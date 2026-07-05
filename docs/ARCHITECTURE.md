@@ -17,7 +17,19 @@
 - `ModuleManifest` 对应模块的 `module.json` 清单。
 - 枚举类型描述模块运行方式、加载策略、状态和声明权限。
 
-当前阶段只定义契约与 Hello 测试实现，不执行真实模块加载。Shell 仍然不能直接引用模块项目。
+## 模块清单发现
+
+第三阶段提供轻量的模块清单发现流程：
+
+- `ModuleManifestReader` 读取 `module.json`，并支持字符串形式的枚举值。
+- `ModuleManifestValidator` 验证必要字段和清单声明的入口文件。
+- `ModuleManifestScanner` 只扫描模块根目录的一级子目录并返回 `DiscoveredModule`。
+- 有效清单的状态为 `NotLoaded`，无效或无法读取的清单状态为 `Failed`。
+
+发现流程不会加载模块 DLL，也不会创建 `IToolModule` 实例。运行时模块目录未来可位于
+应用目录或用户数据目录；仓库根目录的 `Modules` 仅预留给本地开发模块包。
+
+Shell 仍然不能直接引用模块项目，模块只能依赖 Abstractions。
 
 ## 核心原则
 
