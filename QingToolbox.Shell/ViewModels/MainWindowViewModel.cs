@@ -26,6 +26,18 @@ public sealed partial class MainWindowViewModel(
     [ObservableProperty]
     private string _selectedNavigationKey = "Modules";
 
+    [ObservableProperty]
+    private int _totalModuleCount;
+
+    [ObservableProperty]
+    private int _validModuleCount;
+
+    [ObservableProperty]
+    private int _failedModuleCount;
+
+    [ObservableProperty]
+    private int _notLoadedModuleCount;
+
     public string Title => "Qing Toolbox";
 
     public string PinLabel => IsSidebarPinned ? "Unpin Sidebar" : "Pin Sidebar";
@@ -73,10 +85,18 @@ public sealed partial class MainWindowViewModel(
                 Modules.Add(new DiscoveredModuleViewModel(module));
             }
 
+            TotalModuleCount = Modules.Count;
+            ValidModuleCount = Modules.Count(module => module.IsValid);
+            FailedModuleCount = Modules.Count(module => module.State == "Failed");
+            NotLoadedModuleCount = Modules.Count(module => module.State == "NotLoaded");
             StatusMessage = $"Found {Modules.Count} module(s).";
         }
         catch (Exception exception)
         {
+            TotalModuleCount = 0;
+            ValidModuleCount = 0;
+            FailedModuleCount = 0;
+            NotLoadedModuleCount = 0;
             StatusMessage = $"Failed to scan modules: {exception.Message}";
         }
         finally

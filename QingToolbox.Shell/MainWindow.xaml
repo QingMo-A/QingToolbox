@@ -185,6 +185,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
@@ -218,7 +219,52 @@
                 <TextBlock Text="{Binding StatusMessage}" Foreground="#475569"/>
             </Border>
 
-            <Grid Grid.Row="2">
+            <Grid Grid.Row="2" Margin="0,0,0,20">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Style="{StaticResource SummaryCardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="Total" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBlock Text="{Binding TotalModuleCount}"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource PrimaryTextBrush}"/>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="1" Style="{StaticResource SummaryCardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="Valid" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBlock Text="{Binding ValidModuleCount}"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   Foreground="#15803D"/>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="2" Style="{StaticResource SummaryCardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="Failed" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBlock Text="{Binding FailedModuleCount}"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   Foreground="#B45309"/>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="3" Style="{StaticResource SummaryCardStyle}" Margin="0">
+                    <StackPanel>
+                        <TextBlock Text="Not Loaded" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBlock Text="{Binding NotLoadedModuleCount}"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   Foreground="#2563EB"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="3">
                 <TextBlock HorizontalAlignment="Center"
                            VerticalAlignment="Center"
                            Text="No modules discovered. Add module packages to the runtime Modules directory."
@@ -251,37 +297,114 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Border Style="{StaticResource ModuleCardStyle}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
+                                    <StackPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="{Binding Name}"
                                                            FontSize="19"
                                                            FontWeight="SemiBold"
-                                                           Foreground="#172033"/>
+                                                           Foreground="{StaticResource PrimaryTextBrush}"/>
                                                 <TextBlock Margin="10,4,0,0"
                                                            Text="{Binding Version, StringFormat=v{0}}"
-                                                           Foreground="#64748B"/>
+                                                           Foreground="{StaticResource SecondaryTextBrush}"/>
                                             </StackPanel>
-                                            <TextBlock Margin="0,9,24,0"
-                                                       Text="{Binding Description}"
-                                                       TextWrapping="Wrap"
-                                                       Foreground="#475569"/>
+                                            <Border Grid.Column="1"
+                                                    Style="{StaticResource StateBadgeStyle}">
+                                                <TextBlock Text="{Binding StateBadgeText}"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#1D4ED8"/>
+                                            </Border>
+                                        </Grid>
+
+                                        <TextBlock Margin="0,10,0,16"
+                                                   Text="{Binding Description}"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="#475569"/>
+
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" Margin="0,0,16,12">
+                                                <TextBlock Text="Runtime" Style="{StaticResource InfoLabelStyle}"/>
+                                                <TextBlock Text="{Binding RuntimeType}" Style="{StaticResource InfoValueStyle}"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="0,0,16,12">
+                                                <TextBlock Text="Load mode" Style="{StaticResource InfoLabelStyle}"/>
+                                                <TextBlock Text="{Binding LoadMode}" Style="{StaticResource InfoValueStyle}"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2" Margin="0,0,0,12">
+                                                <TextBlock Text="Author" Style="{StaticResource InfoLabelStyle}"/>
+                                                <TextBlock Text="{Binding Author}" Style="{StaticResource InfoValueStyle}"/>
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <StackPanel Margin="0,0,0,12">
+                                            <TextBlock Text="Permissions" Style="{StaticResource InfoLabelStyle}"/>
+                                            <TextBlock Text="{Binding PermissionsText}" Style="{StaticResource InfoValueStyle}"/>
                                         </StackPanel>
-                                        <StackPanel Grid.Column="1" HorizontalAlignment="Right">
-                                            <TextBlock Text="{Binding State}"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="#2563EB"
-                                                       HorizontalAlignment="Right"/>
-                                            <TextBlock Margin="0,8,0,0"
-                                                       Text="{Binding ErrorCount, StringFormat=Errors: {0}}"
-                                                       Foreground="#64748B"
-                                                       HorizontalAlignment="Right"/>
+                                        <StackPanel Margin="0,0,0,12">
+                                            <TextBlock Text="Entry" Style="{StaticResource InfoLabelStyle}"/>
+                                            <TextBlock Text="{Binding Entry}" Style="{StaticResource InfoValueStyle}"/>
                                         </StackPanel>
-                                    </Grid>
+                                        <StackPanel Margin="0,0,0,12">
+                                            <TextBlock Text="Module directory" Style="{StaticResource InfoLabelStyle}"/>
+                                            <TextBlock Text="{Binding ModuleDirectory}" Style="{StaticResource InfoValueStyle}"/>
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Manifest" Style="{StaticResource InfoLabelStyle}"/>
+                                            <TextBlock Text="{Binding ManifestPath}" Style="{StaticResource InfoValueStyle}"/>
+                                        </StackPanel>
+
+                                        <Border>
+                                            <Border.Style>
+                                                <Style BasedOn="{StaticResource ErrorPanelStyle}" TargetType="Border">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding HasErrors}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding ErrorSummary}"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#9A3412"/>
+                                                <ItemsControl Margin="0,6,0,0" ItemsSource="{Binding Errors}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Margin="0,2,0,0"
+                                                                       Text="{Binding}"
+                                                                       TextWrapping="Wrap"
+                                                                       Foreground="#9A3412"/>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <TextBlock Margin="0,12,0,0"
+                                                   Text="{Binding ErrorSummary}"
+                                                   Foreground="#15803D">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding HasErrors}" Value="True">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>

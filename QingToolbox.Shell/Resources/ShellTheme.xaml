@@ -130,4 +130,39 @@
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="10"/>
     </Style>
+
+    <Style x:Key="SummaryCardStyle" TargetType="Border">
+        <Setter Property="Margin" Value="0,0,12,0"/>
+        <Setter Property="Padding" Value="16,13"/>
+        <Setter Property="Background" Value="White"/>
+        <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="10"/>
+    </Style>
+
+    <Style x:Key="InfoLabelStyle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Margin" Value="0,0,0,3"/>
+    </Style>
+
+    <Style x:Key="InfoValueStyle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+
+    <Style x:Key="StateBadgeStyle" TargetType="Border">
+        <Setter Property="Padding" Value="10,5"/>
+        <Setter Property="Background" Value="#DBEAFE"/>
+        <Setter Property="CornerRadius" Value="12"/>
+    </Style>
+
+    <Style x:Key="ErrorPanelStyle" TargetType="Border">
+        <Setter Property="Margin" Value="0,16,0,0"/>
+        <Setter Property="Padding" Value="14,11"/>
+        <Setter Property="Background" Value="#FFF3E8"/>
+        <Setter Property="BorderBrush" Value="#FED7AA"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+    </Style>
 </ResourceDictionary>
