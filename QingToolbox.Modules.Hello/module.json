@@ -1,0 +1,7 @@
+{
+  "id": "qingtoolbox.modules.hello",
+  "name": "Hello",
+  "version": "1.0.0",
+  "entryAssembly": "QingToolbox.Modules.Hello.dll",
+  "entryType": "QingToolbox.Modules.Hello.HelloModule"
+}
