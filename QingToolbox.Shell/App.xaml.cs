@@ -10,7 +10,7 @@ public partial class App : Application
 {
     private ServiceProvider? _serviceProvider;
 
-    protected override async void OnStartup(StartupEventArgs e)
+    protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
@@ -23,9 +23,6 @@ public partial class App : Application
         services.AddSingleton<MainWindow>();
 
         _serviceProvider = services.BuildServiceProvider();
-
-        var viewModel = _serviceProvider.GetRequiredService<MainWindowViewModel>();
-        await viewModel.RefreshModulesCommand.ExecuteAsync(null);
 
         _serviceProvider.GetRequiredService<MainWindow>().Show();
     }
