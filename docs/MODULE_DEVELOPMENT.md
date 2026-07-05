@@ -21,3 +21,17 @@ The module SDK / NuGet packaging workflow is not finalized yet.
 
 Until the SDK packaging is ready, module projects may need temporary local references
 during development.
+
+## External host contract reference
+
+Standalone modules use the `QingToolboxHostRoot` MSBuild property to locate
+`QingToolbox.Abstractions` in a separate `toolbox` worktree:
+
+```powershell
+dotnet build .\modules\TextTools\QingToolbox.Modules.TextTools.csproj `
+  -p:QingToolboxHostRoot="D:\Path\To\QingToolboxToolboxWorktree"
+```
+
+TextTools includes build and deployment scripts. Deployment copies only the module DLL,
+manifest, icon, and optional dependency manifest into the toolbox Shell output. The
+Shell does not reference the TextTools project.

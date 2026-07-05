@@ -1,0 +1,13 @@
+{
+  "id": "qing.texttools",
+  "name": "Text Tools",
+  "description": "Lightweight text conversion and formatting tools.",
+  "version": "0.1.0",
+  "author": "QingMo",
+  "minimumHostVersion": "0.1.0",
+  "entry": "QingToolbox.Modules.TextTools.dll",
+  "runtimeType": "InProcess",
+  "loadMode": "Manual",
+  "permissions": [],
+  "icon": "icon.svg"
+}

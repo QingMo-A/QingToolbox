@@ -25,3 +25,9 @@ Modules should be developed as independent projects and should not require chang
 the toolbox Shell.
 
 The Shell must not directly reference module projects.
+
+## Available modules
+
+`modules/TextTools` is the first standalone module. It is developed on this branch and
+uses a configurable `QingToolboxHostRoot` to reference the host's Abstractions project
+without copying toolbox source into this branch.

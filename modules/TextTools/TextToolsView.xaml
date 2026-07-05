@@ -1,0 +1,100 @@
+<UserControl x:Class="QingToolbox.Modules.TextTools.TextToolsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             MinWidth="640"
+             MinHeight="480"
+             Background="#F8FAFC">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Text="Text Tools"
+                       FontSize="28"
+                       FontWeight="SemiBold"
+                       Foreground="#111827"/>
+            <TextBlock Margin="0,6,0,0"
+                       Text="Lightweight text conversion and formatting tools."
+                       Foreground="#64748B"/>
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="0,20,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock Margin="2,0,0,8"
+                           Text="Input"
+                           FontWeight="SemiBold"
+                           Foreground="#334155"/>
+                <TextBox x:Name="InputTextBox"
+                         Grid.Row="1"
+                         Padding="12"
+                         AcceptsReturn="True"
+                         AcceptsTab="True"
+                         VerticalScrollBarVisibility="Auto"
+                         HorizontalScrollBarVisibility="Auto"
+                         TextWrapping="Wrap"
+                         FontFamily="Consolas"
+                         FontSize="14"/>
+            </Grid>
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock Margin="2,0,0,8"
+                           Text="Output"
+                           FontWeight="SemiBold"
+                           Foreground="#334155"/>
+                <TextBox x:Name="OutputTextBox"
+                         Grid.Row="1"
+                         Padding="12"
+                         AcceptsReturn="True"
+                         IsReadOnly="True"
+                         VerticalScrollBarVisibility="Auto"
+                         HorizontalScrollBarVisibility="Auto"
+                         TextWrapping="Wrap"
+                         FontFamily="Consolas"
+                         FontSize="14"/>
+            </Grid>
+        </Grid>
+
+        <WrapPanel Grid.Row="2">
+            <Button Margin="0,0,8,8" Padding="12,7" Content="Format JSON" Click="FormatJson_Click"/>
+            <Button Margin="0,0,8,8" Padding="12,7" Content="Minify JSON" Click="MinifyJson_Click"/>
+            <Button Margin="0,0,8,8" Padding="12,7" Content="Base64 Encode" Click="Base64Encode_Click"/>
+            <Button Margin="0,0,8,8" Padding="12,7" Content="Base64 Decode" Click="Base64Decode_Click"/>
+            <Button Margin="0,0,8,8" Padding="12,7" Content="URL Encode" Click="UrlEncode_Click"/>
+            <Button Margin="0,0,8,8" Padding="12,7" Content="URL Decode" Click="UrlDecode_Click"/>
+            <Button Margin="0,0,8,8" Padding="12,7" Content="Uppercase" Click="Uppercase_Click"/>
+            <Button Margin="0,0,8,8" Padding="12,7" Content="Lowercase" Click="Lowercase_Click"/>
+            <Button Margin="0,0,8,8" Padding="12,7" Content="Remove Empty Lines" Click="RemoveEmptyLines_Click"/>
+            <Button Margin="0,0,8,8" Padding="12,7" Content="Copy Output To Input" Click="CopyOutputToInput_Click"/>
+            <Button Margin="0,0,0,8" Padding="12,7" Content="Clear" Click="Clear_Click"/>
+        </WrapPanel>
+
+        <Border Grid.Row="3"
+                Margin="0,8,0,0"
+                Padding="12,9"
+                Background="#E2E8F0"
+                CornerRadius="6">
+            <TextBlock x:Name="StatusTextBlock"
+                       Text="Ready."
+                       TextWrapping="Wrap"
+                       Foreground="#475569"/>
+        </Border>
+    </Grid>
+</UserControl>

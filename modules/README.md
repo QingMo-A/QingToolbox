@@ -18,3 +18,7 @@ A module should include:
 - module implementation
 - optional WPF view
 - README
+
+## Available modules
+
+- [`TextTools`](TextTools/README.md): JSON, Base64, URL, case conversion, and line cleanup.
