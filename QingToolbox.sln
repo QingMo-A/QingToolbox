@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QingToolbox.ModuleLoader", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QingToolbox.Modules.Hello", "QingToolbox.Modules.Hello\QingToolbox.Modules.Hello.csproj", "{814D6682-DDDE-4FF3-BA59-F6376534F104}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QingToolbox.DevTools.ModuleLoadSmokeTest", "QingToolbox.DevTools.ModuleLoadSmokeTest\QingToolbox.DevTools.ModuleLoadSmokeTest.csproj", "{B832CC19-6E36-4807-B636-07B191A8BDF5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -83,6 +85,18 @@ Global
 		{814D6682-DDDE-4FF3-BA59-F6376534F104}.Release|x64.Build.0 = Release|Any CPU
 		{814D6682-DDDE-4FF3-BA59-F6376534F104}.Release|x86.ActiveCfg = Release|Any CPU
 		{814D6682-DDDE-4FF3-BA59-F6376534F104}.Release|x86.Build.0 = Release|Any CPU
+		{B832CC19-6E36-4807-B636-07B191A8BDF5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B832CC19-6E36-4807-B636-07B191A8BDF5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B832CC19-6E36-4807-B636-07B191A8BDF5}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B832CC19-6E36-4807-B636-07B191A8BDF5}.Debug|x64.Build.0 = Debug|Any CPU
+		{B832CC19-6E36-4807-B636-07B191A8BDF5}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B832CC19-6E36-4807-B636-07B191A8BDF5}.Debug|x86.Build.0 = Debug|Any CPU
+		{B832CC19-6E36-4807-B636-07B191A8BDF5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B832CC19-6E36-4807-B636-07B191A8BDF5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B832CC19-6E36-4807-B636-07B191A8BDF5}.Release|x64.ActiveCfg = Release|Any CPU
+		{B832CC19-6E36-4807-B636-07B191A8BDF5}.Release|x64.Build.0 = Release|Any CPU
+		{B832CC19-6E36-4807-B636-07B191A8BDF5}.Release|x86.ActiveCfg = Release|Any CPU
+		{B832CC19-6E36-4807-B636-07B191A8BDF5}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -47,3 +47,28 @@ entry-file validation without loading the module DLL.
 `QingToolbox.ModuleLoader` contains the collectible in-process loading and unloading
 infrastructure. It is not connected to the Shell UI or startup flow yet. The Shell
 continues to perform manifest discovery only.
+
+## Run the module load smoke test
+
+First deploy the Hello development module:
+
+```powershell
+./scripts/deploy-dev-modules.ps1
+```
+
+Then run:
+
+```powershell
+dotnet run --project QingToolbox.DevTools.ModuleLoadSmokeTest
+```
+
+Custom runtime and data directories can be supplied without an additional parser:
+
+```powershell
+dotnet run --project QingToolbox.DevTools.ModuleLoadSmokeTest -- `
+  --modules "path/to/Modules" `
+  --data "path/to/UserData/modules"
+```
+
+The smoke test validates manifest scanning, loading, activation, deactivation, disposal,
+and collectible load-context unloading. The Shell still does not invoke the loader.

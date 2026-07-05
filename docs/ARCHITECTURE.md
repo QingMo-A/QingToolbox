@@ -42,6 +42,10 @@ Shell 仍然不能直接引用模块项目，模块只能依赖 Abstractions。
 不会调用进程内加载器，仍然只执行 manifest discovery；UI 加载和卸载操作将在后续
 阶段接入。
 
+`QingToolbox.DevTools.ModuleLoadSmokeTest` 是独立的开发验证工具。它扫描运行时
+模块目录，加载 Hello 模块，调用激活与停用生命周期，然后释放句柄并验证 collectible
+加载上下文能够被回收。它不被 Shell 引用，也不是应用运行时的一部分。
+
 ## 核心原则
 
 1. 本体不内置具体工具功能。
