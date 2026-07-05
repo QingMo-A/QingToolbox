@@ -7,86 +7,7 @@
         MinWidth="800"
         MinHeight="520"
         WindowStartupLocation="CenterScreen"
-        Background="#F4F6F9">
-    <Window.Resources>
-        <Style x:Key="RefreshButtonStyle" TargetType="Button">
-            <Setter Property="Padding" Value="18,10"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="Background" Value="#2563EB"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="ButtonBorder"
-                                Padding="{TemplateBinding Padding}"
-                                Background="{TemplateBinding Background}"
-                                CornerRadius="7">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ButtonBorder"
-                                        Property="Background"
-                                        Value="#1D4ED8"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="ButtonBorder"
-                                        Property="Opacity"
-                                        Value="0.55"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="SidebarButtonStyle" TargetType="Button">
-            <Setter Property="Height" Value="44"/>
-            <Setter Property="Margin" Value="0,3"/>
-            <Setter Property="Padding" Value="8,0"/>
-            <Setter Property="HorizontalContentAlignment" Value="Left"/>
-            <Setter Property="Foreground" Value="#CBD5E1"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="ButtonBorder"
-                                Padding="{TemplateBinding Padding}"
-                                Background="{TemplateBinding Background}"
-                                CornerRadius="10">
-                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                              VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ButtonBorder"
-                                        Property="Background"
-                                        Value="#273449"/>
-                                <Setter Property="Foreground" Value="White"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="SidebarLabelStyle" TargetType="TextBlock">
-            <Setter Property="Margin" Value="12,0,0,0"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Opacity" Value="0"/>
-            <Setter Property="Visibility" Value="Collapsed"/>
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding IsMouseOver, ElementName=Sidebar}" Value="True">
-                    <Setter Property="Opacity" Value="1"/>
-                    <Setter Property="Visibility" Value="Visible"/>
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
-    </Window.Resources>
+        Background="{StaticResource ShellBackgroundBrush}">
 
     <Grid>
         <Grid.ColumnDefinitions>
@@ -98,30 +19,10 @@
                 Grid.Column="0"
                 Width="72"
                 Padding="12,16,12,20"
-                Background="#111827">
-            <Border.Triggers>
-                <EventTrigger RoutedEvent="MouseEnter">
-                    <BeginStoryboard>
-                        <Storyboard>
-                            <DoubleAnimation Storyboard.TargetName="Sidebar"
-                                             Storyboard.TargetProperty="Width"
-                                             To="220"
-                                             Duration="0:0:0.2"/>
-                        </Storyboard>
-                    </BeginStoryboard>
-                </EventTrigger>
-                <EventTrigger RoutedEvent="MouseLeave">
-                    <BeginStoryboard>
-                        <Storyboard>
-                            <DoubleAnimation Storyboard.TargetName="Sidebar"
-                                             Storyboard.TargetProperty="Width"
-                                             To="72"
-                                             Duration="0:0:0.2"/>
-                        </Storyboard>
-                    </BeginStoryboard>
-                </EventTrigger>
-            </Border.Triggers>
-
+                ClipToBounds="True"
+                Background="{StaticResource SidebarBackgroundBrush}"
+                MouseEnter="OnSidebarMouseEnter"
+                MouseLeave="OnSidebarMouseLeave">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -129,6 +30,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
@@ -154,7 +56,18 @@
                                Style="{StaticResource SidebarLabelStyle}"/>
                 </Grid>
 
-                <Button Grid.Row="1" Style="{StaticResource SidebarButtonStyle}">
+                <Button Grid.Row="1"
+                        Command="{Binding SelectNavigationCommand}"
+                        CommandParameter="Home">
+                    <Button.Style>
+                        <Style BasedOn="{StaticResource SidebarButtonStyle}" TargetType="Button">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedNavigationKey}" Value="Home">
+                                    <Setter Property="Tag" Value="Selected"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="32"/>
@@ -168,9 +81,17 @@
                 </Button>
 
                 <Button Grid.Row="2"
-                        Foreground="White"
-                        Background="#2563EB"
-                        Style="{StaticResource SidebarButtonStyle}">
+                        Command="{Binding SelectNavigationCommand}"
+                        CommandParameter="Modules">
+                    <Button.Style>
+                        <Style BasedOn="{StaticResource SidebarButtonStyle}" TargetType="Button">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedNavigationKey}" Value="Modules">
+                                    <Setter Property="Tag" Value="Selected"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="32"/>
@@ -183,7 +104,18 @@
                     </Grid>
                 </Button>
 
-                <Button Grid.Row="3" Style="{StaticResource SidebarButtonStyle}">
+                <Button Grid.Row="3"
+                        Command="{Binding SelectNavigationCommand}"
+                        CommandParameter="Running">
+                    <Button.Style>
+                        <Style BasedOn="{StaticResource SidebarButtonStyle}" TargetType="Button">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedNavigationKey}" Value="Running">
+                                    <Setter Property="Tag" Value="Selected"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="32"/>
@@ -196,7 +128,45 @@
                     </Grid>
                 </Button>
 
-                <Button Grid.Row="5" Style="{StaticResource SidebarButtonStyle}">
+                <Button Grid.Row="5"
+                        Click="OnPinSidebarClick"
+                        ToolTip="Pin or unpin the sidebar"
+                        Style="{StaticResource SidebarButtonStyle}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="32"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock FontSize="16" HorizontalAlignment="Center">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text" Value="□"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsSidebarPinned}" Value="True">
+                                            <Setter Property="Text" Value="■"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding PinLabel}"
+                                   Style="{StaticResource SidebarLabelStyle}"/>
+                    </Grid>
+                </Button>
+
+                <Button Grid.Row="6"
+                        Command="{Binding SelectNavigationCommand}"
+                        CommandParameter="Settings">
+                    <Button.Style>
+                        <Style BasedOn="{StaticResource SidebarButtonStyle}" TargetType="Button">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedNavigationKey}" Value="Settings">
+                                    <Setter Property="Tag" Value="Selected"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="32"/>
@@ -280,12 +250,7 @@
                         </ItemsControl.Style>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Margin="0,0,8,14"
-                                        Padding="22"
-                                        Background="White"
-                                        BorderBrush="#DCE2EA"
-                                        BorderThickness="1"
-                                        CornerRadius="10">
+                                <Border Style="{StaticResource ModuleCardStyle}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>

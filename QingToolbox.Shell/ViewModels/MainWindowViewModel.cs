@@ -17,9 +17,38 @@ public sealed partial class MainWindowViewModel(
     [ObservableProperty]
     private bool _isScanning;
 
+    [ObservableProperty]
+    private bool _isSidebarExpanded;
+
+    [ObservableProperty]
+    private bool _isSidebarPinned;
+
+    [ObservableProperty]
+    private string _selectedNavigationKey = "Modules";
+
     public string Title => "Qing Toolbox";
 
+    public string PinLabel => IsSidebarPinned ? "Unpin Sidebar" : "Pin Sidebar";
+
     public ObservableCollection<DiscoveredModuleViewModel> Modules { get; } = [];
+
+    [RelayCommand]
+    private void ToggleSidebarPin()
+    {
+        IsSidebarPinned = !IsSidebarPinned;
+        IsSidebarExpanded = IsSidebarPinned || IsSidebarExpanded;
+    }
+
+    [RelayCommand]
+    private void SelectNavigation(string key)
+    {
+        SelectedNavigationKey = key;
+    }
+
+    partial void OnIsSidebarPinnedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(PinLabel));
+    }
 
     [RelayCommand]
     private async Task RefreshModulesAsync()
