@@ -285,11 +285,16 @@
             </Grid>
 
             <Grid Grid.Row="3">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="3*"/>
+                    <ColumnDefinition Width="2*"/>
+                </Grid.ColumnDefinitions>
                 <TextBlock HorizontalAlignment="Center"
                            VerticalAlignment="Center"
                            Text="No modules discovered. Add module packages to the runtime Modules directory."
                            Foreground="#64748B"
-                           TextAlignment="Center">
+                           TextAlignment="Center"
+                           Grid.Column="0">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
                             <Setter Property="Visibility" Value="Collapsed"/>
@@ -302,7 +307,7 @@
                     </TextBlock.Style>
                 </TextBlock>
 
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding Modules}">
                         <ItemsControl.Style>
                             <Style TargetType="ItemsControl">
@@ -418,6 +423,11 @@
                                                     CommandParameter="{Binding Id}"
                                                     IsEnabled="{Binding CanUnload}"
                                                     Style="{StaticResource LifecycleDangerButtonStyle}"/>
+                                            <Button Content="Open"
+                                                    Command="{Binding DataContext.OpenModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding Id}"
+                                                    IsEnabled="{Binding CanOpen}"
+                                                    Style="{StaticResource LifecycleButtonStyle}"/>
                                         </StackPanel>
 
                                         <Border>
@@ -491,6 +501,64 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
+
+                <Border Grid.Column="1" Style="{StaticResource ModuleViewHostStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <Border Padding="18,14"
+                                BorderBrush="{StaticResource CardBorderBrush}"
+                                BorderThickness="0,0,0,1">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right"
+                                        Content="Close"
+                                        Command="{Binding CloseModuleViewCommand}"
+                                        IsEnabled="{Binding HasActiveModuleView}"
+                                        Style="{StaticResource CloseViewButtonStyle}"/>
+                                <TextBlock Text="{Binding ActiveModuleTitle}"
+                                           Style="{StaticResource ModuleViewHeaderStyle}"/>
+                            </DockPanel>
+                        </Border>
+
+                        <Grid Grid.Row="1">
+                            <TextBlock HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Margin="24"
+                                       Text="Select a loaded module and click Open."
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap"
+                                       Foreground="{StaticResource SecondaryTextBrush}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasActiveModuleView}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <ContentControl Margin="1"
+                                            Content="{Binding ActiveModuleView}">
+                                <ContentControl.Style>
+                                    <Style TargetType="ContentControl">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasActiveModuleView}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ContentControl.Style>
+                            </ContentControl>
+                        </Grid>
+                    </Grid>
+                </Border>
             </Grid>
         </Grid>
     </Grid>

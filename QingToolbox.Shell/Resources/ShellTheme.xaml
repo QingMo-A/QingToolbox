@@ -220,4 +220,27 @@
         <Setter Property="Background" Value="#FEF2F2"/>
         <Setter Property="BorderBrush" Value="#FECACA"/>
     </Style>
+
+    <Style x:Key="ModuleViewHostStyle" TargetType="Border">
+        <Setter Property="Margin" Value="18,0,0,0"/>
+        <Setter Property="Background" Value="White"/>
+        <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="10"/>
+    </Style>
+
+    <Style x:Key="ModuleViewHeaderStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="17"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <Style x:Key="CloseViewButtonStyle"
+           TargetType="Button"
+           BasedOn="{StaticResource LifecycleButtonStyle}">
+        <Setter Property="MinWidth" Value="68"/>
+        <Setter Property="Margin" Value="0"/>
+        <Setter Property="Height" Value="30"/>
+    </Style>
 </ResourceDictionary>

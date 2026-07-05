@@ -77,6 +77,9 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     public bool CanUnload =>
         !IsBusy && RuntimeState is "Loaded" or "Running" or "Deactivated" or "Failed";
 
+    public bool CanOpen =>
+        !IsBusy && RuntimeState is "Loaded" or "Running" or "Deactivated";
+
     public void UpdateRuntimeState(ModuleRuntimeRecord? record)
     {
         RuntimeState = record?.State.ToString() ?? State;
@@ -104,5 +107,6 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         OnPropertyChanged(nameof(CanActivate));
         OnPropertyChanged(nameof(CanDeactivate));
         OnPropertyChanged(nameof(CanUnload));
+        OnPropertyChanged(nameof(CanOpen));
     }
 }

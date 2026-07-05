@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Animation;
@@ -16,6 +17,7 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         DataContext = viewModel;
         Loaded += OnLoaded;
+        Closing += OnClosing;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -58,5 +60,10 @@ public partial class MainWindow : Window
         };
 
         Sidebar.BeginAnimation(WidthProperty, animation);
+    }
+
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        _viewModel.CloseActiveModuleView();
     }
 }

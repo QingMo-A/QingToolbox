@@ -82,3 +82,7 @@ discovery-only operations.
 When the Shell exits, it asks `ModuleRuntimeManager` to deactivate and unload all active
 modules before disposing application services. Shutdown cleanup errors are written to
 the debug output and do not prevent the process from closing.
+
+After deploying Hello, launch the Shell and click Load followed by Open to display the
+module-provided WPF view. Open never loads a module implicitly. Close clears the hosted
+view, and Unload clears the view before releasing the module.

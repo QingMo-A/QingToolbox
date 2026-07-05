@@ -49,9 +49,20 @@ public sealed partial class MainWindowViewModel(
     [ObservableProperty]
     private int _unloadedModuleCount;
 
+    [ObservableProperty]
+    private object? _activeModuleView;
+
+    [ObservableProperty]
+    private string _activeModuleTitle = "Modules";
+
+    [ObservableProperty]
+    private string _activeModuleId = string.Empty;
+
     public string Title => "Qing Toolbox";
 
     public string PinLabel => IsSidebarPinned ? "Unpin Sidebar" : "Pin Sidebar";
+
+    public bool HasActiveModuleView => ActiveModuleView is not null;
 
     public ObservableCollection<DiscoveredModuleViewModel> Modules { get; } = [];
 
@@ -155,10 +166,88 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand]
     private Task UnloadModuleAsync(string moduleId)
     {
+        if (string.Equals(ActiveModuleId, moduleId, StringComparison.Ordinal))
+        {
+            CloseActiveModuleView(updateStatus: false);
+        }
+
         return ExecuteLifecycleAsync(
             moduleId,
             "unload",
             () => runtimeManager.UnloadAsync(moduleId));
+    }
+
+    [RelayCommand]
+    private Task OpenModuleAsync(string moduleId)
+    {
+        var moduleViewModel = Modules.FirstOrDefault(
+            module => string.Equals(module.Id, moduleId, StringComparison.Ordinal));
+
+        if (moduleViewModel is null || moduleViewModel.IsBusy)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (!moduleViewModel.CanOpen)
+        {
+            StatusMessage =
+                $"Load module '{moduleViewModel.Name}' before opening its view.";
+            return Task.CompletedTask;
+        }
+
+        moduleViewModel.IsBusy = true;
+        moduleViewModel.RuntimeError = string.Empty;
+
+        try
+        {
+            ActiveModuleView = null;
+            ActiveModuleId = string.Empty;
+            ActiveModuleTitle = "Modules";
+
+            var view = runtimeManager.CreateView(moduleId);
+            moduleViewModel.UpdateRuntimeState(runtimeManager.GetRecord(moduleId));
+
+            if (view is null)
+            {
+                StatusMessage =
+                    $"Module '{moduleViewModel.Name}' did not provide a view.";
+                return Task.CompletedTask;
+            }
+
+            ActiveModuleView = view;
+            ActiveModuleTitle = moduleViewModel.Name;
+            ActiveModuleId = moduleId;
+            StatusMessage = $"Opened module '{moduleViewModel.Name}'.";
+        }
+        catch (Exception exception)
+        {
+            moduleViewModel.UpdateRuntimeState(runtimeManager.GetRecord(moduleId));
+            if (!moduleViewModel.HasRuntimeError)
+            {
+                moduleViewModel.RuntimeError = exception.Message;
+            }
+
+            StatusMessage =
+                $"Failed to open module '{moduleViewModel.Name}': {exception.Message}";
+        }
+        finally
+        {
+            moduleViewModel.IsBusy = false;
+            UpdateStatistics();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    [RelayCommand]
+    private void CloseModuleView()
+    {
+        CloseActiveModuleView(updateStatus: true);
+    }
+
+    public void CloseActiveModuleView()
+    {
+        CloseActiveModuleView(updateStatus: false);
     }
 
     private async Task ExecuteLifecycleAsync(
@@ -217,5 +306,22 @@ public sealed partial class MainWindowViewModel(
             module => module.RuntimeState == "Running");
         UnloadedModuleCount = Modules.Count(
             module => module.RuntimeState == "Unloaded");
+    }
+
+    partial void OnActiveModuleViewChanged(object? value)
+    {
+        OnPropertyChanged(nameof(HasActiveModuleView));
+    }
+
+    private void CloseActiveModuleView(bool updateStatus)
+    {
+        ActiveModuleView = null;
+        ActiveModuleTitle = "Modules";
+        ActiveModuleId = string.Empty;
+
+        if (updateStatus)
+        {
+            StatusMessage = "Module view closed.";
+        }
     }
 }

@@ -64,6 +64,40 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader) : IAsyncD
         return _records.GetValueOrDefault(moduleId);
     }
 
+    public object? CreateView(string moduleId)
+    {
+        ThrowIfDisposed();
+        ArgumentException.ThrowIfNullOrWhiteSpace(moduleId);
+
+        if (!_sync.Wait(0))
+        {
+            throw new ModuleRuntimeException(
+                "Module runtime is busy. Try opening the module again.");
+        }
+
+        ModuleRuntimeRecord? record = null;
+        try
+        {
+            record = GetRequiredRecord(moduleId);
+            return GetRequiredHandle(record).Module.CreateView();
+        }
+        catch (Exception exception)
+        {
+            if (record is not null)
+            {
+                SetFailure(record, exception);
+            }
+
+            throw WrapFailure(
+                $"Failed to create view for module '{moduleId}'.",
+                exception);
+        }
+        finally
+        {
+            _sync.Release();
+        }
+    }
+
     public async Task LoadAsync(
         string moduleId,
         string dataRootDirectory,
