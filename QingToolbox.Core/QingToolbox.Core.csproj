@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\QingToolbox.Abstractions\QingToolbox.Abstractions.csproj" />
+    <ProjectReference Include="..\QingToolbox.ModuleLoader\QingToolbox.ModuleLoader.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -46,6 +46,15 @@ Shell 仍然不能直接引用模块项目，模块只能依赖 Abstractions。
 模块目录，加载 Hello 模块，调用激活与停用生命周期，然后释放句柄并验证 collectible
 加载上下文能够被回收。它不被 Shell 引用，也不是应用运行时的一部分。
 
+## 运行时管理
+
+Core 的 `ModuleRuntimeManager` 串行管理模块的 Load、Activate、Deactivate 和 Unload
+生命周期，并持有活动的 `LoadedModuleHandle`。`ModuleRegistry` 仍只负责 manifest
+discovery 结果，两者职责保持分离。
+
+Shell 目前只注册运行时管理服务，并未调用其生命周期方法，也没有 Load/Unload UI。
+后续 UI 将通过 `ModuleRuntimeManager` 接入。
+
 ## 核心原则
 
 1. 本体不内置具体工具功能。

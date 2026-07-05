@@ -1,6 +1,7 @@
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using QingToolbox.Core;
+using QingToolbox.Core.Runtime;
 using QingToolbox.ModuleLoader;
 using QingToolbox.Shell.ViewModels;
 
@@ -19,6 +20,8 @@ public partial class App : Application
         services.AddSingleton<ModuleManifestReader>();
         services.AddSingleton<ModuleManifestValidator>();
         services.AddSingleton<ModuleManifestScanner>();
+        services.AddSingleton<InProcessModuleLoader>();
+        services.AddSingleton<ModuleRuntimeManager>();
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<MainWindow>();
 
