@@ -165,4 +165,59 @@
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="8"/>
     </Style>
+
+    <Style x:Key="LifecycleButtonStyle" TargetType="Button">
+        <Setter Property="MinWidth" Value="82"/>
+        <Setter Property="Height" Value="34"/>
+        <Setter Property="Margin" Value="0,0,8,0"/>
+        <Setter Property="Padding" Value="14,0"/>
+        <Setter Property="Foreground" Value="#1E3A8A"/>
+        <Setter Property="Background" Value="#EFF6FF"/>
+        <Setter Property="BorderBrush" Value="#BFDBFE"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="ButtonBorder"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="7">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ButtonBorder"
+                                    Property="Background"
+                                    Value="#DBEAFE"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ButtonBorder"
+                                    Property="Opacity"
+                                    Value="0.45"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="LifecycleDangerButtonStyle"
+           TargetType="Button"
+           BasedOn="{StaticResource LifecycleButtonStyle}">
+        <Setter Property="Foreground" Value="#9A3412"/>
+        <Setter Property="Background" Value="#FFF7ED"/>
+        <Setter Property="BorderBrush" Value="#FED7AA"/>
+    </Style>
+
+    <Style x:Key="RuntimeErrorPanelStyle"
+           TargetType="Border"
+           BasedOn="{StaticResource ErrorPanelStyle}">
+        <Setter Property="Background" Value="#FEF2F2"/>
+        <Setter Property="BorderBrush" Value="#FECACA"/>
+    </Style>
 </ResourceDictionary>

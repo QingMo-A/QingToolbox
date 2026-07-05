@@ -17,7 +17,11 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader)
     {
         ArgumentNullException.ThrowIfNull(modules);
 
-        _sync.Wait();
+        if (!_sync.Wait(0))
+        {
+            throw new ModuleRuntimeException(
+                "Module runtime is busy. Try refreshing discovery again.");
+        }
         try
         {
             var discoveredById = modules.ToDictionary(
@@ -35,9 +39,14 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader)
 
             foreach (var record in _records.Values.Where(record => record.IsLoaded))
             {
-                record.LastError = discoveredById.ContainsKey(record.Manifest.Id)
-                    ? null
-                    : MissingManifestMessage;
+                if (!discoveredById.ContainsKey(record.Manifest.Id))
+                {
+                    record.LastError = MissingManifestMessage;
+                }
+                else if (record.LastError == MissingManifestMessage)
+                {
+                    record.LastError = null;
+                }
             }
         }
         finally

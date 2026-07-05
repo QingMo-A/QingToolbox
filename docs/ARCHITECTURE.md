@@ -53,8 +53,9 @@ Core 的 `ModuleRuntimeManager` 串行管理模块的 Load、Activate、Deactiva
 生命周期，并持有活动的 `LoadedModuleHandle`。`ModuleRegistry` 仍只负责 manifest
 discovery 结果，两者职责保持分离。
 
-Shell 目前只注册运行时管理服务，并未调用其生命周期方法，也没有 Load/Unload UI。
-后续 UI 将通过 `ModuleRuntimeManager` 接入。
+Shell 的模块卡片通过 `ModuleRuntimeManager` 提供 Load、Activate、Deactivate 和
+Unload 操作。只有用户点击按钮才会触发生命周期；Shell 启动与 Refresh 仍只发现清单，
+不会自动加载模块。
 
 ## 核心原则
 

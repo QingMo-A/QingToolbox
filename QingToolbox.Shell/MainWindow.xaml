@@ -225,6 +225,8 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
                 <Border Grid.Column="0" Style="{StaticResource SummaryCardStyle}">
                     <StackPanel>
@@ -253,13 +255,31 @@
                                    Foreground="#B45309"/>
                     </StackPanel>
                 </Border>
-                <Border Grid.Column="3" Style="{StaticResource SummaryCardStyle}" Margin="0">
+                <Border Grid.Column="3" Style="{StaticResource SummaryCardStyle}">
                     <StackPanel>
                         <TextBlock Text="Not Loaded" Style="{StaticResource InfoLabelStyle}"/>
                         <TextBlock Text="{Binding NotLoadedModuleCount}"
                                    FontSize="24"
                                    FontWeight="SemiBold"
                                    Foreground="#2563EB"/>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="4" Style="{StaticResource SummaryCardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="Loaded" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBlock Text="{Binding LoadedModuleCount}"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   Foreground="#0369A1"/>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="5" Style="{StaticResource SummaryCardStyle}" Margin="0">
+                    <StackPanel>
+                        <TextBlock Text="Running" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBlock Text="{Binding RunningModuleCount}"
+                                   FontSize="24"
+                                   FontWeight="SemiBold"
+                                   Foreground="#15803D"/>
                     </StackPanel>
                 </Border>
             </Grid>
@@ -361,6 +381,67 @@
                                             <TextBlock Text="Manifest" Style="{StaticResource InfoLabelStyle}"/>
                                             <TextBlock Text="{Binding ManifestPath}" Style="{StaticResource InfoValueStyle}"/>
                                         </StackPanel>
+
+                                        <Grid Margin="0,16,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Runtime State:"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource SecondaryTextBrush}"/>
+                                            <TextBlock Grid.Column="1"
+                                                       Margin="8,0,0,0"
+                                                       Text="{Binding RuntimeState}"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource AccentBrush}"/>
+                                        </Grid>
+
+                                        <StackPanel Margin="0,14,0,0" Orientation="Horizontal">
+                                            <Button Content="Load"
+                                                    Command="{Binding DataContext.LoadModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding Id}"
+                                                    IsEnabled="{Binding CanLoad}"
+                                                    Style="{StaticResource LifecycleButtonStyle}"/>
+                                            <Button Content="Activate"
+                                                    Command="{Binding DataContext.ActivateModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding Id}"
+                                                    IsEnabled="{Binding CanActivate}"
+                                                    Style="{StaticResource LifecycleButtonStyle}"/>
+                                            <Button Content="Deactivate"
+                                                    Command="{Binding DataContext.DeactivateModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding Id}"
+                                                    IsEnabled="{Binding CanDeactivate}"
+                                                    Style="{StaticResource LifecycleButtonStyle}"/>
+                                            <Button Content="Unload"
+                                                    Command="{Binding DataContext.UnloadModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding Id}"
+                                                    IsEnabled="{Binding CanUnload}"
+                                                    Style="{StaticResource LifecycleDangerButtonStyle}"/>
+                                        </StackPanel>
+
+                                        <Border>
+                                            <Border.Style>
+                                                <Style BasedOn="{StaticResource RuntimeErrorPanelStyle}"
+                                                       TargetType="Border">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding HasRuntimeError}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <StackPanel>
+                                                <TextBlock Text="Runtime Error"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#991B1B"/>
+                                                <TextBlock Margin="0,5,0,0"
+                                                           Text="{Binding RuntimeError}"
+                                                           TextWrapping="Wrap"
+                                                           Foreground="#991B1B"/>
+                                            </StackPanel>
+                                        </Border>
 
                                         <Border>
                                             <Border.Style>

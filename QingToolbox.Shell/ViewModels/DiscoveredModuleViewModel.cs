@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using QingToolbox.Abstractions.Modules;
+using QingToolbox.Core.Runtime;
 
 namespace QingToolbox.Shell.ViewModels;
 
@@ -30,6 +31,7 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         Errors = module.Errors
             .Select(error => $"{error.Code}: {error.Message}")
             .ToArray();
+        _runtimeState = State;
     }
 
     public string Id { get; }
@@ -51,4 +53,56 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     public string ModuleDirectory { get; }
     public string ManifestPath { get; }
     public IReadOnlyList<string> Errors { get; }
+
+    [ObservableProperty]
+    private string _runtimeState;
+
+    [ObservableProperty]
+    private string _runtimeError = string.Empty;
+
+    [ObservableProperty]
+    private bool _isBusy;
+
+    public bool HasRuntimeError => !string.IsNullOrWhiteSpace(RuntimeError);
+
+    public bool CanLoad =>
+        !IsBusy && RuntimeState is "NotLoaded" or "Unloaded";
+
+    public bool CanActivate =>
+        !IsBusy && RuntimeState is "Loaded" or "Deactivated";
+
+    public bool CanDeactivate =>
+        !IsBusy && RuntimeState == "Running";
+
+    public bool CanUnload =>
+        !IsBusy && RuntimeState is "Loaded" or "Running" or "Deactivated" or "Failed";
+
+    public void UpdateRuntimeState(ModuleRuntimeRecord? record)
+    {
+        RuntimeState = record?.State.ToString() ?? State;
+        RuntimeError = record?.LastError ?? string.Empty;
+    }
+
+    partial void OnRuntimeStateChanged(string value)
+    {
+        NotifyCommandStatesChanged();
+    }
+
+    partial void OnRuntimeErrorChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasRuntimeError));
+    }
+
+    partial void OnIsBusyChanged(bool value)
+    {
+        NotifyCommandStatesChanged();
+    }
+
+    private void NotifyCommandStatesChanged()
+    {
+        OnPropertyChanged(nameof(CanLoad));
+        OnPropertyChanged(nameof(CanActivate));
+        OnPropertyChanged(nameof(CanDeactivate));
+        OnPropertyChanged(nameof(CanUnload));
+    }
 }
