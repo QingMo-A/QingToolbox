@@ -1,5 +1,5 @@
 using System.Text.Json;
-using QingToolbox.Abstractions;
+using QingToolbox.Abstractions.Modules;
 
 namespace QingToolbox.ModuleLoader;
 

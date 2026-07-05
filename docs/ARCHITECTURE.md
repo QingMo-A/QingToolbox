@@ -8,6 +8,17 @@
 - **ModuleLoader**：读取 `module.json`；后续使用可回收的 `AssemblyLoadContext` 扫描、加载和卸载模块。
 - **Modules**：独立工具模块，只依赖 Abstractions。
 
+## 模块契约
+
+`QingToolbox.Abstractions/Modules` 定义模块契约：
+
+- `IToolModule` 是模块生命周期接口，包含加载、激活、停用、卸载和异步释放。
+- `ModuleContext` 提供模块目录、数据目录和轻量属性。
+- `ModuleManifest` 对应模块的 `module.json` 清单。
+- 枚举类型描述模块运行方式、加载策略、状态和声明权限。
+
+当前阶段只定义契约与 Hello 测试实现，不执行真实模块加载。Shell 仍然不能直接引用模块项目。
+
 ## 核心原则
 
 1. 本体不内置具体工具功能。

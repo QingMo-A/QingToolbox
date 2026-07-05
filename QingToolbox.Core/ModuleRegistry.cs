@@ -1,4 +1,4 @@
-using QingToolbox.Abstractions;
+using QingToolbox.Abstractions.Modules;
 
 namespace QingToolbox.Core;
 
