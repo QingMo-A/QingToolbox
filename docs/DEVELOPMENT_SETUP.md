@@ -89,3 +89,7 @@ the debug output and do not prevent the process from closing.
 After deploying Hello, launch the Shell and click Load followed by Open to display the
 module-provided WPF view. Open never loads a module implicitly. Close clears the hosted
 view, and Unload clears the view before releasing the module.
+
+The deployment script also copies the optional module `icon.svg` and dependency manifest.
+The Shell resolves module icon paths from `module.json`; missing icons use the packaged
+default icon and do not cause module assemblies to load.

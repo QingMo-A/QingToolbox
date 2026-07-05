@@ -1,3 +1,4 @@
+using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using QingToolbox.Abstractions.Modules;
 using QingToolbox.Core.Runtime;
@@ -28,6 +29,7 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         IsValid = module.IsValid;
         ModuleDirectory = module.ModuleDirectory;
         ManifestPath = module.ManifestPath;
+        IconPath = ResolveIconPath(module);
         Errors = module.Errors
             .Select(error => $"{error.Code}: {error.Message}")
             .ToArray();
@@ -52,6 +54,8 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     public bool IsValid { get; }
     public string ModuleDirectory { get; }
     public string ManifestPath { get; }
+    public string? IconPath { get; }
+    public bool HasIcon => !string.IsNullOrWhiteSpace(IconPath);
     public IReadOnlyList<string> Errors { get; }
 
     [ObservableProperty]
@@ -108,5 +112,31 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         OnPropertyChanged(nameof(CanDeactivate));
         OnPropertyChanged(nameof(CanUnload));
         OnPropertyChanged(nameof(CanOpen));
+    }
+
+    private static string? ResolveIconPath(DiscoveredModule module)
+    {
+        if (string.IsNullOrWhiteSpace(module.Manifest.Icon) ||
+            !string.Equals(
+                Path.GetExtension(module.Manifest.Icon),
+                ".svg",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var moduleDirectory = Path.GetFullPath(module.ModuleDirectory);
+        var iconPath = Path.GetFullPath(
+            Path.Combine(moduleDirectory, module.Manifest.Icon));
+        var modulePrefix = moduleDirectory.TrimEnd(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+        return iconPath.StartsWith(
+                modulePrefix,
+                StringComparison.OrdinalIgnoreCase) &&
+            File.Exists(iconPath)
+                ? iconPath
+                : null;
     }
 }

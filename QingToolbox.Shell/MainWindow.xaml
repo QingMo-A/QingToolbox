@@ -343,10 +343,17 @@
                                     <StackPanel>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
-                                            <StackPanel Orientation="Horizontal">
+                                            <Border Grid.Column="0"
+                                                    Style="{StaticResource ModuleIconContainerStyle}">
+                                                <svgc:SvgViewbox
+                                                    Style="{StaticResource ModuleIconStyle}"
+                                                    Source="{Binding IconPath, Converter={StaticResource ModuleIconSourceConverter}}"/>
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal">
                                                 <TextBlock Text="{Binding Name}"
                                                            FontSize="19"
                                                            FontWeight="SemiBold"
@@ -355,7 +362,7 @@
                                                            Text="{Binding Version, StringFormat=v{0}}"
                                                            Foreground="{StaticResource SecondaryTextBrush}"/>
                                             </StackPanel>
-                                            <Border Grid.Column="1"
+                                            <Border Grid.Column="2"
                                                     Style="{StaticResource StateBadgeStyle}">
                                                 <TextBlock Text="{Binding StateBadgeText}"
                                                            FontWeight="SemiBold"

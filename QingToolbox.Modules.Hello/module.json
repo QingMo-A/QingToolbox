@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "QingMo",
   "entry": "QingToolbox.Modules.Hello.dll",
-  "icon": null,
+  "icon": "icon.svg",
   "runtimeType": "InProcess",
   "loadMode": "Manual",
   "permissions": []

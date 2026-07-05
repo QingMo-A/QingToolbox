@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <None Update="module.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="icon.svg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

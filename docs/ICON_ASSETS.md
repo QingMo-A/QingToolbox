@@ -17,3 +17,12 @@ QingToolbox Shell uses a selected subset of Nieobie Game Icon Pack from
 | `unload.svg` | `svg/no-padding/9-media/trash.svg` | Unload module |
 | `open.svg` | `svg/no-padding/8-ui/menu-open.svg` | Open module view |
 | `close.svg` | `svg/no-padding/8-ui/cross.svg` | Close module view |
+
+## Module icons
+
+Modules may set `"icon": "icon.svg"` in `module.json`. The path is resolved relative
+to the deployed module directory and currently only SVG is supported. If the file is
+missing, invalid, or omitted, the Shell displays its packaged `modules.svg` fallback.
+
+The Hello development module includes its own `icon.svg`, derived from the same
+Nieobie `svg/no-padding/8-ui/grid.svg` source.

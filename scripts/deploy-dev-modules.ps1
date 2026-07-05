@@ -14,6 +14,8 @@ $shellOutput = Join-Path $repoRoot "QingToolbox.Shell\bin\$Configuration\$target
 $moduleTarget = Join-Path $shellOutput "Modules\Hello"
 $helloAssembly = Join-Path $helloOutput "QingToolbox.Modules.Hello.dll"
 $helloManifest = Join-Path $repoRoot "QingToolbox.Modules.Hello\module.json"
+$helloIcon = Join-Path $repoRoot "QingToolbox.Modules.Hello\icon.svg"
+$helloDeps = Join-Path $helloOutput "QingToolbox.Modules.Hello.deps.json"
 
 Write-Host "Building QingToolbox solution ($Configuration)..."
 dotnet build $solutionPath --configuration $Configuration
@@ -36,6 +38,14 @@ New-Item -ItemType Directory -Force -Path $moduleTarget | Out-Null
 Write-Host "Deploying Hello module manifest and assembly..."
 Copy-Item -LiteralPath $helloAssembly -Destination $moduleTarget -Force
 Copy-Item -LiteralPath $helloManifest -Destination $moduleTarget -Force
+
+if (Test-Path -LiteralPath $helloIcon) {
+    Copy-Item -LiteralPath $helloIcon -Destination $moduleTarget -Force
+}
+
+if (Test-Path -LiteralPath $helloDeps) {
+    Copy-Item -LiteralPath $helloDeps -Destination $moduleTarget -Force
+}
 
 Write-Host "Hello module deployed to:"
 Write-Host "  $moduleTarget"

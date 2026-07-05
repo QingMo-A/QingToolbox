@@ -1,6 +1,9 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:svgc="http://sharpvectors.codeplex.com/svgc/">
+                    xmlns:svgc="http://sharpvectors.codeplex.com/svgc/"
+                    xmlns:converters="clr-namespace:QingToolbox.Shell.Converters">
+    <converters:ModuleIconSourceConverter x:Key="ModuleIconSourceConverter"/>
+
     <SolidColorBrush x:Key="ShellBackgroundBrush" Color="#F4F6F9"/>
     <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#111827"/>
     <SolidColorBrush x:Key="SidebarHoverBrush" Color="#273449"/>
@@ -24,6 +27,24 @@
            BasedOn="{StaticResource ShellSvgIconStyle}">
         <Setter Property="Width" Value="16"/>
         <Setter Property="Height" Value="16"/>
+    </Style>
+
+    <Style x:Key="ModuleIconContainerStyle" TargetType="Border">
+        <Setter Property="Width" Value="42"/>
+        <Setter Property="Height" Value="42"/>
+        <Setter Property="Margin" Value="0,0,12,0"/>
+        <Setter Property="Padding" Value="7"/>
+        <Setter Property="Background" Value="#EFF6FF"/>
+        <Setter Property="BorderBrush" Value="#BFDBFE"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="10"/>
+    </Style>
+
+    <Style x:Key="ModuleIconStyle"
+           TargetType="{x:Type svgc:SvgViewbox}"
+           BasedOn="{StaticResource ShellSvgIconStyle}">
+        <Setter Property="Width" Value="28"/>
+        <Setter Property="Height" Value="28"/>
     </Style>
 
     <Style x:Key="RefreshButtonStyle" TargetType="Button">
