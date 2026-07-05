@@ -32,7 +32,29 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        _serviceProvider?.Dispose();
-        base.OnExit(e);
+        try
+        {
+            var runtimeManager = _serviceProvider?.GetService<ModuleRuntimeManager>();
+            runtimeManager?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"Failed to unload modules during shutdown: {exception}");
+        }
+        finally
+        {
+            try
+            {
+                _serviceProvider?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            catch (Exception exception)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Failed to dispose application services during shutdown: {exception}");
+            }
+
+            base.OnExit(e);
+        }
     }
 }

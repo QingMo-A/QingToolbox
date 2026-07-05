@@ -57,6 +57,10 @@ Shell 的模块卡片通过 `ModuleRuntimeManager` 提供 Load、Activate、Deac
 Unload 操作。只有用户点击按钮才会触发生命周期；Shell 启动与 Refresh 仍只发现清单，
 不会自动加载模块。
 
+应用退出时，Shell 通过 `ModuleRuntimeManager.DisposeAsync` 清理所有活动模块。
+Running 模块会先停用，再卸载并释放；单个模块失败不会阻止其余模块的卸载尝试，也不会
+阻止应用关闭。
+
 ## 核心原则
 
 1. 本体不内置具体工具功能。

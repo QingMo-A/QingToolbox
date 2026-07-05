@@ -75,6 +75,10 @@ The smoke test uses `ModuleRuntimeManager` to validate manifest scanning and the
 collectible load-context unloading.
 
 `ModuleRuntimeManager` owns active module handles and coordinates lifecycle state,
-while `ModuleRegistry` remains the
-manifest-discovery store. Shell module cards invoke the manager only after an explicit
-user action; startup and Refresh Modules remain discovery-only operations.
+while `ModuleRegistry` remains the manifest-discovery store. Shell module cards invoke
+the manager only after an explicit user action; startup and Refresh Modules remain
+discovery-only operations.
+
+When the Shell exits, it asks `ModuleRuntimeManager` to deactivate and unload all active
+modules before disposing application services. Shutdown cleanup errors are written to
+the debug output and do not prevent the process from closing.

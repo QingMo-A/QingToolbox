@@ -3,18 +3,20 @@ using QingToolbox.ModuleLoader;
 
 namespace QingToolbox.Core.Runtime;
 
-public sealed class ModuleRuntimeManager(InProcessModuleLoader loader)
+public sealed class ModuleRuntimeManager(InProcessModuleLoader loader) : IAsyncDisposable
 {
     private const string MissingManifestMessage = "Module manifest disappeared from discovery.";
 
     private readonly Dictionary<string, ModuleRuntimeRecord> _records =
         new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _sync = new(1, 1);
+    private bool _isDisposed;
 
     public IReadOnlyCollection<ModuleRuntimeRecord> Records => _records.Values;
 
     public void ReplaceDiscoveredModules(IEnumerable<DiscoveredModule> modules)
     {
+        ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(modules);
 
         if (!_sync.Wait(0))
@@ -57,6 +59,7 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader)
 
     public ModuleRuntimeRecord? GetRecord(string moduleId)
     {
+        ThrowIfDisposed();
         ArgumentException.ThrowIfNullOrWhiteSpace(moduleId);
         return _records.GetValueOrDefault(moduleId);
     }
@@ -66,6 +69,7 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader)
         string dataRootDirectory,
         CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
         await _sync.WaitAsync(cancellationToken);
         try
         {
@@ -108,6 +112,7 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader)
         string moduleId,
         CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
         await _sync.WaitAsync(cancellationToken);
         try
         {
@@ -138,6 +143,7 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader)
         string moduleId,
         CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
         await _sync.WaitAsync(cancellationToken);
         try
         {
@@ -154,6 +160,7 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader)
         string moduleId,
         CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
         await _sync.WaitAsync(cancellationToken);
         try
         {
@@ -167,6 +174,7 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader)
 
     public async Task UnloadAllAsync(CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
         await _sync.WaitAsync(cancellationToken);
         try
         {
@@ -194,6 +202,24 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader)
         finally
         {
             _sync.Release();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        try
+        {
+            await UnloadAllAsync();
+        }
+        finally
+        {
+            _isDisposed = true;
+            _sync.Dispose();
         }
     }
 
@@ -289,5 +315,10 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader)
     {
         return exception as ModuleRuntimeException ??
             new ModuleRuntimeException(message, exception);
+    }
+
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
     }
 }
