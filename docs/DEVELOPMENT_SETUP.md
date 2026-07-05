@@ -74,6 +74,9 @@ The smoke test uses `ModuleRuntimeManager` to validate manifest scanning and the
 `NotLoaded -> Loaded -> Running -> Deactivated -> Unloaded` state chain, then confirms
 collectible load-context unloading.
 
+It also runs a `CreateView` scenario on an STA thread: the module view is created,
+released, and followed by module unload and a second collectible-context verification.
+
 `ModuleRuntimeManager` owns active module handles and coordinates lifecycle state,
 while `ModuleRegistry` remains the manifest-discovery store. Shell module cards invoke
 the manager only after an explicit user action; startup and Refresh Modules remain

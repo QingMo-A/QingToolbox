@@ -47,6 +47,9 @@ Shell 仍然不能直接引用模块项目，模块只能依赖 Abstractions。
 到 Unloaded 的完整状态链，并确认 collectible 加载上下文能够被回收。它不被 Shell
 引用，也不是应用运行时的一部分。
 
+Smoke test 还覆盖 `CreateView()`：在 STA 线程创建模块 WPF View，显式释放 View
+引用后卸载模块，并再次验证加载上下文回收。这用于防止 UI 引用意外阻止模块卸载。
+
 ## 运行时管理
 
 Core 的 `ModuleRuntimeManager` 串行管理模块的 Load、Activate、Deactivate 和 Unload
