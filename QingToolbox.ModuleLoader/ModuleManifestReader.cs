@@ -6,15 +6,21 @@ namespace QingToolbox.ModuleLoader;
 
 public sealed class ModuleManifestReader
 {
-    private static readonly JsonSerializerOptions Options = CreateSerializerOptions();
+    private static readonly JsonSerializerOptions Options = CreateOptions();
 
-    public async Task<ModuleManifest?> ReadAsync(string manifestPath, CancellationToken cancellationToken = default)
+    public async Task<ModuleManifest?> ReadAsync(
+        string manifestPath,
+        CancellationToken cancellationToken = default)
     {
         await using var stream = File.OpenRead(manifestPath);
-        return await JsonSerializer.DeserializeAsync<ModuleManifest>(stream, Options, cancellationToken);
+
+        return await JsonSerializer.DeserializeAsync<ModuleManifest>(
+            stream,
+            Options,
+            cancellationToken);
     }
 
-    private static JsonSerializerOptions CreateSerializerOptions()
+    private static JsonSerializerOptions CreateOptions()
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         options.Converters.Add(new JsonStringEnumConverter());
