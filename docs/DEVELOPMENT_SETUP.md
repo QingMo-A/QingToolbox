@@ -70,8 +70,10 @@ dotnet run --project QingToolbox.DevTools.ModuleLoadSmokeTest -- `
   --data "path/to/UserData/modules"
 ```
 
-The smoke test validates manifest scanning, loading, activation, deactivation, disposal,
-and collectible load-context unloading. The Shell still does not invoke the loader.
+The smoke test uses `ModuleRuntimeManager` to validate manifest scanning and the
+`NotLoaded -> Loaded -> Running -> Deactivated -> Unloaded` state chain, then confirms
+collectible load-context unloading. The Shell still does not invoke runtime lifecycle
+methods or expose load/unload controls.
 
 `ModuleRuntimeManager` is available in Core for future UI integration. It owns active
 module handles and coordinates lifecycle state, while `ModuleRegistry` remains the

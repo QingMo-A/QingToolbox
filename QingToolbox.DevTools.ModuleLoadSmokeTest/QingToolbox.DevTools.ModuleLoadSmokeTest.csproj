@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\QingToolbox.Abstractions\QingToolbox.Abstractions.csproj" />
     <ProjectReference Include="..\QingToolbox.ModuleLoader\QingToolbox.ModuleLoader.csproj" />
+    <ProjectReference Include="..\QingToolbox.Core\QingToolbox.Core.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

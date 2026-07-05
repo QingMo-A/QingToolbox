@@ -1,4 +1,5 @@
 using QingToolbox.Abstractions.Modules;
+using QingToolbox.Core.Runtime;
 using QingToolbox.ModuleLoader;
 
 return await RunAsync(args);
@@ -55,7 +56,7 @@ static async Task<int> RunAsync(string[] args)
             throw new InvalidOperationException($"Hello module manifest is invalid:{Environment.NewLine}{errors}");
         }
 
-        var weakReference = await LoadAndUnloadAsync(helloModule, dataDirectory);
+        var weakReference = await RunRuntimeLifecycleAsync(helloModule, dataDirectory);
 
         Console.WriteLine("Verifying collectible AssemblyLoadContext unload...");
         if (!ModuleUnloadVerifier.WaitForUnload(weakReference))
@@ -76,29 +77,56 @@ static async Task<int> RunAsync(string[] args)
     }
 }
 
-static async Task<WeakReference> LoadAndUnloadAsync(
+static async Task<WeakReference> RunRuntimeLifecycleAsync(
     DiscoveredModule discoveredModule,
     string dataRootDirectory)
 {
     var loader = new InProcessModuleLoader();
-    var handle = await loader.LoadAsync(discoveredModule, dataRootDirectory);
-    var weakReference = handle.LoadContextWeakReference;
+    var runtimeManager = new ModuleRuntimeManager(loader);
+    runtimeManager.ReplaceDiscoveredModules([discoveredModule]);
 
-    try
+    var record = runtimeManager.GetRecord("qing.hello")
+        ?? throw new InvalidOperationException("The qing.hello runtime record was not created.");
+
+    EnsureState(record, ModuleState.NotLoaded);
+
+    Console.WriteLine("Loading module through ModuleRuntimeManager...");
+    await runtimeManager.LoadAsync("qing.hello", dataRootDirectory);
+    EnsureState(record, ModuleState.Loaded);
+
+    var weakReference = record.Handle?.LoadContextWeakReference
+        ?? throw new InvalidOperationException("Load context weak reference was not available.");
+
+    Console.WriteLine("Activating module through ModuleRuntimeManager...");
+    await runtimeManager.ActivateAsync("qing.hello");
+    EnsureState(record, ModuleState.Running);
+
+    Console.WriteLine("Deactivating module through ModuleRuntimeManager...");
+    await runtimeManager.DeactivateAsync("qing.hello");
+    EnsureState(record, ModuleState.Deactivated);
+
+    Console.WriteLine("Unloading module through ModuleRuntimeManager...");
+    await runtimeManager.UnloadAsync("qing.hello");
+    EnsureState(record, ModuleState.Unloaded);
+
+    if (record.Handle is not null)
     {
-        Console.WriteLine($"Loaded module: {handle.Manifest.Id}");
-        Console.WriteLine("Activating module...");
-        await handle.Module.OnActivateAsync();
-        Console.WriteLine("Deactivating module...");
-        await handle.Module.OnDeactivateAsync();
-    }
-    finally
-    {
-        Console.WriteLine("Disposing module handle...");
-        await handle.DisposeAsync();
+        throw new InvalidOperationException("Runtime record retained its module handle after unload.");
     }
 
+    Console.WriteLine("Runtime handle cleared successfully.");
     return weakReference;
+}
+
+static void EnsureState(ModuleRuntimeRecord record, ModuleState expected)
+{
+    if (record.State != expected)
+    {
+        throw new InvalidOperationException(
+            $"Expected state {expected}, but got {record.State}.");
+    }
+
+    Console.WriteLine($"State OK: {expected}");
 }
 
 static SmokeTestOptions ParseOptions(string[] args)
