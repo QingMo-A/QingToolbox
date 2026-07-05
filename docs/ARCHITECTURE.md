@@ -32,6 +32,16 @@
 
 Shell 仍然不能直接引用模块项目，模块只能依赖 Abstractions。
 
+## 进程内加载基础设施
+
+`InProcessModuleLoader` 可以在 collectible `AssemblyLoadContext` 中创建唯一的
+`IToolModule` 实现并调用其加载生命周期。`LoadedModuleHandle` 负责调用卸载与异步
+释放生命周期、清除模块引用并释放加载上下文。
+
+`ModuleUnloadVerifier` 仅供开发与测试验证加载上下文是否被垃圾回收。当前 Shell
+不会调用进程内加载器，仍然只执行 manifest discovery；UI 加载和卸载操作将在后续
+阶段接入。
+
 ## 核心原则
 
 1. 本体不内置具体工具功能。

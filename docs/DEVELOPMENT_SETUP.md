@@ -41,3 +41,9 @@ dotnet run --project QingToolbox.Shell
 
 The Hello module should appear as `NotLoaded`. This confirms manifest discovery and
 entry-file validation without loading the module DLL.
+
+## In-process loader status
+
+`QingToolbox.ModuleLoader` contains the collectible in-process loading and unloading
+infrastructure. It is not connected to the Shell UI or startup flow yet. The Shell
+continues to perform manifest discovery only.
