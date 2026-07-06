@@ -4,8 +4,8 @@
                     xmlns:converters="clr-namespace:QingToolbox.Shell.Converters">
     <converters:ModuleIconSourceConverter x:Key="ModuleIconSourceConverter"/>
 
-    <SolidColorBrush x:Key="ShellBackgroundBrush" Color="#F4F6F9"/>
-    <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#111827"/>
+    <SolidColorBrush x:Key="ShellBackgroundBrush" Color="#F5F7FB"/>
+    <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#0F172A"/>
     <SolidColorBrush x:Key="SidebarHoverBrush" Color="#273449"/>
     <SolidColorBrush x:Key="AccentBrush" Color="#2563EB"/>
     <SolidColorBrush x:Key="AccentHoverBrush" Color="#1D4ED8"/>
@@ -15,11 +15,17 @@
     <SolidColorBrush x:Key="CardBorderBrush" Color="#DCE2EA"/>
 
     <Style x:Key="ShellSvgIconStyle" TargetType="{x:Type svgc:SvgViewbox}">
-        <Setter Property="Width" Value="22"/>
-        <Setter Property="Height" Value="22"/>
+        <Setter Property="Width" Value="21"/>
+        <Setter Property="Height" Value="21"/>
         <Setter Property="Stretch" Value="Uniform"/>
         <Setter Property="HorizontalAlignment" Value="Center"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <Style x:Key="SidebarIconContainerStyle" TargetType="Border">
+        <Setter Property="Width" Value="32"/>
+        <Setter Property="Height" Value="40"/>
+        <Setter Property="Background" Value="Transparent"/>
     </Style>
 
     <Style x:Key="CompactSvgIconStyle"
@@ -160,19 +166,48 @@
     </Style>
 
     <Style x:Key="ModuleCardStyle" TargetType="Border">
-        <Setter Property="Margin" Value="0,0,8,14"/>
-        <Setter Property="Padding" Value="22"/>
+        <Setter Property="Margin" Value="0,0,10,12"/>
+        <Setter Property="Padding" Value="18"/>
         <Setter Property="Background" Value="White"/>
         <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="CornerRadius" Value="12"/>
+    </Style>
+
+    <Style x:Key="ModuleCardCompactStyle" TargetType="Border"
+           BasedOn="{StaticResource ModuleCardStyle}"/>
+
+    <Style x:Key="ModuleDetailsExpanderStyle" TargetType="Expander">
+        <Setter Property="Margin" Value="0,14,0,0"/>
+        <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}"/>
     </Style>
 
     <Style x:Key="SummaryCardStyle" TargetType="Border">
-        <Setter Property="Margin" Value="0,0,12,0"/>
-        <Setter Property="Padding" Value="16,13"/>
+        <Setter Property="Margin" Value="0,0,10,0"/>
+        <Setter Property="Padding" Value="14,10"/>
+        <Setter Property="Height" Value="70"/>
         <Setter Property="Background" Value="White"/>
         <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="12"/>
+    </Style>
+
+    <Style x:Key="SummaryNumberStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="23"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}"/>
+    </Style>
+
+    <Style x:Key="SummaryLabelStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}"/>
+        <Setter Property="Margin" Value="0,2,0,0"/>
+    </Style>
+
+    <Style x:Key="StatusMessageStyle" TargetType="Border">
+        <Setter Property="Padding" Value="14,9"/>
+        <Setter Property="Background" Value="#EAF2FF"/>
+        <Setter Property="BorderBrush" Value="#D5E5FF"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="10"/>
     </Style>
@@ -251,6 +286,26 @@
         <Setter Property="BorderBrush" Value="#FED7AA"/>
     </Style>
 
+    <Style x:Key="PrimaryActionButtonStyle"
+           TargetType="Button"
+           BasedOn="{StaticResource LifecycleButtonStyle}">
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+    </Style>
+
+    <Style x:Key="SecondaryActionButtonStyle"
+           TargetType="Button"
+           BasedOn="{StaticResource LifecycleButtonStyle}">
+        <Setter Property="Foreground" Value="#334155"/>
+        <Setter Property="Background" Value="#F8FAFC"/>
+        <Setter Property="BorderBrush" Value="#CBD5E1"/>
+    </Style>
+
+    <Style x:Key="DangerActionButtonStyle"
+           TargetType="Button"
+           BasedOn="{StaticResource LifecycleDangerButtonStyle}"/>
+
     <Style x:Key="RuntimeErrorPanelStyle"
            TargetType="Border"
            BasedOn="{StaticResource ErrorPanelStyle}">
@@ -263,7 +318,16 @@
         <Setter Property="Background" Value="White"/>
         <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="CornerRadius" Value="14"/>
+    </Style>
+
+    <Style x:Key="WorkspacePanelStyle" TargetType="Border"
+           BasedOn="{StaticResource ModuleViewHostStyle}"/>
+
+    <Style x:Key="WorkspaceEmptyStateStyle" TargetType="StackPanel">
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="MaxWidth" Value="360"/>
     </Style>
 
     <Style x:Key="ModuleViewHeaderStyle" TargetType="TextBlock">

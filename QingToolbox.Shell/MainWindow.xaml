@@ -3,10 +3,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:svgc="http://sharpvectors.codeplex.com/svgc/"
         Title="{Binding Title}"
-        Width="1100"
-        Height="700"
-        MinWidth="800"
-        MinHeight="520"
+        Width="1180"
+        Height="760"
+        MinWidth="900"
+        MinHeight="580"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource ShellBackgroundBrush}">
 
@@ -74,7 +74,7 @@
                             <ColumnDefinition Width="32"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Border Width="28" Height="28" Background="#E2E8F0" CornerRadius="6">
+                        <Border Style="{StaticResource SidebarIconContainerStyle}">
                             <svgc:SvgViewbox
                                 Style="{StaticResource ShellSvgIconStyle}"
                                 Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/home.svg"/>
@@ -102,7 +102,7 @@
                             <ColumnDefinition Width="32"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Border Width="28" Height="28" Background="#E2E8F0" CornerRadius="6">
+                        <Border Style="{StaticResource SidebarIconContainerStyle}">
                             <svgc:SvgViewbox
                                 Style="{StaticResource ShellSvgIconStyle}"
                                 Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/modules.svg"/>
@@ -130,7 +130,7 @@
                             <ColumnDefinition Width="32"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Border Width="28" Height="28" Background="#E2E8F0" CornerRadius="6">
+                        <Border Style="{StaticResource SidebarIconContainerStyle}">
                             <svgc:SvgViewbox
                                 Style="{StaticResource ShellSvgIconStyle}"
                                 Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/running.svg"/>
@@ -150,7 +150,7 @@
                             <ColumnDefinition Width="32"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Border Width="28" Height="28" Background="#E2E8F0" CornerRadius="6">
+                        <Border Style="{StaticResource SidebarIconContainerStyle}">
                             <svgc:SvgViewbox
                                 Style="{StaticResource ShellSvgIconStyle}"
                                 Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/pin.svg"/>
@@ -178,7 +178,7 @@
                             <ColumnDefinition Width="32"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Border Width="28" Height="28" Background="#E2E8F0" CornerRadius="6">
+                        <Border Style="{StaticResource SidebarIconContainerStyle}">
                             <svgc:SvgViewbox
                                 Style="{StaticResource ShellSvgIconStyle}"
                                 Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/settings.svg"/>
@@ -191,7 +191,7 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Column="1" Margin="44,36">
+        <Grid Grid.Column="1" Margin="34,28,34,30">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -206,7 +206,7 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel>
                     <TextBlock Text="Qing Toolbox"
-                               FontSize="32"
+                               FontSize="30"
                                FontWeight="SemiBold"
                                Foreground="#172033"/>
                     <TextBlock Margin="0,7,0,0"
@@ -230,10 +230,8 @@
             </Grid>
 
             <Border Grid.Row="1"
-                    Margin="0,28,0,20"
-                    Padding="16,12"
-                    Background="#E8EEF8"
-                    CornerRadius="7">
+                    Margin="0,20,0,16"
+                    Style="{StaticResource StatusMessageStyle}">
                 <TextBlock Text="{Binding StatusMessage}" Foreground="#475569"/>
             </Border>
 
@@ -248,55 +246,49 @@
                 </Grid.ColumnDefinitions>
                 <Border Grid.Column="0" Style="{StaticResource SummaryCardStyle}">
                     <StackPanel>
-                        <TextBlock Text="Total" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBlock Text="TOTAL" Style="{StaticResource SummaryLabelStyle}"/>
                         <TextBlock Text="{Binding TotalModuleCount}"
-                                   FontSize="24"
-                                   FontWeight="SemiBold"
+                                   Style="{StaticResource SummaryNumberStyle}"
                                    Foreground="{StaticResource PrimaryTextBrush}"/>
                     </StackPanel>
                 </Border>
                 <Border Grid.Column="1" Style="{StaticResource SummaryCardStyle}">
                     <StackPanel>
-                        <TextBlock Text="Valid" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBlock Text="VALID" Style="{StaticResource SummaryLabelStyle}"/>
                         <TextBlock Text="{Binding ValidModuleCount}"
-                                   FontSize="24"
-                                   FontWeight="SemiBold"
+                                   Style="{StaticResource SummaryNumberStyle}"
                                    Foreground="#15803D"/>
                     </StackPanel>
                 </Border>
                 <Border Grid.Column="2" Style="{StaticResource SummaryCardStyle}">
                     <StackPanel>
-                        <TextBlock Text="Failed" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBlock Text="FAILED" Style="{StaticResource SummaryLabelStyle}"/>
                         <TextBlock Text="{Binding FailedModuleCount}"
-                                   FontSize="24"
-                                   FontWeight="SemiBold"
+                                   Style="{StaticResource SummaryNumberStyle}"
                                    Foreground="#B45309"/>
                     </StackPanel>
                 </Border>
                 <Border Grid.Column="3" Style="{StaticResource SummaryCardStyle}">
                     <StackPanel>
-                        <TextBlock Text="Not Loaded" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBlock Text="NOT LOADED" Style="{StaticResource SummaryLabelStyle}"/>
                         <TextBlock Text="{Binding NotLoadedModuleCount}"
-                                   FontSize="24"
-                                   FontWeight="SemiBold"
+                                   Style="{StaticResource SummaryNumberStyle}"
                                    Foreground="#2563EB"/>
                     </StackPanel>
                 </Border>
                 <Border Grid.Column="4" Style="{StaticResource SummaryCardStyle}">
                     <StackPanel>
-                        <TextBlock Text="Loaded" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBlock Text="LOADED" Style="{StaticResource SummaryLabelStyle}"/>
                         <TextBlock Text="{Binding LoadedModuleCount}"
-                                   FontSize="24"
-                                   FontWeight="SemiBold"
+                                   Style="{StaticResource SummaryNumberStyle}"
                                    Foreground="#0369A1"/>
                     </StackPanel>
                 </Border>
                 <Border Grid.Column="5" Style="{StaticResource SummaryCardStyle}" Margin="0">
                     <StackPanel>
-                        <TextBlock Text="Running" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBlock Text="RUNNING" Style="{StaticResource SummaryLabelStyle}"/>
                         <TextBlock Text="{Binding RunningModuleCount}"
-                                   FontSize="24"
-                                   FontWeight="SemiBold"
+                                   Style="{StaticResource SummaryNumberStyle}"
                                    Foreground="#15803D"/>
                     </StackPanel>
                 </Border>
@@ -304,8 +296,8 @@
 
             <Grid Grid.Row="3">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="3*"/>
-                    <ColumnDefinition Width="2*"/>
+                    <ColumnDefinition MinWidth="420" Width="5*"/>
+                    <ColumnDefinition Width="6*"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock HorizontalAlignment="Center"
                            VerticalAlignment="Center"
@@ -339,8 +331,12 @@
                         </ItemsControl.Style>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Style="{StaticResource ModuleCardStyle}">
+                                <Border Style="{StaticResource ModuleCardCompactStyle}">
                                     <StackPanel>
+                                        <Expander Header="Details"
+                                                  IsExpanded="False"
+                                                  Style="{StaticResource ModuleDetailsExpanderStyle}">
+                                        <StackPanel Margin="0,10,0,0">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/>
@@ -364,7 +360,7 @@
                                             </StackPanel>
                                             <Border Grid.Column="2"
                                                     Style="{StaticResource StateBadgeStyle}">
-                                                <TextBlock Text="{Binding StateBadgeText}"
+                                                <TextBlock Text="{Binding RuntimeState}"
                                                            FontWeight="SemiBold"
                                                            Foreground="#1D4ED8"/>
                                             </Border>
@@ -411,6 +407,12 @@
                                             <TextBlock Text="Manifest" Style="{StaticResource InfoLabelStyle}"/>
                                             <TextBlock Text="{Binding ManifestPath}" Style="{StaticResource InfoValueStyle}"/>
                                         </StackPanel>
+                                        <StackPanel Margin="0,12,0,0">
+                                            <TextBlock Text="Minimum host version" Style="{StaticResource InfoLabelStyle}"/>
+                                            <TextBlock Text="{Binding MinimumHostVersion}" Style="{StaticResource InfoValueStyle}"/>
+                                        </StackPanel>
+                                        </StackPanel>
+                                        </Expander>
 
                                         <Grid Margin="0,16,0,0">
                                             <Grid.ColumnDefinitions>
@@ -432,7 +434,7 @@
                                                     Command="{Binding DataContext.LoadModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}"
                                                     IsEnabled="{Binding CanLoad}"
-                                                    Style="{StaticResource LifecycleButtonStyle}">
+                                                    Style="{StaticResource PrimaryActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <svgc:SvgViewbox Margin="0,0,6,0"
                                                                       Style="{StaticResource CompactSvgIconStyle}"
@@ -444,7 +446,7 @@
                                                     Command="{Binding DataContext.ActivateModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}"
                                                     IsEnabled="{Binding CanActivate}"
-                                                    Style="{StaticResource LifecycleButtonStyle}">
+                                                    Style="{StaticResource SecondaryActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <svgc:SvgViewbox Margin="0,0,6,0"
                                                                       Style="{StaticResource CompactSvgIconStyle}"
@@ -456,7 +458,7 @@
                                                     Command="{Binding DataContext.DeactivateModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}"
                                                     IsEnabled="{Binding CanDeactivate}"
-                                                    Style="{StaticResource LifecycleButtonStyle}">
+                                                    Style="{StaticResource SecondaryActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <svgc:SvgViewbox Margin="0,0,6,0"
                                                                       Style="{StaticResource CompactSvgIconStyle}"
@@ -468,7 +470,7 @@
                                                     Command="{Binding DataContext.UnloadModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}"
                                                     IsEnabled="{Binding CanUnload}"
-                                                    Style="{StaticResource LifecycleDangerButtonStyle}">
+                                                    Style="{StaticResource DangerActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <svgc:SvgViewbox Margin="0,0,6,0"
                                                                       Style="{StaticResource CompactSvgIconStyle}"
@@ -480,7 +482,7 @@
                                                     Command="{Binding DataContext.OpenModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}"
                                                     IsEnabled="{Binding CanOpen}"
-                                                    Style="{StaticResource LifecycleButtonStyle}">
+                                                    Style="{StaticResource PrimaryActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <svgc:SvgViewbox Margin="0,0,6,0"
                                                                       Style="{StaticResource CompactSvgIconStyle}"
@@ -562,7 +564,7 @@
                     </ItemsControl>
                 </ScrollViewer>
 
-                <Border Grid.Column="1" Style="{StaticResource ModuleViewHostStyle}">
+                <Border Grid.Column="1" Style="{StaticResource WorkspacePanelStyle}">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -576,8 +578,17 @@
                                 <Button DockPanel.Dock="Right"
                                         AutomationProperties.Name="Close"
                                         Command="{Binding CloseModuleViewCommand}"
-                                        IsEnabled="{Binding HasActiveModuleView}"
-                                        Style="{StaticResource CloseViewButtonStyle}">
+                                        IsEnabled="{Binding HasActiveModuleView}">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource CloseViewButtonStyle}">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasActiveModuleView}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
                                     <StackPanel Orientation="Horizontal">
                                         <svgc:SvgViewbox Margin="0,0,6,0"
                                                           Style="{StaticResource CompactSvgIconStyle}"
@@ -585,21 +596,20 @@
                                         <TextBlock VerticalAlignment="Center" Text="Close"/>
                                     </StackPanel>
                                 </Button>
-                                <TextBlock Text="{Binding ActiveModuleTitle}"
-                                           Style="{StaticResource ModuleViewHeaderStyle}"/>
+                                <StackPanel>
+                                    <TextBlock Text="Workspace" Style="{StaticResource ModuleViewHeaderStyle}"/>
+                                    <TextBlock Margin="0,4,0,0"
+                                               Text="Open a loaded module to start working."
+                                               FontSize="12"
+                                               Foreground="{StaticResource SecondaryTextBrush}"/>
+                                </StackPanel>
                             </DockPanel>
                         </Border>
 
                         <Grid Grid.Row="1">
-                            <TextBlock HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"
-                                       Margin="24"
-                                       Text="Select a loaded module and click Open."
-                                       TextAlignment="Center"
-                                       TextWrapping="Wrap"
-                                       Foreground="{StaticResource SecondaryTextBrush}">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
+                            <StackPanel>
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel" BasedOn="{StaticResource WorkspaceEmptyStateStyle}">
                                         <Setter Property="Visibility" Value="Visible"/>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding HasActiveModuleView}" Value="True">
@@ -607,8 +617,21 @@
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
+                                </StackPanel.Style>
+                                <Border Width="76" Height="76" Margin="0,0,0,20"
+                                        Background="#EFF6FF" CornerRadius="22">
+                                    <svgc:SvgViewbox Width="38" Height="38"
+                                                      Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/modules.svg"/>
+                                </Border>
+                                <TextBlock Text="Select a loaded module and click Open."
+                                           FontSize="18" FontWeight="SemiBold"
+                                           Foreground="{StaticResource PrimaryTextBrush}"
+                                           TextAlignment="Center"/>
+                                <TextBlock Margin="0,9,0,0"
+                                           Text="Modules are loaded manually and unloaded when no longer needed."
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextAlignment="Center" TextWrapping="Wrap"/>
+                            </StackPanel>
 
                             <ContentControl Margin="1"
                                             Content="{Binding ActiveModuleView}">
