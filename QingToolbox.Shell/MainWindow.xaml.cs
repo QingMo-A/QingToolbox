@@ -29,7 +29,7 @@ public partial class MainWindow : Window
     private void OnSidebarMouseEnter(object sender, MouseEventArgs e)
     {
         _viewModel.IsSidebarExpanded = true;
-        AnimateSidebarWidth(236, TimeSpan.FromMilliseconds(220));
+        AnimateSidebarWidth(236, TimeSpan.FromMilliseconds(380));
     }
 
     private void OnSidebarMouseLeave(object sender, MouseEventArgs e)
@@ -40,7 +40,7 @@ public partial class MainWindow : Window
         }
 
         _viewModel.IsSidebarExpanded = false;
-        AnimateSidebarWidth(76, TimeSpan.FromMilliseconds(180));
+        AnimateSidebarWidth(76, TimeSpan.FromMilliseconds(340));
     }
 
     private void OnPinSidebarClick(object sender, RoutedEventArgs e)
@@ -49,7 +49,7 @@ public partial class MainWindow : Window
         _viewModel.IsSidebarExpanded = _viewModel.IsSidebarPinned || Sidebar.IsMouseOver;
         AnimateSidebarWidth(
             _viewModel.IsSidebarExpanded ? 236 : 76,
-            TimeSpan.FromMilliseconds(_viewModel.IsSidebarExpanded ? 220 : 180));
+            TimeSpan.FromMilliseconds(_viewModel.IsSidebarExpanded ? 380 : 340));
     }
 
     private void AnimateSidebarWidth(double targetWidth, TimeSpan duration)
@@ -60,7 +60,7 @@ public partial class MainWindow : Window
             From = Sidebar.ActualWidth,
             To = targetWidth,
             Duration = duration,
-            EasingFunction = new QuarticEase { EasingMode = EasingMode.EaseOut },
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut },
             FillBehavior = FillBehavior.HoldEnd
         };
 

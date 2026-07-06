@@ -76,9 +76,7 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Border Style="{StaticResource SidebarIconContainerStyle}">
-                            <svgc:SvgViewbox
-                                Style="{StaticResource ShellSvgIconStyle}"
-                                Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/home.svg"/>
+                            <TextBlock Text="&#xE80F;" Style="{StaticResource FluentIconStyle}"/>
                         </Border>
                         <TextBlock Grid.Column="1"
                                    Text="Home"
@@ -105,9 +103,7 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Border Style="{StaticResource SidebarIconContainerStyle}">
-                            <svgc:SvgViewbox
-                                Style="{StaticResource ShellSvgIconStyle}"
-                                Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/modules.svg"/>
+                            <TextBlock Text="&#xE71D;" Style="{StaticResource FluentIconStyle}"/>
                         </Border>
                         <TextBlock Grid.Column="1"
                                    Text="Modules"
@@ -134,9 +130,7 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Border Style="{StaticResource SidebarIconContainerStyle}">
-                            <svgc:SvgViewbox
-                                Style="{StaticResource ShellSvgIconStyle}"
-                                Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/running.svg"/>
+                            <TextBlock Text="&#xE768;" Style="{StaticResource FluentIconStyle}"/>
                         </Border>
                         <TextBlock Grid.Column="1"
                                    Text="Running"
@@ -154,9 +148,7 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Border Style="{StaticResource SidebarIconContainerStyle}">
-                            <svgc:SvgViewbox
-                                Style="{StaticResource ShellSvgIconStyle}"
-                                Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/pin.svg"/>
+                            <TextBlock Text="&#xE718;" Style="{StaticResource FluentIconStyle}"/>
                         </Border>
                         <TextBlock Grid.Column="1"
                                    Text="{Binding PinLabel}"
@@ -183,9 +175,7 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Border Style="{StaticResource SidebarIconContainerStyle}">
-                            <svgc:SvgViewbox
-                                Style="{StaticResource ShellSvgIconStyle}"
-                                Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/settings.svg"/>
+                            <TextBlock Text="&#xE713;" Style="{StaticResource FluentIconStyle}"/>
                         </Border>
                         <TextBlock Grid.Column="1"
                                    Text="Settings"
@@ -224,10 +214,7 @@
                         Command="{Binding RefreshModulesCommand}"
                         Style="{StaticResource RefreshButtonStyle}">
                     <StackPanel Orientation="Horizontal">
-                        <svgc:SvgViewbox
-                            Margin="0,0,8,0"
-                            Style="{StaticResource CompactSvgIconStyle}"
-                            Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/refresh.svg"/>
+                        <TextBlock Margin="0,0,6,0" Text="&#xE72C;" Style="{StaticResource CompactFluentIconStyle}"/>
                         <TextBlock VerticalAlignment="Center" Text="Refresh Modules"/>
                     </StackPanel>
                 </Button>
@@ -341,10 +328,6 @@
                             <DataTemplate>
                                 <Border Style="{StaticResource ModuleCardCompactStyle}">
                                     <StackPanel>
-                                        <Expander Header="Details"
-                                                  IsExpanded="False"
-                                                  Style="{StaticResource ModuleDetailsExpanderStyle}">
-                                        <StackPanel Margin="0,10,0,0">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/>
@@ -353,9 +336,24 @@
                                             </Grid.ColumnDefinitions>
                                             <Border Grid.Column="0"
                                                     Style="{StaticResource ModuleIconContainerStyle}">
+                                                <Grid>
                                                 <svgc:SvgViewbox
                                                     Style="{StaticResource ModuleIconStyle}"
+                                                    Visibility="{Binding HasIcon, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                     Source="{Binding IconPath, Converter={StaticResource ModuleIconSourceConverter}}"/>
+                                                <TextBlock>
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock"
+                                                               BasedOn="{StaticResource DefaultModuleFluentIconStyle}">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding HasIcon}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                                </Grid>
                                             </Border>
                                             <StackPanel Grid.Column="1" Orientation="Horizontal">
                                                 <TextBlock Text="{Binding Name}"
@@ -379,6 +377,10 @@
                                                    TextWrapping="Wrap"
                                                    Foreground="#475569"/>
 
+                                        <Expander Header="Details"
+                                                  IsExpanded="False"
+                                                  Style="{StaticResource ModuleDetailsExpanderStyle}">
+                                        <StackPanel Margin="0,10,0,0">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*"/>
@@ -444,9 +446,7 @@
                                                     IsEnabled="{Binding CanLoad}"
                                                     Style="{StaticResource PrimaryActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
-                                                    <svgc:SvgViewbox Margin="0,0,6,0"
-                                                                      Style="{StaticResource CompactSvgIconStyle}"
-                                                                      Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/load.svg"/>
+                                                    <TextBlock Margin="0,0,6,0" Text="&#xE896;" Style="{StaticResource CompactFluentIconStyle}"/>
                                                     <TextBlock VerticalAlignment="Center" Text="Load"/>
                                                 </StackPanel>
                                             </Button>
@@ -456,9 +456,7 @@
                                                     IsEnabled="{Binding CanActivate}"
                                                     Style="{StaticResource SecondaryActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
-                                                    <svgc:SvgViewbox Margin="0,0,6,0"
-                                                                      Style="{StaticResource CompactSvgIconStyle}"
-                                                                      Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/activate.svg"/>
+                                                    <TextBlock Margin="0,0,6,0" Text="&#xE768;" Style="{StaticResource CompactFluentIconStyle}"/>
                                                     <TextBlock VerticalAlignment="Center" Text="Activate"/>
                                                 </StackPanel>
                                             </Button>
@@ -468,9 +466,7 @@
                                                     IsEnabled="{Binding CanDeactivate}"
                                                     Style="{StaticResource SecondaryActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
-                                                    <svgc:SvgViewbox Margin="0,0,6,0"
-                                                                      Style="{StaticResource CompactSvgIconStyle}"
-                                                                      Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/deactivate.svg"/>
+                                                    <TextBlock Margin="0,0,6,0" Text="&#xE769;" Style="{StaticResource CompactFluentIconStyle}"/>
                                                     <TextBlock VerticalAlignment="Center" Text="Deactivate"/>
                                                 </StackPanel>
                                             </Button>
@@ -480,9 +476,7 @@
                                                     IsEnabled="{Binding CanUnload}"
                                                     Style="{StaticResource DangerActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
-                                                    <svgc:SvgViewbox Margin="0,0,6,0"
-                                                                      Style="{StaticResource CompactSvgIconStyle}"
-                                                                      Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/unload.svg"/>
+                                                    <TextBlock Margin="0,0,6,0" Text="&#xE74D;" Style="{StaticResource CompactFluentIconStyle}"/>
                                                     <TextBlock VerticalAlignment="Center" Text="Unload"/>
                                                 </StackPanel>
                                             </Button>
@@ -492,9 +486,7 @@
                                                     IsEnabled="{Binding CanOpen}"
                                                     Style="{StaticResource PrimaryActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
-                                                    <svgc:SvgViewbox Margin="0,0,6,0"
-                                                                      Style="{StaticResource CompactSvgIconStyle}"
-                                                                      Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/open.svg"/>
+                                                    <TextBlock Margin="0,0,6,0" Text="&#xE8A7;" Style="{StaticResource CompactFluentIconStyle}"/>
                                                     <TextBlock VerticalAlignment="Center" Text="Open"/>
                                                 </StackPanel>
                                             </Button>
@@ -592,9 +584,7 @@
                                         </Style>
                                     </Button.Style>
                                     <StackPanel Orientation="Horizontal">
-                                        <svgc:SvgViewbox Margin="0,0,6,0"
-                                                          Style="{StaticResource CompactSvgIconStyle}"
-                                                          Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/close.svg"/>
+                                        <TextBlock Margin="0,0,6,0" Text="&#xE8BB;" Style="{StaticResource CompactFluentIconStyle}"/>
                                         <TextBlock VerticalAlignment="Center" Text="Close"/>
                                     </StackPanel>
                                 </Button>
@@ -617,8 +607,12 @@
                                 </StackPanel.Style>
                                 <Border Width="76" Height="76" Margin="0,0,0,20"
                                         Background="#EFF6FF" CornerRadius="22">
-                                    <svgc:SvgViewbox Width="38" Height="38"
-                                                      Source="/QingToolbox.Shell;component/Assets/Icons/Nieobie/modules.svg"/>
+                                    <TextBlock Text="&#xE71D;"
+                                               FontFamily="Segoe Fluent Icons"
+                                               FontSize="34"
+                                               Foreground="{StaticResource AccentBrush}"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"/>
                                 </Border>
                                 <TextBlock Text="Select a loaded module and click Open."
                                            FontSize="18" FontWeight="SemiBold"
@@ -705,12 +699,36 @@
                             <DataTemplate>
                                 <Border Style="{StaticResource ModuleCardCompactStyle}">
                                     <Grid>
-                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                        <StackPanel>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border Style="{StaticResource ModuleIconContainerStyle}">
+                                            <Grid>
+                                            <svgc:SvgViewbox
+                                                Style="{StaticResource ModuleIconStyle}"
+                                                Visibility="{Binding HasIcon, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                Source="{Binding IconPath, Converter={StaticResource ModuleIconSourceConverter}}"/>
+                                            <TextBlock>
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock"
+                                                           BasedOn="{StaticResource DefaultModuleFluentIconStyle}">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasIcon}" Value="True">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            </Grid>
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding Name}" FontSize="18" FontWeight="SemiBold"/>
                                             <TextBlock Margin="0,5,0,0" Text="{Binding RuntimeState}" Foreground="{StaticResource AccentBrush}"/>
                                         </StackPanel>
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal">
                                             <Button Command="{Binding DataContext.OpenModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}" IsEnabled="{Binding CanOpen}"
                                                     Style="{StaticResource PrimaryActionButtonStyle}" Content="Open"/>
