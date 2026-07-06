@@ -51,7 +51,7 @@
                                    Foreground="White"/>
                     </Border>
                     <TextBlock Grid.Column="1"
-                               Text="Qing Toolbox"
+                               Text="{Binding Strings[app.name]}"
                                FontWeight="SemiBold"
                                Foreground="White"
                                Style="{StaticResource SidebarLabelStyle}"/>
@@ -239,7 +239,7 @@
                 </Grid.ColumnDefinitions>
                 <Border Grid.Column="0" Style="{StaticResource SummaryCardStyle}">
                     <StackPanel>
-                        <TextBlock Text="TOTAL" Style="{StaticResource SummaryLabelStyle}"/>
+                        <TextBlock Text="{Binding Strings[summary.total]}" Style="{StaticResource SummaryLabelStyle}"/>
                         <TextBlock Text="{Binding TotalModuleCount}"
                                    Style="{StaticResource SummaryNumberStyle}"
                                    Foreground="{StaticResource PrimaryTextBrush}"/>
@@ -247,7 +247,7 @@
                 </Border>
                 <Border Grid.Column="1" Style="{StaticResource SummaryCardStyle}">
                     <StackPanel>
-                        <TextBlock Text="VALID" Style="{StaticResource SummaryLabelStyle}"/>
+                        <TextBlock Text="{Binding Strings[summary.valid]}" Style="{StaticResource SummaryLabelStyle}"/>
                         <TextBlock Text="{Binding ValidModuleCount}"
                                    Style="{StaticResource SummaryNumberStyle}"
                                    Foreground="#15803D"/>
@@ -255,7 +255,7 @@
                 </Border>
                 <Border Grid.Column="2" Style="{StaticResource SummaryCardStyle}">
                     <StackPanel>
-                        <TextBlock Text="FAILED" Style="{StaticResource SummaryLabelStyle}"/>
+                        <TextBlock Text="{Binding Strings[summary.failed]}" Style="{StaticResource SummaryLabelStyle}"/>
                         <TextBlock Text="{Binding FailedModuleCount}"
                                    Style="{StaticResource SummaryNumberStyle}"
                                    Foreground="#B45309"/>
@@ -263,7 +263,7 @@
                 </Border>
                 <Border Grid.Column="3" Style="{StaticResource SummaryCardStyle}">
                     <StackPanel>
-                        <TextBlock Text="NOT LOADED" Style="{StaticResource SummaryLabelStyle}"/>
+                        <TextBlock Text="{Binding Strings[summary.notLoaded]}" Style="{StaticResource SummaryLabelStyle}"/>
                         <TextBlock Text="{Binding NotLoadedModuleCount}"
                                    Style="{StaticResource SummaryNumberStyle}"
                                    Foreground="#2563EB"/>
@@ -271,7 +271,7 @@
                 </Border>
                 <Border Grid.Column="4" Style="{StaticResource SummaryCardStyle}">
                     <StackPanel>
-                        <TextBlock Text="LOADED" Style="{StaticResource SummaryLabelStyle}"/>
+                        <TextBlock Text="{Binding Strings[summary.loaded]}" Style="{StaticResource SummaryLabelStyle}"/>
                         <TextBlock Text="{Binding LoadedModuleCount}"
                                    Style="{StaticResource SummaryNumberStyle}"
                                    Foreground="#0369A1"/>
@@ -279,7 +279,7 @@
                 </Border>
                 <Border Grid.Column="5" Style="{StaticResource SummaryCardStyle}" Margin="0">
                     <StackPanel>
-                        <TextBlock Text="RUNNING" Style="{StaticResource SummaryLabelStyle}"/>
+                        <TextBlock Text="{Binding Strings[summary.running]}" Style="{StaticResource SummaryLabelStyle}"/>
                         <TextBlock Text="{Binding RunningModuleCount}"
                                    Style="{StaticResource SummaryNumberStyle}"
                                    Foreground="#15803D"/>
@@ -296,7 +296,7 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock HorizontalAlignment="Center"
                            VerticalAlignment="Center"
-                           Text="No modules discovered. Add module packages to the runtime Modules directory."
+                           Text="{Binding Strings[module.noModulesDiscoveredHint]}"
                            Foreground="#64748B"
                            TextAlignment="Center"
                            Grid.Column="0">
@@ -388,37 +388,37 @@
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Grid.Column="0" Margin="0,0,16,12">
-                                                <TextBlock Text="Runtime" Style="{StaticResource InfoLabelStyle}"/>
+                                                <TextBlock Text="{Binding DataContext.Strings[module.runtime], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource InfoLabelStyle}"/>
                                                 <TextBlock Text="{Binding RuntimeType}" Style="{StaticResource InfoValueStyle}"/>
                                             </StackPanel>
                                             <StackPanel Grid.Column="1" Margin="0,0,16,12">
-                                                <TextBlock Text="Load mode" Style="{StaticResource InfoLabelStyle}"/>
+                                                <TextBlock Text="{Binding DataContext.Strings[module.loadMode], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource InfoLabelStyle}"/>
                                                 <TextBlock Text="{Binding LoadMode}" Style="{StaticResource InfoValueStyle}"/>
                                             </StackPanel>
                                             <StackPanel Grid.Column="2" Margin="0,0,0,12">
-                                                <TextBlock Text="Author" Style="{StaticResource InfoLabelStyle}"/>
+                                                <TextBlock Text="{Binding DataContext.Strings[module.author], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource InfoLabelStyle}"/>
                                                 <TextBlock Text="{Binding Author}" Style="{StaticResource InfoValueStyle}"/>
                                             </StackPanel>
                                         </Grid>
 
                                         <StackPanel Margin="0,0,0,12">
-                                            <TextBlock Text="Permissions" Style="{StaticResource InfoLabelStyle}"/>
+                                            <TextBlock Text="{Binding DataContext.Strings[module.permissions], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource InfoLabelStyle}"/>
                                             <TextBlock Text="{Binding PermissionsText}" Style="{StaticResource InfoValueStyle}"/>
                                         </StackPanel>
                                         <StackPanel Margin="0,0,0,12">
-                                            <TextBlock Text="Entry" Style="{StaticResource InfoLabelStyle}"/>
+                                            <TextBlock Text="{Binding DataContext.Strings[module.entry], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource InfoLabelStyle}"/>
                                             <TextBlock Text="{Binding Entry}" Style="{StaticResource InfoValueStyle}"/>
                                         </StackPanel>
                                         <StackPanel Margin="0,0,0,12">
-                                            <TextBlock Text="Module directory" Style="{StaticResource InfoLabelStyle}"/>
+                                            <TextBlock Text="{Binding DataContext.Strings[module.directory], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource InfoLabelStyle}"/>
                                             <TextBlock Text="{Binding ModuleDirectory}" Style="{StaticResource InfoValueStyle}"/>
                                         </StackPanel>
                                         <StackPanel>
-                                            <TextBlock Text="Manifest" Style="{StaticResource InfoLabelStyle}"/>
+                                            <TextBlock Text="{Binding DataContext.Strings[module.manifest], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource InfoLabelStyle}"/>
                                             <TextBlock Text="{Binding ManifestPath}" Style="{StaticResource InfoValueStyle}"/>
                                         </StackPanel>
                                         <StackPanel Margin="0,12,0,0">
-                                            <TextBlock Text="Minimum host version" Style="{StaticResource InfoLabelStyle}"/>
+                                            <TextBlock Text="{Binding DataContext.Strings[module.minimumHostVersion], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource InfoLabelStyle}"/>
                                             <TextBlock Text="{Binding MinimumHostVersion}" Style="{StaticResource InfoValueStyle}"/>
                                         </StackPanel>
                                         </StackPanel>
@@ -429,7 +429,7 @@
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Runtime State:"
+                                            <TextBlock Text="{Binding DataContext.Strings[module.runtimeState], RelativeSource={RelativeSource AncestorType=Window}}"
                                                        FontWeight="SemiBold"
                                                        Foreground="{StaticResource SecondaryTextBrush}"/>
                                             <TextBlock Grid.Column="1"
@@ -505,7 +505,7 @@
                                                 </Style>
                                             </Border.Style>
                                             <StackPanel>
-                                                <TextBlock Text="Runtime Error"
+                                                <TextBlock Text="{Binding DataContext.Strings[module.runtimeError], RelativeSource={RelativeSource AncestorType=Window}}"
                                                            FontWeight="SemiBold"
                                                            Foreground="#991B1B"/>
                                                 <TextBlock Margin="0,5,0,0"
@@ -585,13 +585,13 @@
                                     </Button.Style>
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Margin="0,0,6,0" Text="&#xE8BB;" Style="{StaticResource CompactFluentIconStyle}"/>
-                                        <TextBlock VerticalAlignment="Center" Text="Close"/>
+                                        <TextBlock VerticalAlignment="Center" Text="{Binding Strings[common.close]}"/>
                                     </StackPanel>
                                 </Button>
                                 <StackPanel>
-                                    <TextBlock Text="Workspace" Style="{StaticResource ModuleViewHeaderStyle}"/>
+                                    <TextBlock Text="{Binding Strings[workspace.title]}" Style="{StaticResource ModuleViewHeaderStyle}"/>
                                     <TextBlock Margin="0,4,0,0"
-                                               Text="Open a loaded module to start working."
+                                               Text="{Binding Strings[workspace.subtitle]}"
                                                FontSize="12"
                                                Foreground="{StaticResource SecondaryTextBrush}"/>
                                 </StackPanel>
@@ -614,12 +614,12 @@
                                                HorizontalAlignment="Center"
                                                VerticalAlignment="Center"/>
                                 </Border>
-                                <TextBlock Text="Select a loaded module and click Open."
+                                <TextBlock Text="{Binding Strings[workspace.emptyTitle]}"
                                            FontSize="18" FontWeight="SemiBold"
                                            Foreground="{StaticResource PrimaryTextBrush}"
                                            TextAlignment="Center"/>
                                 <TextBlock Margin="0,9,0,0"
-                                           Text="Modules are loaded manually and unloaded when no longer needed."
+                                           Text="{Binding Strings[workspace.emptyDescription]}"
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextAlignment="Center" TextWrapping="Wrap"/>
                             </StackPanel>
@@ -670,7 +670,7 @@
                             <TextBlock Text="{Binding Strings[home.browseModules]}"/>
                         </Button>
                         <TextBlock Margin="0,18,0,0"
-                                   Text="Modules are discovered from the runtime Modules folder and loaded manually."
+                                   Text="{Binding Strings[home.modulesHint]}"
                                    FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"/>
                     </StackPanel>
                 </Border>
@@ -731,13 +731,13 @@
                                         <StackPanel Grid.Column="2" Orientation="Horizontal">
                                             <Button Command="{Binding DataContext.OpenModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}" IsEnabled="{Binding CanOpen}"
-                                                    Style="{StaticResource PrimaryActionButtonStyle}" Content="Open"/>
+                                                    Style="{StaticResource PrimaryActionButtonStyle}" Content="{Binding DataContext.Strings[common.open], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                             <Button Command="{Binding DataContext.DeactivateModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}" IsEnabled="{Binding CanDeactivate}"
-                                                    Style="{StaticResource SecondaryActionButtonStyle}" Content="Deactivate"/>
+                                                    Style="{StaticResource SecondaryActionButtonStyle}" Content="{Binding DataContext.Strings[common.deactivate], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                             <Button Command="{Binding DataContext.UnloadModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}" IsEnabled="{Binding CanUnload}"
-                                                    Style="{StaticResource DangerActionButtonStyle}" Content="Unload"/>
+                                                    Style="{StaticResource DangerActionButtonStyle}" Content="{Binding DataContext.Strings[common.unload], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                         </StackPanel>
                                     </Grid>
                                 </Border>
@@ -768,7 +768,7 @@
                                   HorizontalAlignment="Left"
                                   Padding="10,7"
                                   ItemsSource="{Binding LanguageOptions}"
-                                  DisplayMemberPath="NativeName"
+                                  DisplayMemberPath="DisplayText"
                                   SelectedValuePath="Code"
                                   SelectedValue="{Binding SelectedLanguageCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                     </StackPanel>

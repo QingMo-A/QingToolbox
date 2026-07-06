@@ -12,33 +12,43 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
 
     public DiscoveredModuleViewModel(
         DiscoveredModule module,
-        ILocalizationService localization)
+        ILocalizationService localization,
+        IReadOnlyList<string>? localizationDiagnostics = null)
     {
         _localization = localization;
         Id = module.Manifest.Id;
         Name = module.Manifest.Name;
         Version = module.Manifest.Version;
-        Description = module.Manifest.Description ?? "No description.";
+        Description = module.Manifest.Description ??
+            localization.GetString("module.noDescription");
         RuntimeType = module.Manifest.RuntimeType.ToString();
         LoadMode = module.Manifest.LoadMode.ToString();
         PermissionsText = module.Manifest.Permissions.Count == 0
-            ? "No permissions"
+            ? localization.GetString("module.noPermissions")
             : string.Join(", ", module.Manifest.Permissions);
         Entry = module.Manifest.Entry;
-        Author = module.Manifest.Author ?? "Unknown";
-        MinimumHostVersion = module.Manifest.MinimumHostVersion ?? "Not specified";
+        Author = module.Manifest.Author ??
+            localization.GetString("module.unknownAuthor");
+        MinimumHostVersion = module.Manifest.MinimumHostVersion ??
+            localization.GetString("module.notSpecified");
         State = module.State.ToString();
-        ErrorCount = module.Errors.Count;
+        var localizationErrors = localizationDiagnostics?
+            .Select(error => $"Localization: {error}") ??
+            [];
+        Errors = module.Errors
+            .Select(error => $"{error.Code}: {error.Message}")
+            .Concat(localizationErrors)
+            .ToArray();
+        ErrorCount = Errors.Count;
         HasErrors = ErrorCount > 0;
-        ErrorSummary = HasErrors ? $"{ErrorCount} issue(s)" : "No issues";
+        ErrorSummary = HasErrors
+            ? $"{ErrorCount} issue(s)"
+            : localization.GetString("module.noIssues");
         StateBadgeText = State;
         IsValid = module.IsValid;
         ModuleDirectory = module.ModuleDirectory;
         ManifestPath = module.ManifestPath;
         IconPath = ResolveIconPath(module);
-        Errors = module.Errors
-            .Select(error => $"{error.Code}: {error.Message}")
-            .ToArray();
         _runtimeState = State;
     }
 

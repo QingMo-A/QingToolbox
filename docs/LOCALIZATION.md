@@ -48,3 +48,12 @@ modules continue to use their original `module.json` values.
 Localization JSON is read with the manifest. Refreshing modules does not load
 module DLLs or invoke module code. Module-view localization is planned for a
 later phase.
+
+The first phase covers Shell navigation, page headings, module management
+actions, status messages, module detail labels, and module manifest name and
+description metadata. It does not localize controls inside a module View.
+
+Missing, invalid, or unsafe module localization resources are reported in the
+module card's collapsed **Details** issue list. These diagnostics do not stop
+the module from being discovered, and modules without localization metadata
+remain fully compatible.

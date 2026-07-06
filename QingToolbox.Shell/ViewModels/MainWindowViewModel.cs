@@ -62,8 +62,15 @@ public sealed partial class MainWindowViewModel(
 
     public string Title => "Qing Toolbox";
     public LocalizedText Strings { get; } = new(localization);
-    public IReadOnlyList<LanguageOption> LanguageOptions =>
-        localizationManager.SupportedLanguages;
+    public IReadOnlyList<LanguageOptionViewModel> LanguageOptions =>
+    [
+        new("system", localization.GetString(
+            "settings.language.systemDisplay")),
+        new("zh-CN", localization.GetString(
+            "settings.language.zhCNDisplay")),
+        new("en-US", localization.GetString(
+            "settings.language.enUSDisplay"))
+    ];
 
     public string PinLabel => IsSidebarPinned ? "Unpin Sidebar" : "Pin Sidebar";
 
@@ -127,11 +134,12 @@ public sealed partial class MainWindowViewModel(
 
         OnPropertyChanged(nameof(PageTitle));
         OnPropertyChanged(nameof(PageSubtitle));
+        OnPropertyChanged(nameof(LanguageOptions));
         var option = LanguageOptions.FirstOrDefault(
             item => item.Code == languageCode);
         StatusMessage = localization.GetString(
             "status.languageChanged",
-            option?.NativeName ?? languageCode);
+            option?.DisplayText ?? languageCode);
     }
 
     partial void OnIsSidebarPinnedChanged(bool value)
@@ -150,18 +158,25 @@ public sealed partial class MainWindowViewModel(
         try
         {
             IsScanning = true;
-            StatusMessage = "Scanning modules...";
+            StatusMessage = localization.GetString(
+                "status.scanningModules");
 
             var modulesRoot = Path.Combine(AppContext.BaseDirectory, "Modules");
             var discoveredModules = await scanner.ScanAsync(modulesRoot);
             localizationManager.ClearModuleLocalizations();
+            var localizationDiagnosticsByModuleId =
+                new Dictionary<string, IReadOnlyList<string>>(
+                    StringComparer.Ordinal);
             foreach (var module in discoveredModules)
             {
-                localizationManager.RegisterModuleLocalization(
+                var diagnostics =
+                    localizationManager.RegisterModuleLocalization(
                     module.Manifest.Id,
                     module.ModuleDirectory,
                     module.Manifest.Localization,
                     module.Manifest.DefaultLanguage);
+                localizationDiagnosticsByModuleId[module.Manifest.Id] =
+                    diagnostics;
             }
             runtimeManager.ReplaceDiscoveredModules(discoveredModules);
             registry.ReplaceAll(discoveredModules);
@@ -171,14 +186,18 @@ public sealed partial class MainWindowViewModel(
             {
                 var moduleViewModel = new DiscoveredModuleViewModel(
                     module,
-                    localization);
+                    localization,
+                    localizationDiagnosticsByModuleId.GetValueOrDefault(
+                        module.Manifest.Id));
                 moduleViewModel.UpdateRuntimeState(
                     runtimeManager.GetRecord(module.Manifest.Id));
                 Modules.Add(moduleViewModel);
             }
 
             UpdateStatistics();
-            StatusMessage = $"Found {Modules.Count} module(s).";
+            StatusMessage = localization.GetString(
+                "status.modulesFound",
+                Modules.Count);
         }
         catch (Exception exception)
         {
@@ -189,7 +208,9 @@ public sealed partial class MainWindowViewModel(
             LoadedModuleCount = 0;
             RunningModuleCount = 0;
             UnloadedModuleCount = 0;
-            StatusMessage = $"Failed to scan modules: {exception.Message}";
+            StatusMessage = localization.GetString(
+                "status.scanFailed",
+                exception.Message);
         }
         finally
         {
@@ -253,8 +274,9 @@ public sealed partial class MainWindowViewModel(
 
         if (!moduleViewModel.CanOpen)
         {
-            StatusMessage =
-                $"Load module '{moduleViewModel.Name}' before opening its view.";
+            StatusMessage = localization.GetString(
+                "status.moduleLoadBeforeOpen",
+                moduleViewModel.DisplayName);
             return Task.CompletedTask;
         }
 
@@ -266,7 +288,9 @@ public sealed partial class MainWindowViewModel(
             if (moduleWindowManager.IsWindowOpen(moduleId))
             {
                 moduleWindowManager.ActivateWindow(moduleId);
-                StatusMessage = $"Focused module '{moduleViewModel.Name}'.";
+                StatusMessage = localization.GetString(
+                    "status.moduleFocused",
+                    moduleViewModel.DisplayName);
                 return Task.CompletedTask;
             }
 
@@ -275,8 +299,9 @@ public sealed partial class MainWindowViewModel(
 
             if (view is null)
             {
-                StatusMessage =
-                    $"Module '{moduleViewModel.Name}' did not provide a view.";
+                StatusMessage = localization.GetString(
+                    "status.moduleNoView",
+                    moduleViewModel.DisplayName);
                 return Task.CompletedTask;
             }
 
@@ -285,7 +310,9 @@ public sealed partial class MainWindowViewModel(
                 moduleViewModel.Name,
                 view,
                 Application.Current.MainWindow);
-            StatusMessage = $"Opened module '{moduleViewModel.Name}'.";
+            StatusMessage = localization.GetString(
+                "status.moduleOpened",
+                moduleViewModel.DisplayName);
         }
         catch (Exception exception)
         {
@@ -295,8 +322,10 @@ public sealed partial class MainWindowViewModel(
                 moduleViewModel.RuntimeError = exception.Message;
             }
 
-            StatusMessage =
-                $"Failed to open module '{moduleViewModel.Name}': {exception.Message}";
+            StatusMessage = localization.GetString(
+                "status.moduleOpenFailed",
+                moduleViewModel.DisplayName,
+                exception.Message);
         }
         finally
         {
@@ -324,14 +353,21 @@ public sealed partial class MainWindowViewModel(
 
         moduleViewModel.IsBusy = true;
         moduleViewModel.RuntimeError = string.Empty;
-        StatusMessage = $"{operation} module '{moduleViewModel.Name}'...";
+        var localizedOperation = localization.GetString(
+            $"common.{operation}");
+        StatusMessage = localization.GetString(
+            "status.moduleOperationStarted",
+            localizedOperation,
+            moduleViewModel.DisplayName);
 
         try
         {
             await action();
             moduleViewModel.UpdateRuntimeState(runtimeManager.GetRecord(moduleId));
-            StatusMessage =
-                $"Module '{moduleViewModel.Name}' {operation} completed.";
+            StatusMessage = localization.GetString(
+                "status.moduleOperationCompleted",
+                moduleViewModel.DisplayName,
+                localizedOperation);
         }
         catch (Exception exception)
         {
@@ -341,8 +377,11 @@ public sealed partial class MainWindowViewModel(
                 moduleViewModel.RuntimeError = exception.Message;
             }
 
-            StatusMessage =
-                $"Failed to {operation} module '{moduleViewModel.Name}': {exception.Message}";
+            StatusMessage = localization.GetString(
+                "status.moduleOperationFailed",
+                localizedOperation,
+                moduleViewModel.DisplayName,
+                exception.Message);
         }
         finally
         {

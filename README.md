@@ -4,6 +4,8 @@ QingToolbox supports Shell localization and module manifest localization.
 Modules can provide `i18n/*.json` files declared in `module.json`. See
 [`docs/LOCALIZATION.md`](docs/LOCALIZATION.md) for culture codes and fallback
 rules.
+Shell UI strings and module manifest metadata are localized in the first
+phase.
 
 Shell icons use a selected subset of Nieobie Game Icon Pack under CC0 1.0.
 
