@@ -58,6 +58,7 @@
                 </Grid>
 
                 <Button Grid.Row="1"
+                        AutomationProperties.Name="Home"
                         Command="{Binding SelectNavigationCommand}"
                         CommandParameter="Home">
                     <Button.Style>
@@ -86,6 +87,7 @@
                 </Button>
 
                 <Button Grid.Row="2"
+                        AutomationProperties.Name="Modules"
                         Command="{Binding SelectNavigationCommand}"
                         CommandParameter="Modules">
                     <Button.Style>
@@ -114,6 +116,7 @@
                 </Button>
 
                 <Button Grid.Row="3"
+                        AutomationProperties.Name="Running"
                         Command="{Binding SelectNavigationCommand}"
                         CommandParameter="Running">
                     <Button.Style>
@@ -162,6 +165,7 @@
                 </Button>
 
                 <Button Grid.Row="6"
+                        AutomationProperties.Name="Settings"
                         Command="{Binding SelectNavigationCommand}"
                         CommandParameter="Settings">
                     <Button.Style>
@@ -205,12 +209,12 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock Text="Qing Toolbox"
+                    <TextBlock Text="{Binding PageTitle}"
                                FontSize="30"
                                FontWeight="SemiBold"
                                Foreground="#172033"/>
                     <TextBlock Margin="0,7,0,0"
-                               Text="Modular Windows toolbox"
+                               Text="{Binding PageSubtitle}"
                                FontSize="15"
                                Foreground="#64748B"/>
                 </StackPanel>
@@ -235,7 +239,8 @@
                 <TextBlock Text="{Binding StatusMessage}" Foreground="#475569"/>
             </Border>
 
-            <Grid Grid.Row="2" Margin="0,0,0,20">
+            <Grid Grid.Row="2" Margin="0,0,0,20"
+                  Visibility="{Binding IsModulesSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
@@ -294,10 +299,11 @@
                 </Border>
             </Grid>
 
-            <Grid Grid.Row="3">
+            <Grid Grid.Row="3"
+                  Visibility="{Binding IsModulesSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition MinWidth="420" Width="5*"/>
-                    <ColumnDefinition Width="6*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="0"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock HorizontalAlignment="Center"
                            VerticalAlignment="Center"
@@ -577,16 +583,10 @@
                             <DockPanel>
                                 <Button DockPanel.Dock="Right"
                                         AutomationProperties.Name="Close"
-                                        Command="{Binding CloseModuleViewCommand}"
-                                        IsEnabled="{Binding HasActiveModuleView}">
+                                        IsEnabled="False">
                                     <Button.Style>
                                         <Style TargetType="Button" BasedOn="{StaticResource CloseViewButtonStyle}">
                                             <Setter Property="Visibility" Value="Collapsed"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding HasActiveModuleView}" Value="True">
-                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
                                         </Style>
                                     </Button.Style>
                                     <StackPanel Orientation="Horizontal">
@@ -611,11 +611,6 @@
                                 <StackPanel.Style>
                                     <Style TargetType="StackPanel" BasedOn="{StaticResource WorkspaceEmptyStateStyle}">
                                         <Setter Property="Visibility" Value="Visible"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding HasActiveModuleView}" Value="True">
-                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
                                     </Style>
                                 </StackPanel.Style>
                                 <Border Width="76" Height="76" Margin="0,0,0,20"
@@ -633,21 +628,119 @@
                                            TextAlignment="Center" TextWrapping="Wrap"/>
                             </StackPanel>
 
-                            <ContentControl Margin="1"
-                                            Content="{Binding ActiveModuleView}">
+                            <ContentControl Margin="1">
                                 <ContentControl.Style>
                                     <Style TargetType="ContentControl">
                                         <Setter Property="Visibility" Value="Collapsed"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding HasActiveModuleView}" Value="True">
-                                                <Setter Property="Visibility" Value="Visible"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
                                     </Style>
                                 </ContentControl.Style>
                             </ContentControl>
                         </Grid>
                     </Grid>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="2" Grid.RowSpan="2"
+                  Visibility="{Binding IsHomeSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Border MaxWidth="860" Padding="42" HorizontalAlignment="Center"
+                        VerticalAlignment="Center" Background="White"
+                        BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
+                        CornerRadius="18">
+                    <StackPanel>
+                        <TextBlock Text="Welcome to Qing Toolbox" FontSize="30"
+                                   FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/>
+                        <TextBlock Margin="0,10,0,26"
+                                   Text="A modular Windows toolbox where tools are loaded only when needed."
+                                   FontSize="15" Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <Grid Margin="0,0,0,26">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition/><ColumnDefinition/><ColumnDefinition/>
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Style="{StaticResource SummaryCardStyle}">
+                                <StackPanel><TextBlock Text="{Binding TotalModuleCount}" Style="{StaticResource SummaryNumberStyle}"/><TextBlock Text="INSTALLED MODULES" Style="{StaticResource SummaryLabelStyle}"/></StackPanel>
+                            </Border>
+                            <Border Grid.Column="1" Style="{StaticResource SummaryCardStyle}">
+                                <StackPanel><TextBlock Text="{Binding LoadedModuleCount}" Style="{StaticResource SummaryNumberStyle}"/><TextBlock Text="LOADED MODULES" Style="{StaticResource SummaryLabelStyle}"/></StackPanel>
+                            </Border>
+                            <Border Grid.Column="2" Margin="0" Style="{StaticResource SummaryCardStyle}">
+                                <StackPanel><TextBlock Text="{Binding RunningModuleCount}" Style="{StaticResource SummaryNumberStyle}"/><TextBlock Text="RUNNING MODULES" Style="{StaticResource SummaryLabelStyle}"/></StackPanel>
+                            </Border>
+                        </Grid>
+                        <Button Width="150" HorizontalAlignment="Left"
+                                Command="{Binding SelectNavigationCommand}"
+                                CommandParameter="Modules"
+                                Style="{StaticResource PrimaryActionButtonStyle}">
+                            <TextBlock Text="Browse Modules"/>
+                        </Button>
+                        <TextBlock Margin="0,18,0,0"
+                                   Text="Modules are discovered from the runtime Modules folder and loaded manually."
+                                   FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="2" Grid.RowSpan="2"
+                  Visibility="{Binding IsRunningSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Grid>
+                    <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Text="No modules are currently loaded."
+                               Foreground="{StaticResource SecondaryTextBrush}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding RunningModules.Count}" Value="0">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <ItemsControl ItemsSource="{Binding RunningModules}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource ModuleCardCompactStyle}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Name}" FontSize="18" FontWeight="SemiBold"/>
+                                            <TextBlock Margin="0,5,0,0" Text="{Binding RuntimeState}" Foreground="{StaticResource AccentBrush}"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <Button Command="{Binding DataContext.OpenModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding Id}" IsEnabled="{Binding CanOpen}"
+                                                    Style="{StaticResource PrimaryActionButtonStyle}" Content="Open"/>
+                                            <Button Command="{Binding DataContext.DeactivateModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding Id}" IsEnabled="{Binding CanDeactivate}"
+                                                    Style="{StaticResource SecondaryActionButtonStyle}" Content="Deactivate"/>
+                                            <Button Command="{Binding DataContext.UnloadModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding Id}" IsEnabled="{Binding CanUnload}"
+                                                    Style="{StaticResource DangerActionButtonStyle}" Content="Unload"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
+            </Grid>
+
+            <Grid Grid.Row="2" Grid.RowSpan="2"
+                  Visibility="{Binding IsSettingsSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Border MaxWidth="720" Padding="36" HorizontalAlignment="Center"
+                        VerticalAlignment="Center" Background="White"
+                        BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
+                        CornerRadius="16">
+                    <StackPanel>
+                        <TextBlock Text="Settings" FontSize="26" FontWeight="SemiBold"/>
+                        <TextBlock Margin="0,8,0,24" Text="Qing Toolbox settings will appear here."
+                                   Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <TextBlock Text="Theme" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBox Margin="0,4,0,14" Text="System default" IsEnabled="False"/>
+                        <TextBlock Text="Module directory" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBox Margin="0,4,0,14" Text="Runtime Modules folder" IsEnabled="False"/>
+                        <CheckBox Content="Load modules at startup" IsEnabled="False"/>
+                    </StackPanel>
                 </Border>
             </Grid>
         </Grid>

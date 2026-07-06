@@ -5,13 +5,16 @@ using CommunityToolkit.Mvvm.Input;
 using QingToolbox.Core;
 using QingToolbox.Core.Runtime;
 using QingToolbox.ModuleLoader;
+using QingToolbox.Shell.Services;
+using System.Windows;
 
 namespace QingToolbox.Shell.ViewModels;
 
 public sealed partial class MainWindowViewModel(
     ModuleManifestScanner scanner,
     ModuleRegistry registry,
-    ModuleRuntimeManager runtimeManager) : ObservableObject
+    ModuleRuntimeManager runtimeManager,
+    ModuleWindowManager moduleWindowManager) : ObservableObject
 {
     [ObservableProperty]
     private string _statusMessage = "Ready.";
@@ -26,7 +29,7 @@ public sealed partial class MainWindowViewModel(
     private bool _isSidebarPinned;
 
     [ObservableProperty]
-    private string _selectedNavigationKey = "Modules";
+    private string _selectedNavigationKey = "Home";
 
     [ObservableProperty]
     private int _totalModuleCount;
@@ -49,22 +52,31 @@ public sealed partial class MainWindowViewModel(
     [ObservableProperty]
     private int _unloadedModuleCount;
 
-    [ObservableProperty]
-    private object? _activeModuleView;
-
-    [ObservableProperty]
-    private string _activeModuleTitle = "Modules";
-
-    [ObservableProperty]
-    private string _activeModuleId = string.Empty;
-
     public string Title => "Qing Toolbox";
 
     public string PinLabel => IsSidebarPinned ? "Unpin Sidebar" : "Pin Sidebar";
 
-    public bool HasActiveModuleView => ActiveModuleView is not null;
+    public bool IsHomeSelected => SelectedNavigationKey == "Home";
+    public bool IsModulesSelected => SelectedNavigationKey == "Modules";
+    public bool IsRunningSelected => SelectedNavigationKey == "Running";
+    public bool IsSettingsSelected => SelectedNavigationKey == "Settings";
+    public string PageTitle => SelectedNavigationKey switch
+    {
+        "Modules" => "Modules",
+        "Running" => "Running Modules",
+        "Settings" => "Settings",
+        _ => "Qing Toolbox"
+    };
+    public string PageSubtitle => SelectedNavigationKey switch
+    {
+        "Modules" => "Discover and manage modules.",
+        "Running" => "Review modules currently held in memory.",
+        "Settings" => "Configure Qing Toolbox.",
+        _ => "Modular Windows toolbox"
+    };
 
     public ObservableCollection<DiscoveredModuleViewModel> Modules { get; } = [];
+    public ObservableCollection<DiscoveredModuleViewModel> RunningModules { get; } = [];
 
     [RelayCommand]
     private void ToggleSidebarPin()
@@ -77,6 +89,16 @@ public sealed partial class MainWindowViewModel(
     private void SelectNavigation(string key)
     {
         SelectedNavigationKey = key;
+    }
+
+    partial void OnSelectedNavigationKeyChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsHomeSelected));
+        OnPropertyChanged(nameof(IsModulesSelected));
+        OnPropertyChanged(nameof(IsRunningSelected));
+        OnPropertyChanged(nameof(IsSettingsSelected));
+        OnPropertyChanged(nameof(PageTitle));
+        OnPropertyChanged(nameof(PageSubtitle));
     }
 
     partial void OnIsSidebarPinnedChanged(bool value)
@@ -166,10 +188,7 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand]
     private Task UnloadModuleAsync(string moduleId)
     {
-        if (string.Equals(ActiveModuleId, moduleId, StringComparison.Ordinal))
-        {
-            CloseActiveModuleView(updateStatus: false);
-        }
+        moduleWindowManager.CloseWindow(moduleId);
 
         return ExecuteLifecycleAsync(
             moduleId,
@@ -200,9 +219,12 @@ public sealed partial class MainWindowViewModel(
 
         try
         {
-            ActiveModuleView = null;
-            ActiveModuleId = string.Empty;
-            ActiveModuleTitle = "Modules";
+            if (moduleWindowManager.IsWindowOpen(moduleId))
+            {
+                moduleWindowManager.ActivateWindow(moduleId);
+                StatusMessage = $"Focused module '{moduleViewModel.Name}'.";
+                return Task.CompletedTask;
+            }
 
             var view = runtimeManager.CreateView(moduleId);
             moduleViewModel.UpdateRuntimeState(runtimeManager.GetRecord(moduleId));
@@ -214,9 +236,11 @@ public sealed partial class MainWindowViewModel(
                 return Task.CompletedTask;
             }
 
-            ActiveModuleView = view;
-            ActiveModuleTitle = moduleViewModel.Name;
-            ActiveModuleId = moduleId;
+            moduleWindowManager.OpenWindow(
+                moduleId,
+                moduleViewModel.Name,
+                view,
+                Application.Current.MainWindow);
             StatusMessage = $"Opened module '{moduleViewModel.Name}'.";
         }
         catch (Exception exception)
@@ -239,16 +263,7 @@ public sealed partial class MainWindowViewModel(
         return Task.CompletedTask;
     }
 
-    [RelayCommand]
-    private void CloseModuleView()
-    {
-        CloseActiveModuleView(updateStatus: true);
-    }
-
-    public void CloseActiveModuleView()
-    {
-        CloseActiveModuleView(updateStatus: false);
-    }
+    public void CloseModuleWindows() => moduleWindowManager.CloseAll();
 
     private async Task ExecuteLifecycleAsync(
         string moduleId,
@@ -306,22 +321,12 @@ public sealed partial class MainWindowViewModel(
             module => module.RuntimeState == "Running");
         UnloadedModuleCount = Modules.Count(
             module => module.RuntimeState == "Unloaded");
-    }
-
-    partial void OnActiveModuleViewChanged(object? value)
-    {
-        OnPropertyChanged(nameof(HasActiveModuleView));
-    }
-
-    private void CloseActiveModuleView(bool updateStatus)
-    {
-        ActiveModuleView = null;
-        ActiveModuleTitle = "Modules";
-        ActiveModuleId = string.Empty;
-
-        if (updateStatus)
+        RunningModules.Clear();
+        foreach (var module in Modules.Where(
+                     module => module.RuntimeState is
+                         "Loaded" or "Running" or "Deactivated" or "Unloading" or "Failed"))
         {
-            StatusMessage = "Module view closed.";
+            RunningModules.Add(module);
         }
     }
 }

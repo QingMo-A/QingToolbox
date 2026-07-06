@@ -64,6 +64,6 @@ public partial class MainWindow : Window
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
-        _viewModel.CloseActiveModuleView();
+        _viewModel.CloseModuleWindows();
     }
 }

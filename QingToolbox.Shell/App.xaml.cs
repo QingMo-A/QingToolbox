@@ -4,6 +4,7 @@ using QingToolbox.Core;
 using QingToolbox.Core.Runtime;
 using QingToolbox.ModuleLoader;
 using QingToolbox.Shell.ViewModels;
+using QingToolbox.Shell.Services;
 
 namespace QingToolbox.Shell;
 
@@ -22,6 +23,7 @@ public partial class App : Application
         services.AddSingleton<ModuleManifestScanner>();
         services.AddSingleton<InProcessModuleLoader>();
         services.AddSingleton<ModuleRuntimeManager>();
+        services.AddSingleton<ModuleWindowManager>();
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<MainWindow>();
 

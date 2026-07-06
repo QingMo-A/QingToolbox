@@ -4,6 +4,7 @@
              xmlns:local="clr-namespace:QingToolbox.Shell">
     <Application.Resources>
         <ResourceDictionary>
+            <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="Resources/ShellTheme.xaml"/>
             </ResourceDictionary.MergedDictionaries>
