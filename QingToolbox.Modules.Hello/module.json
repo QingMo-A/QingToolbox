@@ -1,12 +1,20 @@
 {
   "id": "qing.hello",
   "name": "Hello Module",
-  "description": "A minimal test module for QingToolbox.",
+  "description": "A sample module used to verify loading, activation, view hosting and unloading.",
   "version": "0.1.0",
   "author": "QingMo",
   "entry": "QingToolbox.Modules.Hello.dll",
   "icon": "icon.svg",
   "runtimeType": "InProcess",
   "loadMode": "Manual",
-  "permissions": []
+  "permissions": [],
+  "defaultLanguage": "en-US",
+  "localization": {
+    "basePath": "i18n",
+    "resources": {
+      "en-US": "i18n/en-US.json",
+      "zh-CN": "i18n/zh-CN.json"
+    }
+  }
 }

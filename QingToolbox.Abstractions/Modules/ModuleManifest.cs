@@ -24,4 +24,8 @@ public sealed class ModuleManifest
         = Array.Empty<ModulePermission>();
 
     public string? MinimumHostVersion { get; init; }
+
+    public string? DefaultLanguage { get; init; }
+
+    public ModuleLocalizationManifest? Localization { get; init; }
 }

@@ -79,7 +79,7 @@
                             <TextBlock Text="&#xE80F;" Style="{StaticResource FluentIconStyle}"/>
                         </Border>
                         <TextBlock Grid.Column="1"
-                                   Text="Home"
+                                   Text="{Binding Strings[nav.home]}"
                                    Style="{StaticResource SidebarLabelStyle}"/>
                     </Grid>
                 </Button>
@@ -106,7 +106,7 @@
                             <TextBlock Text="&#xE71D;" Style="{StaticResource FluentIconStyle}"/>
                         </Border>
                         <TextBlock Grid.Column="1"
-                                   Text="Modules"
+                                   Text="{Binding Strings[nav.modules]}"
                                    Style="{StaticResource SidebarLabelStyle}"/>
                     </Grid>
                 </Button>
@@ -133,7 +133,7 @@
                             <TextBlock Text="&#xE768;" Style="{StaticResource FluentIconStyle}"/>
                         </Border>
                         <TextBlock Grid.Column="1"
-                                   Text="Running"
+                                   Text="{Binding Strings[nav.running]}"
                                    Style="{StaticResource SidebarLabelStyle}"/>
                     </Grid>
                 </Button>
@@ -178,7 +178,7 @@
                             <TextBlock Text="&#xE713;" Style="{StaticResource FluentIconStyle}"/>
                         </Border>
                         <TextBlock Grid.Column="1"
-                                   Text="Settings"
+                                   Text="{Binding Strings[nav.settings]}"
                                    Style="{StaticResource SidebarLabelStyle}"/>
                     </Grid>
                 </Button>
@@ -215,7 +215,7 @@
                         Style="{StaticResource RefreshButtonStyle}">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Margin="0,0,6,0" Text="&#xE72C;" Style="{StaticResource CompactFluentIconStyle}"/>
-                        <TextBlock VerticalAlignment="Center" Text="Refresh Modules"/>
+                            <TextBlock VerticalAlignment="Center" Text="{Binding Strings[modules.refresh]}"/>
                     </StackPanel>
                 </Button>
             </Grid>
@@ -356,7 +356,7 @@
                                                 </Grid>
                                             </Border>
                                             <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                                <TextBlock Text="{Binding Name}"
+                                                <TextBlock Text="{Binding DisplayName}"
                                                            FontSize="19"
                                                            FontWeight="SemiBold"
                                                            Foreground="{StaticResource PrimaryTextBrush}"/>
@@ -373,11 +373,11 @@
                                         </Grid>
 
                                         <TextBlock Margin="0,10,0,16"
-                                                   Text="{Binding Description}"
+                                                   Text="{Binding DisplayDescription}"
                                                    TextWrapping="Wrap"
                                                    Foreground="#475569"/>
 
-                                        <Expander Header="Details"
+                                        <Expander Header="{Binding DataContext.Strings[modules.details], RelativeSource={RelativeSource AncestorType=Window}}"
                                                   IsExpanded="False"
                                                   Style="{StaticResource ModuleDetailsExpanderStyle}">
                                         <StackPanel Margin="0,10,0,0">
@@ -447,7 +447,7 @@
                                                     Style="{StaticResource PrimaryActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Margin="0,0,6,0" Text="&#xE896;" Style="{StaticResource CompactFluentIconStyle}"/>
-                                                    <TextBlock VerticalAlignment="Center" Text="Load"/>
+                                                    <TextBlock VerticalAlignment="Center" Text="{Binding DataContext.Strings[modules.load], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                                 </StackPanel>
                                             </Button>
                                             <Button AutomationProperties.Name="Activate"
@@ -457,7 +457,7 @@
                                                     Style="{StaticResource SecondaryActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Margin="0,0,6,0" Text="&#xE768;" Style="{StaticResource CompactFluentIconStyle}"/>
-                                                    <TextBlock VerticalAlignment="Center" Text="Activate"/>
+                                                    <TextBlock VerticalAlignment="Center" Text="{Binding DataContext.Strings[modules.activate], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                                 </StackPanel>
                                             </Button>
                                             <Button AutomationProperties.Name="Deactivate"
@@ -467,7 +467,7 @@
                                                     Style="{StaticResource SecondaryActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Margin="0,0,6,0" Text="&#xE769;" Style="{StaticResource CompactFluentIconStyle}"/>
-                                                    <TextBlock VerticalAlignment="Center" Text="Deactivate"/>
+                                                    <TextBlock VerticalAlignment="Center" Text="{Binding DataContext.Strings[modules.deactivate], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                                 </StackPanel>
                                             </Button>
                                             <Button AutomationProperties.Name="Unload"
@@ -477,7 +477,7 @@
                                                     Style="{StaticResource DangerActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Margin="0,0,6,0" Text="&#xE74D;" Style="{StaticResource CompactFluentIconStyle}"/>
-                                                    <TextBlock VerticalAlignment="Center" Text="Unload"/>
+                                                    <TextBlock VerticalAlignment="Center" Text="{Binding DataContext.Strings[modules.unload], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                                 </StackPanel>
                                             </Button>
                                             <Button AutomationProperties.Name="Open"
@@ -487,7 +487,7 @@
                                                     Style="{StaticResource PrimaryActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Margin="0,0,6,0" Text="&#xE8A7;" Style="{StaticResource CompactFluentIconStyle}"/>
-                                                    <TextBlock VerticalAlignment="Center" Text="Open"/>
+                                                    <TextBlock VerticalAlignment="Center" Text="{Binding DataContext.Strings[modules.open], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                                 </StackPanel>
                                             </Button>
                                         </WrapPanel>
@@ -644,30 +644,30 @@
                         BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
                         Style="{StaticResource LiquidGlassPanelStyle}">
                     <StackPanel>
-                        <TextBlock Text="Welcome to Qing Toolbox" FontSize="30"
+                        <TextBlock Text="{Binding Strings[home.title]}" FontSize="30"
                                    FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/>
                         <TextBlock Margin="0,10,0,26"
-                                   Text="A modular Windows toolbox where tools are loaded only when needed."
+                                   Text="{Binding Strings[home.subtitle]}"
                                    FontSize="15" Foreground="{StaticResource SecondaryTextBrush}"/>
                         <Grid Margin="0,0,0,26">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition/><ColumnDefinition/><ColumnDefinition/>
                             </Grid.ColumnDefinitions>
                             <Border Grid.Column="0" Style="{StaticResource SummaryCardStyle}">
-                                <StackPanel><TextBlock Text="{Binding TotalModuleCount}" Style="{StaticResource SummaryNumberStyle}"/><TextBlock Text="INSTALLED MODULES" Style="{StaticResource SummaryLabelStyle}"/></StackPanel>
+                                <StackPanel><TextBlock Text="{Binding TotalModuleCount}" Style="{StaticResource SummaryNumberStyle}"/><TextBlock Text="{Binding Strings[home.installedModules]}" Style="{StaticResource SummaryLabelStyle}"/></StackPanel>
                             </Border>
                             <Border Grid.Column="1" Style="{StaticResource SummaryCardStyle}">
-                                <StackPanel><TextBlock Text="{Binding LoadedModuleCount}" Style="{StaticResource SummaryNumberStyle}"/><TextBlock Text="LOADED MODULES" Style="{StaticResource SummaryLabelStyle}"/></StackPanel>
+                                <StackPanel><TextBlock Text="{Binding LoadedModuleCount}" Style="{StaticResource SummaryNumberStyle}"/><TextBlock Text="{Binding Strings[home.loadedModules]}" Style="{StaticResource SummaryLabelStyle}"/></StackPanel>
                             </Border>
                             <Border Grid.Column="2" Margin="0" Style="{StaticResource SummaryCardStyle}">
-                                <StackPanel><TextBlock Text="{Binding RunningModuleCount}" Style="{StaticResource SummaryNumberStyle}"/><TextBlock Text="RUNNING MODULES" Style="{StaticResource SummaryLabelStyle}"/></StackPanel>
+                                <StackPanel><TextBlock Text="{Binding RunningModuleCount}" Style="{StaticResource SummaryNumberStyle}"/><TextBlock Text="{Binding Strings[home.runningModules]}" Style="{StaticResource SummaryLabelStyle}"/></StackPanel>
                             </Border>
                         </Grid>
                         <Button Width="150" HorizontalAlignment="Left"
                                 Command="{Binding SelectNavigationCommand}"
                                 CommandParameter="Modules"
                                 Style="{StaticResource PrimaryActionButtonStyle}">
-                            <TextBlock Text="Browse Modules"/>
+                            <TextBlock Text="{Binding Strings[home.browseModules]}"/>
                         </Button>
                         <TextBlock Margin="0,18,0,0"
                                    Text="Modules are discovered from the runtime Modules folder and loaded manually."
@@ -681,7 +681,7 @@
                   Visibility="{Binding IsRunningSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Grid>
                     <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
-                               Text="No modules are currently loaded."
+                               Text="{Binding Strings[running.empty]}"
                                Foreground="{StaticResource SecondaryTextBrush}">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
@@ -725,7 +725,7 @@
                                             </Grid>
                                         </Border>
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Name}" FontSize="18" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding DisplayName}" FontSize="18" FontWeight="SemiBold"/>
                                             <TextBlock Margin="0,5,0,0" Text="{Binding RuntimeState}" Foreground="{StaticResource AccentBrush}"/>
                                         </StackPanel>
                                         <StackPanel Grid.Column="2" Orientation="Horizontal">
@@ -755,14 +755,22 @@
                         BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
                         Style="{StaticResource LiquidGlassPanelStyle}">
                     <StackPanel>
-                        <TextBlock Text="Settings" FontSize="26" FontWeight="SemiBold"/>
-                        <TextBlock Margin="0,8,0,24" Text="Qing Toolbox settings will appear here."
+                        <TextBlock Text="{Binding Strings[settings.title]}" FontSize="26" FontWeight="SemiBold"/>
+                        <TextBlock Margin="0,8,0,24" Text="{Binding Strings[settings.subtitle]}"
                                    Foreground="{StaticResource SecondaryTextBrush}"/>
-                        <TextBlock Text="Theme" Style="{StaticResource InfoLabelStyle}"/>
-                        <TextBox Margin="0,4,0,14" Text="System default" IsEnabled="False"/>
-                        <TextBlock Text="Module directory" Style="{StaticResource InfoLabelStyle}"/>
-                        <TextBox Margin="0,4,0,14" Text="Runtime Modules folder" IsEnabled="False"/>
-                        <CheckBox Content="Load modules at startup" IsEnabled="False"/>
+                        <TextBlock Text="{Binding Strings[settings.language]}"
+                                   FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{StaticResource PrimaryTextBrush}"/>
+                        <TextBlock Margin="0,5,0,12"
+                                   Text="{Binding Strings[settings.languageDescription]}"
+                                   Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <ComboBox Width="280"
+                                  HorizontalAlignment="Left"
+                                  Padding="10,7"
+                                  ItemsSource="{Binding LanguageOptions}"
+                                  DisplayMemberPath="NativeName"
+                                  SelectedValuePath="Code"
+                                  SelectedValue="{Binding SelectedLanguageCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                     </StackPanel>
                 </Border>
             </Grid>

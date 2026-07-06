@@ -18,6 +18,9 @@
 
   <ItemGroup>
     <Resource Include="Assets\Icons\Nieobie\*.svg" />
+    <Content Include="Resources\Localization\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <PropertyGroup>

@@ -7,6 +7,8 @@ using QingToolbox.Core.Runtime;
 using QingToolbox.ModuleLoader;
 using QingToolbox.Shell.Services;
 using System.Windows;
+using QingToolbox.Abstractions.Localization;
+using QingToolbox.Core.Localization;
 
 namespace QingToolbox.Shell.ViewModels;
 
@@ -14,10 +16,12 @@ public sealed partial class MainWindowViewModel(
     ModuleManifestScanner scanner,
     ModuleRegistry registry,
     ModuleRuntimeManager runtimeManager,
-    ModuleWindowManager moduleWindowManager) : ObservableObject
+    ModuleWindowManager moduleWindowManager,
+    LocalizationManager localizationManager,
+    ILocalizationService localization) : ObservableObject
 {
     [ObservableProperty]
-    private string _statusMessage = "Ready.";
+    private string _statusMessage = localization.GetString("status.ready");
 
     [ObservableProperty]
     private bool _isScanning;
@@ -30,6 +34,10 @@ public sealed partial class MainWindowViewModel(
 
     [ObservableProperty]
     private string _selectedNavigationKey = "Home";
+
+    [ObservableProperty]
+    private string _selectedLanguageCode =
+        localizationManager.ConfiguredLanguageCode;
 
     [ObservableProperty]
     private int _totalModuleCount;
@@ -53,6 +61,9 @@ public sealed partial class MainWindowViewModel(
     private int _unloadedModuleCount;
 
     public string Title => "Qing Toolbox";
+    public LocalizedText Strings { get; } = new(localization);
+    public IReadOnlyList<LanguageOption> LanguageOptions =>
+        localizationManager.SupportedLanguages;
 
     public string PinLabel => IsSidebarPinned ? "Unpin Sidebar" : "Pin Sidebar";
 
@@ -62,17 +73,17 @@ public sealed partial class MainWindowViewModel(
     public bool IsSettingsSelected => SelectedNavigationKey == "Settings";
     public string PageTitle => SelectedNavigationKey switch
     {
-        "Modules" => "Modules",
-        "Running" => "Running Modules",
-        "Settings" => "Settings",
-        _ => "Qing Toolbox"
+        "Modules" => localization.GetString("modules.title"),
+        "Running" => localization.GetString("running.title"),
+        "Settings" => localization.GetString("settings.title"),
+        _ => localization.GetString("app.name")
     };
     public string PageSubtitle => SelectedNavigationKey switch
     {
-        "Modules" => "Discover and manage modules.",
-        "Running" => "Review modules currently held in memory.",
-        "Settings" => "Configure Qing Toolbox.",
-        _ => "Modular Windows toolbox"
+        "Modules" => localization.GetString("modules.subtitle"),
+        "Running" => localization.GetString("running.subtitle"),
+        "Settings" => localization.GetString("settings.subtitle"),
+        _ => localization.GetString("app.subtitle")
     };
 
     public ObservableCollection<DiscoveredModuleViewModel> Modules { get; } = [];
@@ -101,6 +112,28 @@ public sealed partial class MainWindowViewModel(
         OnPropertyChanged(nameof(PageSubtitle));
     }
 
+    partial void OnSelectedLanguageCodeChanged(string value)
+    {
+        _ = ChangeLanguageAsync(value);
+    }
+
+    private async Task ChangeLanguageAsync(string languageCode)
+    {
+        await localizationManager.SetLanguageAsync(languageCode);
+        foreach (var module in Modules)
+        {
+            module.RefreshLocalization();
+        }
+
+        OnPropertyChanged(nameof(PageTitle));
+        OnPropertyChanged(nameof(PageSubtitle));
+        var option = LanguageOptions.FirstOrDefault(
+            item => item.Code == languageCode);
+        StatusMessage = localization.GetString(
+            "status.languageChanged",
+            option?.NativeName ?? languageCode);
+    }
+
     partial void OnIsSidebarPinnedChanged(bool value)
     {
         OnPropertyChanged(nameof(PinLabel));
@@ -121,13 +154,24 @@ public sealed partial class MainWindowViewModel(
 
             var modulesRoot = Path.Combine(AppContext.BaseDirectory, "Modules");
             var discoveredModules = await scanner.ScanAsync(modulesRoot);
+            localizationManager.ClearModuleLocalizations();
+            foreach (var module in discoveredModules)
+            {
+                localizationManager.RegisterModuleLocalization(
+                    module.Manifest.Id,
+                    module.ModuleDirectory,
+                    module.Manifest.Localization,
+                    module.Manifest.DefaultLanguage);
+            }
             runtimeManager.ReplaceDiscoveredModules(discoveredModules);
             registry.ReplaceAll(discoveredModules);
 
             Modules.Clear();
             foreach (var module in discoveredModules)
             {
-                var moduleViewModel = new DiscoveredModuleViewModel(module);
+                var moduleViewModel = new DiscoveredModuleViewModel(
+                    module,
+                    localization);
                 moduleViewModel.UpdateRuntimeState(
                     runtimeManager.GetRecord(module.Manifest.Id));
                 Modules.Add(moduleViewModel);

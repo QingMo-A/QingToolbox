@@ -1,0 +1,4 @@
+{
+  "module.name": "你好模块",
+  "module.description": "用于验证加载、启用、视图宿主和卸载流程的示例模块。"
+}

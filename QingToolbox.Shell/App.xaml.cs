@@ -1,10 +1,13 @@
 using System.Windows;
+using System.IO;
 using Microsoft.Extensions.DependencyInjection;
 using QingToolbox.Core;
 using QingToolbox.Core.Runtime;
 using QingToolbox.ModuleLoader;
 using QingToolbox.Shell.ViewModels;
 using QingToolbox.Shell.Services;
+using QingToolbox.Abstractions.Localization;
+using QingToolbox.Core.Localization;
 
 namespace QingToolbox.Shell;
 
@@ -12,7 +15,7 @@ public partial class App : Application
 {
     private ServiceProvider? _serviceProvider;
 
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
@@ -23,11 +26,23 @@ public partial class App : Application
         services.AddSingleton<ModuleManifestScanner>();
         services.AddSingleton<InProcessModuleLoader>();
         services.AddSingleton<ModuleRuntimeManager>();
+        services.AddSingleton<UserSettingsService>();
+        services.AddSingleton<LocalizationManager>();
+        services.AddSingleton<ILocalizationService>(
+            provider => provider.GetRequiredService<LocalizationManager>());
         services.AddSingleton<ModuleWindowManager>();
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<MainWindow>();
 
         _serviceProvider = services.BuildServiceProvider();
+
+        var localizationDirectory = Path.Combine(
+            AppContext.BaseDirectory,
+            "Resources",
+            "Localization");
+        await _serviceProvider
+            .GetRequiredService<LocalizationManager>()
+            .InitializeAsync(localizationDirectory);
 
         _serviceProvider.GetRequiredService<MainWindow>().Show();
     }

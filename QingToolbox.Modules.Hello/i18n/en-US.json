@@ -1,0 +1,4 @@
+{
+  "module.name": "Hello Module",
+  "module.description": "A sample module used to verify loading, activation, view hosting and unloading."
+}

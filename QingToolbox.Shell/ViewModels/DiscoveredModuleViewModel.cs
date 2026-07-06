@@ -2,13 +2,19 @@ using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using QingToolbox.Abstractions.Modules;
 using QingToolbox.Core.Runtime;
+using QingToolbox.Abstractions.Localization;
 
 namespace QingToolbox.Shell.ViewModels;
 
 public sealed partial class DiscoveredModuleViewModel : ObservableObject
 {
-    public DiscoveredModuleViewModel(DiscoveredModule module)
+    private readonly ILocalizationService _localization;
+
+    public DiscoveredModuleViewModel(
+        DiscoveredModule module,
+        ILocalizationService localization)
     {
+        _localization = localization;
         Id = module.Manifest.Id;
         Name = module.Manifest.Name;
         Version = module.Manifest.Version;
@@ -40,6 +46,13 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     public string Name { get; }
     public string Version { get; }
     public string Description { get; }
+    public string DisplayName =>
+        _localization.GetModuleString(Id, "module.name", Name);
+    public string DisplayDescription =>
+        _localization.GetModuleString(
+            Id,
+            "module.description",
+            Description);
     public string RuntimeType { get; }
     public string LoadMode { get; }
     public string PermissionsText { get; }
@@ -88,6 +101,12 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     {
         RuntimeState = record?.State.ToString() ?? State;
         RuntimeError = record?.LastError ?? string.Empty;
+    }
+
+    public void RefreshLocalization()
+    {
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(DisplayDescription));
     }
 
     partial void OnRuntimeStateChanged(string value)
