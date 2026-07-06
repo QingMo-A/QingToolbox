@@ -92,6 +92,19 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
 
     public bool HasRuntimeError => !string.IsNullOrWhiteSpace(RuntimeError);
 
+    public string DisplayRuntimeState => _localization.GetString(
+        RuntimeState switch
+        {
+            "NotLoaded" => "runtimeState.notLoaded",
+            "Loaded" => "runtimeState.loaded",
+            "Running" => "runtimeState.running",
+            "Deactivated" => "runtimeState.deactivated",
+            "Unloading" => "runtimeState.unloading",
+            "Unloaded" => "runtimeState.unloaded",
+            "Failed" => "runtimeState.failed",
+            _ => RuntimeState
+        });
+
     public bool CanLoad =>
         !IsBusy && RuntimeState is "NotLoaded" or "Unloaded";
 
@@ -117,10 +130,12 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(DisplayDescription));
+        OnPropertyChanged(nameof(DisplayRuntimeState));
     }
 
     partial void OnRuntimeStateChanged(string value)
     {
+        OnPropertyChanged(nameof(DisplayRuntimeState));
         NotifyCommandStatesChanged();
     }
 

@@ -72,7 +72,8 @@ public sealed partial class MainWindowViewModel(
             "settings.language.enUSDisplay"))
     ];
 
-    public string PinLabel => IsSidebarPinned ? "Unpin Sidebar" : "Pin Sidebar";
+    public string PinLabel => localization.GetString(
+        IsSidebarPinned ? "sidebar.unpin" : "sidebar.pin");
 
     public bool IsHomeSelected => SelectedNavigationKey == "Home";
     public bool IsModulesSelected => SelectedNavigationKey == "Modules";
@@ -117,6 +118,7 @@ public sealed partial class MainWindowViewModel(
         OnPropertyChanged(nameof(IsSettingsSelected));
         OnPropertyChanged(nameof(PageTitle));
         OnPropertyChanged(nameof(PageSubtitle));
+        OnPropertyChanged(nameof(PinLabel));
     }
 
     partial void OnSelectedLanguageCodeChanged(string value)
@@ -409,7 +411,8 @@ public sealed partial class MainWindowViewModel(
         NotLoadedModuleCount = Modules.Count(
             module => module.RuntimeState == "NotLoaded");
         LoadedModuleCount = Modules.Count(
-            module => module.RuntimeState == "Loaded");
+            module => module.RuntimeState is
+                "Loaded" or "Running" or "Deactivated");
         RunningModuleCount = Modules.Count(
             module => module.RuntimeState == "Running");
         UnloadedModuleCount = Modules.Count(

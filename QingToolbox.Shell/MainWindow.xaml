@@ -20,6 +20,186 @@
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
+        <Grid Grid.Column="1"
+              ClipToBounds="True"
+              IsHitTestVisible="False"
+              Opacity="0.72">
+            <Path Width="430"
+                  Height="360"
+                  HorizontalAlignment="Left"
+                  VerticalAlignment="Top"
+                  Margin="-80,-100,0,0"
+                  CacheMode="BitmapCache"
+                  Data="M44,119 C62,35 166,-8 260,33 C354,73 414,155 374,238 C334,322 218,359 119,318 C20,277 25,203 44,119 Z"
+                  Stretch="Fill">
+                <Path.Fill>
+                    <RadialGradientBrush Center="0.42,0.38"
+                                         GradientOrigin="0.35,0.3"
+                                         RadiusX="0.72"
+                                         RadiusY="0.72">
+                        <GradientStop Color="#704F8FF7" Offset="0"/>
+                        <GradientStop Color="#2838BDF8" Offset="0.58"/>
+                        <GradientStop Color="#004F8FF7" Offset="1"/>
+                    </RadialGradientBrush>
+                </Path.Fill>
+                <Path.Effect>
+                    <BlurEffect Radius="58"/>
+                </Path.Effect>
+                <Path.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform ScaleX="1" ScaleY="1"/>
+                        <TranslateTransform X="0" Y="0"/>
+                    </TransformGroup>
+                </Path.RenderTransform>
+                <Path.Triggers>
+                    <EventTrigger RoutedEvent="Loaded">
+                        <BeginStoryboard>
+                            <Storyboard RepeatBehavior="Forever"
+                                        AutoReverse="True">
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(TranslateTransform.X)"
+                                                 From="-18" To="52"
+                                                 Duration="0:0:24">
+                                    <DoubleAnimation.EasingFunction>
+                                        <SineEase EasingMode="EaseInOut"/>
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(TranslateTransform.Y)"
+                                                 From="-8" To="34"
+                                                 Duration="0:0:19">
+                                    <DoubleAnimation.EasingFunction>
+                                        <SineEase EasingMode="EaseInOut"/>
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleX)"
+                                                 From="0.96" To="1.06"
+                                                 Duration="0:0:22"/>
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleY)"
+                                                 From="1.03" To="0.96"
+                                                 Duration="0:0:22"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+                </Path.Triggers>
+            </Path>
+
+            <Path Width="520"
+                  Height="430"
+                  HorizontalAlignment="Right"
+                  VerticalAlignment="Center"
+                  Margin="0,0,-180,-40"
+                  CacheMode="BitmapCache"
+                  Data="M31,162 C42,59 149,5 266,24 C383,43 484,117 474,224 C465,331 353,421 227,405 C101,389 20,265 31,162 Z"
+                  Stretch="Fill">
+                <Path.Fill>
+                    <RadialGradientBrush Center="0.56,0.46"
+                                         GradientOrigin="0.64,0.35"
+                                         RadiusX="0.75"
+                                         RadiusY="0.75">
+                        <GradientStop Color="#665B8CFF" Offset="0"/>
+                        <GradientStop Color="#305EEAD4" Offset="0.62"/>
+                        <GradientStop Color="#005EEAD4" Offset="1"/>
+                    </RadialGradientBrush>
+                </Path.Fill>
+                <Path.Effect>
+                    <BlurEffect Radius="68"/>
+                </Path.Effect>
+                <Path.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform ScaleX="1" ScaleY="1"/>
+                        <TranslateTransform X="0" Y="0"/>
+                    </TransformGroup>
+                </Path.RenderTransform>
+                <Path.Triggers>
+                    <EventTrigger RoutedEvent="Loaded">
+                        <BeginStoryboard>
+                            <Storyboard RepeatBehavior="Forever"
+                                        AutoReverse="True">
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(TranslateTransform.X)"
+                                                 From="42" To="-42"
+                                                 Duration="0:0:29">
+                                    <DoubleAnimation.EasingFunction>
+                                        <SineEase EasingMode="EaseInOut"/>
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(TranslateTransform.Y)"
+                                                 From="28" To="-32"
+                                                 Duration="0:0:25">
+                                    <DoubleAnimation.EasingFunction>
+                                        <SineEase EasingMode="EaseInOut"/>
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleX)"
+                                                 From="1.05" To="0.95"
+                                                 Duration="0:0:27"/>
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleY)"
+                                                 From="0.96" To="1.05"
+                                                 Duration="0:0:27"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+                </Path.Triggers>
+            </Path>
+
+            <Path Width="360"
+                  Height="300"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Bottom"
+                  Margin="-120,0,0,-135"
+                  CacheMode="BitmapCache"
+                  Data="M26,111 C51,30 141,-5 224,25 C307,55 352,129 329,205 C306,281 218,310 128,284 C38,258 1,192 26,111 Z"
+                  Stretch="Fill"
+                  Opacity="0.72">
+                <Path.Fill>
+                    <RadialGradientBrush Center="0.5,0.48"
+                                         GradientOrigin="0.42,0.58"
+                                         RadiusX="0.78"
+                                         RadiusY="0.78">
+                        <GradientStop Color="#5C8B5CF6" Offset="0"/>
+                        <GradientStop Color="#264F8FF7" Offset="0.65"/>
+                        <GradientStop Color="#008B5CF6" Offset="1"/>
+                    </RadialGradientBrush>
+                </Path.Fill>
+                <Path.Effect>
+                    <BlurEffect Radius="62"/>
+                </Path.Effect>
+                <Path.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform ScaleX="1" ScaleY="1"/>
+                        <TranslateTransform X="0" Y="0"/>
+                    </TransformGroup>
+                </Path.RenderTransform>
+                <Path.Triggers>
+                    <EventTrigger RoutedEvent="Loaded">
+                        <BeginStoryboard>
+                            <Storyboard RepeatBehavior="Forever"
+                                        AutoReverse="True">
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(TranslateTransform.X)"
+                                                 From="-35" To="38"
+                                                 Duration="0:0:26">
+                                    <DoubleAnimation.EasingFunction>
+                                        <SineEase EasingMode="EaseInOut"/>
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(TranslateTransform.Y)"
+                                                 From="12" To="-28"
+                                                 Duration="0:0:21">
+                                    <DoubleAnimation.EasingFunction>
+                                        <SineEase EasingMode="EaseInOut"/>
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleX)"
+                                                 From="0.97" To="1.08"
+                                                 Duration="0:0:30"/>
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[0].(ScaleTransform.ScaleY)"
+                                                 From="1.06" To="0.96"
+                                                 Duration="0:0:30"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+                </Path.Triggers>
+            </Path>
+        </Grid>
+
         <Border x:Name="Sidebar"
                 Grid.Column="0"
                 Width="72"
@@ -144,7 +324,7 @@
 
                 <Button Grid.Row="5"
                         Click="OnPinSidebarClick"
-                        ToolTip="Pin or unpin the sidebar"
+                        ToolTip="{Binding Strings[sidebar.pinTooltip]}"
                         Style="{StaticResource SidebarButtonStyle}">
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -339,6 +519,7 @@
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
                                             <Border Grid.Column="0"
+                                                    VerticalAlignment="Center"
                                                     Style="{StaticResource ModuleIconContainerStyle}">
                                                 <Grid>
                                                 <svgc:SvgViewbox
@@ -359,7 +540,9 @@
                                                 </TextBlock>
                                                 </Grid>
                                             </Border>
-                                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <StackPanel Grid.Column="1"
+                                                        VerticalAlignment="Center"
+                                                        Orientation="Horizontal">
                                                 <TextBlock Text="{Binding DisplayName}"
                                                            FontSize="19"
                                                            FontWeight="SemiBold"
@@ -369,8 +552,10 @@
                                                            Foreground="{StaticResource SecondaryTextBrush}"/>
                                             </StackPanel>
                                             <Border Grid.Column="2"
+                                                    Margin="12,0,0,0"
+                                                    VerticalAlignment="Center"
                                                     Style="{StaticResource StateBadgeStyle}">
-                                                <TextBlock Text="{Binding RuntimeState}"
+                                                <TextBlock Text="{Binding DisplayRuntimeState}"
                                                            FontWeight="SemiBold"
                                                            Foreground="#1D4ED8"/>
                                             </Border>
@@ -438,7 +623,7 @@
                                                        Foreground="{StaticResource SecondaryTextBrush}"/>
                                             <TextBlock Grid.Column="1"
                                                        Margin="8,0,0,0"
-                                                       Text="{Binding RuntimeState}"
+                                                       Text="{Binding DisplayRuntimeState}"
                                                        FontWeight="SemiBold"
                                                        Foreground="{StaticResource AccentBrush}"/>
                                         </Grid>
@@ -730,7 +915,7 @@
                                         </Border>
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding DisplayName}" FontSize="18" FontWeight="SemiBold"/>
-                                            <TextBlock Margin="0,5,0,0" Text="{Binding RuntimeState}" Foreground="{StaticResource AccentBrush}"/>
+                                            <TextBlock Margin="0,5,0,0" Text="{Binding DisplayRuntimeState}" Foreground="{StaticResource AccentBrush}"/>
                                         </StackPanel>
                                         <StackPanel Grid.Column="2" Orientation="Horizontal">
                                             <Button Command="{Binding DataContext.OpenModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
