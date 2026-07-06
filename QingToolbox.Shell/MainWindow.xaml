@@ -7,6 +7,10 @@
         Height="760"
         MinWidth="900"
         MinHeight="580"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource ShellBackgroundGradientBrush}">
 

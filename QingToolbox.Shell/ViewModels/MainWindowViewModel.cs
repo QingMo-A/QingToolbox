@@ -62,7 +62,7 @@ public sealed partial class MainWindowViewModel(
 
     public string Title => "Qing Toolbox";
     public LocalizedText Strings { get; } = new(localization);
-    public IReadOnlyList<LanguageOptionViewModel> LanguageOptions =>
+    public ObservableCollection<LanguageOptionViewModel> LanguageOptions { get; } =
     [
         new("system", localization.GetString(
             "settings.language.systemDisplay")),
@@ -134,12 +134,22 @@ public sealed partial class MainWindowViewModel(
 
         OnPropertyChanged(nameof(PageTitle));
         OnPropertyChanged(nameof(PageSubtitle));
-        OnPropertyChanged(nameof(LanguageOptions));
+        RefreshLanguageOptionLabels();
         var option = LanguageOptions.FirstOrDefault(
             item => item.Code == languageCode);
         StatusMessage = localization.GetString(
             "status.languageChanged",
             option?.DisplayText ?? languageCode);
+    }
+
+    private void RefreshLanguageOptionLabels()
+    {
+        LanguageOptions[0].DisplayText = localization.GetString(
+            "settings.language.systemDisplay");
+        LanguageOptions[1].DisplayText = localization.GetString(
+            "settings.language.zhCNDisplay");
+        LanguageOptions[2].DisplayText = localization.GetString(
+            "settings.language.enUSDisplay");
     }
 
     partial void OnIsSidebarPinnedChanged(bool value)

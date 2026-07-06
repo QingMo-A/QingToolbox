@@ -45,13 +45,16 @@
         <Setter Property="BorderBrush" Value="{StaticResource GlassPanelBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="{StaticResource GlassPanelCornerRadius}"/>
-        <Setter Property="Effect" Value="{StaticResource SoftPanelShadow}"/>
     </Style>
 
     <Style x:Key="PageTransitionStyle" TargetType="Grid">
-        <Setter Property="Opacity" Value="0"/>
+        <Setter Property="Opacity" Value="1"/>
+        <Setter Property="UseLayoutRounding" Value="True"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="TextOptions.TextFormattingMode" Value="Display"/>
+        <Setter Property="TextOptions.TextRenderingMode" Value="ClearType"/>
         <Setter Property="RenderTransform">
-            <Setter.Value><TranslateTransform Y="8"/></Setter.Value>
+            <Setter.Value><TranslateTransform Y="0"/></Setter.Value>
         </Setter>
         <Style.Triggers>
             <Trigger Property="IsVisible" Value="True">
@@ -59,9 +62,11 @@
                     <BeginStoryboard>
                         <Storyboard>
                             <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                             From="0" To="1" Duration="0:0:0.18"/>
+                                             From="0" To="1" Duration="0:0:0.18"
+                                             FillBehavior="Stop"/>
                             <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
-                                             From="8" To="0" Duration="0:0:0.18">
+                                             From="8" To="0" Duration="0:0:0.18"
+                                             FillBehavior="Stop">
                                 <DoubleAnimation.EasingFunction>
                                     <CubicEase EasingMode="EaseOut"/>
                                 </DoubleAnimation.EasingFunction>
@@ -167,7 +172,6 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="ButtonBorder" Property="Effect" Value="{StaticResource HoverCardShadow}"/>
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
@@ -329,12 +333,10 @@
         <Setter Property="BorderBrush" Value="{StaticResource GlassPanelBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="{StaticResource CardCornerRadius}"/>
-        <Setter Property="Effect" Value="{StaticResource SoftPanelShadow}"/>
         <Setter Property="RenderTransform"><Setter.Value><TranslateTransform Y="0"/></Setter.Value></Setter>
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
                 <Setter Property="RenderTransform"><Setter.Value><TranslateTransform Y="-2"/></Setter.Value></Setter>
-                <Setter Property="Effect" Value="{StaticResource HoverCardShadow}"/>
                 <Setter Property="BorderBrush" Value="#B8D3FF"/>
                 <Setter Property="Background" Value="#F2FFFFFF"/>
             </Trigger>
@@ -357,7 +359,6 @@
         <Setter Property="BorderBrush" Value="{StaticResource GlassPanelBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="{StaticResource CardCornerRadius}"/>
-        <Setter Property="Effect" Value="{StaticResource SoftPanelShadow}"/>
     </Style>
 
     <Style x:Key="SummaryNumberStyle" TargetType="TextBlock">
@@ -442,7 +443,6 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="ButtonBorder" Property="Effect" Value="{StaticResource HoverCardShadow}"/>
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
@@ -526,7 +526,6 @@
         <Setter Property="BorderBrush" Value="{StaticResource GlassPanelBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="{StaticResource GlassPanelCornerRadius}"/>
-        <Setter Property="Effect" Value="{StaticResource SoftPanelShadow}"/>
     </Style>
 
     <Style x:Key="WorkspacePanelStyle" TargetType="Border"

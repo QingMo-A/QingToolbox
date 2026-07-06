@@ -5,6 +5,10 @@
         Height="650"
         MinWidth="520"
         MinHeight="380"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource ShellBackgroundGradientBrush}">
     <Grid Margin="20">
