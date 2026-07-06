@@ -1,0 +1,4 @@
+{
+  "module.name": "Screen Pin",
+  "module.description": "Capture a screen region and pin it as a resizable floating image."
+}

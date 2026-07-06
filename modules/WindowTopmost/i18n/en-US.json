@@ -1,0 +1,4 @@
+{
+  "module.name": "Window Topmost",
+  "module.description": "Select a visible window and toggle whether it stays always on top."
+}

@@ -1,5 +1,11 @@
 # Modules
 
+Available modules:
+
+- `TextTools` — text conversion and formatting.
+- `ScreenPin` — region capture with resizable floating image pins.
+- `WindowTopmost` — visible-window enumeration and always-on-top control.
+
 Each folder under this directory is intended to contain one standalone QingToolbox module.
 
 Example:

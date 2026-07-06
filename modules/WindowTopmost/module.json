@@ -1,0 +1,20 @@
+{
+  "id": "qing.windowtopmost",
+  "name": "Window Topmost",
+  "description": "Select a visible window and toggle whether it stays always on top.",
+  "version": "0.1.0",
+  "author": "QingMo",
+  "entry": "QingToolbox.Modules.WindowTopmost.dll",
+  "icon": "icon.svg",
+  "runtimeType": "InProcess",
+  "loadMode": "Manual",
+  "permissions": [],
+  "defaultLanguage": "en-US",
+  "localization": {
+    "basePath": "i18n",
+    "resources": {
+      "en-US": "i18n/en-US.json",
+      "zh-CN": "i18n/zh-CN.json"
+    }
+  }
+}
