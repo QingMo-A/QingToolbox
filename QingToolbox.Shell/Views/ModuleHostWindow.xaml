@@ -6,23 +6,25 @@
         MinWidth="520"
         MinHeight="380"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource ShellBackgroundBrush}">
+        Background="{StaticResource ShellBackgroundGradientBrush}">
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-        <TextBlock Margin="4,0,0,14"
-                   Text="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=Title}"
-                   FontSize="22"
-                   FontWeight="SemiBold"
-                   Foreground="{StaticResource PrimaryTextBrush}"/>
+        <StackPanel Margin="4,0,0,16">
+            <TextBlock Text="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=Title}"
+                       FontSize="22" FontWeight="SemiBold"
+                       Foreground="{StaticResource StrongTextBrush}"/>
+            <TextBlock Margin="0,4,0,0" Text="Qing Toolbox module"
+                       FontSize="12" Foreground="{StaticResource MutedTextBrush}"/>
+        </StackPanel>
         <Border Grid.Row="1"
-                Background="White"
-                BorderBrush="{StaticResource CardBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="12">
-            <ContentControl x:Name="ModuleContent"/>
+                Padding="1"
+                Style="{StaticResource LiquidGlassPanelStyle}">
+            <Border Background="#E6FFFFFF" CornerRadius="23" Padding="12">
+                <ContentControl x:Name="ModuleContent"/>
+            </Border>
         </Border>
     </Grid>
 </Window>

@@ -8,7 +8,7 @@
         MinWidth="900"
         MinHeight="580"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource ShellBackgroundBrush}">
+        Background="{StaticResource ShellBackgroundGradientBrush}">
 
     <Grid>
         <Grid.ColumnDefinitions>
@@ -240,6 +240,7 @@
             </Border>
 
             <Grid Grid.Row="2" Margin="0,0,0,20"
+                  Style="{StaticResource PageTransitionStyle}"
                   Visibility="{Binding IsModulesSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -300,6 +301,7 @@
             </Grid>
 
             <Grid Grid.Row="3"
+                  Style="{StaticResource PageTransitionStyle}"
                   Visibility="{Binding IsModulesSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -641,11 +643,12 @@
             </Grid>
 
             <Grid Grid.Row="2" Grid.RowSpan="2"
+                  Style="{StaticResource PageTransitionStyle}"
                   Visibility="{Binding IsHomeSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Border MaxWidth="860" Padding="42" HorizontalAlignment="Center"
                         VerticalAlignment="Center" Background="White"
                         BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
-                        CornerRadius="18">
+                        Style="{StaticResource LiquidGlassPanelStyle}">
                     <StackPanel>
                         <TextBlock Text="Welcome to Qing Toolbox" FontSize="30"
                                    FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/>
@@ -680,6 +683,7 @@
             </Grid>
 
             <Grid Grid.Row="2" Grid.RowSpan="2"
+                  Style="{StaticResource PageTransitionStyle}"
                   Visibility="{Binding IsRunningSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Grid>
                     <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -726,11 +730,12 @@
             </Grid>
 
             <Grid Grid.Row="2" Grid.RowSpan="2"
+                  Style="{StaticResource PageTransitionStyle}"
                   Visibility="{Binding IsSettingsSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Border MaxWidth="720" Padding="36" HorizontalAlignment="Center"
                         VerticalAlignment="Center" Background="White"
                         BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
-                        CornerRadius="16">
+                        Style="{StaticResource LiquidGlassPanelStyle}">
                     <StackPanel>
                         <TextBlock Text="Settings" FontSize="26" FontWeight="SemiBold"/>
                         <TextBlock Margin="0,8,0,24" Text="Qing Toolbox settings will appear here."

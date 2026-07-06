@@ -13,6 +13,65 @@
     <SolidColorBrush x:Key="SecondaryTextBrush" Color="#64748B"/>
     <SolidColorBrush x:Key="StatusBackgroundBrush" Color="#E8EEF8"/>
     <SolidColorBrush x:Key="CardBorderBrush" Color="#DCE2EA"/>
+    <LinearGradientBrush x:Key="ShellBackgroundGradientBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#F8FAFC" Offset="0"/>
+        <GradientStop Color="#EEF5FF" Offset="1"/>
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="GlassPanelBackgroundBrush" Color="#D9FFFFFF"/>
+    <SolidColorBrush x:Key="GlassPanelBorderBrush" Color="#88FFFFFF"/>
+    <SolidColorBrush x:Key="GlassPanelHighlightBrush" Color="#F2FFFFFF"/>
+    <SolidColorBrush x:Key="PrimaryAccentBrush" Color="#2563EB"/>
+    <SolidColorBrush x:Key="PrimaryAccentSoftBrush" Color="#E8F0FF"/>
+    <SolidColorBrush x:Key="DangerSoftBrush" Color="#FFF1F0"/>
+    <SolidColorBrush x:Key="SuccessSoftBrush" Color="#ECFDF3"/>
+    <SolidColorBrush x:Key="MutedTextBrush" Color="#64748B"/>
+    <SolidColorBrush x:Key="StrongTextBrush" Color="#172033"/>
+    <CornerRadius x:Key="GlassPanelCornerRadius">24</CornerRadius>
+    <CornerRadius x:Key="CardCornerRadius">18</CornerRadius>
+    <CornerRadius x:Key="ButtonCornerRadius">12</CornerRadius>
+    <CornerRadius x:Key="SidebarItemCornerRadius">14</CornerRadius>
+    <Duration x:Key="FastAnimationDuration">0:0:0.12</Duration>
+    <Duration x:Key="NormalAnimationDuration">0:0:0.18</Duration>
+    <Duration x:Key="SlowAnimationDuration">0:0:0.26</Duration>
+    <DropShadowEffect x:Key="SoftPanelShadow" BlurRadius="22" ShadowDepth="5"
+                      Opacity="0.12" Color="#334155"/>
+    <DropShadowEffect x:Key="FloatingPanelShadow" BlurRadius="32" ShadowDepth="8"
+                      Opacity="0.16" Color="#334155"/>
+    <DropShadowEffect x:Key="HoverCardShadow" BlurRadius="25" ShadowDepth="7"
+                      Opacity="0.18" Color="#2563EB"/>
+
+    <Style x:Key="LiquidGlassPanelStyle" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource GlassPanelBackgroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource GlassPanelBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="{StaticResource GlassPanelCornerRadius}"/>
+        <Setter Property="Effect" Value="{StaticResource SoftPanelShadow}"/>
+    </Style>
+
+    <Style x:Key="PageTransitionStyle" TargetType="Grid">
+        <Setter Property="Opacity" Value="0"/>
+        <Setter Property="RenderTransform">
+            <Setter.Value><TranslateTransform Y="8"/></Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsVisible" Value="True">
+                <Trigger.EnterActions>
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                             From="0" To="1" Duration="0:0:0.18"/>
+                            <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                             From="8" To="0" Duration="0:0:0.18">
+                                <DoubleAnimation.EasingFunction>
+                                    <CubicEase EasingMode="EaseOut"/>
+                                </DoubleAnimation.EasingFunction>
+                            </DoubleAnimation>
+                        </Storyboard>
+                    </BeginStoryboard>
+                </Trigger.EnterActions>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
 
     <Style x:Key="ShellSvgIconStyle" TargetType="{x:Type svgc:SvgViewbox}">
         <Setter Property="Width" Value="21"/>
@@ -59,6 +118,10 @@
         <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+        <Setter Property="RenderTransform"><Setter.Value><TransformGroup>
+            <ScaleTransform ScaleX="1" ScaleY="1"/><TranslateTransform Y="0"/>
+        </TransformGroup></Setter.Value></Setter>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -74,6 +137,15 @@
                             <Setter TargetName="ButtonBorder"
                                     Property="Background"
                                     Value="{StaticResource AccentHoverBrush}"/>
+                            <Setter Property="RenderTransform">
+                                <Setter.Value><TransformGroup><ScaleTransform ScaleX="1.02" ScaleY="1.02"/><TranslateTransform Y="-1"/></TransformGroup></Setter.Value>
+                            </Setter>
+                            <Setter TargetName="ButtonBorder" Property="Effect" Value="{StaticResource HoverCardShadow}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter Property="RenderTransform">
+                                <Setter.Value><TransformGroup><ScaleTransform ScaleX="0.98" ScaleY="0.98"/><TranslateTransform Y="0"/></TransformGroup></Setter.Value>
+                            </Setter>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="ButtonBorder"
@@ -95,6 +167,7 @@
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="RenderTransform"><Setter.Value><TranslateTransform X="0"/></Setter.Value></Setter>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -110,7 +183,7 @@
                                 Margin="5,0,0,0"
                                 Padding="{TemplateBinding Padding}"
                                 Background="{TemplateBinding Background}"
-                                CornerRadius="10">
+                                CornerRadius="{StaticResource SidebarItemCornerRadius}">
                             <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                               VerticalAlignment="Center"/>
                         </Border>
@@ -121,6 +194,7 @@
                                     Property="Background"
                                     Value="{StaticResource SidebarHoverBrush}"/>
                             <Setter Property="Foreground" Value="White"/>
+                            <Setter Property="RenderTransform"><Setter.Value><TranslateTransform X="2"/></Setter.Value></Setter>
                         </Trigger>
                         <Trigger Property="Tag" Value="Selected">
                             <Setter TargetName="ButtonBorder"
@@ -168,10 +242,20 @@
     <Style x:Key="ModuleCardStyle" TargetType="Border">
         <Setter Property="Margin" Value="0,0,10,12"/>
         <Setter Property="Padding" Value="18"/>
-        <Setter Property="Background" Value="White"/>
-        <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
+        <Setter Property="Background" Value="{StaticResource GlassPanelBackgroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource GlassPanelBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="CornerRadius" Value="{StaticResource CardCornerRadius}"/>
+        <Setter Property="Effect" Value="{StaticResource SoftPanelShadow}"/>
+        <Setter Property="RenderTransform"><Setter.Value><TranslateTransform Y="0"/></Setter.Value></Setter>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="RenderTransform"><Setter.Value><TranslateTransform Y="-2"/></Setter.Value></Setter>
+                <Setter Property="Effect" Value="{StaticResource HoverCardShadow}"/>
+                <Setter Property="BorderBrush" Value="#B8D3FF"/>
+                <Setter Property="Background" Value="#F2FFFFFF"/>
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <Style x:Key="ModuleCardCompactStyle" TargetType="Border"
@@ -186,10 +270,11 @@
         <Setter Property="Margin" Value="0,0,10,0"/>
         <Setter Property="Padding" Value="14,10"/>
         <Setter Property="Height" Value="70"/>
-        <Setter Property="Background" Value="White"/>
-        <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
+        <Setter Property="Background" Value="{StaticResource GlassPanelBackgroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource GlassPanelBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="CornerRadius" Value="{StaticResource CardCornerRadius}"/>
+        <Setter Property="Effect" Value="{StaticResource SoftPanelShadow}"/>
     </Style>
 
     <Style x:Key="SummaryNumberStyle" TargetType="TextBlock">
@@ -248,6 +333,10 @@
         <Setter Property="BorderBrush" Value="#BFDBFE"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+        <Setter Property="RenderTransform"><Setter.Value><TransformGroup>
+            <ScaleTransform ScaleX="1" ScaleY="1"/><TranslateTransform Y="0"/>
+        </TransformGroup></Setter.Value></Setter>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -256,7 +345,7 @@
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="7">
+                            CornerRadius="{StaticResource ButtonCornerRadius}">
                         <ContentPresenter HorizontalAlignment="Center"
                                           VerticalAlignment="Center"/>
                     </Border>
@@ -265,6 +354,11 @@
                             <Setter TargetName="ButtonBorder"
                                     Property="Background"
                                     Value="#DBEAFE"/>
+                            <Setter Property="RenderTransform"><Setter.Value><TransformGroup><ScaleTransform ScaleX="1.01" ScaleY="1.01"/><TranslateTransform Y="-1"/></TransformGroup></Setter.Value></Setter>
+                            <Setter TargetName="ButtonBorder" Property="Effect" Value="{StaticResource HoverCardShadow}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter Property="RenderTransform"><Setter.Value><TransformGroup><ScaleTransform ScaleX="0.98" ScaleY="0.98"/><TranslateTransform Y="0"/></TransformGroup></Setter.Value></Setter>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="ButtonBorder"
@@ -315,10 +409,11 @@
 
     <Style x:Key="ModuleViewHostStyle" TargetType="Border">
         <Setter Property="Margin" Value="18,0,0,0"/>
-        <Setter Property="Background" Value="White"/>
-        <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
+        <Setter Property="Background" Value="{StaticResource GlassPanelBackgroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource GlassPanelBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="14"/>
+        <Setter Property="CornerRadius" Value="{StaticResource GlassPanelCornerRadius}"/>
+        <Setter Property="Effect" Value="{StaticResource SoftPanelShadow}"/>
     </Style>
 
     <Style x:Key="WorkspacePanelStyle" TargetType="Border"
