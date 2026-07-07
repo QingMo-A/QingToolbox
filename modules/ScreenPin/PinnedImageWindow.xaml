@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         MinWidth="120" MinHeight="80"
         WindowStyle="None"
-        ResizeMode="CanResizeWithGrip"
+        ResizeMode="NoResize"
         Topmost="True"
         ShowInTaskbar="False"
         AllowsTransparency="True"
@@ -14,13 +14,13 @@
         <CubicEase x:Key="OverlayEase" EasingMode="EaseInOut"/>
 
         <Style x:Key="OverlayIconButtonStyle" TargetType="Button">
-            <Setter Property="Width" Value="30"/>
+            <Setter Property="Width" Value="34"/>
             <Setter Property="Height" Value="30"/>
             <Setter Property="Padding" Value="0"/>
             <Setter Property="Margin" Value="0,0,6,0"/>
             <Setter Property="Foreground" Value="#F8FAFC"/>
-            <Setter Property="FontFamily" Value="Segoe UI Symbol"/>
-            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontSize" Value="11"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Background" Value="#7A0F172A"/>
             <Setter Property="BorderBrush" Value="#55FFFFFF"/>
@@ -62,6 +62,9 @@
                 <MenuItem x:Name="TopmostMenuItem"
                           Header="取消置顶"
                           Click="OnToggleTopmost"/>
+                <MenuItem x:Name="ResizeModeMenuItem"
+                          Header="自由拉伸"
+                          Click="OnToggleResizeMode"/>
                 <MenuItem Header="复制"
                           Click="OnCopy"/>
                 <Separator/>
@@ -72,12 +75,12 @@
 
         <Border x:Name="ImageFrame"
                 Background="Transparent"
-                BorderBrush="#22000000"
-                BorderThickness="1"
-                CornerRadius="6"
+                BorderBrush="Transparent"
+                BorderThickness="0"
+                CornerRadius="4"
                 ClipToBounds="True">
             <Image x:Name="PinnedImage"
-                   Stretch="Fill"
+                   Stretch="Uniform"
                    SnapsToDevicePixels="True"
                    RenderOptions.BitmapScalingMode="HighQuality"/>
         </Border>
@@ -91,11 +94,16 @@
                         Orientation="Horizontal">
                 <Button x:Name="TopmostButton"
                         Style="{StaticResource OverlayIconButtonStyle}"
-                        Content="📌"
+                        Content="LOCK"
                         ToolTip="取消置顶"
                         Click="OnToggleTopmost"/>
+                <Button x:Name="ResizeModeButton"
+                        Style="{StaticResource OverlayIconButtonStyle}"
+                        Content="1:1"
+                        ToolTip="等比例缩放"
+                        Click="OnToggleResizeMode"/>
                 <Button Style="{StaticResource OverlayIconButtonStyle}"
-                        Content="⧉"
+                        Content="COPY"
                         ToolTip="复制"
                         Click="OnCopy"/>
             </StackPanel>
@@ -103,9 +111,9 @@
             <Button HorizontalAlignment="Right"
                     VerticalAlignment="Top"
                     Margin="0"
+                    Width="30"
                     Style="{StaticResource OverlayIconButtonStyle}"
                     Content="×"
-                    FontFamily="Segoe UI"
                     FontSize="18"
                     ToolTip="关闭"
                     Click="OnClose"/>
@@ -118,7 +126,7 @@
                VerticalAlignment="Bottom"
                Margin="0,0,1,1"
                Cursor="SizeNWSE"
-               Opacity="0.48"
+               Opacity="0.52"
                DragDelta="OnResizeGripDragDelta">
             <Thumb.Template>
                 <ControlTemplate TargetType="Thumb">

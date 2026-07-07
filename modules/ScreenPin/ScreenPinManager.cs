@@ -12,15 +12,18 @@ public sealed class ScreenPinManager
     public async Task CaptureRegionAsync()
     {
         var overlay = new CaptureOverlayWindow();
-        var region = overlay.ShowDialog() == true ? overlay.SelectedRegion : null;
-        if (region is null || region.Value.Width < 2 || region.Value.Height < 2)
+        var selectedRegionDip = overlay.ShowDialog() == true ? overlay.SelectedRegionDip : null;
+        if (selectedRegionDip is null || selectedRegionDip.Value.Width < 2 || selectedRegionDip.Value.Height < 2)
         {
             return;
         }
 
         await Task.Delay(100);
-        var image = ScreenCaptureService.Capture(region.Value);
-        var window = new PinnedImageWindow(image);
+        var image = ScreenCaptureService.Capture(selectedRegionDip.Value, overlay.TransformToDevice);
+        var window = new PinnedImageWindow(
+            image,
+            selectedRegionDip.Value,
+            CaptureOverlayWindow.GetVirtualScreenDip());
         window.Closed += (_, _) =>
         {
             _windows.Remove(window);

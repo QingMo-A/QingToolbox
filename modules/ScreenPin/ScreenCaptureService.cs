@@ -2,23 +2,24 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
 namespace QingToolbox.Modules.ScreenPin;
 
 internal static class ScreenCaptureService
 {
-    public static BitmapSource Capture(Rect region)
+    public static BitmapSource Capture(Rect regionDip, Matrix transformToDevice)
     {
-        // Coordinates are correct at 100% scaling. Per-monitor DPI refinement is planned.
-        var width = Math.Max(1, (int)Math.Round(region.Width));
-        var height = Math.Max(1, (int)Math.Round(region.Height));
+        var regionPixel = DipToPixel(regionDip, transformToDevice);
+        var width = Math.Max(1, (int)Math.Round(regionPixel.Width));
+        var height = Math.Max(1, (int)Math.Round(regionPixel.Height));
         using var bitmap = new Bitmap(width, height);
         using (var graphics = Graphics.FromImage(bitmap))
         {
             graphics.CopyFromScreen(
-                (int)Math.Round(region.X),
-                (int)Math.Round(region.Y),
+                (int)Math.Round(regionPixel.X),
+                (int)Math.Round(regionPixel.Y),
                 0,
                 0,
                 new System.Drawing.Size(width, height),
@@ -40,6 +41,21 @@ internal static class ScreenCaptureService
         {
             DeleteObject(handle);
         }
+    }
+
+    private static Rect DipToPixel(Rect regionDip, Matrix transformToDevice)
+    {
+        if (transformToDevice.IsIdentity)
+        {
+            return regionDip;
+        }
+
+        // TODO: Per-monitor mixed-DPI setups can require per-screen transforms. This
+        // keeps single-monitor 100%/125%/150% captures aligned by separating WPF DIP
+        // geometry from physical capture pixels.
+        var topLeft = transformToDevice.Transform(regionDip.TopLeft);
+        var bottomRight = transformToDevice.Transform(regionDip.BottomRight);
+        return new Rect(topLeft, bottomRight);
     }
 
     [DllImport("gdi32.dll")]
