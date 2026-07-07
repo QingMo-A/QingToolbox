@@ -22,6 +22,8 @@ public partial class CaptureOverlayWindow : Window
     {
         _start = e.GetPosition(this);
         Selection.Visibility = Visibility.Visible;
+        SizeBadge.Visibility = Visibility.Visible;
+        UpdateSelection(_start.Value, _start.Value);
         CaptureMouse();
     }
 
@@ -52,6 +54,13 @@ public partial class CaptureOverlayWindow : Window
         Canvas.SetTop(Selection, rect.Y);
         Selection.Width = rect.Width;
         Selection.Height = rect.Height;
+
+        var width = Math.Max(0, (int)Math.Round(rect.Width));
+        var height = Math.Max(0, (int)Math.Round(rect.Height));
+        SizeText.Text = $"{width} × {height}";
+
+        Canvas.SetLeft(SizeBadge, rect.X + 8);
+        Canvas.SetTop(SizeBadge, Math.Max(8, rect.Y - 34));
     }
 
     private void OnKeyDown(object sender, KeyEventArgs e)

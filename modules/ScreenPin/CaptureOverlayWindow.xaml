@@ -1,14 +1,47 @@
 <Window x:Class="QingToolbox.Modules.ScreenPin.CaptureOverlayWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        WindowStyle="None" AllowsTransparency="True" Background="#66000000"
-        ShowInTaskbar="False" Topmost="True" Cursor="Cross"
-        KeyDown="OnKeyDown" MouseLeftButtonDown="OnMouseDown"
-        MouseMove="OnMouseMove" MouseLeftButtonUp="OnMouseUp">
-    <Canvas>
-        <Rectangle x:Name="Selection" Stroke="#38BDF8" StrokeThickness="2"
-                   Fill="#2238BDF8" Visibility="Collapsed"/>
-        <TextBlock Canvas.Left="24" Canvas.Top="20" Foreground="White"
-                   FontSize="16" Text="Drag to capture a region · Esc to cancel"/>
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        Cursor="Cross"
+        KeyDown="OnKeyDown"
+        MouseLeftButtonDown="OnMouseDown"
+        MouseMove="OnMouseMove"
+        MouseLeftButtonUp="OnMouseUp">
+    <Canvas x:Name="OverlayCanvas" Background="#8A020617">
+        <Rectangle x:Name="Selection"
+                   Stroke="#7DD3FC"
+                   StrokeThickness="2"
+                   StrokeDashArray="4 2"
+                   Fill="#18FFFFFF"
+                   Visibility="Collapsed"/>
+
+        <Border x:Name="SizeBadge"
+                Visibility="Collapsed"
+                Background="#D90F172A"
+                BorderBrush="#55BAE6FD"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="8,4">
+            <TextBlock x:Name="SizeText"
+                       Foreground="#F8FAFC"
+                       FontSize="13"
+                       FontWeight="SemiBold"/>
+        </Border>
+
+        <Border Canvas.Left="24"
+                Canvas.Top="24"
+                Background="#B30F172A"
+                BorderBrush="#33FFFFFF"
+                BorderThickness="1"
+                CornerRadius="12"
+                Padding="12,8">
+            <TextBlock Foreground="#F8FAFC"
+                       FontSize="14"
+                       Text="拖拽选择截图区域 · Esc 取消"/>
+        </Border>
     </Canvas>
 </Window>
