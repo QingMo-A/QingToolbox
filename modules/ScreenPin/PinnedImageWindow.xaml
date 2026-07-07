@@ -14,14 +14,11 @@
         <CubicEase x:Key="OverlayEase" EasingMode="EaseInOut"/>
 
         <Style x:Key="OverlayIconButtonStyle" TargetType="Button">
-            <Setter Property="Width" Value="34"/>
+            <Setter Property="Width" Value="30"/>
             <Setter Property="Height" Value="30"/>
             <Setter Property="Padding" Value="0"/>
             <Setter Property="Margin" Value="0,0,6,0"/>
             <Setter Property="Foreground" Value="#F8FAFC"/>
-            <Setter Property="FontFamily" Value="Segoe UI"/>
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Background" Value="#7A0F172A"/>
             <Setter Property="BorderBrush" Value="#55FFFFFF"/>
             <Setter Property="BorderThickness" Value="1"/>
@@ -73,17 +70,10 @@
             </ContextMenu>
         </Grid.ContextMenu>
 
-        <Border x:Name="ImageFrame"
-                Background="Transparent"
-                BorderBrush="Transparent"
-                BorderThickness="0"
-                CornerRadius="4"
-                ClipToBounds="True">
-            <Image x:Name="PinnedImage"
-                   Stretch="Uniform"
-                   SnapsToDevicePixels="True"
-                   RenderOptions.BitmapScalingMode="HighQuality"/>
-        </Border>
+        <Image x:Name="PinnedImage"
+               Stretch="Fill"
+               SnapsToDevicePixels="True"
+               RenderOptions.BitmapScalingMode="HighQuality"/>
 
         <Grid x:Name="OverlayControls"
               Margin="8"
@@ -94,29 +84,48 @@
                         Orientation="Horizontal">
                 <Button x:Name="TopmostButton"
                         Style="{StaticResource OverlayIconButtonStyle}"
-                        Content="LOCK"
                         ToolTip="取消置顶"
-                        Click="OnToggleTopmost"/>
+                        Click="OnToggleTopmost">
+                    <Viewbox Width="15" Height="15">
+                        <Path x:Name="TopmostIcon"
+                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              Data="M5,2 L13,2 L13,4 L11.8,4 L11.8,9.2 L14,11.4 L14,13 L9.8,13 L9.8,18 L8.2,18 L8.2,13 L4,13 L4,11.4 L6.2,9.2 L6.2,4 L5,4 Z"/>
+                    </Viewbox>
+                </Button>
                 <Button x:Name="ResizeModeButton"
                         Style="{StaticResource OverlayIconButtonStyle}"
-                        Content="1:1"
                         ToolTip="等比例缩放"
-                        Click="OnToggleResizeMode"/>
+                        Click="OnToggleResizeMode">
+                    <Viewbox Width="15" Height="15">
+                        <Path x:Name="ResizeModeIcon"
+                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              Data="M3,3 L9,3 L9,5 L6.4,5 L11,9.6 L9.6,11 L5,6.4 L5,9 L3,9 Z M13,15 L7,15 L7,13 L9.6,13 L5,8.4 L6.4,7 L11,11.6 L11,9 L13,9 Z"/>
+                    </Viewbox>
+                </Button>
                 <Button Style="{StaticResource OverlayIconButtonStyle}"
-                        Content="COPY"
                         ToolTip="复制"
-                        Click="OnCopy"/>
+                        Click="OnCopy">
+                    <Viewbox Width="15" Height="15">
+                        <Path Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              Data="M4,2 L12,2 L12,4 L6,4 L6,12 L4,12 Z M7,5 L15,5 L15,15 L7,15 Z M9,7 L9,13 L13,13 L13,7 Z"/>
+                    </Viewbox>
+                </Button>
             </StackPanel>
 
             <Button HorizontalAlignment="Right"
                     VerticalAlignment="Top"
                     Margin="0"
-                    Width="30"
                     Style="{StaticResource OverlayIconButtonStyle}"
-                    Content="×"
-                    FontSize="18"
                     ToolTip="关闭"
-                    Click="OnClose"/>
+                    Click="OnClose">
+                <Viewbox Width="13" Height="13">
+                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                          StrokeThickness="2.2"
+                          StrokeStartLineCap="Round"
+                          StrokeEndLineCap="Round"
+                          Data="M3,3 L13,13 M13,3 L3,13"/>
+                </Viewbox>
+            </Button>
         </Grid>
 
         <Thumb x:Name="CornerResizeGrip"
@@ -127,6 +136,7 @@
                Margin="0,0,1,1"
                Cursor="SizeNWSE"
                Opacity="0.52"
+               DragStarted="OnResizeGripDragStarted"
                DragDelta="OnResizeGripDragDelta">
             <Thumb.Template>
                 <ControlTemplate TargetType="Thumb">
