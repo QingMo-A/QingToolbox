@@ -1,6 +1,7 @@
 # Text Tools
 
-Text Tools is a QingToolbox module for lightweight text conversion and formatting.
+Text Tools is a QingToolbox module for lightweight text conversion and
+formatting.
 
 ## Features
 
@@ -12,6 +13,17 @@ Text Tools is a QingToolbox module for lightweight text conversion and formattin
 - Remove empty lines
 - Copy output back to input
 - Clear input, output, and status
+
+## Localization
+
+Text Tools supports `en-US` and `zh-CN`. Both manifest metadata
+(`module.name` / `module.description`) and internal UI text come from the
+module's `i18n` JSON files.
+
+The module receives the current QingToolbox language through
+`ModuleContext.Localization`. Open Text Tools views implement
+`ILocalizedModuleView`, so labels and buttons refresh when the toolbox language
+changes. Existing input and output text are not cleared by localization refresh.
 
 ## Build
 
@@ -31,5 +43,5 @@ Text Tools is a QingToolbox module for lightweight text conversion and formattin
 Then run the Shell from the `toolbox` branch and click:
 
 ```text
-Refresh Modules → Load → Open
+Refresh Modules -> Load -> Open
 ```

@@ -2,24 +2,29 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid Margin="24">
-        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
         <StackPanel>
-            <TextBlock FontSize="26" FontWeight="SemiBold" Text="Window Topmost"/>
-            <TextBlock Margin="0,6,0,18" Foreground="#64748B" Text="Choose a visible window and toggle always-on-top."/>
+            <TextBlock x:Name="TitleText" FontSize="26" FontWeight="SemiBold" Text="Window Topmost"/>
+            <TextBlock x:Name="SubtitleText" Margin="0,6,0,18" Foreground="#64748B" Text="Choose a visible window and toggle always-on-top."/>
         </StackPanel>
         <WrapPanel Grid.Row="1" Margin="0,0,0,14">
-            <Button Margin="0,0,8,0" Padding="14,8" Click="OnRefresh" Content="Refresh"/>
-            <Button Margin="0,0,8,0" Padding="14,8" Click="OnPick" Content="Pick Window (3s)"/>
-            <Button Margin="0,0,8,0" Padding="14,8" Click="OnSetTopmost" Content="Set Topmost"/>
-            <Button Padding="14,8" Click="OnRemoveTopmost" Content="Remove Topmost"/>
+            <Button x:Name="RefreshButton" Margin="0,0,8,0" Padding="14,8" Click="OnRefresh" Content="Refresh"/>
+            <Button x:Name="PickButton" Margin="0,0,8,0" Padding="14,8" Click="OnPick" Content="Pick Window"/>
+            <Button x:Name="SetTopmostButton" Margin="0,0,8,0" Padding="14,8" Click="OnSetTopmost" Content="Set Topmost"/>
+            <Button x:Name="RemoveTopmostButton" Padding="14,8" Click="OnRemoveTopmost" Content="Remove Topmost"/>
         </WrapPanel>
         <DataGrid x:Name="WindowGrid" Grid.Row="2" AutoGenerateColumns="False"
                   IsReadOnly="True" SelectionMode="Single">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="*"/>
-                <DataGridTextColumn Header="Process" Binding="{Binding ProcessName}" Width="150"/>
-                <DataGridTextColumn Header="HWND" Binding="{Binding HandleText}" Width="130"/>
-                <DataGridTextColumn Header="Topmost" Binding="{Binding TopmostText}" Width="90"/>
+                <DataGridTextColumn x:Name="TitleColumn" Header="Title" Binding="{Binding Title}" Width="*"/>
+                <DataGridTextColumn x:Name="ProcessColumn" Header="Process" Binding="{Binding ProcessName}" Width="150"/>
+                <DataGridTextColumn x:Name="HwndColumn" Header="HWND" Binding="{Binding HandleText}" Width="130"/>
+                <DataGridTextColumn x:Name="TopmostColumn" Header="Topmost" Binding="{Binding TopmostText}" Width="90"/>
             </DataGrid.Columns>
         </DataGrid>
         <TextBlock x:Name="StatusText" Grid.Row="3" Margin="0,12,0,0" Foreground="#475569"/>

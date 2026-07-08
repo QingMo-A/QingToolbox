@@ -6,10 +6,11 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using QingToolbox.Abstractions.Localization;
 
 namespace QingToolbox.Modules.ScreenPin;
 
-public partial class PinnedImageWindow : Window
+public partial class PinnedImageWindow : Window, ILocalizedModuleView
 {
     private const double PlacementGap = 12;
     private static readonly Geometry PinnedGeometry = Geometry.Parse("M5,2 L13,2 L13,4 L11.8,4 L11.8,9.2 L14,11.4 L14,13 L9.8,13 L9.8,18 L8.2,18 L8.2,13 L4,13 L4,11.4 L6.2,9.2 L6.2,4 L5,4 Z");
@@ -18,6 +19,8 @@ public partial class PinnedImageWindow : Window
     private static readonly Geometry FreeGeometry = Geometry.Parse("M2,4 L7,4 L7,6 L5.4,6 L8,8.6 L6.6,10 L4,7.4 L4,9 L2,9 Z M16,12 L11,12 L11,10 L12.6,10 L10,7.4 L11.4,6 L14,8.6 L14,7 L16,7 Z M2,14 L2,11 L4,11 L4,12 L7,12 L7,14 Z M11,4 L16,4 L16,6 L11,6 Z");
 
     private readonly BitmapSource _image;
+    private readonly ILocalizationService? _localization;
+    private readonly string _moduleId;
     private readonly double _aspectRatio;
     private bool _isAspectRatioLocked = true;
     private double _resizeStartWidth;
@@ -25,16 +28,34 @@ public partial class PinnedImageWindow : Window
     private double _resizeDeltaX;
     private double _resizeDeltaY;
 
-    public PinnedImageWindow(BitmapSource image, Rect selectedRegionDip, Rect virtualScreenDip)
+    public PinnedImageWindow(
+        BitmapSource image,
+        Rect selectedRegionDip,
+        Rect virtualScreenDip,
+        ILocalizationService? localization = null,
+        string moduleId = "qing.screenpin")
     {
         InitializeComponent();
-
         _image = image;
+        _localization = localization;
+        _moduleId = moduleId;
         _aspectRatio = Math.Max(0.01, selectedRegionDip.Width / Math.Max(1, selectedRegionDip.Height));
 
         PinnedImage.Source = image;
         SetInitialSize(selectedRegionDip);
         PlaceNearSelection(selectedRegionDip, virtualScreenDip);
+        RefreshLocalization();
+    }
+
+    private string T(string key, string fallback) =>
+        _localization?.GetModuleString(_moduleId, key, fallback) ?? fallback;
+
+    public void RefreshLocalization()
+    {
+        CopyButton.ToolTip = T("pin.copy", "Copy");
+        CloseButton.ToolTip = T("pin.close", "Close");
+        CopyMenuItem.Header = T("context.copy", "Copy");
+        CloseMenuItem.Header = T("context.close", "Close");
         UpdateTopmostVisualState();
         UpdateResizeModeVisualState();
     }
@@ -94,7 +115,6 @@ public partial class PinnedImageWindow : Window
     }
 
     private void OnHostMouseEnter(object sender, MouseEventArgs e) => ShowOverlay(true);
-
     private void OnHostMouseLeave(object sender, MouseEventArgs e) => ShowOverlay(false);
 
     private void OnImageHostMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -131,11 +151,7 @@ public partial class PinnedImageWindow : Window
         UpdateResizeModeVisualState();
     }
 
-    private void OnCopy(object sender, RoutedEventArgs e)
-    {
-        Clipboard.SetImage(_image);
-    }
-
+    private void OnCopy(object sender, RoutedEventArgs e) => Clipboard.SetImage(_image);
     private void OnClose(object sender, RoutedEventArgs e) => Close();
 
     private void OnResizeGripDragStarted(object sender, DragStartedEventArgs e)
@@ -224,18 +240,18 @@ public partial class PinnedImageWindow : Window
         if (Topmost)
         {
             TopmostIcon.Data = PinnedGeometry;
-            TopmostButton.ToolTip = "取消置顶";
+            TopmostButton.ToolTip = T("pin.cancelTopmost", "Unpin");
             TopmostButton.Background = new SolidColorBrush(Color.FromArgb(218, 37, 99, 235));
             TopmostButton.BorderBrush = new SolidColorBrush(Color.FromArgb(160, 191, 219, 254));
-            TopmostMenuItem.Header = "取消置顶";
+            TopmostMenuItem.Header = T("context.cancelTopmost", "Unpin");
             return;
         }
 
         TopmostIcon.Data = UnpinnedGeometry;
-        TopmostButton.ToolTip = "置顶";
+        TopmostButton.ToolTip = T("pin.topmost", "Pin on top");
         TopmostButton.Background = new SolidColorBrush(Color.FromArgb(116, 15, 23, 42));
         TopmostButton.BorderBrush = new SolidColorBrush(Color.FromArgb(70, 255, 255, 255));
-        TopmostMenuItem.Header = "置顶";
+        TopmostMenuItem.Header = T("context.topmost", "Pin on top");
     }
 
     private void UpdateResizeModeVisualState()
@@ -245,16 +261,16 @@ public partial class PinnedImageWindow : Window
         if (_isAspectRatioLocked)
         {
             ResizeModeIcon.Data = AspectGeometry;
-            ResizeModeButton.ToolTip = "等比例缩放";
+            ResizeModeButton.ToolTip = T("pin.aspectRatio", "Aspect ratio resize");
             ResizeModeButton.Background = new SolidColorBrush(Color.FromArgb(204, 20, 184, 166));
-            ResizeModeMenuItem.Header = "自由拉伸";
+            ResizeModeMenuItem.Header = T("context.freeStretch", "Free stretch");
             return;
         }
 
         ResizeModeIcon.Data = FreeGeometry;
-        ResizeModeButton.ToolTip = "自由拉伸";
+        ResizeModeButton.ToolTip = T("pin.freeStretch", "Free stretch");
         ResizeModeButton.Background = new SolidColorBrush(Color.FromArgb(116, 15, 23, 42));
-        ResizeModeMenuItem.Header = "等比例缩放";
+        ResizeModeMenuItem.Header = T("context.aspectRatio", "Aspect ratio resize");
     }
 
     private void ShowOverlay(bool show)

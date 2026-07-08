@@ -9,5 +9,13 @@
   "runtimeType": "InProcess",
   "loadMode": "Manual",
   "permissions": [],
-  "icon": "icon.svg"
+  "icon": "icon.svg",
+  "defaultLanguage": "en-US",
+  "localization": {
+    "basePath": "i18n",
+    "resources": {
+      "en-US": "i18n/en-US.json",
+      "zh-CN": "i18n/zh-CN.json"
+    }
+  }
 }

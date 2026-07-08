@@ -57,15 +57,17 @@
         <Grid.ContextMenu>
             <ContextMenu>
                 <MenuItem x:Name="TopmostMenuItem"
-                          Header="取消置顶"
+                          Header="Unpin"
                           Click="OnToggleTopmost"/>
                 <MenuItem x:Name="ResizeModeMenuItem"
-                          Header="自由拉伸"
+                          Header="Free stretch"
                           Click="OnToggleResizeMode"/>
-                <MenuItem Header="复制"
+                <MenuItem x:Name="CopyMenuItem"
+                          Header="Copy"
                           Click="OnCopy"/>
                 <Separator/>
-                <MenuItem Header="关闭"
+                <MenuItem x:Name="CloseMenuItem"
+                          Header="Close"
                           Click="OnClose"/>
             </ContextMenu>
         </Grid.ContextMenu>
@@ -84,7 +86,7 @@
                         Orientation="Horizontal">
                 <Button x:Name="TopmostButton"
                         Style="{StaticResource OverlayIconButtonStyle}"
-                        ToolTip="取消置顶"
+                        ToolTip="Unpin"
                         Click="OnToggleTopmost">
                     <Viewbox Width="15" Height="15">
                         <Path x:Name="TopmostIcon"
@@ -94,7 +96,7 @@
                 </Button>
                 <Button x:Name="ResizeModeButton"
                         Style="{StaticResource OverlayIconButtonStyle}"
-                        ToolTip="等比例缩放"
+                        ToolTip="Aspect ratio resize"
                         Click="OnToggleResizeMode">
                     <Viewbox Width="15" Height="15">
                         <Path x:Name="ResizeModeIcon"
@@ -102,8 +104,9 @@
                               Data="M3,3 L9,3 L9,5 L6.4,5 L11,9.6 L9.6,11 L5,6.4 L5,9 L3,9 Z M13,15 L7,15 L7,13 L9.6,13 L5,8.4 L6.4,7 L11,11.6 L11,9 L13,9 Z"/>
                     </Viewbox>
                 </Button>
-                <Button Style="{StaticResource OverlayIconButtonStyle}"
-                        ToolTip="复制"
+                <Button x:Name="CopyButton"
+                        Style="{StaticResource OverlayIconButtonStyle}"
+                        ToolTip="Copy"
                         Click="OnCopy">
                     <Viewbox Width="15" Height="15">
                         <Path Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
@@ -112,11 +115,12 @@
                 </Button>
             </StackPanel>
 
-            <Button HorizontalAlignment="Right"
+            <Button x:Name="CloseButton"
+                    HorizontalAlignment="Right"
                     VerticalAlignment="Top"
                     Margin="0"
                     Style="{StaticResource OverlayIconButtonStyle}"
-                    ToolTip="关闭"
+                    ToolTip="Close"
                     Click="OnClose">
                 <Viewbox Width="13" Height="13">
                     <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"

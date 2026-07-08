@@ -1,4 +1,25 @@
 {
   "module.name": "Window Topmost",
-  "module.description": "Select a visible window and toggle whether it stays always on top."
+  "module.description": "Select a visible window and toggle whether it stays always on top.",
+  "view.title": "Window Topmost",
+  "view.subtitle": "Choose a visible window and toggle always-on-top.",
+  "actions.refresh": "Refresh",
+  "actions.pickWindow": "Pick Window",
+  "actions.setTopmost": "Set Topmost",
+  "actions.removeTopmost": "Remove Topmost",
+  "columns.title": "Title",
+  "columns.process": "Process",
+  "columns.hwnd": "HWND",
+  "columns.topmost": "Topmost",
+  "status.ready": "Ready.",
+  "status.refreshed": "Window list refreshed.",
+  "status.selected": "Selected window: {0}",
+  "status.topmostSet": "Window set to topmost.",
+  "status.topmostRemoved": "Window removed from topmost.",
+  "status.pickPending": "Move the cursor over a window and confirm.",
+  "status.pickFailed": "No window was picked.",
+  "status.noWindowSelected": "No window selected.",
+  "values.yes": "Yes",
+  "values.no": "No",
+  "errors.operationFailed": "Operation failed: {0}"
 }

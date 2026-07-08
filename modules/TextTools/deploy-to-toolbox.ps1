@@ -40,6 +40,11 @@ foreach ($file in $files) {
     }
 }
 
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "i18n") `
+    -Destination $moduleTarget `
+    -Recurse `
+    -Force
+
 Write-Host "Text Tools deployed to:"
 Write-Host "  $moduleTarget"
 Write-Host "Run the toolbox Shell and use Refresh Modules -> Load -> Open."

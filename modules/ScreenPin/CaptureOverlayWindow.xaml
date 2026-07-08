@@ -39,9 +39,10 @@
                 BorderThickness="1"
                 CornerRadius="12"
                 Padding="12,8">
-            <TextBlock Foreground="#F8FAFC"
+            <TextBlock x:Name="InstructionText"
+                       Foreground="#F8FAFC"
                        FontSize="14"
-                       Text="拖拽选择截图区域 · Esc 取消"/>
+                       Text="Drag to capture a region · Esc to cancel"/>
         </Border>
     </Canvas>
 </Window>

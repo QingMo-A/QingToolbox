@@ -3,13 +3,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid Margin="28">
         <StackPanel>
-            <TextBlock FontSize="26" FontWeight="SemiBold" Text="Screen Pin"/>
-            <TextBlock Margin="0,8,0,24" Foreground="#64748B"
+            <TextBlock x:Name="TitleText" FontSize="26" FontWeight="SemiBold" Text="Screen Pin"/>
+            <TextBlock x:Name="SubtitleText" Margin="0,8,0,24" Foreground="#64748B"
                        Text="Capture a screen region and keep it on screen as a floating image."/>
             <WrapPanel>
-                <Button Padding="18,10" Margin="0,0,10,0"
+                <Button x:Name="CaptureButton" Padding="18,10" Margin="0,0,10,0"
                         Click="OnCapture" Content="Capture Region"/>
-                <Button Padding="18,10" Click="OnCloseAll" Content="Close All Pins"/>
+                <Button x:Name="CloseAllButton" Padding="18,10" Click="OnCloseAll" Content="Close All Pins"/>
             </WrapPanel>
             <TextBlock x:Name="CountText" Margin="0,22,0,0" FontWeight="SemiBold"/>
         </StackPanel>

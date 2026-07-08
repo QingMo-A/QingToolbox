@@ -3,18 +3,27 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using QingToolbox.Abstractions.Localization;
 
 namespace QingToolbox.Modules.ScreenPin;
 
 public partial class CaptureOverlayWindow : Window
 {
+    private readonly ILocalizationService? _localization;
+    private readonly string _moduleId;
     private Point? _start;
+
     public Rect? SelectedRegionDip { get; private set; }
     public Matrix TransformToDevice { get; private set; } = Matrix.Identity;
 
-    public CaptureOverlayWindow()
+    public CaptureOverlayWindow(
+        ILocalizationService? localization = null,
+        string moduleId = "qing.screenpin")
     {
         InitializeComponent();
+        _localization = localization;
+        _moduleId = moduleId;
+        RefreshLocalization();
         var virtualScreenDip = GetVirtualScreenDip();
         Left = virtualScreenDip.Left;
         Top = virtualScreenDip.Top;
@@ -79,7 +88,12 @@ public partial class CaptureOverlayWindow : Window
 
         var width = Math.Max(0, (int)Math.Round(rect.Width));
         var height = Math.Max(0, (int)Math.Round(rect.Height));
-        SizeText.Text = $"{width} × {height}";
+        SizeText.Text = _localization?.GetModuleString(
+            _moduleId,
+            "overlay.size",
+            "{0} × {1}",
+            width,
+            height) ?? $"{width} × {height}";
 
         Canvas.SetLeft(SizeBadge, rect.X + 8);
         Canvas.SetTop(SizeBadge, Math.Max(8, rect.Y - 34));
@@ -98,4 +112,13 @@ public partial class CaptureOverlayWindow : Window
         SystemParameters.VirtualScreenTop,
         SystemParameters.VirtualScreenWidth,
         SystemParameters.VirtualScreenHeight);
+
+    private void RefreshLocalization()
+    {
+        InstructionText.Text = _localization?.GetModuleString(
+            _moduleId,
+            "overlay.instruction",
+            "Drag to capture a region · Esc to cancel")
+            ?? "Drag to capture a region · Esc to cancel";
+    }
 }

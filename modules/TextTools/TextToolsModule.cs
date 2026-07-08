@@ -4,6 +4,7 @@ namespace QingToolbox.Modules.TextTools;
 
 public sealed class TextToolsModule : IToolModule
 {
+    private ModuleContext? _context;
     public string Id => "qing.texttools";
 
     public string Name => "Text Tools";
@@ -14,6 +15,7 @@ public sealed class TextToolsModule : IToolModule
         ModuleContext context,
         CancellationToken cancellationToken = default)
     {
+        _context = context;
         return Task.CompletedTask;
     }
 
@@ -29,16 +31,20 @@ public sealed class TextToolsModule : IToolModule
 
     public Task OnUnloadAsync(CancellationToken cancellationToken = default)
     {
+        _context = null;
         return Task.CompletedTask;
     }
 
     public object? CreateView()
     {
-        return new TextToolsView();
+        return _context is null
+            ? throw new InvalidOperationException("Module context is not available.")
+            : new TextToolsView(_context.Localization, _context.ModuleId);
     }
 
     public ValueTask DisposeAsync()
     {
+        _context = null;
         return ValueTask.CompletedTask;
     }
 }

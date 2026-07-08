@@ -13,11 +13,13 @@
         </Grid.RowDefinitions>
 
         <StackPanel>
-            <TextBlock Text="Text Tools"
+            <TextBlock x:Name="TitleText"
+                       Text="Text Tools"
                        FontSize="28"
                        FontWeight="SemiBold"
                        Foreground="#111827"/>
-            <TextBlock Margin="0,6,0,0"
+            <TextBlock x:Name="SubtitleText"
+                       Margin="0,6,0,0"
                        Text="Lightweight text conversion and formatting tools."
                        Foreground="#64748B"/>
         </StackPanel>
@@ -34,7 +36,8 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
-                <TextBlock Margin="2,0,0,8"
+                <TextBlock x:Name="InputLabelText"
+                           Margin="2,0,0,8"
                            Text="Input"
                            FontWeight="SemiBold"
                            Foreground="#334155"/>
@@ -55,7 +58,8 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
-                <TextBlock Margin="2,0,0,8"
+                <TextBlock x:Name="OutputLabelText"
+                           Margin="2,0,0,8"
                            Text="Output"
                            FontWeight="SemiBold"
                            Foreground="#334155"/>
@@ -73,17 +77,17 @@
         </Grid>
 
         <WrapPanel Grid.Row="2">
-            <Button Margin="0,0,8,8" Padding="12,7" Content="Format JSON" Click="FormatJson_Click"/>
-            <Button Margin="0,0,8,8" Padding="12,7" Content="Minify JSON" Click="MinifyJson_Click"/>
-            <Button Margin="0,0,8,8" Padding="12,7" Content="Base64 Encode" Click="Base64Encode_Click"/>
-            <Button Margin="0,0,8,8" Padding="12,7" Content="Base64 Decode" Click="Base64Decode_Click"/>
-            <Button Margin="0,0,8,8" Padding="12,7" Content="URL Encode" Click="UrlEncode_Click"/>
-            <Button Margin="0,0,8,8" Padding="12,7" Content="URL Decode" Click="UrlDecode_Click"/>
-            <Button Margin="0,0,8,8" Padding="12,7" Content="Uppercase" Click="Uppercase_Click"/>
-            <Button Margin="0,0,8,8" Padding="12,7" Content="Lowercase" Click="Lowercase_Click"/>
-            <Button Margin="0,0,8,8" Padding="12,7" Content="Remove Empty Lines" Click="RemoveEmptyLines_Click"/>
-            <Button Margin="0,0,8,8" Padding="12,7" Content="Copy Output To Input" Click="CopyOutputToInput_Click"/>
-            <Button Margin="0,0,0,8" Padding="12,7" Content="Clear" Click="Clear_Click"/>
+            <Button x:Name="FormatJsonButton" Margin="0,0,8,8" Padding="12,7" Content="Format JSON" Click="FormatJson_Click"/>
+            <Button x:Name="MinifyJsonButton" Margin="0,0,8,8" Padding="12,7" Content="Minify JSON" Click="MinifyJson_Click"/>
+            <Button x:Name="Base64EncodeButton" Margin="0,0,8,8" Padding="12,7" Content="Base64 Encode" Click="Base64Encode_Click"/>
+            <Button x:Name="Base64DecodeButton" Margin="0,0,8,8" Padding="12,7" Content="Base64 Decode" Click="Base64Decode_Click"/>
+            <Button x:Name="UrlEncodeButton" Margin="0,0,8,8" Padding="12,7" Content="URL Encode" Click="UrlEncode_Click"/>
+            <Button x:Name="UrlDecodeButton" Margin="0,0,8,8" Padding="12,7" Content="URL Decode" Click="UrlDecode_Click"/>
+            <Button x:Name="UppercaseButton" Margin="0,0,8,8" Padding="12,7" Content="Uppercase" Click="Uppercase_Click"/>
+            <Button x:Name="LowercaseButton" Margin="0,0,8,8" Padding="12,7" Content="Lowercase" Click="Lowercase_Click"/>
+            <Button x:Name="RemoveEmptyLinesButton" Margin="0,0,8,8" Padding="12,7" Content="Remove Empty Lines" Click="RemoveEmptyLines_Click"/>
+            <Button x:Name="CopyOutputToInputButton" Margin="0,0,8,8" Padding="12,7" Content="Copy Output To Input" Click="CopyOutputToInput_Click"/>
+            <Button x:Name="ClearButton" Margin="0,0,0,8" Padding="12,7" Content="Clear" Click="Clear_Click"/>
         </WrapPanel>
 
         <Border Grid.Row="3"
