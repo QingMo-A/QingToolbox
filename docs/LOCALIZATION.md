@@ -1,7 +1,7 @@
 # Localization
 
-QingToolbox localizes the Shell and module manifest metadata. The first phase
-supports `system`, `zh-CN`, and `en-US`.
+QingToolbox supports Shell localization, module manifest localization, and
+module View localization.
 
 The selected language is stored outside the repository:
 
@@ -11,7 +11,7 @@ The selected language is stored outside the repository:
 
 Missing or damaged settings safely fall back to `system`.
 
-## Module resources
+## Module manifest localization
 
 Modules may declare localization in `module.json`:
 
@@ -28,32 +28,96 @@ Modules may declare localization in `module.json`:
 }
 ```
 
-Resource files are flat JSON string dictionaries:
+Resource files are flat JSON string dictionaries. Manifest metadata currently
+uses these keys:
 
 ```json
 {
-  "module.name": "文本工具",
-  "module.description": "轻量文本转换与格式化工具。"
+  "module.name": "Text Tools",
+  "module.description": "Lightweight text conversion and formatting tools."
 }
 ```
-
-Use standard culture codes and stable dotted keys. Metadata currently uses
-`module.name` and `module.description`.
 
 The fallback order is the selected culture, its parent, the module's
 `defaultLanguage`, `en-US`, the original manifest value, and finally the key.
 Missing files, keys, or localization metadata do not prevent discovery. Older
 modules continue to use their original `module.json` values.
 
-Localization JSON is read with the manifest. Refreshing modules does not load
-module DLLs or invoke module code. Module-view localization is planned for a
-later phase.
+Refreshing modules reads `module.json` and i18n JSON files only. It must not
+load module DLLs or invoke module code.
 
-The first phase covers Shell navigation, page headings, module management
-actions, status messages, module detail labels, and module manifest name and
-description metadata. It does not localize controls inside a module View.
+## Module View localization
 
-Missing, invalid, or unsafe module localization resources are reported in the
-module card's collapsed **Details** issue list. These diagnostics do not stop
-the module from being discovered, and modules without localization metadata
-remain fully compatible.
+When a module is loaded, the host passes `ILocalizationService` through
+`ModuleContext.Localization`. Module code should use this service instead of
+reading Shell settings directly or assuming the current language.
+
+Example:
+
+```csharp
+private ModuleContext? _context;
+
+public Task OnLoadAsync(
+    ModuleContext context,
+    CancellationToken cancellationToken)
+{
+    _context = context;
+    return Task.CompletedTask;
+}
+
+public object? CreateView()
+{
+    return new MyModuleView(_context!.Localization, _context.ModuleId);
+}
+```
+
+Inside the View:
+
+```csharp
+title.Text = localization.GetModuleString(
+    moduleId,
+    "view.title",
+    "My Module");
+```
+
+Recommended key groups:
+
+- `module.name`
+- `module.description`
+- `view.title`
+- `actions.xxx`
+- `status.xxx`
+- `errors.xxx`
+
+## Refreshing open module Views
+
+Modules that want the host to refresh an already-open View on language changes
+can implement:
+
+```csharp
+using QingToolbox.Abstractions.Localization;
+
+public sealed class MyModuleView : UserControl, ILocalizedModuleView
+{
+    public void RefreshLocalization()
+    {
+        // Update visible text from ModuleContext.Localization.
+    }
+}
+```
+
+The Shell detects `ILocalizedModuleView` on open module window content and calls
+`RefreshLocalization()` after the user changes the language. It does not reload
+the module, recreate the View, or close the window.
+
+Modules may also subscribe to `ILocalizationService.CultureChanged` directly.
+If they do, they must unsubscribe on `Unloaded`, `Dispose`, or module unload so
+the module AssemblyLoadContext can still be collected.
+
+Do not:
+
+- read `%APPDATA%\QingToolbox\settings.json` from a module;
+- hard-code UI language assumptions;
+- put module UI text in Shell resources;
+- load module DLLs during Refresh Modules;
+- use module View i18n before the module has been loaded/opened.

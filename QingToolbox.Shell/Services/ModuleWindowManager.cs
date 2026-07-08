@@ -61,6 +61,14 @@ public sealed class ModuleWindowManager
         }
     }
 
+    public void RefreshOpenWindowLocalization()
+    {
+        foreach (var window in _windows.Values)
+        {
+            window.RefreshLocalization();
+        }
+    }
+
     public void CloseAll()
     {
         foreach (var window in _windows.Values.ToArray())

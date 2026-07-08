@@ -1,4 +1,6 @@
 {
   "module.name": "Hello Module",
-  "module.description": "A sample module used to verify loading, activation, view hosting and unloading."
+  "module.description": "A sample module used to verify loading, activation, view hosting and unloading.",
+  "view.title": "Hello Module",
+  "view.message": "This view is localized through ModuleContext.Localization."
 }

@@ -1,9 +1,10 @@
 using System.Reflection;
+using QingToolbox.Abstractions.Localization;
 using QingToolbox.Abstractions.Modules;
 
 namespace QingToolbox.ModuleLoader;
 
-public sealed class InProcessModuleLoader
+public sealed class InProcessModuleLoader(ILocalizationService localization)
 {
     public async Task<LoadedModuleHandle> LoadAsync(
         DiscoveredModule discoveredModule,
@@ -49,7 +50,8 @@ public sealed class InProcessModuleLoader
             {
                 ModuleId = manifest.Id,
                 ModuleDirectory = discoveredModule.ModuleDirectory,
-                DataDirectory = dataDirectory
+                DataDirectory = dataDirectory,
+                Localization = localization
             };
 
             await module.OnLoadAsync(context, cancellationToken);

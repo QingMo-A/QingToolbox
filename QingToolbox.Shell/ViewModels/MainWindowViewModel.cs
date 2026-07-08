@@ -133,6 +133,7 @@ public sealed partial class MainWindowViewModel(
         {
             module.RefreshLocalization();
         }
+        moduleWindowManager.RefreshOpenWindowLocalization();
 
         OnPropertyChanged(nameof(PageTitle));
         OnPropertyChanged(nameof(PageSubtitle));

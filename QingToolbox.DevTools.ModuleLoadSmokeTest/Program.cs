@@ -1,5 +1,8 @@
 using System.IO;
+using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Windows;
+using QingToolbox.Abstractions.Localization;
 using QingToolbox.Abstractions.Modules;
 using QingToolbox.Core.Runtime;
 using QingToolbox.ModuleLoader;
@@ -152,17 +155,7 @@ internal static class Program
         EnsureState(record, ModuleState.Loaded);
 
         var weakReference = GetLoadContextWeakReference(record);
-        object? view = runtimeManager.CreateView("qing.hello");
-
-        if (view is null)
-        {
-            throw new InvalidOperationException("CreateView returned null.");
-        }
-
-        Console.WriteLine($"Created module view: {view.GetType().FullName}");
-
-        view = null;
-        Console.WriteLine("Released module view reference.");
+        CreateRefreshAndReleaseView(runtimeManager);
 
         runtimeManager.UnloadAsync("qing.hello")
             .GetAwaiter()
@@ -172,10 +165,45 @@ internal static class Program
         return weakReference;
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void CreateRefreshAndReleaseView(
+        ModuleRuntimeManager runtimeManager)
+    {
+        object? view = runtimeManager.CreateView("qing.hello");
+
+        if (view is null)
+        {
+            throw new InvalidOperationException("CreateView returned null.");
+        }
+
+        Console.WriteLine($"Created module view: {view.GetType().FullName}");
+        ValidateLocalizedView(view);
+        view = null;
+        Console.WriteLine("Released module view reference.");
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ValidateLocalizedView(object view)
+    {
+        var localizedView =
+            view as ILocalizedModuleView ??
+            (view as FrameworkElement)?.Tag as ILocalizedModuleView;
+
+        if (localizedView is null)
+        {
+            throw new InvalidOperationException(
+                "Hello view does not expose ILocalizedModuleView.");
+        }
+
+        localizedView.RefreshLocalization();
+        Console.WriteLine("Hello view localization refresh succeeded.");
+    }
+
     private static ModuleRuntimeManager CreateRuntimeManager(
         DiscoveredModule discoveredModule)
     {
-        var runtimeManager = new ModuleRuntimeManager(new InProcessModuleLoader());
+        var runtimeManager = new ModuleRuntimeManager(
+            new InProcessModuleLoader(new SmokeTestLocalizationService()));
         runtimeManager.ReplaceDiscoveredModules([discoveredModule]);
         return runtimeManager;
     }
@@ -273,4 +301,45 @@ internal static class Program
     private sealed record SmokeTestOptions(
         string? ModulesDirectory,
         string? DataDirectory);
+
+    private sealed class SmokeTestLocalizationService : ILocalizationService
+    {
+        public CultureInfo CurrentCulture { get; } =
+            CultureInfo.GetCultureInfo("en-US");
+
+        public string CurrentLanguageCode => CurrentCulture.Name;
+
+        public event EventHandler? CultureChanged;
+
+        public string GetString(string key) => key;
+
+        public string GetString(string key, params object[] args) =>
+            string.Format(CultureInfo.InvariantCulture, key, args);
+
+        public string GetModuleString(
+            string moduleId,
+            string key,
+            string? fallback = null)
+        {
+            if (moduleId == "qing.hello" && key == "view.title")
+            {
+                return "Smoke Test Hello";
+            }
+
+            return fallback ?? key;
+        }
+
+        public string GetModuleString(
+            string moduleId,
+            string key,
+            string? fallback,
+            params object[] args) =>
+            string.Format(
+                CultureInfo.InvariantCulture,
+                GetModuleString(moduleId, key, fallback),
+                args);
+
+        public void RaiseCultureChangedForTest() =>
+            CultureChanged?.Invoke(this, EventArgs.Empty);
+    }
 }

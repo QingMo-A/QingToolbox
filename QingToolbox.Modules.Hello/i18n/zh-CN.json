@@ -1,4 +1,6 @@
 {
   "module.name": "你好模块",
-  "module.description": "用于验证加载、启用、视图宿主和卸载流程的示例模块。"
+  "module.description": "用于验证加载、启用、视图宿主和卸载流程的示例模块。",
+  "view.title": "你好模块",
+  "view.message": "此视图通过 ModuleContext.Localization 读取模块内部本地化文本。"
 }
