@@ -1,0 +1,10 @@
+{
+  "module.name": "模板模块",
+  "module.description": "用于创建 QingToolbox 模块的起始模板。",
+  "view.title": "模板模块",
+  "view.subtitle": "使用此模板创建支持本地化的 QingToolbox 模块。",
+  "actions.primary": "主要操作",
+  "status.ready": "就绪。",
+  "status.done": "完成。",
+  "errors.operationFailed": "操作失败：{0}"
+}

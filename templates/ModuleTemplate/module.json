@@ -1,0 +1,20 @@
+{
+  "id": "qing.template",
+  "name": "Template Module",
+  "description": "A starter module template for QingToolbox.",
+  "version": "0.1.0",
+  "author": "QingMo",
+  "entry": "QingToolbox.Modules.Template.dll",
+  "icon": "icon.svg",
+  "runtimeType": "InProcess",
+  "loadMode": "Manual",
+  "permissions": [],
+  "defaultLanguage": "en-US",
+  "localization": {
+    "basePath": "i18n",
+    "resources": {
+      "en-US": "i18n/en-US.json",
+      "zh-CN": "i18n/zh-CN.json"
+    }
+  }
+}

@@ -40,3 +40,16 @@ public partial class MyView : UserControl, ILocalizedModuleView
 `RefreshLocalization()` should only update visible text. It should not clear
 user input, clear output, reload data, enumerate windows, capture screenshots,
 or rerun business logic.
+
+## Module author checklist
+
+- Include UTF-8 `i18n/en-US.json` and `i18n/zh-CN.json` with identical keys.
+- Declare `defaultLanguage: "en-US"` and both files in `localization.resources`.
+- Use `module.name` / `module.description` for card metadata and namespaced UI
+  keys such as `view.title`, `actions.primary`, `status.ready`, and
+  `errors.operationFailed` in module views.
+- Pass `ModuleContext.Localization` and `ModuleContext.ModuleId` to the view;
+  do not cache either one statically.
+- Implement `ILocalizedModuleView` when an open view should refresh after a host
+  culture change. `RefreshLocalization()` must only refresh text.
+- Run `./scripts/verify-modules.ps1` before committing.

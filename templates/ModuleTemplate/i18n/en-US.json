@@ -1,0 +1,10 @@
+{
+  "module.name": "Template Module",
+  "module.description": "A starter module template for QingToolbox.",
+  "view.title": "Template Module",
+  "view.subtitle": "Use this template to build a localized QingToolbox module.",
+  "actions.primary": "Primary Action",
+  "status.ready": "Ready.",
+  "status.done": "Done.",
+  "errors.operationFailed": "Operation failed: {0}"
+}

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <QingToolboxHostRoot Condition="'$(QingToolboxHostRoot)' == ''">..\..\..\QingToolbox-toolbox</QingToolboxHostRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(QingToolboxHostRoot)\QingToolbox.Abstractions\QingToolbox.Abstractions.csproj"
+                      Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="module.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="icon.svg" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="i18n\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

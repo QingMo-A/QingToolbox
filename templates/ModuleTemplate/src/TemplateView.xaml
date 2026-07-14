@@ -1,0 +1,21 @@
+<UserControl x:Class="QingToolbox.Modules.Template.TemplateView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             MinWidth="480"
+             MinHeight="280">
+    <StackPanel Margin="24">
+        <TextBlock x:Name="TitleText"
+                   FontSize="28"
+                   FontWeight="SemiBold" />
+        <TextBlock x:Name="SubtitleText"
+                   Margin="0,8,0,20"
+                   TextWrapping="Wrap" />
+        <Button x:Name="PrimaryButton"
+                Width="128"
+                HorizontalAlignment="Left"
+                Padding="12,7"
+                Click="PrimaryButton_Click" />
+        <TextBlock x:Name="StatusText"
+                   Margin="0,16,0,0" />
+    </StackPanel>
+</UserControl>
