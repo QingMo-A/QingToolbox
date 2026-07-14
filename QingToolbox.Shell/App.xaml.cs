@@ -31,11 +31,13 @@ public partial class App : Application
         services.AddSingleton<ILocalizationService>(
             provider => provider.GetRequiredService<LocalizationManager>());
         services.AddSingleton<ModuleWindowManager>();
+        services.AddSingleton<ApplicationPaths>();
         services.AddSingleton<ModulePackageImporter>();
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<MainWindow>();
 
         _serviceProvider = services.BuildServiceProvider();
+        _serviceProvider.GetRequiredService<ApplicationPaths>().EnsureUserDirectories();
 
         var localizationDirectory = Path.Combine(
             AppContext.BaseDirectory,

@@ -4,6 +4,8 @@ obj/
 *.user
 *.suo
 TestResults/
+artifacts/
+publish/
 *.dll
 *.exe
 *.pdb

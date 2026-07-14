@@ -1,4 +1,5 @@
 using System.IO;
+using System.IO.Compression;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows;
@@ -6,6 +7,7 @@ using QingToolbox.Abstractions.Localization;
 using QingToolbox.Abstractions.Modules;
 using QingToolbox.Core.Runtime;
 using QingToolbox.ModuleLoader;
+using QingToolbox.Shell.Services;
 
 namespace QingToolbox.DevTools.ModuleLoadSmokeTest;
 
@@ -30,11 +32,12 @@ internal static class Program
     {
         var options = ParseOptions(args);
         var repositoryRoot = FindRepositoryRoot(AppContext.BaseDirectory);
+        var configuration = GetBuildConfiguration(AppContext.BaseDirectory);
         var shellOutput = Path.Combine(
             repositoryRoot,
             "QingToolbox.Shell",
             "bin",
-            "Debug",
+            configuration,
             "net10.0-windows");
 
         var modulesDirectory = Path.GetFullPath(
@@ -104,8 +107,108 @@ internal static class Program
         }
 
         Console.WriteLine("CreateView scenario unloaded successfully.");
+        RunQmodImportScenario(repositoryRoot);
         Console.WriteLine("Smoke test passed.");
         return 0;
+    }
+
+    private static void RunQmodImportScenario(string repositoryRoot)
+    {
+        Console.WriteLine("Starting .qmod import scenario...");
+        var testRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"QingToolbox-qmod-smoke-{Guid.NewGuid():N}");
+        var packageSource = Path.Combine(testRoot, "package");
+        var userModules = Path.Combine(testRoot, "user-modules");
+        var validPackage = Path.Combine(testRoot, "hello.qmod");
+        var maliciousPackage = Path.Combine(testRoot, "malicious.qmod");
+
+        try
+        {
+            Directory.CreateDirectory(packageSource);
+            File.Copy(
+                Path.Combine(repositoryRoot, "QingToolbox.Modules.Hello", "module.json"),
+                Path.Combine(packageSource, "module.json"));
+            File.Copy(
+                Path.Combine(repositoryRoot, "QingToolbox.Modules.Hello", "icon.svg"),
+                Path.Combine(packageSource, "icon.svg"));
+            File.Copy(
+                Path.Combine(
+                    repositoryRoot,
+                    "QingToolbox.Modules.Hello",
+                    "bin",
+                    "Release",
+                    "net10.0-windows",
+                    "QingToolbox.Modules.Hello.dll"),
+                Path.Combine(packageSource, "QingToolbox.Modules.Hello.dll"));
+            CopyDirectory(
+                Path.Combine(repositoryRoot, "QingToolbox.Modules.Hello", "i18n"),
+                Path.Combine(packageSource, "i18n"));
+            ZipFile.CreateFromDirectory(packageSource, validPackage);
+
+            var importer = new ModulePackageImporter(
+                new ModuleManifestReader(),
+                new ModuleManifestValidator());
+            var importedId = importer.ImportAsync(validPackage, userModules)
+                .GetAwaiter()
+                .GetResult();
+            if (importedId != "qing.hello" ||
+                !File.Exists(Path.Combine(userModules, importedId, "module.json")))
+            {
+                throw new InvalidOperationException("Valid .qmod import did not complete.");
+            }
+
+            try
+            {
+                importer.ImportAsync(validPackage, userModules, ["qing.hello"])
+                    .GetAwaiter()
+                    .GetResult();
+                throw new InvalidOperationException("Duplicate .qmod import was not rejected.");
+            }
+            catch (IOException)
+            {
+                Console.WriteLine("Duplicate module id rejected successfully.");
+            }
+
+            using (var archive = ZipFile.Open(maliciousPackage, ZipArchiveMode.Create))
+            {
+                archive.CreateEntry("../escape.txt");
+                var manifestEntry = archive.CreateEntry("module.json");
+                using var source = File.OpenRead(Path.Combine(packageSource, "module.json"));
+                using var destination = manifestEntry.Open();
+                source.CopyTo(destination);
+            }
+
+            try
+            {
+                importer.ImportAsync(maliciousPackage, Path.Combine(testRoot, "malicious-target"))
+                    .GetAwaiter()
+                    .GetResult();
+                throw new InvalidOperationException("Path-traversal .qmod was not rejected.");
+            }
+            catch (InvalidDataException)
+            {
+                Console.WriteLine("Path-traversal package rejected successfully.");
+            }
+
+            Console.WriteLine(".qmod import scenario passed.");
+        }
+        finally
+        {
+            if (Directory.Exists(testRoot))
+            {
+                Directory.Delete(testRoot, recursive: true);
+            }
+        }
+    }
+
+    private static void CopyDirectory(string sourceDirectory, string targetDirectory)
+    {
+        Directory.CreateDirectory(targetDirectory);
+        foreach (var file in Directory.EnumerateFiles(sourceDirectory))
+        {
+            File.Copy(file, Path.Combine(targetDirectory, Path.GetFileName(file)));
+        }
     }
 
     private static async Task<WeakReference> RunRuntimeLifecycleAsync(
@@ -341,5 +444,15 @@ internal static class Program
 
         public void RaiseCultureChangedForTest() =>
             CultureChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static string GetBuildConfiguration(string baseDirectory)
+    {
+        var segments = baseDirectory.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+        return segments.LastOrDefault(segment =>
+                   segment is "Debug" or "Release") ??
+               "Debug";
     }
 }

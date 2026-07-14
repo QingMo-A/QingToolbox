@@ -1,5 +1,6 @@
 using System.IO;
 using System.IO.Compression;
+using System.Text.Json;
 using QingToolbox.ModuleLoader;
 
 namespace QingToolbox.Shell.Services;
@@ -14,6 +15,7 @@ public sealed class ModulePackageImporter(
     public async Task<string> ImportAsync(
         string packagePath,
         string modulesRoot,
+        IReadOnlyCollection<string>? existingModuleIds = null,
         CancellationToken cancellationToken = default)
     {
         if (!string.Equals(Path.GetExtension(packagePath), ".qmod", StringComparison.OrdinalIgnoreCase))
@@ -43,7 +45,7 @@ public sealed class ModulePackageImporter(
 
             var manifestEntries = archive.Entries
                 .Where(entry => string.Equals(
-                    Path.GetFileName(NormalizeEntryPath(entry.FullName)),
+                    NormalizeEntryPath(entry.FullName),
                     "module.json",
                     StringComparison.OrdinalIgnoreCase))
                 .ToArray();
@@ -52,19 +54,11 @@ public sealed class ModulePackageImporter(
                 throw new InvalidDataException("A .qmod package must contain exactly one module.json.");
             }
 
-            var normalizedManifestPath = NormalizeEntryPath(manifestEntries[0].FullName);
-            var packagePrefix = normalizedManifestPath[..^"module.json".Length];
-
             foreach (var entry in archive.Entries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var normalizedPath = NormalizeEntryPath(entry.FullName);
-                if (!normalizedPath.StartsWith(packagePrefix, StringComparison.Ordinal))
-                {
-                    throw new InvalidDataException("Package entries must share the module.json root directory.");
-                }
-
-                var relativePath = normalizedPath[packagePrefix.Length..];
+                var relativePath = normalizedPath;
                 if (string.IsNullOrEmpty(relativePath))
                 {
                     continue;
@@ -84,7 +78,13 @@ public sealed class ModulePackageImporter(
             }
 
             var manifestPath = Path.Combine(stagingDirectory, "module.json");
+            ValidateRequiredManifestFields(manifestPath);
             var manifest = await manifestReader.ReadAsync(manifestPath, cancellationToken);
+            if (manifest is not null)
+            {
+                var normalizedEntry = NormalizeEntryPath(manifest.Entry);
+                _ = GetSafeDestinationPath(stagingDirectory, normalizedEntry);
+            }
             var validationErrors = manifestValidator.Validate(
                 manifest,
                 stagingDirectory,
@@ -97,6 +97,12 @@ public sealed class ModulePackageImporter(
             }
 
             var moduleId = manifest!.Id;
+            if (existingModuleIds?.Contains(moduleId, StringComparer.Ordinal) == true)
+            {
+                throw new IOException(
+                    $"Module '{moduleId}' is already installed. Remove the existing module before importing it again.");
+            }
+
             var folderName = CreateSafeFolderName(moduleId);
             var targetDirectory = Path.Combine(modulesRoot, folderName);
             if (Directory.Exists(targetDirectory))
@@ -158,5 +164,39 @@ public sealed class ModulePackageImporter(
         }
 
         return folderName;
+    }
+
+    private static void ValidateRequiredManifestFields(string manifestPath)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("module.json must contain a JSON object.");
+        }
+
+        var properties = document.RootElement
+            .EnumerateObject()
+            .ToDictionary(property => property.Name, StringComparer.OrdinalIgnoreCase);
+        var requiredFields = new[]
+        {
+            "id",
+            "name",
+            "description",
+            "version",
+            "entry",
+            "runtimeType",
+            "loadMode",
+            "defaultLanguage",
+            "localization"
+        };
+        var missingFields = requiredFields
+            .Where(field => !properties.ContainsKey(field) ||
+                            properties[field].Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            .ToArray();
+        if (missingFields.Length > 0)
+        {
+            throw new InvalidDataException(
+                $"module.json is missing required fields: {string.Join(", ", missingFields)}");
+        }
     }
 }

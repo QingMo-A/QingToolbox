@@ -124,3 +124,21 @@ view, and Unload clears the view before releasing the module.
 The deployment script also copies the optional module `icon.svg` and dependency manifest.
 The Shell resolves module icon paths from `module.json`; missing icons use the packaged
 default icon and do not cause module assemblies to load.
+
+## Preview publishing
+
+Create the framework-dependent `0.1.0-alpha` Windows x64 Preview archive with:
+
+```powershell
+./scripts/publish-preview.ps1
+```
+
+To include the .NET runtime:
+
+```powershell
+./scripts/publish-preview.ps1 -SelfContained $true
+```
+
+The script publishes in Release configuration, creates
+`artifacts/QingToolbox-0.1.0-alpha-win-x64.zip`, and writes its SHA256 beside
+the archive. `artifacts/` is ignored by Git.

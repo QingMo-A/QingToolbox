@@ -28,7 +28,10 @@
 
 发现流程不会加载模块 DLL，也不会创建 `IToolModule` 实例。
 
-运行时模块目录未来可位于应用目录或用户数据目录；仓库根目录的 `Modules` 仅预留给本地开发模块包。
+Shell 按顺序扫描程序目录下的 `Modules`（开发或随程序提供，只读用途）和
+`%LOCALAPPDATA%\QingToolbox\Modules`（用户导入模块）。同 ID 冲突时开发目录优先。
+模块运行数据位于 `%APPDATA%\QingToolbox\Data`，用户设置位于
+`%APPDATA%\QingToolbox\settings.json`。扫描和刷新均不会加载模块 DLL。
 
 Shell 仍然不能直接引用模块项目，模块只能依赖 Abstractions。
 

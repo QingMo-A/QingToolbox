@@ -10,6 +10,7 @@ using System.Windows;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Core.Localization;
 using Microsoft.Win32;
+using System.Reflection;
 
 namespace QingToolbox.Shell.ViewModels;
 
@@ -19,6 +20,7 @@ public sealed partial class MainWindowViewModel(
     ModuleRuntimeManager runtimeManager,
     ModuleWindowManager moduleWindowManager,
     ModulePackageImporter modulePackageImporter,
+    ApplicationPaths applicationPaths,
     LocalizationManager localizationManager,
     ILocalizationService localization) : ObservableObject
 {
@@ -66,6 +68,10 @@ public sealed partial class MainWindowViewModel(
     private DiscoveredModuleViewModel? _selectedModule;
 
     public string Title => "Qing Toolbox";
+    public string VersionDisplay =>
+        typeof(MainWindowViewModel).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion.Split('+')[0] ?? "0.1.0-alpha";
     public LocalizedText Strings { get; } = new(localization);
     public ObservableCollection<LanguageOptionViewModel> LanguageOptions { get; } =
     [
@@ -185,8 +191,15 @@ public sealed partial class MainWindowViewModel(
             StatusMessage = localization.GetString(
                 "status.scanningModules");
 
-            var modulesRoot = Path.Combine(AppContext.BaseDirectory, "Modules");
-            var discoveredModules = await scanner.ScanAsync(modulesRoot);
+            var developmentModules = await scanner.ScanAsync(
+                applicationPaths.DevelopmentModulesDirectory);
+            var userModules = await scanner.ScanAsync(
+                applicationPaths.UserModulesDirectory);
+            var discoveredModules = developmentModules
+                .Concat(userModules)
+                .GroupBy(module => module.Manifest.Id, StringComparer.Ordinal)
+                .Select(group => group.First())
+                .ToArray();
             localizationManager.ClearModuleLocalizations();
             var localizationDiagnosticsByModuleId =
                 new Dictionary<string, IReadOnlyList<string>>(
@@ -250,15 +263,12 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand]
     private Task LoadModuleAsync(string moduleId)
     {
-        var dataRootDirectory = Path.Combine(
-            AppContext.BaseDirectory,
-            "UserData",
-            "modules");
-
         return ExecuteLifecycleAsync(
             moduleId,
             "load",
-            () => runtimeManager.LoadAsync(moduleId, dataRootDirectory));
+            () => runtimeManager.LoadAsync(
+                moduleId,
+                applicationPaths.ModuleDataDirectory));
     }
 
     [RelayCommand]
@@ -460,10 +470,10 @@ public sealed partial class MainWindowViewModel(
 
         try
         {
-            var modulesRoot = Path.Combine(AppContext.BaseDirectory, "Modules");
             var moduleId = await modulePackageImporter.ImportAsync(
                 dialog.FileName,
-                modulesRoot);
+                applicationPaths.UserModulesDirectory,
+                Modules.Select(module => module.Id).ToArray());
             await RefreshModulesAsync();
             StatusMessage = localization.GetString("status.moduleImported", moduleId);
         }

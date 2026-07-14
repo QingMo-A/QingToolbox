@@ -1043,6 +1043,14 @@
                                   DisplayMemberPath="DisplayText"
                                   SelectedValuePath="Code"
                                   SelectedValue="{Binding SelectedLanguageCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <Border Margin="0,24,0,0" Height="1" Background="#E2E8F0"/>
+                        <TextBlock Margin="0,20,0,0"
+                                   Text="{Binding Strings[settings.version]}"
+                                   FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{StaticResource PrimaryTextBrush}"/>
+                        <TextBlock Margin="0,6,0,0"
+                                   Text="{Binding VersionDisplay, StringFormat={}{0} Preview}"
+                                   Foreground="{StaticResource SecondaryTextBrush}"/>
                     </StackPanel>
                 </Border>
             </Grid>
