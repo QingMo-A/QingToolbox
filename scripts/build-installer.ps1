@@ -4,7 +4,8 @@ param(
     [string]$Runtime = "win-x64",
     [ValidateSet("Release")]
     [string]$Configuration = "Release",
-    [string]$IsccPath
+    [string]$IsccPath,
+    [switch]$SkipPreflight
 )
 
 $ErrorActionPreference = "Stop"
@@ -86,21 +87,26 @@ try {
         New-Item -ItemType Directory -Force -Path $path | Out-Null
     }
 
-    Invoke-DotNet -Arguments @("build", "-c", $Configuration) `
-        -FailureMessage "Release build failed."
-
-    & (Join-Path $PSScriptRoot "deploy-dev-modules.ps1") `
-        -Configuration $Configuration
-    if (-not $?) {
-        throw "Development module deployment failed."
+    if ($SkipPreflight) {
+        Write-Host "Skipping Release build, module deployment, and smoke test."
     }
+    else {
+        Invoke-DotNet -Arguments @("build", "-c", $Configuration) `
+            -FailureMessage "Release build failed."
 
-    Invoke-DotNet -Arguments @(
-        "run",
-        "--project", $smokeProject,
-        "-c", $Configuration,
-        "--no-build"
-    ) -FailureMessage "Module smoke test failed."
+        & (Join-Path $PSScriptRoot "deploy-dev-modules.ps1") `
+            -Configuration $Configuration
+        if (-not $?) {
+            throw "Development module deployment failed."
+        }
+
+        Invoke-DotNet -Arguments @(
+            "run",
+            "--project", $smokeProject,
+            "-c", $Configuration,
+            "--no-build"
+        ) -FailureMessage "Module smoke test failed."
+    }
 
     Invoke-DotNet -Arguments @(
         "publish", $shellProject,

@@ -6,6 +6,7 @@ param(
     [switch]$KeepTestFiles
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $createdTestRoot = [string]::IsNullOrWhiteSpace($TestRoot)
 $testSucceeded = $false
@@ -15,11 +16,18 @@ $uninstallerProcess = $null
 $moduleSentinel = $null
 $dataSentinel = $null
 $settingsSentinel = $null
+$resolvedTestRoot = $null
+$installDirectory = $null
+$installLog = $null
+$uninstallLog = $null
+$shellExe = $null
+$currentStage = "Initialize"
 $createdUserDirectories = [System.Collections.Generic.List[string]]::new()
 
 function Write-Stage {
     param([Parameter(Mandatory = $true)][string]$Name)
 
+    $script:currentStage = $Name
     Write-Host "`n==> $Name"
 }
 
@@ -46,12 +54,16 @@ function New-TrackedDirectory {
 }
 
 function Invoke-Uninstaller {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$LogPath
+    )
 
     $process = Start-Process -FilePath $Path -ArgumentList @(
         "/VERYSILENT",
         "/SUPPRESSMSGBOXES",
-        "/NORESTART"
+        "/NORESTART",
+        "/LOG=`"$LogPath`""
     ) -Wait -PassThru
     Write-Host "Uninstaller exit code: $($process.ExitCode)"
     if ($process.ExitCode -ne 0) {
@@ -101,6 +113,7 @@ try {
         "/VERYSILENT",
         "/SUPPRESSMSGBOXES",
         "/NORESTART",
+        "/NOICONS",
         "/LANG=english",
         "/DIR=`"$installDirectory`"",
         "/LOG=`"$installLog`""
@@ -108,6 +121,9 @@ try {
     Write-Host "Installer exit code: $($installerProcess.ExitCode)"
     if ($installerProcess.ExitCode -ne 0) {
         throw "Installer failed with exit code $($installerProcess.ExitCode)."
+    }
+    if (-not (Test-Path -LiteralPath $installLog -PathType Leaf)) {
+        throw "Installer did not create its log: $installLog"
     }
 
     Write-Stage "Validate installed payload"
@@ -164,14 +180,19 @@ try {
     Write-Host "Shell CompanyName:  $($shellVersionInfo.CompanyName)"
 
     $installerVersionInfo = (Get-Item -LiteralPath $resolvedInstallerPath).VersionInfo
+    $installerFileVersion = $installerVersionInfo.FileVersion.Trim()
     $installerProductName = $installerVersionInfo.ProductName.Trim()
     $installerCompanyName = $installerVersionInfo.CompanyName.Trim()
+    if ($installerFileVersion -ne "0.1.0.0") {
+        throw "Unexpected installer FileVersion: $($installerVersionInfo.FileVersion)"
+    }
     if ($installerProductName -ne "QingToolbox") {
         throw "Unexpected installer ProductName: $($installerVersionInfo.ProductName)"
     }
     if ($installerCompanyName -ne "QingMo-A") {
         throw "Unexpected installer CompanyName: $($installerVersionInfo.CompanyName)"
     }
+    Write-Host "Installer FileVersion: $installerFileVersion"
     Write-Host "Installer ProductName: $installerProductName"
     Write-Host "Installer CompanyName: $installerCompanyName"
 
@@ -207,7 +228,11 @@ try {
     } | ConvertTo-Json | Set-Content -LiteralPath $settingsSentinel -Encoding UTF8
 
     Write-Stage "Uninstall QingToolbox silently"
-    $uninstallerProcess = Invoke-Uninstaller -Path $uninstaller.FullName
+    $uninstallerProcess = Invoke-Uninstaller -Path $uninstaller.FullName `
+        -LogPath $uninstallLog
+    if (-not (Test-Path -LiteralPath $uninstallLog -PathType Leaf)) {
+        throw "Uninstaller did not create its log: $uninstallLog"
+    }
 
     Write-Stage "Validate uninstall and retained user data"
     $installRemoved = $false
@@ -245,6 +270,15 @@ try {
 }
 catch {
     $failure = $_
+    if ($null -ne $resolvedTestRoot -and (Test-Path -LiteralPath $resolvedTestRoot)) {
+        $diagnosticsPath = Join-Path $resolvedTestRoot "diagnostics.txt"
+        @(
+            "Stage: $currentStage",
+            "Installer: $InstallerPath",
+            "Install directory: $installDirectory",
+            "Error: $($_.Exception.Message)"
+        ) | Set-Content -LiteralPath $diagnosticsPath -Encoding UTF8
+    }
 }
 finally {
     foreach ($sentinel in @($moduleSentinel, $dataSentinel, $settingsSentinel)) {
@@ -269,7 +303,14 @@ finally {
             Select-Object -First 1
         if ($null -ne $cleanupUninstaller) {
             try {
-                Invoke-Uninstaller -Path $cleanupUninstaller.FullName | Out-Null
+                $cleanupLog = if ($null -ne $uninstallLog) {
+                    $uninstallLog
+                }
+                else {
+                    Join-Path $resolvedTestRoot "uninstall.log"
+                }
+                Invoke-Uninstaller -Path $cleanupUninstaller.FullName `
+                    -LogPath $cleanupLog | Out-Null
             }
             catch {
                 Write-Warning "Cleanup uninstall failed: $_"
@@ -277,7 +318,7 @@ finally {
         }
     }
 
-    if ($KeepTestFiles) {
+    if ($KeepTestFiles -or $null -ne $failure) {
         if ($null -ne $resolvedTestRoot) {
             Write-Host "Test files retained at: $resolvedTestRoot"
         }

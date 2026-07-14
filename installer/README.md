@@ -23,6 +23,11 @@ concrete modules, source/project files, or `bin`/`obj` directories, and verifies
 the Shell executable, release documents, and localization JSON before writing
 the installer plus SHA256 to `artifacts/installer/output`.
 
+By default the command performs the Release build, development-module deploy,
+and module smoke test before publishing. CI may pass `-SkipPreflight` only after
+those steps have already succeeded; self-contained publish, payload validation,
+Inno compilation, and SHA256 generation are never skipped.
+
 ## Installation and uninstall policy
 
 - Installation is per-user at `%LOCALAPPDATA%\Programs\QingToolbox` and does
@@ -70,3 +75,14 @@ assets for 10 days. CI installs the approved Chocolatey `innosetup` 6.7.1
 package and obtains the Simplified Chinese message file from the official Inno
 Setup translation endpoint. It does not publish a GitHub Release. A formal
 QingToolbox application icon has not been provided yet.
+
+The Simplified Chinese message file is downloaded from the official
+`jrsoftware/issrc` source by `scripts/prepare-inno-setup.ps1`. Its expected
+SHA256 is stored in `installer/dependencies.psd1`; updating the translation
+requires reviewing the upstream file and explicitly updating that hash. The
+script validates existing files without overwriting a different local copy.
+
+Roundtrip installation passes `/NOICONS`, so automated tests create no Start
+Menu or desktop shortcuts. With `-KeepTestFiles`, `install.log`, `uninstall.log`,
+and failure diagnostics remain under `TestRoot`; CI uploads only these text logs
+and then removes its isolated test/profile directories.

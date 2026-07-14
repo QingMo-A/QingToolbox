@@ -21,6 +21,9 @@
 - Windows CI validation for Preview release assets.
 - Silent installer roundtrip coverage for uninstall data retention.
 - SHA256 verification before uploading short-lived CI artifacts.
+- Pinned SHA256 verification for the official Simplified Chinese Inno messages.
+- Isolated no-shortcut installer roundtrip logs and failure diagnostics.
+- Reusable Preview asset verification and optional CI preflight deduplication.
 
 ### Known Issues
 
