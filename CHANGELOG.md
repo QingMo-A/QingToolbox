@@ -12,11 +12,13 @@
 - Module templates with en-US and zh-CN resources.
 - `.qmod` package import preview.
 - TextTools, ScreenPin and WindowTopmost preview modules.
+- Per-user Inno Setup installer and uninstaller.
+- Start Menu shortcuts and an optional desktop shortcut.
+- Uninstall behavior that preserves user modules, module data and settings.
 
 ### Known Issues
 
 - This is a Preview release, not a stable release.
 - `.qmod` packages are not signed; only import modules from trusted sources.
 - ScreenPin geometry, DPI and resize behavior still need refinement.
-- There is no installer or uninstaller yet.
 - Windows SmartScreen may warn because the binaries are unsigned.
