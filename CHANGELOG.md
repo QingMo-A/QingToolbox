@@ -18,6 +18,9 @@
 - Localized installer tasks, shortcuts and post-install actions.
 - Improved installer product and version metadata.
 - Hardened self-contained installer payload validation.
+- Windows CI validation for Preview release assets.
+- Silent installer roundtrip coverage for uninstall data retention.
+- SHA256 verification before uploading short-lived CI artifacts.
 
 ### Known Issues
 

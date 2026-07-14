@@ -93,6 +93,11 @@ dotnet run --project QingToolbox.Shell
 安装器构建说明参见 [`installer/README.md`](installer/README.md)。安装器只包含
 QingToolbox 宿主，不包含 TextTools、ScreenPin、WindowTopmost 或其他具体模块。
 
+`toolbox` 分支的 Windows CI 会构建并校验便携 ZIP 与安装器、执行模块 Smoke
+Test，并在隔离用户目录中进行静默安装—卸载往返测试。CI 上传的 Preview
+artifacts 仅用于验证，不会自动创建 GitHub Release、tag 或提交构建产物。
+正式 QingToolbox 应用图标仍待提供。
+
 ## License
 
 QingToolbox 使用 [MIT License](LICENSE)。Shell 使用的 Nieobie Game Icon Pack

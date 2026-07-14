@@ -1,0 +1,125 @@
+name: Preview release validation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - toolbox
+  push:
+    branches:
+      - toolbox
+    paths-ignore:
+      - "**/*.md"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-preview:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore
+
+      - name: Build Release
+        shell: pwsh
+        run: dotnet build -c Release --no-restore
+
+      - name: Deploy development module for smoke test
+        shell: pwsh
+        run: ./scripts/deploy-dev-modules.ps1 -Configuration Release
+
+      - name: Run module load smoke test
+        shell: pwsh
+        run: >-
+          dotnet run
+          --project QingToolbox.DevTools.ModuleLoadSmokeTest
+          -c Release
+          --no-build
+
+      - name: Build portable Preview archive
+        shell: pwsh
+        run: ./scripts/publish-preview.ps1
+
+      - name: Install Inno Setup 6
+        shell: pwsh
+        run: |
+          choco install innosetup --version=6.7.1 -y --no-progress
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) {
+            throw "ISCC.exe was not installed at the expected path: $iscc"
+          }
+          $languageDirectory = Join-Path (Split-Path -Parent $iscc) "Languages"
+          $languageFile = Join-Path $languageDirectory "ChineseSimplified.isl"
+          Invoke-WebRequest `
+            -Uri "https://jrsoftware.org/files/istrans/ChineseSimplified.isl" `
+            -OutFile $languageFile
+          if (-not (Select-String -LiteralPath $languageFile `
+              -Pattern "Chinese Simplified messages" -Quiet)) {
+            throw "Downloaded ChineseSimplified.isl did not pass content validation."
+          }
+          "ISCC_PATH=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build Preview installer
+        shell: pwsh
+        run: ./scripts/build-installer.ps1 -IsccPath $env:ISCC_PATH
+
+      - name: Test installer roundtrip
+        shell: pwsh
+        env:
+          LOCALAPPDATA: ${{ runner.temp }}\QingToolboxProfile\LocalAppData
+          APPDATA: ${{ runner.temp }}\QingToolboxProfile\AppData
+        run: >-
+          ./scripts/test-installer-roundtrip.ps1
+          -InstallerPath
+          ./artifacts/installer/output/QingToolbox-0.1.0-alpha-win-x64-setup.exe
+          -TestRoot
+          ${{ runner.temp }}\QingToolboxInstallerRoundtrip
+
+      - name: Verify Preview asset checksums
+        shell: pwsh
+        run: |
+          function Assert-Checksum([string]$AssetPath) {
+            $checksumPath = "$AssetPath.sha256"
+            if (-not (Test-Path -LiteralPath $AssetPath -PathType Leaf)) {
+              throw "Release asset is missing: $AssetPath"
+            }
+            if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) {
+              throw "Checksum file is missing: $checksumPath"
+            }
+            $expected = ((Get-Content -LiteralPath $checksumPath -Raw).Trim() `
+              -split "\s+")[0].ToUpperInvariant()
+            $actual = (Get-FileHash -LiteralPath $AssetPath -Algorithm SHA256).Hash
+            if ($actual -ne $expected) {
+              throw "SHA256 mismatch for ${AssetPath}: expected $expected, actual $actual"
+            }
+            Write-Host "SHA256 verified: $AssetPath"
+          }
+
+          Assert-Checksum `
+            "artifacts/QingToolbox-0.1.0-alpha-win-x64.zip"
+          Assert-Checksum `
+            "artifacts/installer/output/QingToolbox-0.1.0-alpha-win-x64-setup.exe"
+
+      - name: Upload Preview validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: QingToolbox-0.1.0-alpha-preview-win-x64
+          retention-days: 10
+          if-no-files-found: error
+          path: |
+            artifacts/QingToolbox-0.1.0-alpha-win-x64.zip
+            artifacts/QingToolbox-0.1.0-alpha-win-x64.zip.sha256
+            artifacts/installer/output/QingToolbox-0.1.0-alpha-win-x64-setup.exe
+            artifacts/installer/output/QingToolbox-0.1.0-alpha-win-x64-setup.exe.sha256

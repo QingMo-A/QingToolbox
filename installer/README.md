@@ -45,3 +45,28 @@ The permanent AppId is:
 Do not change this AppId in future versions. Keeping it stable allows repair,
 reinstall, and upgrade to use the same per-user installation record and path.
 Future releases should update `Directory.Build.props` and reuse the same `.iss`.
+
+## Installer roundtrip test
+
+Run the generated installer through an isolated silent install/uninstall test:
+
+```powershell
+$env:LOCALAPPDATA = Join-Path $env:TEMP "QingToolboxProfile\LocalAppData"
+$env:APPDATA = Join-Path $env:TEMP "QingToolboxProfile\AppData"
+./scripts/test-installer-roundtrip.ps1 `
+  -InstallerPath `
+    ".\artifacts\installer\output\QingToolbox-0.1.0-alpha-win-x64-setup.exe"
+```
+
+The script installs under its own temporary root, validates the host-only
+payload and version metadata, creates isolated user-data sentinels, uninstalls,
+and verifies that modules, data, and settings are retained. It refuses to
+overwrite an existing `settings.json`; use isolated `LOCALAPPDATA` and
+`APPDATA` values for repeatable local and CI runs.
+
+The Windows Preview validation workflow also builds both release assets,
+recomputes their SHA256 checksums, performs this roundtrip, and uploads the four
+assets for 10 days. CI installs the approved Chocolatey `innosetup` 6.7.1
+package and obtains the Simplified Chinese message file from the official Inno
+Setup translation endpoint. It does not publish a GitHub Release. A formal
+QingToolbox application icon has not been provided yet.
