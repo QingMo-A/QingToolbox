@@ -13,6 +13,37 @@ dotnet build
 dotnet run --project QingToolbox.Shell
 ```
 
+## Git commit messages
+
+Commit messages must describe the actual scope of the change. Use one tagged
+line for each logical change instead of compressing unrelated work into one
+generic summary line. When a commit contains multiple kinds of work, include
+multiple tagged lines.
+
+Allowed tags:
+
+```text
+[+]         Added functionality, files, or modules
+[-]         Removed functionality, files, or dependencies
+[fix]       Bug, build, or reference fixes
+[refactor]  Internal restructuring without behavior changes
+[docs]      Documentation changes
+[style]     UI, styling, animation, or formatting changes
+[chore]     Engineering configuration, dependencies, scripts, or maintenance
+[test]      Test changes
+```
+
+Example:
+
+```text
+[style] redesign shell dashboard
+[+] add qmod package import
+[docs] document module packaging workflow
+```
+
+The first line should summarize the primary change. Add further tagged lines
+for other meaningful changes included in the same commit.
+
 ## Deploy development modules
 
 The Shell scans runtime modules from:

@@ -9,6 +9,7 @@ using QingToolbox.Shell.Services;
 using System.Windows;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Core.Localization;
+using Microsoft.Win32;
 
 namespace QingToolbox.Shell.ViewModels;
 
@@ -17,6 +18,7 @@ public sealed partial class MainWindowViewModel(
     ModuleRegistry registry,
     ModuleRuntimeManager runtimeManager,
     ModuleWindowManager moduleWindowManager,
+    ModulePackageImporter modulePackageImporter,
     LocalizationManager localizationManager,
     ILocalizationService localization) : ObservableObject
 {
@@ -59,6 +61,9 @@ public sealed partial class MainWindowViewModel(
 
     [ObservableProperty]
     private int _unloadedModuleCount;
+
+    [ObservableProperty]
+    private DiscoveredModuleViewModel? _selectedModule;
 
     public string Title => "Qing Toolbox";
     public LocalizedText Strings { get; } = new(localization);
@@ -108,6 +113,12 @@ public sealed partial class MainWindowViewModel(
     private void SelectNavigation(string key)
     {
         SelectedNavigationKey = key;
+    }
+
+    [RelayCommand]
+    private void SelectModule(DiscoveredModuleViewModel module)
+    {
+        SelectedModule = module;
     }
 
     partial void OnSelectedNavigationKeyChanged(string value)
@@ -194,6 +205,7 @@ public sealed partial class MainWindowViewModel(
             runtimeManager.ReplaceDiscoveredModules(discoveredModules);
             registry.ReplaceAll(discoveredModules);
 
+            var selectedModuleId = SelectedModule?.Id;
             Modules.Clear();
             foreach (var module in discoveredModules)
             {
@@ -206,6 +218,9 @@ public sealed partial class MainWindowViewModel(
                     runtimeManager.GetRecord(module.Manifest.Id));
                 Modules.Add(moduleViewModel);
             }
+
+            SelectedModule = Modules.FirstOrDefault(
+                module => module.Id == selectedModuleId) ?? Modules.FirstOrDefault();
 
             UpdateStatistics();
             StatusMessage = localization.GetString(
@@ -221,6 +236,7 @@ public sealed partial class MainWindowViewModel(
             LoadedModuleCount = 0;
             RunningModuleCount = 0;
             UnloadedModuleCount = 0;
+            SelectedModule = null;
             StatusMessage = localization.GetString(
                 "status.scanFailed",
                 exception.Message);
@@ -424,6 +440,38 @@ public sealed partial class MainWindowViewModel(
                          "Loaded" or "Running" or "Deactivated" or "Unloading" or "Failed"))
         {
             RunningModules.Add(module);
+        }
+    }
+
+    [RelayCommand]
+    private async Task ImportModuleAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = localization.GetString("modules.importDialogTitle"),
+            Filter = localization.GetString("modules.importFileFilter"),
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var modulesRoot = Path.Combine(AppContext.BaseDirectory, "Modules");
+            var moduleId = await modulePackageImporter.ImportAsync(
+                dialog.FileName,
+                modulesRoot);
+            await RefreshModulesAsync();
+            StatusMessage = localization.GetString("status.moduleImported", moduleId);
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = localization.GetString(
+                "status.moduleImportFailed",
+                exception.Message);
         }
     }
 }
