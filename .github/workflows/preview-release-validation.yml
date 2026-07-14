@@ -63,10 +63,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Chocolatey failed to install Inno Setup 6.7.1."
           }
-          $installedIscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
+          $installedIscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $installedIscc -PathType Leaf)) {
+            throw "ISCC.exe was not installed at the expected path: $installedIscc"
+          }
           $sourceRoot = Split-Path -Parent $installedIscc
           $isolatedRoot = Join-Path $env:RUNNER_TEMP "InnoSetup"
-          Copy-Item -LiteralPath $sourceRoot -Destination $isolatedRoot -Recurse
+          New-Item -ItemType Directory -Path $isolatedRoot -Force | Out-Null
+          Copy-Item -Path (Join-Path $sourceRoot "*") `
+            -Destination $isolatedRoot -Recurse
           $isolatedIscc = Join-Path $isolatedRoot "ISCC.exe"
           $preparedIscc = ./scripts/prepare-inno-setup.ps1 `
             -IsccPath $isolatedIscc
