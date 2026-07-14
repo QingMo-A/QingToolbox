@@ -16,16 +16,21 @@ If `ISCC.exe` is installed elsewhere:
   -IsccPath "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 ```
 
-The script reads the version from `Directory.Build.props`, builds and runs the
-smoke test, publishes a self-contained host-only payload, removes PDB files,
-and writes the installer plus SHA256 to `artifacts/installer/output`.
+The script reads `Version` and numeric `FileVersion` from
+`Directory.Build.props`, builds and runs the smoke test, and always publishes a
+self-contained host-only payload. It fails if the payload contains PDBs,
+concrete modules, source/project files, or `bin`/`obj` directories, and verifies
+the Shell executable, release documents, and localization JSON before writing
+the installer plus SHA256 to `artifacts/installer/output`.
 
 ## Installation and uninstall policy
 
 - Installation is per-user at `%LOCALAPPDATA%\Programs\QingToolbox` and does
   not request administrator privileges.
-- The installer creates a Start Menu application shortcut and uninstall
-  shortcut. The desktop shortcut is optional and unchecked by default.
+- English and Simplified Chinese custom tasks, shortcuts, and post-install text
+  follow the selected installer language (`ShowLanguageDialog=auto`).
+- The installer creates a Start Menu application shortcut and localized
+  uninstall shortcut. The desktop shortcut is optional and unchecked by default.
 - Uninstall removes program files and shortcuts but preserves user modules,
   module data, and settings.
 - Complete manual cleanup requires deleting `%LOCALAPPDATA%\QingToolbox` and

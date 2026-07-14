@@ -4,8 +4,7 @@ param(
     [string]$Runtime = "win-x64",
     [ValidateSet("Release")]
     [string]$Configuration = "Release",
-    [string]$IsccPath,
-    [bool]$SelfContained = $true
+    [string]$IsccPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,7 +49,8 @@ function Resolve-IsccPath {
     $candidates = if ([string]::IsNullOrWhiteSpace($ExplicitPath)) {
         @(
             "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-            "C:\Program Files\Inno Setup 6\ISCC.exe"
+            "C:\Program Files\Inno Setup 6\ISCC.exe",
+            (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe")
         )
     }
     else {
@@ -70,8 +70,12 @@ function Resolve-IsccPath {
 try {
     [xml]$props = Get-Content -LiteralPath $propsPath -Raw
     $version = @($props.Project.PropertyGroup.Version)[0]
+    $fileVersion = @($props.Project.PropertyGroup.FileVersion)[0]
     if ($version -ne "0.1.0-alpha") {
         throw "Expected version 0.1.0-alpha in Directory.Build.props, found '$version'."
+    }
+    if ($fileVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+        throw "FileVersion must contain four numeric components, found '$fileVersion'."
     }
 
     foreach ($path in @($payloadDirectory, $outputDirectory)) {
@@ -98,22 +102,44 @@ try {
         "--no-build"
     ) -FailureMessage "Module smoke test failed."
 
-    $selfContainedValue = $SelfContained.ToString().ToLowerInvariant()
     Invoke-DotNet -Arguments @(
         "publish", $shellProject,
         "-c", $Configuration,
         "-r", $Runtime,
-        "--self-contained", $selfContainedValue,
+        "--self-contained", "true",
+        "-p:DebugSymbols=false",
+        "-p:DebugType=None",
         "-o", $payloadDirectory
     ) -FailureMessage "Shell publish failed."
 
-    Get-ChildItem -LiteralPath $payloadDirectory -Recurse -Filter "*.pdb" -File |
-        Remove-Item -Force
-    $bundledModuleDlls = Get-ChildItem -LiteralPath $payloadDirectory `
-        -Recurse -Filter "*.dll" -File |
-        Where-Object FullName -Match "[\\/]Modules[\\/]"
-    if ($bundledModuleDlls) {
-        throw "Installer payload unexpectedly contains module DLLs."
+    $shellExecutable = Join-Path $payloadDirectory "QingToolbox.Shell.exe"
+    if (-not (Test-Path -LiteralPath $shellExecutable -PathType Leaf)) {
+        throw "Installer payload is missing QingToolbox.Shell.exe."
+    }
+
+    $payloadFiles = @(Get-ChildItem -LiteralPath $payloadDirectory -Recurse -File)
+    $pdbFiles = @($payloadFiles | Where-Object Extension -EQ ".pdb")
+    if ($pdbFiles.Count -gt 0) {
+        throw "Installer payload contains PDB files: $($pdbFiles.FullName -join ', ')"
+    }
+
+    $forbiddenModuleFiles = @($payloadFiles | Where-Object {
+        $_.Name -match '^(TextTools|ScreenPin|WindowTopmost)(\.|$)' -or
+        $_.Name -like 'QingToolbox.Modules.*'
+    })
+    if ($forbiddenModuleFiles.Count -gt 0) {
+        throw "Installer payload contains concrete module files: $($forbiddenModuleFiles.FullName -join ', ')"
+    }
+
+    $sourceFiles = @($payloadFiles | Where-Object Extension -In @(".cs", ".csproj", ".sln"))
+    if ($sourceFiles.Count -gt 0) {
+        throw "Installer payload contains source or project files: $($sourceFiles.FullName -join ', ')"
+    }
+
+    $buildDirectories = @(Get-ChildItem -LiteralPath $payloadDirectory -Recurse -Directory |
+        Where-Object Name -In @("bin", "obj"))
+    if ($buildDirectories.Count -gt 0) {
+        throw "Installer payload contains bin/obj directories: $($buildDirectories.FullName -join ', ')"
     }
 
     Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") `
@@ -126,6 +152,20 @@ try {
         -Destination $docsDirectory -Force
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\releases\0.1.0-alpha.md") `
         -Destination $docsDirectory -Force
+
+    $requiredPayloadFiles = @(
+        "LICENSE",
+        "CHANGELOG.md",
+        "docs\0.1.0-alpha.md",
+        "Resources\Localization\en-US.json",
+        "Resources\Localization\zh-CN.json"
+    )
+    foreach ($relativePath in $requiredPayloadFiles) {
+        $requiredPath = Join-Path $payloadDirectory $relativePath
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+            throw "Installer payload is missing required file: $relativePath"
+        }
+    }
 
     $resolvedIsccPath = Resolve-IsccPath -ExplicitPath $IsccPath
     $innoRoot = Split-Path -Parent $resolvedIsccPath
@@ -140,6 +180,7 @@ try {
     $outputBaseFilename = "QingToolbox-$version-$Runtime-setup"
     & $resolvedIsccPath `
         "/DAppVersion=$version" `
+        "/DFileVersion=$fileVersion" `
         "/DSourceDir=$payloadDirectory" `
         "/DOutputDir=$outputDirectory" `
         "/DOutputBaseFilename=$outputBaseFilename" `

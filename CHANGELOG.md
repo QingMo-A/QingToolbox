@@ -15,6 +15,9 @@
 - Per-user Inno Setup installer and uninstaller.
 - Start Menu shortcuts and an optional desktop shortcut.
 - Uninstall behavior that preserves user modules, module data and settings.
+- Localized installer tasks, shortcuts and post-install actions.
+- Improved installer product and version metadata.
+- Hardened self-contained installer payload validation.
 
 ### Known Issues
 
