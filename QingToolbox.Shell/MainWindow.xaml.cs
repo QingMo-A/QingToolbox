@@ -55,12 +55,35 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
+        try { await RunStartupAsync(); }
+        catch (OperationCanceledException) when (_startupSession.State == StartupSessionState.Exiting)
+        {
+            // Application shutdown cancellation is an expected lifecycle outcome.
+        }
+        catch (Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine($"Shell startup failed: {exception.GetType().Name}");
+            if (_startupSession.State != StartupSessionState.Exiting)
+            {
+                Opacity = 1;
+                ShowActivated = true;
+                ShowInTaskbar = true;
+                if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+                Show();
+                Activate();
+                _viewModel.StatusMessage = _viewModel.Strings["status.startupFailed"];
+            }
+        }
+    }
+
+    private async Task RunStartupAsync()
+    {
         _startupSession.BeginDiscovery();
         await _viewModel.InitializeDiscoveryAsync(_startupSession.LifetimeToken);
         await _startupSession.PresentAsync(_viewModel.SelectedStartupPresentationMode);
         _startupSession.BeginModuleRestore();
         await _viewModel.RestoreAuthorizedStartupModulesAsync(_startupSession.LifetimeToken);
-        _startupSession.Complete();
+        if (_startupSession.State != StartupSessionState.Exiting) _startupSession.Complete();
     }
 
     private void OnSidebarMouseEnter(object sender, MouseEventArgs e)

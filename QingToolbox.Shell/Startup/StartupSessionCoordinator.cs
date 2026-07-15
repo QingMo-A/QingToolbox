@@ -6,10 +6,12 @@ namespace QingToolbox.Shell.Startup;
 
 public enum StartupSessionState { Starting, Discovering, Presenting, RestoringModules, Ready, Exiting }
 
-public sealed class StartupSessionCoordinator(ApplicationLaunchOptions launchOptions) : IDisposable
+public sealed class StartupSessionCoordinator(ApplicationLaunchOptions launchOptions)
 {
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly object _stateLock = new();
     private int _manualActivationRequested;
+    private int _disposed;
     private MainWindow? _mainWindow;
     private FloatingBadgeManager? _badgeManager;
 
@@ -23,18 +25,36 @@ public sealed class StartupSessionCoordinator(ApplicationLaunchOptions launchOpt
         _badgeManager = badgeManager;
     }
 
-    public void MarkManualActivationRequested() => Interlocked.Exchange(ref _manualActivationRequested, 1);
+    public bool TryRequestManualActivation()
+    {
+        lock (_stateLock)
+        {
+            if (State == StartupSessionState.Exiting || _lifetime.IsCancellationRequested) return false;
+            Interlocked.Exchange(ref _manualActivationRequested, 1);
+            return true;
+        }
+    }
     public StartupPresentationMode GetEffectivePresentation(StartupPresentationMode configuredMode) =>
         !launchOptions.IsStartupLaunch || ManualActivationRequested
             ? StartupPresentationMode.MainWindow
             : configuredMode;
-    public void BeginDiscovery() => State = StartupSessionState.Discovering;
-    public void BeginModuleRestore() => State = StartupSessionState.RestoringModules;
-    public void Complete() => State = StartupSessionState.Ready;
+    public void BeginDiscovery() => TrySetState(StartupSessionState.Discovering);
+    public void BeginModuleRestore() => TrySetState(StartupSessionState.RestoringModules);
+    public void Complete() => TrySetState(StartupSessionState.Ready);
+
+    private bool TrySetState(StartupSessionState state)
+    {
+        lock (_stateLock)
+        {
+            if (State == StartupSessionState.Exiting) return false;
+            State = state;
+            return true;
+        }
+    }
 
     public async Task PresentAsync(StartupPresentationMode configuredMode)
     {
-        State = StartupSessionState.Presenting;
+        if (!TrySetState(StartupSessionState.Presenting)) return;
         if (_mainWindow is null || _badgeManager is null) return;
         var effectiveMode = GetEffectivePresentation(configuredMode);
         if (effectiveMode == StartupPresentationMode.MainWindow)
@@ -70,9 +90,10 @@ public sealed class StartupSessionCoordinator(ApplicationLaunchOptions launchOpt
 
     public async Task ActivateMainWindowAsync()
     {
-        MarkManualActivationRequested();
-        if (_mainWindow is null || _badgeManager is null) return;
+        if (!TryRequestManualActivation() || _lifetime.IsCancellationRequested ||
+            _mainWindow is null || _badgeManager is null) return;
         await _badgeManager.RestoreAsync(_lifetime.Token);
+        if (State == StartupSessionState.Exiting || _lifetime.IsCancellationRequested) return;
         _mainWindow.Opacity = 1;
         _mainWindow.ShowActivated = true;
         _mainWindow.ShowInTaskbar = true;
@@ -84,9 +105,18 @@ public sealed class StartupSessionCoordinator(ApplicationLaunchOptions launchOpt
 
     public void PrepareForExit()
     {
-        State = StartupSessionState.Exiting;
-        _lifetime.Cancel();
+        lock (_stateLock)
+        {
+            if (State == StartupSessionState.Exiting) return;
+            State = StartupSessionState.Exiting;
+            _lifetime.Cancel();
+        }
     }
 
-    public void Dispose() { PrepareForExit(); _lifetime.Dispose(); }
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        PrepareForExit();
+        _lifetime.Dispose();
+    }
 }

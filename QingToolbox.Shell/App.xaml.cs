@@ -1,5 +1,6 @@
 using System.Windows;
 using System.IO;
+using System.Globalization;
 using Microsoft.Extensions.DependencyInjection;
 using QingToolbox.Core;
 using QingToolbox.Core.Runtime;
@@ -18,6 +19,8 @@ public partial class App : Application
     private ServiceProvider? _serviceProvider;
     private SingleInstanceCoordinator? _singleInstance;
     private StartupSessionCoordinator? _startupSession;
+    private Func<InstanceActivationMessage, Task>? _activationHandler;
+    private int _activationDispatchPending;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -27,21 +30,49 @@ public partial class App : Application
         _singleInstance = SingleInstanceCoordinator.Create();
         if (!_singleInstance.IsPrimary)
         {
-            await _singleInstance.SendAsync(launchOptions.IsStartupLaunch
-                ? InstanceActivationMessage.StartupProbe
-                : InstanceActivationMessage.Activate);
+            var delivered = false;
+            try
+            {
+                delivered = await _singleInstance.SendAsync(launchOptions.IsStartupLaunch
+                    ? InstanceActivationMessage.StartupProbe
+                    : InstanceActivationMessage.Activate);
+            }
+            catch (Exception exception)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Single-instance delivery failed: {exception.GetType().Name}");
+            }
+            if (!delivered && !launchOptions.IsStartupLaunch)
+            {
+                System.Diagnostics.Debug.WriteLine("Existing QingToolbox instance could not be activated.");
+                var chinese = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "zh";
+                MessageBox.Show(
+                    chinese
+                        ? "QingToolbox 已在运行，但暂时无法激活现有窗口。"
+                        : "QingToolbox is already running, but its window could not be activated.",
+                    "QingToolbox",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
             Shutdown();
             return;
         }
 
         _startupSession = new StartupSessionCoordinator(launchOptions);
-        _singleInstance.MessageReceived += message =>
+        _activationHandler = message =>
         {
             if (message != InstanceActivationMessage.Activate) return Task.CompletedTask;
-            _startupSession.MarkManualActivationRequested();
-            if (_serviceProvider is null) return Task.CompletedTask;
-            return Dispatcher.InvokeAsync(() => _startupSession.ActivateMainWindowAsync()).Task.Unwrap();
+            if (!_startupSession.TryRequestManualActivation() || _serviceProvider is null)
+                return Task.CompletedTask;
+            if (Interlocked.Exchange(ref _activationDispatchPending, 1) != 0)
+                return Task.CompletedTask;
+            return Dispatcher.InvokeAsync(async () =>
+            {
+                try { await _startupSession.ActivateMainWindowAsync(); }
+                finally { Interlocked.Exchange(ref _activationDispatchPending, 0); }
+            }).Task.Unwrap();
         };
+        _singleInstance.MessageReceived += _activationHandler;
         _singleInstance.StartServer();
 
         var services = new ServiceCollection();
@@ -88,8 +119,15 @@ public partial class App : Application
     {
         try
         {
-            _serviceProvider?.GetService<FloatingBadgeManager>()?.PrepareForApplicationExit();
             _startupSession?.PrepareForExit();
+            if (_singleInstance is not null)
+            {
+                if (_activationHandler is not null)
+                    _singleInstance.MessageReceived -= _activationHandler;
+                _singleInstance.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                _singleInstance = null;
+            }
+            _serviceProvider?.GetService<FloatingBadgeManager>()?.PrepareForApplicationExit();
             var runtimeManager = _serviceProvider?.GetService<ModuleRuntimeManager>();
             runtimeManager?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
@@ -103,7 +141,7 @@ public partial class App : Application
             try
             {
                 _serviceProvider?.DisposeAsync().AsTask().GetAwaiter().GetResult();
-                _singleInstance?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                _startupSession?.Dispose();
             }
             catch (Exception exception)
             {
@@ -117,6 +155,7 @@ public partial class App : Application
 
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
     {
+        _startupSession?.PrepareForExit();
         _serviceProvider?.GetService<FloatingBadgeManager>()?.PrepareForApplicationExit();
         base.OnSessionEnding(e);
     }

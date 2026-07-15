@@ -1,7 +1,11 @@
 using System.IO;
 using System.IO.Compression;
+using System.IO.Pipes;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Security.Principal;
+using System.Text;
 using System.Text.Json;
 using System.Windows;
 using QingToolbox.Abstractions.Localization;
@@ -277,8 +281,8 @@ internal static class Program
         await using (var primary = SingleInstanceCoordinator.CreateForScope(pipeScope))
         {
             Require(primary.IsPrimary, "The first coordinator must own the current-user instance.");
-            var received = new List<InstanceActivationMessage>();
-            primary.MessageReceived += message => { received.Add(message); return Task.CompletedTask; };
+            var received = new System.Collections.Concurrent.ConcurrentQueue<InstanceActivationMessage>();
+            primary.MessageReceived += message => { received.Enqueue(message); return Task.CompletedTask; };
             await using var secondary = SingleInstanceCoordinator.CreateForScope(pipeScope);
             var delayedSend = secondary.SendAsync(InstanceActivationMessage.Activate);
             await Task.Delay(250);
@@ -286,19 +290,28 @@ internal static class Program
             Require(!secondary.IsPrimary && await delayedSend &&
                     await secondary.SendAsync(InstanceActivationMessage.StartupProbe),
                 "Pipe retry or acknowledgment failed.");
-            Require(received.SequenceEqual([InstanceActivationMessage.Activate, InstanceActivationMessage.StartupProbe]),
-                "Pipe messages were not acknowledged and delivered in order.");
+            await WaitUntilAsync(() => received.Count == 2);
+            Require(received.Contains(InstanceActivationMessage.Activate) &&
+                    received.Contains(InstanceActivationMessage.StartupProbe),
+                "Pipe messages were not acknowledged and delivered.");
         }
         await using (var restarted = SingleInstanceCoordinator.CreateForScope(pipeScope))
             Require(restarted.IsPrimary, "Instance ownership was not released after shutdown.");
 
         var startupSession = new StartupSessionCoordinator(new ApplicationLaunchOptions(true));
-        startupSession.MarkManualActivationRequested();
-        startupSession.MarkManualActivationRequested();
+        Require(startupSession.TryRequestManualActivation() && startupSession.TryRequestManualActivation(),
+            "Active startup session rejected manual activation.");
         Require(startupSession.ManualActivationRequested &&
                 startupSession.GetEffectivePresentation(StartupPresentationMode.FloatingBadge) == StartupPresentationMode.MainWindow,
             "Pending manual activation must be coalesced into one durable flag.");
+        startupSession.PrepareForExit();
+        startupSession.Complete();
+        Require(startupSession.State == StartupSessionState.Exiting && !startupSession.TryRequestManualActivation(),
+            "Exiting startup session accepted activation or returned to Ready.");
         startupSession.Dispose();
+        startupSession.Dispose();
+
+        await VerifyPipeFailureIsolationAsync();
 
         var root = Path.Combine(Path.GetTempPath(), $"QingToolbox-startup-smoke-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
@@ -408,6 +421,94 @@ internal static class Program
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
         Console.WriteLine("Startup safety infrastructure passed.");
+    }
+
+    private static async Task VerifyPipeFailureIsolationAsync()
+    {
+        var scope = $"PipeRecovery.{Guid.NewGuid():N}";
+        await using var primary = SingleInstanceCoordinator.CreateForScope(scope);
+        var invocation = 0;
+        var slowEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSlow = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        primary.MessageReceived += message =>
+        {
+            var current = Interlocked.Increment(ref invocation);
+            if (current == 1) throw new InvalidOperationException("synchronous smoke failure");
+            if (current == 2) return Task.FromException(new IOException("asynchronous smoke failure"));
+            if (current == 3)
+            {
+                slowEntered.TrySetResult();
+                return releaseSlow.Task;
+            }
+            return Task.CompletedTask;
+        };
+        primary.StartServer();
+        await using var secondary = SingleInstanceCoordinator.CreateForScope(scope);
+        Require(await secondary.SendAsync(InstanceActivationMessage.Activate),
+            "Synchronous handler failure prevented acknowledgment.");
+        await WaitUntilAsync(() => Volatile.Read(ref invocation) >= 1);
+        Require(await secondary.SendAsync(InstanceActivationMessage.Activate),
+            "Server stopped after synchronous handler failure.");
+        await WaitUntilAsync(() => Volatile.Read(ref invocation) >= 2);
+
+        var slowAcknowledgment = secondary.SendAsync(InstanceActivationMessage.Activate);
+        await slowEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Require(await slowAcknowledgment.WaitAsync(TimeSpan.FromSeconds(2)) && !releaseSlow.Task.IsCompleted,
+            "Pipe acknowledgment waited for slow UI work.");
+        releaseSlow.TrySetResult();
+
+        Require(await SendRawPipeMessageAsync(scope, "unsupported\n") == SingleInstanceCoordinator.ErrorAcknowledgment,
+            "Invalid pipe input did not return ERROR.");
+        Require(await SendRawPipeMessageAsync(scope, new string('X', 64)) == SingleInstanceCoordinator.ErrorAcknowledgment,
+            "Overlong non-terminated pipe input was not bounded and rejected.");
+        Require(await SendRawPipeMessageAsync(scope, "Activate\r\n") == SingleInstanceCoordinator.ErrorAcknowledgment,
+            "Embedded carriage return was accepted by the pipe protocol.");
+        await SendRawPipeMessageAsync(scope, "Activate\n", disconnectBeforeAcknowledgment: true);
+        Require(await secondary.SendAsync(InstanceActivationMessage.StartupProbe),
+            "Client disconnect or asynchronous handler failure terminated the pipe server.");
+
+        var disposeScope = $"PipeDispose.{Guid.NewGuid():N}";
+        var disposingPrimary = SingleInstanceCoordinator.CreateForScope(disposeScope);
+        var disposeHandlerEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDisposeHandler = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        disposingPrimary.MessageReceived += _ =>
+        {
+            disposeHandlerEntered.TrySetResult();
+            return releaseDisposeHandler.Task;
+        };
+        disposingPrimary.StartServer();
+        await using var disposingSecondary = SingleInstanceCoordinator.CreateForScope(disposeScope);
+        Require(await disposingSecondary.SendAsync(InstanceActivationMessage.Activate),
+            "Dispose-race activation was not acknowledged.");
+        await disposeHandlerEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await disposingPrimary.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        releaseDisposeHandler.TrySetResult();
+        await disposingPrimary.DisposeAsync();
+    }
+
+    private static async Task<string?> SendRawPipeMessageAsync(
+        string scope,
+        string payload,
+        bool disconnectBeforeAcknowledgment = false)
+    {
+        var sid = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
+        var suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{sid}\0{scope}")))[..16];
+        using var client = new NamedPipeClientStream(
+            ".", $"QingToolbox.{suffix}.Activation", PipeDirection.InOut,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        await client.ConnectAsync(5000);
+        var bytes = new UTF8Encoding(false).GetBytes(payload);
+        await client.WriteAsync(bytes);
+        await client.FlushAsync();
+        if (disconnectBeforeAcknowledgment) return null;
+        using var reader = new StreamReader(client, Encoding.UTF8, false, 128, leaveOpen: true);
+        return await reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!condition()) await Task.Delay(10, timeout.Token);
     }
 
     private static void Require(bool condition, string message)

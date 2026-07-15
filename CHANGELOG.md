@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Contained startup cancellation during shutdown and stopped activation pipes before service disposal.
+- Acknowledged accepted single-instance messages before UI activation and isolated handler/client failures.
+- Enforced strictly bounded pipe reads and kept the server available after malformed or disconnected clients.
+- Reduced startup restoration to one final full-payload validation immediately before each module load.
+- Localized startup-authorization write failures and preserved authorization counts when cleanup fails.
 - Started current-user activation pipes before dependency injection and added bounded retry plus OK/ERROR acknowledgments.
 - Made manual activation override pending minimized or floating-badge startup presentation.
 - Split discovery, recoverable window presentation and cancellable startup-module restoration.
@@ -25,7 +30,7 @@
 - Changed the floating badge title-bar action to icon-only in compact windows.
 - Hardened native maximize-button cancellation for capture loss, deactivation and non-client leave.
 - Floating badge mode never starts automatically and does not include system-tray integration.
-- Startup registration and automatic module loading remain future work.
+- PowerGuard remains separate future work on the modules branch.
 - Centralized title-bar metrics and cached DPI-aware maximize-button hit targets.
 - Added native icon single/right/double-click arbitration and capability-aware caption buttons.
 - Added minimal non-client maximize click handling so `HTMAXBUTTON` executes maximize or restore exactly once.

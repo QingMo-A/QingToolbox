@@ -171,5 +171,8 @@
   "startup.missingCleared": "已清理缺失模块的启动授权。",
   "startup.authorizationSummary": "启动授权总数：{0}",
   "startup.missingSummary": "缺失模块授权：{0}",
-  "startup.registrationFailed": "无法更新 Windows 登录自启动设置。"
+  "startup.registrationFailed": "无法更新 Windows 登录自启动设置。",
+  "startup.moduleAuthorizationFailed": "无法更新此模块的启动授权。",
+  "startup.missingClearFailed": "无法清理缺失模块的启动授权。",
+  "status.startupFailed": "QingToolbox 未能完成启动，主窗口仍可继续使用。"
 }

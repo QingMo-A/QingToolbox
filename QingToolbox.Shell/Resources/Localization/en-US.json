@@ -171,5 +171,8 @@
   "startup.missingCleared": "Missing startup authorizations cleared.",
   "startup.authorizationSummary": "Startup authorizations: {0}",
   "startup.missingSummary": "Missing module authorizations: {0}",
-  "startup.registrationFailed": "Windows login startup could not be updated."
+  "startup.registrationFailed": "Windows login startup could not be updated.",
+  "startup.moduleAuthorizationFailed": "Could not update this module's startup authorization.",
+  "startup.missingClearFailed": "Could not clear missing module startup authorizations.",
+  "status.startupFailed": "QingToolbox could not finish starting. The main window remains available."
 }
