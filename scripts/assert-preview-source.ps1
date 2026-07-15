@@ -42,18 +42,22 @@ function Assert-PreviewSource {
         }
     }
 
-    $dirty = @(Invoke-SourceGit -Arguments @(
-        "status", "--porcelain=v1", "--untracked-files=all")) |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $dirty = @(
+        @(Invoke-SourceGit -Arguments @(
+            "status", "--porcelain=v1", "--untracked-files=all")) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
     if ($dirty.Count -gt 0) {
         throw "Preview source tree is dirty. Commit or remove these changes:`n" +
               ($dirty -join "`n")
     }
 
     $diffIssues = @(
-        Invoke-SourceGit -Arguments @("diff", "--check")
-        Invoke-SourceGit -Arguments @("diff", "--cached", "--check")
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        @(
+            Invoke-SourceGit -Arguments @("diff", "--check")
+            Invoke-SourceGit -Arguments @("diff", "--cached", "--check")
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
     if ($diffIssues.Count -gt 0) {
         throw "Git whitespace validation failed:`n$($diffIssues -join "`n")"
     }
