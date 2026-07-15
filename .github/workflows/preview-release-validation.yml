@@ -114,6 +114,10 @@ jobs:
             -TestRoot "${{ runner.temp }}\QingToolboxInstallerRoundtrip" `
             -KeepTestFiles
 
+      - name: Validate clean Preview source
+        shell: pwsh
+        run: ./scripts/assert-preview-source.ps1
+
       - name: Write Preview manifest
         shell: pwsh
         run: ./scripts/write-preview-manifest.ps1

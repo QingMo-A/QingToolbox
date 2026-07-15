@@ -27,6 +27,9 @@
 - Centralized Preview version, runtime, filenames, and artifact metadata.
 - Immutable upstream pins for official Actions and Inno localization.
 - Machine-readable release manifest with source commit, sizes, and SHA256 hashes.
+- Clean-source and origin-synchronization gates for final Preview candidates.
+- Schema-v2 release provenance with repository and clean-worktree assertions.
+- One-command Preview candidate orchestration and manual release handoff guide.
 
 ### Known Issues
 

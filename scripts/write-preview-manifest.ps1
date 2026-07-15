@@ -7,6 +7,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 . (Join-Path $PSScriptRoot "get-preview-release-metadata.ps1")
+. (Join-Path $PSScriptRoot "assert-preview-source.ps1")
 
 function Get-VerifiedAssetRecord {
     param(
@@ -42,6 +43,7 @@ function Get-VerifiedAssetRecord {
 }
 
 try {
+    $source = Assert-PreviewSource
     $metadata = Get-PreviewReleaseMetadata
     if ([string]::IsNullOrWhiteSpace($ArtifactsRoot)) {
         $ArtifactsRoot = Join-Path $repoRoot "artifacts"
@@ -51,19 +53,18 @@ try {
     $installerPath = Join-Path $resolvedArtifactsRoot (
         "installer\output\$($metadata.InstallerFileName)")
 
-    $sourceCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
-    if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-fA-F]{40}$') {
-        throw "Unable to resolve a full source commit from Git."
-    }
+    $sourceCommit = $source.Commit
 
     $manifest = [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         product = $metadata.ProductName
         channel = "Preview"
         version = $metadata.Version
         fileVersion = $metadata.FileVersion
         runtime = $metadata.Runtime
+        sourceRepository = "QingMo-A/QingToolbox"
         sourceCommit = $sourceCommit.ToLowerInvariant()
+        sourceTreeClean = $true
         generatedAtUtc = [DateTime]::UtcNow.ToString("o")
         artifacts = @(
             (Get-VerifiedAssetRecord -Type "portable" -AssetPath $portablePath),

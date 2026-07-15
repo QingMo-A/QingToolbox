@@ -7,6 +7,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 . (Join-Path $PSScriptRoot "get-preview-release-metadata.ps1")
+. (Join-Path $PSScriptRoot "assert-preview-source.ps1")
 
 function Get-VerifiedAsset {
     param([Parameter(Mandatory = $true)][string]$AssetPath)
@@ -48,6 +49,7 @@ function Get-VerifiedAsset {
 }
 
 try {
+    $source = Assert-PreviewSource
     $metadata = Get-PreviewReleaseMetadata
     if ([string]::IsNullOrWhiteSpace($ArtifactsRoot)) {
         $ArtifactsRoot = Join-Path $repoRoot "artifacts"
@@ -70,25 +72,23 @@ try {
     }
     $manifest = $manifestText | ConvertFrom-Json
 
-    if ([int]$manifest.schemaVersion -ne 1 -or
+    if ([int]$manifest.schemaVersion -ne 2 -or
         $manifest.product -ne $metadata.ProductName -or
         $manifest.channel -ne "Preview" -or
         $manifest.version -ne $metadata.Version -or
         $manifest.fileVersion -ne $metadata.FileVersion -or
-        $manifest.runtime -ne $metadata.Runtime) {
+        $manifest.runtime -ne $metadata.Runtime -or
+        $manifest.sourceRepository -ne "QingMo-A/QingToolbox" -or
+        $manifest.sourceTreeClean -ne $true) {
         throw "Preview manifest metadata does not match release metadata."
     }
     if ($manifest.sourceCommit -notmatch '^[0-9a-fA-F]{40}$') {
         throw "Preview manifest sourceCommit is not a full Git commit."
     }
 
-    $gitDirectory = & git -C $repoRoot rev-parse --git-dir 2>$null
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($gitDirectory)) {
-        $headCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
-        if ($manifest.sourceCommit -ne $headCommit) {
-            throw "Preview manifest sourceCommit does not match HEAD. " +
-                  "Manifest $($manifest.sourceCommit), HEAD $headCommit."
-        }
+    if ($manifest.sourceCommit -ne $source.Commit) {
+        throw "Preview manifest sourceCommit does not match HEAD. " +
+              "Manifest $($manifest.sourceCommit), HEAD $($source.Commit)."
     }
 
     $manifestArtifacts = @($manifest.artifacts)

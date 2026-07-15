@@ -109,6 +109,18 @@ CI 还会生成机器可读 manifest，记录构建源码 commit、ZIP 与安装
 SHA256；官方 GitHub Actions 与 Inno 中文翻译均固定到不可变 commit。该流程
 继续只做发布门禁，不创建 Release 或 tag。
 
+## Preview release candidate
+
+最终 Preview 候选必须从干净且与 `origin/toolbox` 同步的 `toolbox` 分支构建：
+
+```powershell
+./scripts/build-preview-release-candidate.ps1
+```
+
+完整门禁、产物溯源和人工发布交接清单见
+[`docs/PREVIEW_RELEASE_PROCESS.md`](docs/PREVIEW_RELEASE_PROCESS.md)。该流程只生成并验证
+候选资产，不会创建 GitHub Release 或 tag。
+
 ## License
 
 QingToolbox 使用 [MIT License](LICENSE)。Shell 使用的 Nieobie Game Icon Pack

@@ -100,3 +100,12 @@ source commit and recomputed hashes; `scripts/verify-preview-assets.ps1`
 validates the assets, checksum files, manifest, and current Git HEAD. Official
 GitHub Actions are pinned to full release commit SHAs in the workflow and must
 be upgraded explicitly.
+
+## Final Preview candidate gate
+
+Release handoff must use `scripts/build-preview-release-candidate.ps1` from a
+clean `toolbox` branch synchronized with `origin/toolbox`. The gate performs the
+complete build, smoke test, isolated installer roundtrip, schema-v2 provenance
+manifest generation, and final source-state verification. See
+`docs/PREVIEW_RELEASE_PROCESS.md`. It deliberately does not create a Release or
+tag and does not upload or commit artifacts.
