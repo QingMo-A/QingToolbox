@@ -28,7 +28,7 @@ public sealed class PowerGuardModule : IToolModule
         var settings = await _settingsStore.ReadAsync(cancellationToken);
         _warning = new(context.Localization, context.ModuleId);
         _controller = new(_probe, new PowerActionService(), _settingsStore, _eventStore, _warning, settings);
-        _warning.Configure(async () => { await _controller.SuppressCurrentOutageAsync(); }, async () => { await _controller.ExtendCountdownAsync(); }, async () => { await _controller.ShutdownNowAsync(); });
+        _warning.Configure(() => _controller.SuppressCurrentOutageAsync(), () => _controller.ExtendCountdownAsync(), () => _controller.ShutdownNowAsync());
         context.Localization.CultureChanged += OnCultureChanged;
     }
     public Task OnActivateAsync(CancellationToken cancellationToken = default) => Controller.ActivateAsync(cancellationToken);
@@ -41,6 +41,7 @@ public sealed class PowerGuardModule : IToolModule
         foreach (var weak in _views) if (weak.TryGetTarget(out var view)) view.Dispose();
         _views.Clear();
         if (_controller is not null) await _controller.DisposeAsync();
+        if (_warning is not null) await _warning.DisposeAsync();
         _probe?.Dispose(); _settingsStore?.Dispose(); _eventStore?.Dispose();
         _controller=null;_warning=null;_probe=null;_settingsStore=null;_eventStore=null;_context=null;
     }

@@ -4,6 +4,8 @@ Available modules include TextTools, ScreenPin, WindowTopmost, and PowerGuard. P
 
 PowerGuard enforces state-based operation capabilities, invalidates stale final probes after cancellation, recovery, or extension, and restarts monitoring faults through a fresh grace period. Its localized event refresh is coalesced. Module CI uses fake network and power adapters: it performs no live connectivity probe and no real shutdown.
 
+Countdown presentation is validated against its session before and after window creation, settings mutations either commit consistently or retain the prior runtime state, and module unload never disposes synchronization resources while owned tasks remain alive. Failed cleanup can be retried safely.
+
 This branch contains standalone module source code for QingToolbox.
 
 The toolbox host application is maintained on the `toolbox` branch.

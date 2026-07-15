@@ -14,6 +14,10 @@ Controller operations are capability-gated by runtime state: cancellation and ex
 
 Internal monitoring faults clear accumulated outage timestamps, invalidate countdown UI, close the real warning, and restart only through a fresh startup grace period. State locks protect in-memory decisions only; UI dispatch, settings and event I/O, HTTP probes, ticker shutdown, and the power process request run outside the state lock. Recent events are localized and refresh requests are coalesced.
 
+Countdown window creation is session-validated both before and after dispatcher work. A stale presentation is closed immediately, and its ticker cannot update a later session. Settings save, suppression, rearming, and recovery clearing are serialized transactions: persistence failure retains the previous business state, while a state change during a completed write returns an explicit applied-but-changed result.
+
+Settings replacement uses a flushed temporary file in the destination directory followed by atomic replace or initial same-volume rename. Unsafe copy-overwrite fallback is not used. Deactivation waits for monitor and presentation ownership to end before clearing task references; a cleanup timeout fails unload without disposing synchronization resources, and disposal can then be retried.
+
 Runtime data is stored under the `ModuleContext.DataDirectory`: `settings.json` for normalized settings and `events.jsonl` for UTC event summaries. Events rotate near 1 MiB to `events.previous.jsonl`. No IP address, machine name, username, remote telemetry, or full exception stack is recorded. The module runs with the current user's permissions; import only trusted `.qmod` packages.
 
 Build and verify:
@@ -23,6 +27,6 @@ Build and verify:
 ./scripts/package-powerguard.ps1 -Configuration Release -QingToolboxHostRoot "F:\QingToolbox-toolbox"
 ```
 
-The automated tests use an in-memory HTTP handler and fake process launcher. CI performs no live network probe and no shutdown operation. UPS state remains unsupported, and protection still depends on QingToolbox remaining active.
+The automated tests use an in-memory HTTP handler, fake process launcher, fake warning presenter, and injectable atomic file replacer. CI covers stale presentation, settings rollback, atomic replacement, and disposal retry races without a live network probe or shutdown operation. UPS state remains unsupported, and protection still depends on QingToolbox remaining active.
 
 The package is written to `artifacts/modules/QingToolbox.PowerGuard-0.1.0.qmod` with a SHA256 sidecar. Build artifacts are not committed.
