@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added an opt-in 68 DIP desktop floating badge from the MainWindow title bar.
+- Preserved the existing Shell, module windows and module runtime state while switching modes.
+- Added constrained, persisted badge placement plus localized Open and Exit controls.
+- Hardened native maximize-button cancellation for capture loss, deactivation and non-client leave.
+- Floating badge mode never starts automatically and does not include system-tray integration.
 - Centralized title-bar metrics and cached DPI-aware maximize-button hit targets.
 - Added native icon single/right/double-click arbitration and capability-aware caption buttons.
 - Added minimal non-client maximize click handling so `HTMAXBUTTON` executes maximize or restore exactly once.

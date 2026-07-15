@@ -9,6 +9,8 @@ internal static class NativeWindowMessages
     internal const int WindowNonClientLeftButtonDown = 0x00A1;
     internal const int WindowNonClientLeftButtonUp = 0x00A2;
     internal const int WindowNonClientMouseLeave = 0x02A2;
+    internal const int WindowCancelMode = 0x001F;
+    internal const int WindowCaptureChanged = 0x0215;
     internal const int HitTestMaximizeButton = 9;
     private const uint TrackMouseEventLeave = 0x00000002;
     private const uint TrackMouseEventNonClient = 0x00000010;

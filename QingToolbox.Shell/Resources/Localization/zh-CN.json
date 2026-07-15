@@ -141,5 +141,12 @@
   "window.close": "关闭",
   "window.systemMenu": "系统菜单",
   "window.titleBar": "窗口标题栏",
-  "moduleHost.subtitle": "QingToolbox 模块"
+  "moduleHost.subtitle": "QingToolbox 模块",
+  "floatingBadge.enable": "切换为悬浮标",
+  "floatingBadge.enableTooltip": "将 QingToolbox 收起为桌面悬浮标",
+  "floatingBadge.open": "打开 QingToolbox",
+  "floatingBadge.exit": "退出 QingToolbox",
+  "floatingBadge.contextMenu": "悬浮标菜单",
+  "floatingBadge.automationName": "QingToolbox 桌面悬浮标",
+  "floatingBadge.restoreFailed": "QingToolbox 无法安全切换窗口模式。"
 }

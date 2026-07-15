@@ -145,6 +145,34 @@ internal static class Program
             "Maximized windows must expose Restore.");
         Require(!WindowCaptionCapabilities.UsesRestoreAction(WindowState.Normal),
             "Normal windows must expose Maximize.");
+        var maximizeInteraction = new MaximizeButtonInteractionState();
+        maximizeInteraction.Press();
+        Require(maximizeInteraction.Release(true) && !maximizeInteraction.IsPressed,
+            "A normal maximize release must invoke exactly once and clear Pressed.");
+        maximizeInteraction.Press();
+        maximizeInteraction.Cancel();
+        Require(!maximizeInteraction.Release(true) && !maximizeInteraction.IsPressed,
+            "A cancelled maximize press must not invoke or remain Pressed.");
+
+        var workArea = new Rect(-1280, -900, 1280, 900);
+        var badgeSize = new Size(68, 68);
+        Require(FloatingBadgePlacement.Initial(workArea, badgeSize) == new Point(-92, -876),
+            "Floating badge initial placement is incorrect for negative coordinates.");
+        Require(FloatingBadgePlacement.Constrain(new Point(100, 100), workArea, badgeSize) == new Point(-68, -68),
+            "Floating badge right/bottom constraints are incorrect.");
+        Require(FloatingBadgePlacement.Constrain(new Point(double.NaN, 0), workArea, badgeSize) == workArea.TopLeft,
+            "Invalid saved badge positions must fall back safely.");
+        var tinyArea = new Rect(-20, -20, 30, 30);
+        Require(FloatingBadgePlacement.Constrain(new Point(50, 50), tinyArea, badgeSize) == tinyArea.TopLeft,
+            "A badge must remain visible in a smaller work area.");
+
+        var badgeState = new FloatingBadgeStateMachine();
+        Require(badgeState.TryBeginEnter() && !badgeState.TryBeginEnter(),
+            "Repeated floating badge entry must be rejected.");
+        badgeState.CompleteEnter();
+        Require(badgeState.TryBeginRestore() && !badgeState.TryBeginRestore(),
+            "Repeated floating badge restore must be rejected.");
+        badgeState.CompleteRestore();
         Console.WriteLine("Custom window chrome contracts passed.");
     }
 

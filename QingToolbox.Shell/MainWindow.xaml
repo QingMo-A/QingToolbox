@@ -38,6 +38,17 @@
                 <svgc:SvgViewbox Width="24" Height="24"
                     Source="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.Mark.svg"/>
             </controls:WindowTitleBar.IconSource>
+            <controls:WindowTitleBar.AdditionalActions>
+                <Button Style="{StaticResource WindowTitleActionButtonStyle}"
+                        ToolTip="{Binding Strings[floatingBadge.enableTooltip]}"
+                        AutomationProperties.Name="{Binding Strings[floatingBadge.enable]}"
+                        Click="OnFloatingBadgeClick">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE718;" FontFamily="Segoe Fluent Icons" FontSize="14"/>
+                        <TextBlock Margin="7,0,0,0" Text="{Binding Strings[floatingBadge.enable]}"/>
+                    </StackPanel>
+                </Button>
+            </controls:WindowTitleBar.AdditionalActions>
         </controls:WindowTitleBar>
         <Grid Grid.Row="1">
         <Grid.ColumnDefinitions>

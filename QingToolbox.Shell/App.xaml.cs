@@ -31,6 +31,7 @@ public partial class App : Application
         services.AddSingleton<ILocalizationService>(
             provider => provider.GetRequiredService<LocalizationManager>());
         services.AddSingleton<ModuleWindowManager>();
+        services.AddSingleton<FloatingBadgeManager>();
         services.AddSingleton<ApplicationPaths>();
         services.AddSingleton<ModulePackageImporter>();
         services.AddSingleton<MainWindowViewModel>();

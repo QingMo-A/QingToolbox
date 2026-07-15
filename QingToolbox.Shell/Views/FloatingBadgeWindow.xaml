@@ -1,0 +1,35 @@
+<Window x:Class="QingToolbox.Shell.Views.FloatingBadgeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:svgc="http://sharpvectors.codeplex.com/svgc/"
+        Width="68" Height="68"
+        WindowStyle="None" ResizeMode="NoResize"
+        ShowInTaskbar="False" Topmost="True"
+        WindowStartupLocation="Manual"
+        AllowsTransparency="True" Background="Transparent"
+        Title="{Binding AutomationName, RelativeSource={RelativeSource AncestorType=Window}}"
+        KeyDown="OnKeyDown" Closing="OnClosing"
+        AutomationProperties.Name="{Binding AutomationName, RelativeSource={RelativeSource AncestorType=Window}}">
+    <Border x:Name="BadgeSurface" Margin="5" Padding="12"
+            CornerRadius="20" Background="{StaticResource AccentBrush}"
+            Style="{StaticResource FloatingBadgeButtonStyle}"
+            Focusable="True"
+            AutomationProperties.Name="{Binding AutomationName, RelativeSource={RelativeSource AncestorType=Window}}"
+            MouseLeftButtonDown="OnMouseLeftButtonDown"
+            MouseMove="OnMouseMove"
+            MouseLeftButtonUp="OnMouseLeftButtonUp"
+            MouseRightButtonUp="OnMouseRightButtonUp">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="16" ShadowDepth="4" Opacity="0.25" Color="#334155"/>
+        </Border.Effect>
+        <Border.ContextMenu>
+            <ContextMenu Style="{StaticResource FloatingBadgeContextMenuStyle}"
+                         AutomationProperties.Name="{Binding ContextMenuText}">
+                <MenuItem Header="{Binding OpenText}" Click="OnOpenClick"/>
+                <Separator/>
+                <MenuItem Header="{Binding ExitText}" Click="OnExitClick"/>
+            </ContextMenu>
+        </Border.ContextMenu>
+        <svgc:SvgViewbox Source="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.Mark.svg"/>
+    </Border>
+</Window>

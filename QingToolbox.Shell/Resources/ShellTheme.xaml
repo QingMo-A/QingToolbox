@@ -109,6 +109,56 @@
         <Setter Property="Width" Value="{x:Static windowing:WindowChromeMetrics.SystemMenuButtonWidth}"/>
     </Style>
 
+    <Style x:Key="WindowTitleActionButtonStyle" TargetType="Button">
+        <Setter Property="Height" Value="32"/>
+        <Setter Property="Padding" Value="10,0"/>
+        <Setter Property="Background" Value="{StaticResource PrimaryAccentSoftBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Focusable" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="9"
+                            BorderBrush="{StaticResource AccentBrush}" BorderThickness="0">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="#DCE9FF"/></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Background" Value="#C8DCFF"/></Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderThickness" Value="1"/></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="FloatingBadgeButtonStyle" TargetType="Border">
+        <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+        <Setter Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1" ScaleY="1"/></Setter.Value></Setter>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{StaticResource AccentHoverBrush}"/>
+                <Setter Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1.04" ScaleY="1.04"/></Setter.Value></Setter>
+            </Trigger>
+            <Trigger Property="IsMouseCaptureWithin" Value="True">
+                <Setter Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.97" ScaleY="0.97"/></Setter.Value></Setter>
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter Property="BorderBrush" Value="White"/>
+                <Setter Property="BorderThickness" Value="2"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="FloatingBadgeContextMenuStyle" TargetType="ContextMenu">
+        <Setter Property="Padding" Value="4"/>
+        <Setter Property="Background" Value="White"/>
+        <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+
     <Style x:Key="WindowTitleBarDividerStyle" TargetType="Border">
         <Setter Property="BorderBrush" Value="{StaticResource WindowTitleBarDividerBrush}"/>
         <Setter Property="BorderThickness" Value="0,0,0,1"/>

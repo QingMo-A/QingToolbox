@@ -3,22 +3,37 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Animation;
 using QingToolbox.Shell.ViewModels;
+using QingToolbox.Shell.Services;
 
 namespace QingToolbox.Shell;
 
 public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
+    private readonly FloatingBadgeManager _floatingBadgeManager;
 
-    public MainWindow(MainWindowViewModel viewModel)
+    public MainWindow(
+        MainWindowViewModel viewModel,
+        FloatingBadgeManager floatingBadgeManager)
     {
         InitializeComponent();
 
         _viewModel = viewModel;
+        _floatingBadgeManager = floatingBadgeManager;
+        _floatingBadgeManager.Attach(this);
         DataContext = viewModel;
         Loaded += OnLoaded;
         SizeChanged += OnSizeChanged;
         Closing += OnClosing;
+    }
+
+    private async void OnFloatingBadgeClick(object sender, RoutedEventArgs e)
+    {
+        var button = (System.Windows.Controls.Button)sender;
+        button.IsEnabled = false;
+        try { await _floatingBadgeManager.EnterAsync(); }
+        catch { _viewModel.StatusMessage = _viewModel.Strings["floatingBadge.restoreFailed"]; }
+        finally { button.IsEnabled = true; }
     }
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e)
@@ -82,6 +97,7 @@ public partial class MainWindow : Window
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
+        _floatingBadgeManager.OnMainWindowClosing();
         _viewModel.CloseModuleWindows();
     }
 }

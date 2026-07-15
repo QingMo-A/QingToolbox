@@ -52,7 +52,7 @@ public static class WindowChromeBehavior
         private HwndSource? _source;
         private WeakReference<WindowTitleBar>? _titleBarReference;
         private WeakReference<FrameworkElement>? _maximizeButtonReference;
-        private bool _maximizeButtonPressed;
+        private readonly MaximizeButtonInteractionState _maximizeInteraction = new();
         private bool _trackingNonClientMouse;
 
         internal Controller(Window window)
@@ -69,6 +69,7 @@ public static class WindowChromeBehavior
             window.SourceInitialized += OnSourceInitialized;
             window.Loaded += OnWindowLoaded;
             window.ContentRendered += OnContentRendered;
+            window.Deactivated += OnWindowDeactivated;
             window.Closed += OnClosed;
         }
 
@@ -123,9 +124,16 @@ public static class WindowChromeBehavior
             IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam,
             ref bool handled)
         {
+            if (message is NativeWindowMessages.WindowCancelMode or
+                NativeWindowMessages.WindowCaptureChanged)
+            {
+                CancelMaximizeInteraction();
+                return IntPtr.Zero;
+            }
+
             if (message == NativeWindowMessages.WindowNonClientMouseLeave)
             {
-                SetNativeMaximizeState(false, false);
+                CancelMaximizeInteraction();
                 _trackingNonClientMouse = false;
                 return IntPtr.Zero;
             }
@@ -133,7 +141,7 @@ public static class WindowChromeBehavior
             if (message == NativeWindowMessages.WindowNonClientMouseMove &&
                 wParam.ToInt64() == NativeWindowMessages.HitTestMaximizeButton)
             {
-                SetNativeMaximizeState(true, _maximizeButtonPressed);
+                SetNativeMaximizeState(true, _maximizeInteraction.IsPressed);
                 if (!_trackingNonClientMouse)
                 {
                     NativeWindowMessages.TrackNonClientMouseLeave(hwnd);
@@ -145,16 +153,16 @@ public static class WindowChromeBehavior
             if (message == NativeWindowMessages.WindowNonClientLeftButtonDown &&
                 wParam.ToInt64() == NativeWindowMessages.HitTestMaximizeButton)
             {
-                _maximizeButtonPressed = true;
+                _maximizeInteraction.Press();
                 SetNativeMaximizeState(true, true);
                 handled = true;
                 return IntPtr.Zero;
             }
 
-            if (message == NativeWindowMessages.WindowNonClientLeftButtonUp && _maximizeButtonPressed)
+            if (message == NativeWindowMessages.WindowNonClientLeftButtonUp && _maximizeInteraction.IsPressed)
             {
-                var invoke = wParam.ToInt64() == NativeWindowMessages.HitTestMaximizeButton;
-                _maximizeButtonPressed = false;
+                var invoke = _maximizeInteraction.Release(
+                    wParam.ToInt64() == NativeWindowMessages.HitTestMaximizeButton);
                 SetNativeMaximizeState(invoke, false);
                 handled = true;
                 if (invoke && _titleBarReference?.TryGetTarget(out var pressedTitleBar) == true)
@@ -205,6 +213,15 @@ public static class WindowChromeBehavior
                 titleBar.SetNativeMaximizeButtonState(hovered, pressed);
         }
 
+        private void OnWindowDeactivated(object? sender, EventArgs e) =>
+            CancelMaximizeInteraction();
+
+        private void CancelMaximizeInteraction()
+        {
+            _maximizeInteraction.Cancel();
+            SetNativeMaximizeState(false, false);
+        }
+
         private static T? FindVisualChild<T>(DependencyObject root)
             where T : DependencyObject
         {
@@ -233,7 +250,9 @@ public static class WindowChromeBehavior
             _window.SourceInitialized -= OnSourceInitialized;
             _window.Loaded -= OnWindowLoaded;
             _window.ContentRendered -= OnContentRendered;
+            _window.Deactivated -= OnWindowDeactivated;
             _window.Closed -= OnClosed;
+            CancelMaximizeInteraction();
             ClearTitleBarReferences();
             if (_source is not null)
             {

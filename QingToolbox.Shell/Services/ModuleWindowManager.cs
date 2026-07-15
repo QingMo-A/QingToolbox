@@ -8,6 +8,8 @@ public sealed class ModuleWindowManager(ILocalizationService localization)
 {
     private readonly Dictionary<string, ModuleHostWindow> _windows =
         new(StringComparer.Ordinal);
+    private readonly Dictionary<string, WindowState> _suspendedWindows =
+        new(StringComparer.Ordinal);
 
     public bool IsWindowOpen(string moduleId) => _windows.ContainsKey(moduleId);
 
@@ -77,5 +79,27 @@ public sealed class ModuleWindowManager(ILocalizationService localization)
         {
             window.Close();
         }
+    }
+
+    public void SuspendForFloatingBadge()
+    {
+        _suspendedWindows.Clear();
+        foreach (var (moduleId, window) in _windows)
+        {
+            if (!window.IsVisible) continue;
+            _suspendedWindows[moduleId] = window.WindowState;
+            window.Hide();
+        }
+    }
+
+    public void RestoreAfterFloatingBadge()
+    {
+        foreach (var (moduleId, state) in _suspendedWindows.ToArray())
+        {
+            if (!_windows.TryGetValue(moduleId, out var window)) continue;
+            window.Show();
+            window.WindowState = state;
+        }
+        _suspendedWindows.Clear();
     }
 }

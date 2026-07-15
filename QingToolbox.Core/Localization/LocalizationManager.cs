@@ -60,10 +60,9 @@ public sealed class LocalizationManager(UserSettingsService settingsService)
         var changed = ConfiguredLanguageCode != languageCode ||
                       CurrentCulture.Name != culture.Name;
         ConfiguredLanguageCode = languageCode;
-        await settingsService.SaveAsync(new LanguageSettings
-        {
-            Language = languageCode
-        });
+        var settings = await settingsService.LoadAsync();
+        settings.Language = languageCode;
+        await settingsService.SaveAsync(settings);
         ApplyCulture(culture, changed);
     }
 

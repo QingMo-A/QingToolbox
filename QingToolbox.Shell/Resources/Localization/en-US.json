@@ -141,5 +141,12 @@
   "window.close": "Close",
   "window.systemMenu": "System menu",
   "window.titleBar": "Window title bar",
-  "moduleHost.subtitle": "QingToolbox module"
+  "moduleHost.subtitle": "QingToolbox module",
+  "floatingBadge.enable": "Switch to floating badge",
+  "floatingBadge.enableTooltip": "Keep QingToolbox available as a desktop floating badge",
+  "floatingBadge.open": "Open QingToolbox",
+  "floatingBadge.exit": "Exit QingToolbox",
+  "floatingBadge.contextMenu": "Floating badge menu",
+  "floatingBadge.automationName": "QingToolbox floating badge",
+  "floatingBadge.restoreFailed": "QingToolbox could not switch window modes safely."
 }
