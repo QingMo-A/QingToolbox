@@ -13,6 +13,9 @@
 #ifndef OutputBaseFilename
   #error OutputBaseFilename must be provided by scripts/build-installer.ps1
 #endif
+#ifndef BrandIconPath
+  #error BrandIconPath must be provided by scripts/build-installer.ps1
+#endif
 
 [Setup]
 AppId={{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}
@@ -45,6 +48,7 @@ DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
 OutputBaseFilename={#OutputBaseFilename}
 SetupLogging=yes
+SetupIconFile={#BrandIconPath}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

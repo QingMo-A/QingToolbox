@@ -37,6 +37,9 @@
 - Empty dashboards no longer show meaningless zero statistics.
 - First-run steps now use a constrained equal-width responsive layout.
 - Refresh failures preserve the last consistent discovered-module state.
+- Official geometric QingToolbox brand mark and nine-frame Windows icon.
+- Unified Shell, taskbar, shortcut, settings, and installer branding.
+- Standardized the user-visible product name as QingToolbox.
 
 ### Known Issues
 

@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <Resource Include="Assets\Icons\Nieobie\*.svg" />
+    <Resource Include="Assets\Branding\QingToolbox.Mark.svg" />
+    <Resource Include="Assets\Branding\QingToolbox.ico" />
     <Content Include="Resources\Localization\*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
@@ -29,6 +31,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets\Branding\QingToolbox.ico</ApplicationIcon>
   </PropertyGroup>
 
 </Project>

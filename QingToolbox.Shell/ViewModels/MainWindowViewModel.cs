@@ -68,7 +68,7 @@ public sealed partial class MainWindowViewModel(
     [ObservableProperty]
     private DiscoveredModuleViewModel? _selectedModule;
 
-    public string Title => "Qing Toolbox";
+    public string Title => localization.GetString("app.name");
     public string VersionDisplay =>
         typeof(MainWindowViewModel).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
@@ -179,6 +179,7 @@ public sealed partial class MainWindowViewModel(
 
         OnPropertyChanged(nameof(PageTitle));
         OnPropertyChanged(nameof(PageSubtitle));
+        OnPropertyChanged(nameof(Title));
         RefreshLanguageOptionLabels();
         var option = LanguageOptions.FirstOrDefault(
             item => item.Code == languageCode);

@@ -20,7 +20,7 @@
             <TextBlock Text="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=Title}"
                        FontSize="22" FontWeight="SemiBold"
                        Foreground="{StaticResource StrongTextBrush}"/>
-            <TextBlock Margin="0,4,0,0" Text="Qing Toolbox module"
+            <TextBlock Margin="0,4,0,0" Text="QingToolbox module"
                        FontSize="12" Foreground="{StaticResource MutedTextBrush}"/>
         </StackPanel>
         <Border Grid.Row="1"

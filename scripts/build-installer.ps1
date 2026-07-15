@@ -23,6 +23,10 @@ $outputDirectory = Join-Path $installerRoot "output"
 $shellProject = Join-Path $repoRoot "QingToolbox.Shell\QingToolbox.Shell.csproj"
 $smokeProject = Join-Path $repoRoot "QingToolbox.DevTools.ModuleLoadSmokeTest\QingToolbox.DevTools.ModuleLoadSmokeTest.csproj"
 $installerScript = Join-Path $repoRoot "installer\QingToolbox.iss"
+$brandIconPath = Join-Path $repoRoot `
+    "QingToolbox.Shell\Assets\Branding\QingToolbox.ico"
+$brandMarkPath = Join-Path $repoRoot `
+    "QingToolbox.Shell\Assets\Branding\QingToolbox.Mark.svg"
 
 function Assert-InstallerArtifactPath {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -75,6 +79,11 @@ function Resolve-IsccPath {
 }
 
 try {
+    foreach ($brandAsset in @($brandIconPath, $brandMarkPath)) {
+        if (-not (Test-Path -LiteralPath $brandAsset -PathType Leaf)) {
+            throw "QingToolbox brand asset is missing: $brandAsset"
+        }
+    }
     foreach ($path in @($payloadDirectory, $outputDirectory)) {
         Assert-InstallerArtifactPath -Path $path
         if (Test-Path -LiteralPath $path) {
@@ -119,10 +128,26 @@ try {
         throw "Installer payload is missing QingToolbox.Shell.exe."
     }
 
+    Add-Type -AssemblyName System.Drawing
+    $embeddedIcon = [System.Drawing.Icon]::ExtractAssociatedIcon(
+        $shellExecutable)
+    if ($null -eq $embeddedIcon) {
+        throw "QingToolbox.Shell.exe does not expose an embedded application icon."
+    }
+    $embeddedIcon.Dispose()
+
     $payloadFiles = @(Get-ChildItem -LiteralPath $payloadDirectory -Recurse -File)
     $pdbFiles = @($payloadFiles | Where-Object Extension -EQ ".pdb")
     if ($pdbFiles.Count -gt 0) {
         throw "Installer payload contains PDB files: $($pdbFiles.FullName -join ', ')"
+    }
+
+    $looseBrandImages = @($payloadFiles | Where-Object {
+        $_.Extension -in @(".ico", ".png")
+    })
+    if ($looseBrandImages.Count -gt 0) {
+        throw "Installer payload contains loose icon exports: " +
+              ($looseBrandImages.FullName -join ', ')
     }
 
     $forbiddenModuleFiles = @($payloadFiles | Where-Object {
@@ -187,6 +212,7 @@ try {
         "/DSourceDir=$payloadDirectory" `
         "/DOutputDir=$outputDirectory" `
         "/DOutputBaseFilename=$outputBaseFilename" `
+        "/DBrandIconPath=$brandIconPath" `
         $installerScript
     if ($LASTEXITCODE -ne 0) {
         throw "Inno Setup compilation failed with exit code $LASTEXITCODE."

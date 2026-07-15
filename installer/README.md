@@ -73,8 +73,19 @@ The Windows Preview validation workflow also builds both release assets,
 recomputes their SHA256 checksums, performs this roundtrip, and uploads the four
 assets for 10 days. CI installs the approved Chocolatey `innosetup` 6.7.1
 package and obtains the Simplified Chinese message file from the official Inno
-Setup translation endpoint. It does not publish a GitHub Release. A formal
-QingToolbox application icon has not been provided yet.
+Setup translation endpoint. It does not publish a GitHub Release.
+
+The installer, installed Shell executable, Start Menu shortcut, optional
+desktop shortcut, and uninstall entry use the same QingToolbox brand icon.
+The editable authority is
+`QingToolbox.Shell/Assets/Branding/QingToolbox.Mark.svg`; the multi-frame
+`QingToolbox.ico` is the Windows release asset and is passed to Inno Setup
+without copying it into the payload.
+
+Windows Explorer and the taskbar cache icons. When validating branding, restart
+Explorer if necessary, recreate old shortcuts, and uninstall an older Preview
+or use a clean test environment. The installer does not clear system icon
+caches. The binaries remain unsigned.
 
 The Simplified Chinese message file is downloaded from the official
 `jrsoftware/issrc` source by `scripts/prepare-inno-setup.ps1`. Its expected

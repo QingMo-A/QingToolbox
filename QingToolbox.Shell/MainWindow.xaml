@@ -12,6 +12,7 @@
         SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="ClearType"
+        Icon="Assets/Branding/QingToolbox.ico"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource ShellBackgroundGradientBrush}">
 
@@ -220,21 +221,16 @@
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <Grid Margin="8,0,8,22" Height="36">
+                <Grid Margin="8,0,8,22" Height="36"
+                      AutomationProperties.Name="QingToolbox">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="32"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <Border Width="30"
-                            Height="30"
-                            Background="#2563EB"
-                            CornerRadius="8">
-                        <TextBlock HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"
-                                   Text="Q"
-                                   FontWeight="Bold"
-                                   Foreground="White"/>
-                    </Border>
+                    <svgc:SvgViewbox Width="32" Height="32"
+                                     HorizontalAlignment="Center"
+                                     VerticalAlignment="Center"
+                                     Source="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.Mark.svg"/>
                     <TextBlock Grid.Column="1"
                                Text="{Binding Strings[app.name]}"
                                FontWeight="SemiBold"
@@ -1182,13 +1178,36 @@
                                   SelectedValuePath="Code"
                                   SelectedValue="{Binding SelectedLanguageCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                         <Border Margin="0,24,0,0" Height="1" Background="#E2E8F0"/>
-                        <TextBlock Margin="0,20,0,0"
-                                   Text="{Binding Strings[settings.version]}"
-                                   FontSize="16" FontWeight="SemiBold"
-                                   Foreground="{StaticResource PrimaryTextBrush}"/>
-                        <TextBlock Margin="0,6,0,0"
-                                   Text="{Binding VersionDisplay, StringFormat={}{0} Preview}"
-                                   Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <Border Margin="0,20,0,0" Padding="18"
+                                Style="{StaticResource LiquidGlassPanelStyle}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <svgc:SvgViewbox Width="56" Height="56"
+                                                 Source="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.Mark.svg"/>
+                                <StackPanel Grid.Column="1" Margin="16,0,0,0">
+                                    <WrapPanel>
+                                        <TextBlock Text="{Binding Strings[settings.about.product]}"
+                                                   FontSize="18" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource PrimaryTextBrush}"/>
+                                        <Border Margin="10,0,0,0" Padding="9,3"
+                                                Background="{StaticResource PrimaryAccentSoftBrush}"
+                                                CornerRadius="9">
+                                            <TextBlock Text="{Binding Strings[settings.about.preview]}"
+                                                       FontSize="11" Foreground="{StaticResource AccentBrush}"/>
+                                        </Border>
+                                    </WrapPanel>
+                                    <TextBlock Margin="0,5,0,0" Text="{Binding VersionDisplay}"
+                                               Foreground="{StaticResource SecondaryTextBrush}"/>
+                                    <TextBlock Margin="0,7,0,0"
+                                               Text="{Binding Strings[settings.about.description]}"
+                                               TextWrapping="Wrap"
+                                               Foreground="{StaticResource SecondaryTextBrush}"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
                     </StackPanel>
                 </Border>
             </Grid>
