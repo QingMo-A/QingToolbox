@@ -20,7 +20,8 @@ public partial class ShutdownWarningWindow : Window
         if (viewModel.IsTestMode)
         {
             _testTimer = new() { Interval=TimeSpan.FromSeconds(1) };
-            _testTimer.Tick += (_, _) => { if (_viewModel.Seconds > 0) _viewModel.Seconds--; else { _testTimer.Stop(); ModeText.Text=T("status.testCompleted","Test completed"); } };
+            _testTimer.Tick += OnTestTick;
+            Closed += (_,_) => { _testTimer.Stop(); _testTimer.Tick -= OnTestTick; };
             _testTimer.Start();
         }
     }
@@ -38,13 +39,16 @@ public partial class ShutdownWarningWindow : Window
     public void SetSeconds(int seconds)=>_viewModel.Seconds=seconds;
     public void PositionAtPrimaryWorkArea() { UpdateLayout(); var area=SystemParameters.WorkArea; Left=area.Left+20; Top=area.Bottom-ActualHeight-20; }
     public void CloseWithoutCancel() { _closeWithoutCancel=true; _testTimer?.Stop(); Close(); }
-    private async void Cancel_Click(object sender,RoutedEventArgs e)=>await _cancel();
-    private async void Extend_Click(object sender,RoutedEventArgs e)=>await _extend();
+    private void OnTestTick(object? sender,EventArgs e){_viewModel.Seconds=Math.Max(0,_viewModel.Seconds-1);if(_viewModel.Seconds==0){_testTimer?.Stop();ModeText.Text=T("status.testCompleted","Test completed");}}
+    private async Task RunActionAsync(Func<Task> action){CancelButton.IsEnabled=ExtendButton.IsEnabled=ShutdownButton.IsEnabled=false;try{await action();}catch{ModeText.Text=T("errors.operationFailed","Operation failed.");}finally{CancelButton.IsEnabled=true;ExtendButton.IsEnabled=!_viewModel.IsTestMode;ShutdownButton.IsEnabled=true;}}
+    private async void Cancel_Click(object sender,RoutedEventArgs e)=>await RunActionAsync(_cancel);
+    private async void Extend_Click(object sender,RoutedEventArgs e)=>await RunActionAsync(_extend);
     private async void Shutdown_Click(object sender,RoutedEventArgs e)
     {
-        if (_viewModel.IsTestMode) { await _shutdown(); return; }
-        if (MessageBox.Show(T("warning.confirmShutdown","Shut down Windows now?"),"PowerGuard",MessageBoxButton.YesNo,MessageBoxImage.Warning)==MessageBoxResult.Yes) await _shutdown();
+        if (_viewModel.IsTestMode) { await RunActionAsync(_shutdown); return; }
+        if (MessageBox.Show(this,T("warning.confirmShutdown","Shut down Windows now?"),"PowerGuard",MessageBoxButton.YesNo,MessageBoxImage.Warning)==MessageBoxResult.Yes) await RunActionAsync(_shutdown);
     }
-    private async void OnPreviewKeyDown(object sender,KeyEventArgs e) { if(e.Key==Key.Escape){e.Handled=true;await _cancel();} }
-    private void OnClosing(object? sender,CancelEventArgs e) { _testTimer?.Stop(); if(!_closeWithoutCancel){e.Cancel=true;_ = _cancel();} }
+    private async void OnPreviewKeyDown(object sender,KeyEventArgs e) { if(e.Key==Key.Escape){e.Handled=true;await RunActionAsync(_cancel);} }
+    private void OnClosing(object? sender,CancelEventArgs e) { _testTimer?.Stop(); if(!_closeWithoutCancel){e.Cancel=true;_ = CancelFromChromeAsync();} }
+    private async Task CancelFromChromeAsync()=>await RunActionAsync(_cancel);
 }

@@ -47,7 +47,7 @@ public sealed class PowerGuardModule : IToolModule
     public object CreateView()
     {
         var context=_context ?? throw new InvalidOperationException("Module context is not available.");
-        var viewModel=new PowerGuardViewModel(Controller); _views.Add(new(viewModel));
+        var viewModel=new PowerGuardViewModel(Controller,context.Localization,context.ModuleId); _views.Add(new(viewModel));
         return new PowerGuardView(context.Localization,context.ModuleId,viewModel);
     }
     private PowerGuardController Controller => _controller ?? throw new InvalidOperationException("PowerGuard is not loaded.");

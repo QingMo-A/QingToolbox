@@ -4,32 +4,38 @@ using QingToolbox.Modules.PowerGuard.ViewModels;
 using QingToolbox.Modules.PowerGuard.Views;
 
 namespace QingToolbox.Modules.PowerGuard.Services;
+public enum WarningWindowSessionKind{None,RealWarning,TestPreview}
+public enum TestPreviewResult{Opened,ActivatedExisting,UnavailableDuringCountdown}
 
-public sealed class WarningWindowPresenter(ILocalizationService localization, string moduleId) : IWarningPresenter
+public sealed class WarningWindowPresenter(ILocalizationService localization,string moduleId):IWarningPresenter
 {
-    private ShutdownWarningWindow? _window;
-    private Func<Task>? _suppress;
-    private Func<Task>? _extend;
-    private Func<Task>? _shutdown;
-    public void Configure(Func<Task> suppress, Func<Task> extend, Func<Task> shutdown) { _suppress=suppress; _extend=extend; _shutdown=shutdown; }
-
-    public Task ShowAsync(bool testMode, int seconds, CancellationToken token = default) => DispatchAsync(() =>
+    private ShutdownWarningWindow? _real,_test;private Func<Task>? _suppress,_extend,_shutdown;
+    public WarningWindowSessionKind SessionKind=>_real is not null?WarningWindowSessionKind.RealWarning:_test is not null?WarningWindowSessionKind.TestPreview:WarningWindowSessionKind.None;
+    public void Configure(Func<Task>suppress,Func<Task>extend,Func<Task>shutdown){_suppress=suppress;_extend=extend;_shutdown=shutdown;}
+    public async Task ShowRealAsync(int seconds,CancellationToken token=default)
     {
-        if (_window is not null) { _window.SetSeconds(seconds); return; }
-        _window = new ShutdownWarningWindow(localization, moduleId, new() { IsTestMode=testMode, Seconds=seconds },
-            async () => { if (!testMode && _suppress is not null) await _suppress(); await CloseAsync(); },
-            async () => { if (!testMode && _extend is not null) await _extend(); },
-            async () => { if (!testMode && _shutdown is not null) await _shutdown(); else await CloseAsync(); });
-        _window.Closed += (_, _) => _window = null;
-        _window.Show(); _window.PositionAtPrimaryWorkArea();
-    }, token);
-    public Task UpdateAsync(int seconds, bool recovering, CancellationToken token = default) => DispatchAsync(() => _window?.SetSeconds(seconds), token);
-    public Task CloseAsync(CancellationToken token = default) => DispatchAsync(() => { var window=_window; _window=null; window?.CloseWithoutCancel(); }, token);
-    public void RefreshLocalization() { if (_window is not null) _ = DispatchAsync(_window.RefreshLocalization, CancellationToken.None); }
-    private static Task DispatchAsync(Action action, CancellationToken token)
-    {
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.CheckAccess()) { token.ThrowIfCancellationRequested(); action(); return Task.CompletedTask; }
-        return dispatcher.InvokeAsync(action, System.Windows.Threading.DispatcherPriority.Normal, token).Task;
+        await CloseTestAsync(token);await DispatchAsync(()=>
+        {
+            if(_real is not null){_real.SetSeconds(seconds);_real.Activate();return;}
+            var window=new ShutdownWarningWindow(localization,moduleId,new(){Seconds=seconds},async()=>{if(_suppress is null)throw new InvalidOperationException();await _suppress();},async()=>{if(_extend is null)throw new InvalidOperationException();await _extend();},async()=>{if(_shutdown is null)throw new InvalidOperationException();await _shutdown();});
+            _real=window;window.Closed+=(_,_)=>{if(ReferenceEquals(_real,window))_real=null;};window.Show();window.PositionAtPrimaryWorkArea();
+        },token);
     }
+    public async Task<TestPreviewResult> ShowTestAsync(int seconds,CancellationToken token=default)
+    {
+        if(_real is not null)return TestPreviewResult.UnavailableDuringCountdown;
+        var result=TestPreviewResult.Opened;await DispatchAsync(()=>
+        {
+            if(_real is not null){result=TestPreviewResult.UnavailableDuringCountdown;return;}
+            if(_test is not null){_test.Activate();result=TestPreviewResult.ActivatedExisting;return;}
+            var window=new ShutdownWarningWindow(localization,moduleId,new(){IsTestMode=true,Seconds=seconds},()=>CloseTestAsync(),()=>Task.CompletedTask,()=>CloseTestAsync());
+            _test=window;window.Closed+=(_,_)=>{if(ReferenceEquals(_test,window))_test=null;};window.Show();window.PositionAtPrimaryWorkArea();
+        },token);return result;
+    }
+    public Task UpdateRealAsync(int seconds,CancellationToken token=default)=>DispatchAsync(()=>_real?.SetSeconds(seconds),token);
+    public Task CloseRealAsync(CancellationToken token=default)=>DispatchAsync(()=>{var w=_real;_real=null;w?.CloseWithoutCancel();},token);
+    public Task CloseTestAsync(CancellationToken token=default)=>DispatchAsync(()=>{var w=_test;_test=null;w?.CloseWithoutCancel();},token);
+    public async Task CloseAllAsync(CancellationToken token=default){await CloseTestAsync(token);await CloseRealAsync(token);}
+    public void RefreshLocalization(){if(_real is not null)_=DispatchAsync(_real.RefreshLocalization,CancellationToken.None);if(_test is not null)_=DispatchAsync(_test.RefreshLocalization,CancellationToken.None);}
+    private static Task DispatchAsync(Action action,CancellationToken token){var d=Application.Current?.Dispatcher;if(d is null||d.CheckAccess()){token.ThrowIfCancellationRequested();action();return Task.CompletedTask;}return d.InvokeAsync(action,System.Windows.Threading.DispatcherPriority.Normal,token).Task;}
 }

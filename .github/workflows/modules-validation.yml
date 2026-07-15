@@ -1,0 +1,35 @@
+name: Modules validation
+
+on:
+  push:
+    branches: [modules]
+  pull_request:
+    branches: [modules]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout modules
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          path: modules-source
+      - name: Checkout compatible toolbox host
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          repository: QingMo-A/QingToolbox
+          ref: b0be12daa5874dad13bb90d1e9a9e60e72f49ab6
+          path: toolbox-host
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: 10.0.x
+      - name: Verify modules
+        shell: pwsh
+        run: ./modules-source/scripts/verify-modules.ps1 -QingToolboxHostRoot "$PWD/toolbox-host" -Configuration Release
+      - name: Package and integration test PowerGuard
+        shell: pwsh
+        run: ./modules-source/scripts/package-powerguard.ps1 -QingToolboxHostRoot "$PWD/toolbox-host" -Configuration Release

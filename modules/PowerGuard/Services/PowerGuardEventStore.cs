@@ -6,6 +6,7 @@ namespace QingToolbox.Modules.PowerGuard.Services;
 
 public sealed class PowerGuardEventStore(string dataDirectory) : IDisposable
 {
+    public event EventHandler? EventAppended;
     private const long MaximumBytes = 1024 * 1024;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _path = Path.Combine(dataDirectory, "events.jsonl");
@@ -25,6 +26,7 @@ public sealed class PowerGuardEventStore(string dataDirectory) : IDisposable
                 }
                 var safeDetail = string.IsNullOrWhiteSpace(detail) ? null : detail.Length > 160 ? detail[..160] : detail;
                 await File.AppendAllTextAsync(_path, JsonSerializer.Serialize(new GuardEvent(DateTimeOffset.UtcNow, type, safeDetail)) + Environment.NewLine, token);
+                EventAppended?.Invoke(this, EventArgs.Empty);
             }
             finally { _gate.Release(); }
         }

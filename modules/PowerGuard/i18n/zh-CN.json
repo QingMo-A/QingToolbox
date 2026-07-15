@@ -5,4 +5,5 @@
   "status.disabled":"已停用","status.startupGrace":"启动宽限中","status.online":"在线","status.suspectedOffline":"疑似断网","status.countdown":"关机倒计时","status.suppressed":"本次断网已抑制","status.recovering":"正在确认恢复","status.executingShutdown":"正在请求关机","status.actionFailed":"关机请求失败","status.settingsSaved":"设置已保存。","status.testMode":"测试模式，不会关机","status.testCompleted":"测试完成",
   "warning.title":"网络连接已中断","warning.description":"如果网络未恢复，电脑将在倒计时结束后正常关机。","warning.testDescription":"当前为测试模式，倒计时结束不会关闭电脑。","warning.recovery":"正在确认网络恢复。","warning.cancelMeaning":"取消只会抑制当前连续断网周期。","warning.confirmShutdown":"确定现在正常关闭 Windows 吗？",
   "errors.settingsLoadFailed":"无法加载设置，已使用安全默认值。","errors.settingsSaveFailed":"无法保存设置。","errors.probeFailed":"网络探测失败。","errors.shutdownFailed":"正常关机请求失败。","errors.operationFailed":"操作失败。"
+  ,"view.recentEvents":"最近事件","status.enabled":"已启用","status.offline":"离线","status.never":"从未","status.monitoringFault":"监控故障","status.testUnavailable":"真实关机倒计时正在进行，无法打开测试窗口。"
 }

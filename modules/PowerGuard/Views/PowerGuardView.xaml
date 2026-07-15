@@ -2,9 +2,9 @@
  <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="28" MaxWidth="900">
   <TextBlock x:Name="TitleText" FontSize="28" FontWeight="Bold" Foreground="#102A56"/><TextBlock x:Name="SubtitleText" Margin="0,6,0,20" Foreground="#60708A" TextWrapping="Wrap"/>
   <UniformGrid Columns="3" Margin="0,0,0,18">
-   <Border Margin="0,0,10,0" Padding="16" CornerRadius="14" Background="#EEF5FF"><StackPanel><TextBlock x:Name="GuardLabel" Foreground="#60708A"/><TextBlock Text="{Binding Snapshot.GuardEnabled}" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
-   <Border Margin="0,0,10,0" Padding="16" CornerRadius="14" Background="#F3F8FF"><StackPanel><TextBlock x:Name="StateLabel" Foreground="#60708A"/><TextBlock Text="{Binding State}" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
-   <Border Padding="16" CornerRadius="14" Background="#F6F9FD"><StackPanel><TextBlock x:Name="CountdownLabel" Foreground="#60708A"/><TextBlock Text="{Binding Countdown}" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
+   <Border Margin="0,0,10,0" Padding="16" CornerRadius="14" Background="#EEF5FF"><StackPanel><TextBlock x:Name="GuardLabel" Foreground="#60708A"/><TextBlock Text="{Binding GuardStatusText}" FontSize="20" FontWeight="SemiBold"/><TextBlock Text="{Binding NetworkStatusText}" Foreground="#52647E"/></StackPanel></Border>
+   <Border Margin="0,0,10,0" Padding="16" CornerRadius="14" Background="#F3F8FF"><StackPanel><TextBlock x:Name="StateLabel" Foreground="#60708A"/><TextBlock Text="{Binding StateText}" FontSize="20" FontWeight="SemiBold"/><TextBlock Text="{Binding LastOnlineText}" Foreground="#52647E"/></StackPanel></Border>
+   <Border Padding="16" CornerRadius="14" Background="#F6F9FD"><StackPanel><TextBlock x:Name="CountdownLabel" Foreground="#60708A"/><TextBlock Text="{Binding Countdown}" Visibility="{Binding CountdownVisibility}" FontSize="20" FontWeight="SemiBold"/><TextBlock Text="{Binding DefaultActionText}" Foreground="#52647E"/></StackPanel></Border>
   </UniformGrid>
   <GroupBox x:Name="SettingsGroup" Padding="16"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
    <CheckBox x:Name="GuardCheck" Grid.ColumnSpan="2" IsChecked="{Binding EditableSettings.GuardEnabled}" Margin="0,0,0,12"/>
@@ -16,5 +16,6 @@
   <WrapPanel Margin="0,16,0,0"><Button x:Name="SaveButton" Padding="16,9" Margin="0,0,8,8" Click="Save_Click"/><Button x:Name="ProbeButton" Padding="16,9" Margin="0,0,8,8" Click="Probe_Click"/><Button x:Name="TestButton" Padding="16,9" Margin="0,0,8,8" Click="Test_Click"/><Button x:Name="CancelButton" Padding="16,9" Margin="0,0,8,8" Click="Cancel_Click"/><Button x:Name="RearmButton" Padding="16,9" Margin="0,0,8,8" Click="Rearm_Click"/></WrapPanel>
   <TextBlock x:Name="StatusText" Margin="0,8,0,0" Foreground="#2563EB" TextWrapping="Wrap"/>
   <Border Margin="0,18,0,0" Padding="16" CornerRadius="14" Background="#F6F9FD"><TextBlock x:Name="NoticeText" TextWrapping="Wrap" Foreground="#52647E"/></Border>
+  <GroupBox x:Name="RecentEventsGroup" Margin="0,18,0,0" Padding="10"><ListBox ItemsSource="{Binding RecentEvents}" MaxHeight="220" BorderThickness="0" Background="Transparent"/></GroupBox>
  </StackPanel></ScrollViewer>
 </UserControl>
