@@ -1,0 +1,15 @@
+{
+  "id": "qing.powerguard",
+  "name": "PowerGuard",
+  "description": "Monitor internet connectivity and safely shut down the computer after a confirmed outage.",
+  "version": "0.1.0",
+  "author": "QingMo",
+  "minimumHostVersion": "0.1.0",
+  "entry": "QingToolbox.Modules.PowerGuard.dll",
+  "runtimeType": "InProcess",
+  "loadMode": "Manual",
+  "permissions": ["Network", "ProcessStart"],
+  "icon": "icon.svg",
+  "defaultLanguage": "en-US",
+  "localization": { "basePath": "i18n", "resources": { "en-US": "i18n/en-US.json", "zh-CN": "i18n/zh-CN.json" } }
+}

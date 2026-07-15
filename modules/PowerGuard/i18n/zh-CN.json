@@ -1,0 +1,8 @@
+{
+  "module.name":"断网关机守护","module.description":"监测互联网连接，并在确认断网后安全地正常关闭电脑。",
+  "view.title":"断网关机守护","view.subtitle":"适用于无人值守电脑的离线关机保护。","view.guardStatus":"守护状态","view.networkStatus":"网络状态","view.currentState":"当前阶段","view.lastOnline":"最近联网时间","view.countdown":"当前倒计时","view.settings":"设置","view.startupGrace":"启动宽限（秒）","view.offlineConfirmation":"断网确认（秒）","view.shutdownCountdown":"关机倒计时（秒）","view.recoveryConfirmation":"恢复确认（秒）","view.defaultAction":"默认动作","view.normalShutdown":"正常关机","view.setupNotice":"如需无人值守运行，请开启 QingToolbox 开机自启动，并在 PowerGuard 模块卡片开启“随工具箱启动”。关闭此界面不会停止守护。此版本尚不读取 UPS 状态。","view.upsNotSupported":"此版本尚不支持 UPS 状态。",
+  "actions.enableGuard":"启用守护","actions.disableGuard":"停用守护","actions.save":"保存设置","actions.testWarning":"测试警告窗口","actions.probeNow":"立即检测网络","actions.cancelCurrent":"取消本次自动关机","actions.extendTenMinutes":"延长 10 分钟","actions.shutdownNow":"立即关机","actions.rearmCurrent":"重新启用本次保护",
+  "status.disabled":"已停用","status.startupGrace":"启动宽限中","status.online":"在线","status.suspectedOffline":"疑似断网","status.countdown":"关机倒计时","status.suppressed":"本次断网已抑制","status.recovering":"正在确认恢复","status.executingShutdown":"正在请求关机","status.actionFailed":"关机请求失败","status.settingsSaved":"设置已保存。","status.testMode":"测试模式，不会关机","status.testCompleted":"测试完成",
+  "warning.title":"网络连接已中断","warning.description":"如果网络未恢复，电脑将在倒计时结束后正常关机。","warning.testDescription":"当前为测试模式，倒计时结束不会关闭电脑。","warning.recovery":"正在确认网络恢复。","warning.cancelMeaning":"取消只会抑制当前连续断网周期。","warning.confirmShutdown":"确定现在正常关闭 Windows 吗？",
+  "errors.settingsLoadFailed":"无法加载设置，已使用安全默认值。","errors.settingsSaveFailed":"无法保存设置。","errors.probeFailed":"网络探测失败。","errors.shutdownFailed":"正常关机请求失败。","errors.operationFailed":"操作失败。"
+}

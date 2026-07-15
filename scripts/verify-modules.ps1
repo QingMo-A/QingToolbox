@@ -39,4 +39,11 @@ foreach ($project in $projects) {
     }
 }
 
+$powerGuardSmoke = Join-Path $PSScriptRoot "..\tests\PowerGuard.SmokeTest\QingToolbox.Modules.PowerGuard.SmokeTest.csproj"
+if (Test-Path -LiteralPath $powerGuardSmoke -PathType Leaf) {
+    Write-Host "Building and running PowerGuard safe smoke test ($Configuration)..."
+    dotnet run --project $powerGuardSmoke -c $Configuration "-p:QingToolboxHostRoot=$hostRoot"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 Write-Host "Module verification passed."

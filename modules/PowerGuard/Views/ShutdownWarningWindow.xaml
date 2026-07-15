@@ -1,0 +1,18 @@
+<Window x:Class="QingToolbox.Modules.PowerGuard.Views.ShutdownWarningWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Width="400" SizeToContent="Height" WindowStyle="ToolWindow" ResizeMode="NoResize" Topmost="True" ShowInTaskbar="False" Background="Transparent" AllowsTransparency="True">
+ <Border Margin="8" Padding="22" CornerRadius="18" Background="#FAFCFF" BorderBrush="#CADAF6" BorderThickness="1">
+  <Border.Effect><DropShadowEffect BlurRadius="18" Opacity="0.18" ShadowDepth="3"/></Border.Effect>
+  <StackPanel>
+   <StackPanel Orientation="Horizontal"><Border Width="42" Height="42" CornerRadius="12" Background="#E7F0FF"><Path Width="22" Height="22" Stretch="Uniform" Fill="#2563EB" Data="M12,2 L22,6 V12 C22,18 18,22 12,24 C6,22 2,18 2,12 V6 Z M11,7 V14 H13 V7 Z M11,17 V19 H13 V17 Z"/></Border><StackPanel Margin="12,0,0,0"><TextBlock x:Name="TitleText" FontSize="19" FontWeight="SemiBold" Foreground="#102A56"/><TextBlock x:Name="ModeText" Margin="0,3,0,0" Foreground="#2563EB" FontWeight="SemiBold"/></StackPanel></StackPanel>
+   <TextBlock x:Name="DescriptionText" Margin="0,16,0,0" TextWrapping="Wrap" Foreground="#52647E"/>
+   <TextBlock Text="{Binding Countdown}" Margin="0,16,0,12" FontSize="42" FontWeight="Bold" Foreground="#174EA6" HorizontalAlignment="Center"/>
+   <TextBlock x:Name="CancelMeaningText" TextWrapping="Wrap" Foreground="#718096" FontSize="12"/>
+   <WrapPanel Margin="0,18,0,0" HorizontalAlignment="Right">
+    <Button x:Name="CancelButton" Padding="13,8" Margin="0,0,8,0" Click="Cancel_Click"/>
+    <Button x:Name="ExtendButton" Padding="13,8" Margin="0,0,8,0" Click="Extend_Click"/>
+    <Button x:Name="ShutdownButton" Padding="13,8" Background="#2563EB" Foreground="White" Click="Shutdown_Click"/>
+   </WrapPanel>
+  </StackPanel>
+ </Border>
+</Window>

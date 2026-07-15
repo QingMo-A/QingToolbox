@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <QingToolboxHostRoot Condition="'$(QingToolboxHostRoot)' == ''">..\..\..\QingToolbox-toolbox</QingToolboxHostRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(QingToolboxHostRoot)\QingToolbox.Abstractions\QingToolbox.Abstractions.csproj" Private="false" />
+  </ItemGroup>
+  <ItemGroup><AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo"><_Parameter1>QingToolbox.Modules.PowerGuard.SmokeTest</_Parameter1></AssemblyAttribute></ItemGroup>
+  <ItemGroup>
+    <None Update="module.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="icon.svg" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="i18n\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

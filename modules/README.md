@@ -5,6 +5,7 @@ Available modules:
 - `TextTools` — text conversion and formatting.
 - `ScreenPin` — region capture with resizable floating image pins.
 - `WindowTopmost` — visible-window enumeration and always-on-top control.
+- `PowerGuard` — confirmed-outage monitoring with a cancellable normal-shutdown countdown.
 
 Each folder under this directory is intended to contain one standalone QingToolbox module.
 
@@ -28,3 +29,4 @@ A module should include:
 ## Available modules
 
 - [`TextTools`](TextTools/README.md): JSON, Base64, URL, case conversion, and line cleanup.
+- [`PowerGuard`](PowerGuard/README.md): unattended offline detection and safe normal-shutdown protection.

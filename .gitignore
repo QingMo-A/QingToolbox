@@ -3,3 +3,10 @@ obj/
 *.dll
 *.exe
 *.pdb
+artifacts/
+*.qmod
+*.sha256
+settings.json
+settings.corrupt-*.json
+events.jsonl
+events.previous.jsonl

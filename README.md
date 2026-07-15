@@ -1,5 +1,7 @@
 # QingToolbox Modules
 
+Available modules include TextTools, ScreenPin, WindowTopmost, and PowerGuard. PowerGuard provides opt-in offline monitoring and a cancellable normal-shutdown countdown; see [docs/POWERGUARD.md](docs/POWERGUARD.md).
+
 This branch contains standalone module source code for QingToolbox.
 
 The toolbox host application is maintained on the `toolbox` branch.
