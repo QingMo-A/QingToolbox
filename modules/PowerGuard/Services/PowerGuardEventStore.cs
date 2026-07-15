@@ -7,6 +7,7 @@ namespace QingToolbox.Modules.PowerGuard.Services;
 public sealed class PowerGuardEventStore(string dataDirectory) : IDisposable
 {
     public event EventHandler? EventAppended;
+    internal void ClearSubscribers()=>EventAppended=null;
     private const long MaximumBytes = 1024 * 1024;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _path = Path.Combine(dataDirectory, "events.jsonl");
@@ -36,9 +37,17 @@ public sealed class PowerGuardEventStore(string dataDirectory) : IDisposable
 
     public async Task<IReadOnlyList<GuardEvent>> ReadRecentAsync(int count = 20, CancellationToken token = default)
     {
-        if (!File.Exists(_path)) return [];
-        var lines = await File.ReadAllLinesAsync(_path, token);
-        return lines.TakeLast(count).Select(line => { try { return JsonSerializer.Deserialize<GuardEvent>(line); } catch { return null; } }).Where(x => x is not null).Cast<GuardEvent>().ToArray();
+        await _gate.WaitAsync(token);
+        try
+        {
+            if (!File.Exists(_path)) return [];
+            await using var stream=new FileStream(_path,FileMode.Open,FileAccess.Read,FileShare.Read,4096,true);
+            var take=(int)Math.Min(stream.Length,64*1024);stream.Seek(-take,SeekOrigin.End);var buffer=new byte[take];await stream.ReadExactlyAsync(buffer,token);
+            var text=System.Text.Encoding.UTF8.GetString(buffer);var lines=text.Split(['\r','\n'],StringSplitOptions.RemoveEmptyEntries);if(stream.Length>take&&lines.Length>0)lines=lines[1..];
+            return lines.TakeLast(Math.Clamp(count,1,20)).Select(line=>{try{return JsonSerializer.Deserialize<GuardEvent>(line);}catch{return null;}}).Where(x=>x is not null).Cast<GuardEvent>().ToArray();
+        }
+        catch(OperationCanceledException){throw;}catch(Exception e){System.Diagnostics.Debug.WriteLine(e.GetType().Name);return [];}
+        finally{_gate.Release();}
     }
     public void Dispose() => _gate.Dispose();
 }

@@ -18,16 +18,16 @@ public sealed class PowerGuardStateMachine
     };
     public PowerGuardState State { get; private set; } = PowerGuardState.Disabled;
     public DateTimeOffset StateSinceUtc { get; private set; } = DateTimeOffset.UtcNow;
-    public PowerGuardTransition MoveTo(PowerGuardState next, DateTimeOffset now)
+    private PowerGuardTransition MoveTo(PowerGuardState next, DateTimeOffset now)
     {
         var transition = new PowerGuardTransition(State, next, now);
         State = next;
         StateSinceUtc = now;
         return transition;
     }
-    public bool TryMoveTo(PowerGuardState next, DateTimeOffset now, out PowerGuardTransition? transition)
+    public bool TryTransition(PowerGuardState next, DateTimeOffset now, out PowerGuardTransition? transition)
     {
-        if (next==State) { transition=new(State,next,now); return true; }
+        if (next==State) { transition=new(State,next,StateSinceUtc); return true; }
         if (!Allowed.GetValueOrDefault(State,[]).Contains(next)) { transition=null; return false; }
         transition=MoveTo(next,now); return true;
     }

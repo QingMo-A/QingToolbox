@@ -2,6 +2,8 @@
 
 Available modules include TextTools, ScreenPin, WindowTopmost, and PowerGuard. PowerGuard provides opt-in offline monitoring and a cancellable normal-shutdown countdown; see [docs/POWERGUARD.md](docs/POWERGUARD.md).
 
+PowerGuard enforces state-based operation capabilities, invalidates stale final probes after cancellation, recovery, or extension, and restarts monitoring faults through a fresh grace period. Its localized event refresh is coalesced. Module CI uses fake network and power adapters: it performs no live connectivity probe and no real shutdown.
+
 This branch contains standalone module source code for QingToolbox.
 
 The toolbox host application is maintained on the `toolbox` branch.
