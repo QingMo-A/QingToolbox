@@ -11,8 +11,16 @@ $repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 function Invoke-SourceGit {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-    $output = @(& git -C $repoRoot @Arguments 2>&1)
-    if ($LASTEXITCODE -ne 0) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = @(& git -C $repoRoot @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) {
         throw "Git command failed: git $($Arguments -join ' ')`n$($output -join "`n")"
     }
     return $output
