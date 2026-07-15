@@ -424,9 +424,21 @@
                 <TextBlock Text="{Binding StatusMessage}" Foreground="#475569"/>
             </Border>
 
-            <Grid Grid.Row="2" Margin="0,0,0,20"
-                  Style="{StaticResource PageTransitionStyle}"
-                  Visibility="{Binding IsModulesSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Grid Grid.Row="2" Margin="0,0,0,20">
+                <Grid.Style>
+                    <Style TargetType="Grid" BasedOn="{StaticResource PageTransitionStyle}">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsModulesSelected}" Value="True"/>
+                                    <Condition Binding="{Binding HasModules}" Value="True"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
@@ -529,17 +541,35 @@
                             <TextBlock Margin="0,8,0,0" Text="{Binding Strings[empty.modules.description]}"
                                        Foreground="{StaticResource SecondaryTextBrush}"
                                        FontSize="14" TextWrapping="Wrap"/>
-                            <WrapPanel Margin="0,22,0,0">
-                                <Border Style="{StaticResource EmptyStateStepStyle}">
-                                    <StackPanel><TextBlock Text="1" Foreground="{StaticResource AccentBrush}" FontWeight="Bold"/><TextBlock Margin="0,7,0,0" Text="{Binding Strings[empty.modules.step.obtain.title]}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/><TextBlock Margin="0,5,0,0" Text="{Binding Strings[empty.modules.step.obtain.description]}" TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/></StackPanel>
+                            <UniformGrid Margin="0,22,0,0" Columns="3" Rows="1">
+                                <Border Margin="0,0,5,0" Style="{StaticResource EmptyStateStepStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="1" Style="{StaticResource EmptyStateStepNumberStyle}"/>
+                                        <TextBlock Text="{Binding Strings[empty.modules.step.obtain.title]}"
+                                                   Style="{StaticResource EmptyStateStepTitleStyle}"/>
+                                        <TextBlock Text="{Binding Strings[empty.modules.step.obtain.description]}"
+                                                   Style="{StaticResource EmptyStateStepDescriptionStyle}"/>
+                                    </StackPanel>
                                 </Border>
-                                <Border Style="{StaticResource EmptyStateStepStyle}">
-                                    <StackPanel><TextBlock Text="2" Foreground="{StaticResource AccentBrush}" FontWeight="Bold"/><TextBlock Margin="0,7,0,0" Text="{Binding Strings[empty.modules.step.import.title]}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/><TextBlock Margin="0,5,0,0" Text="{Binding Strings[empty.modules.step.import.description]}" TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/></StackPanel>
+                                <Border Margin="5,0" Style="{StaticResource EmptyStateStepStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="2" Style="{StaticResource EmptyStateStepNumberStyle}"/>
+                                        <TextBlock Text="{Binding Strings[empty.modules.step.import.title]}"
+                                                   Style="{StaticResource EmptyStateStepTitleStyle}"/>
+                                        <TextBlock Text="{Binding Strings[empty.modules.step.import.description]}"
+                                                   Style="{StaticResource EmptyStateStepDescriptionStyle}"/>
+                                    </StackPanel>
                                 </Border>
-                                <Border Style="{StaticResource EmptyStateStepStyle}">
-                                    <StackPanel><TextBlock Text="3" Foreground="{StaticResource AccentBrush}" FontWeight="Bold"/><TextBlock Margin="0,7,0,0" Text="{Binding Strings[empty.modules.step.load.title]}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/><TextBlock Margin="0,5,0,0" Text="{Binding Strings[empty.modules.step.load.description]}" TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/></StackPanel>
+                                <Border Margin="5,0,0,0" Style="{StaticResource EmptyStateStepStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="3" Style="{StaticResource EmptyStateStepNumberStyle}"/>
+                                        <TextBlock Text="{Binding Strings[empty.modules.step.load.title]}"
+                                                   Style="{StaticResource EmptyStateStepTitleStyle}"/>
+                                        <TextBlock Text="{Binding Strings[empty.modules.step.load.description]}"
+                                                   Style="{StaticResource EmptyStateStepDescriptionStyle}"/>
+                                    </StackPanel>
                                 </Border>
-                            </WrapPanel>
+                            </UniformGrid>
                             <WrapPanel Margin="0,12,0,0">
                                 <Button Margin="0,0,10,10" Command="{Binding ImportModuleCommand}"
                                         AutomationProperties.Name="{Binding Strings[empty.modules.import]}"
@@ -910,8 +940,9 @@
                                 </StackPanel>
                             </Grid>
                         </Border>
-                        <Border Padding="28" CornerRadius="22" BorderThickness="0"
-                                Effect="{StaticResource FloatingPanelShadow}">
+                        <StackPanel Visibility="{Binding HasModules, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Border Padding="28" CornerRadius="22" BorderThickness="0"
+                                    Effect="{StaticResource FloatingPanelShadow}">
                             <Border.Background>
                                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                                     <GradientStop Color="#2864F0" Offset="0"/>
@@ -1021,7 +1052,8 @@
                                     <TextBlock Text="{Binding Strings[modules.refresh]}" FontWeight="SemiBold"/>
                                 </StackPanel>
                             </Button>
-                        </Grid>
+                            </Grid>
+                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
             </Grid>
@@ -1063,6 +1095,16 @@
                         </StackPanel>
                     </Border>
                     <ItemsControl ItemsSource="{Binding RunningModules}">
+                        <ItemsControl.Style>
+                            <Style TargetType="ItemsControl">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding RunningModules.Count}" Value="0">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ItemsControl.Style>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Border Style="{StaticResource ModuleCardCompactStyle}">

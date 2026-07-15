@@ -243,8 +243,7 @@ public sealed partial class MainWindowViewModel(
             runtimeManager.ReplaceDiscoveredModules(discoveredModules);
             registry.ReplaceAll(discoveredModules);
 
-            var selectedModuleId = SelectedModule?.Id;
-            Modules.Clear();
+            var refreshedModules = new List<DiscoveredModuleViewModel>();
             foreach (var module in discoveredModules)
             {
                 var moduleViewModel = new DiscoveredModuleViewModel(
@@ -254,7 +253,14 @@ public sealed partial class MainWindowViewModel(
                         module.Manifest.Id));
                 moduleViewModel.UpdateRuntimeState(
                     runtimeManager.GetRecord(module.Manifest.Id));
-                Modules.Add(moduleViewModel);
+                refreshedModules.Add(moduleViewModel);
+            }
+
+            var selectedModuleId = SelectedModule?.Id;
+            Modules.Clear();
+            foreach (var module in refreshedModules)
+            {
+                Modules.Add(module);
             }
 
             SelectedModule = Modules.FirstOrDefault(
@@ -267,14 +273,7 @@ public sealed partial class MainWindowViewModel(
         }
         catch (Exception exception)
         {
-            TotalModuleCount = 0;
-            ValidModuleCount = 0;
-            FailedModuleCount = 0;
-            NotLoadedModuleCount = 0;
-            LoadedModuleCount = 0;
-            RunningModuleCount = 0;
-            UnloadedModuleCount = 0;
-            SelectedModule = null;
+            UpdateStatistics();
             StatusMessage = localization.GetString(
                 "status.scanFailed",
                 exception.Message);
@@ -502,10 +501,13 @@ public sealed partial class MainWindowViewModel(
                 applicationPaths.UserModulesDirectory,
                 Modules.Select(module => module.Id).ToArray());
             await RefreshModulesAsync();
-            SelectedModule = Modules.FirstOrDefault(module => module.Id == moduleId);
+            var importedModule = Modules.FirstOrDefault(
+                module => module.Id == moduleId);
+            SelectedModule = importedModule;
+            SelectedNavigationKey = "Modules";
             StatusMessage = localization.GetString(
                 "status.moduleImportedNextStep",
-                moduleId);
+                importedModule?.DisplayName ?? moduleId);
         }
         catch (Exception exception)
         {

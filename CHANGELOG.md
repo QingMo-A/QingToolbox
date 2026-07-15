@@ -33,6 +33,10 @@
 - First-run empty toolbox onboarding across Home, Modules, and Running pages.
 - Direct trusted `.qmod` import guidance and a user module folder shortcut.
 - Clear in-product explanation that discovery and refresh do not load module DLLs.
+- Successful imports now hand off to the selected module on the Modules page without loading DLLs.
+- Empty dashboards no longer show meaningless zero statistics.
+- First-run steps now use a constrained equal-width responsive layout.
+- Refresh failures preserve the last consistent discovered-module state.
 
 ### Known Issues
 
