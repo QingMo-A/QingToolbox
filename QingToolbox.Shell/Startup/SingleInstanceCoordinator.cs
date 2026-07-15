@@ -1,13 +1,21 @@
+using System.IO;
 using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
-using System.IO;
 
 namespace QingToolbox.Shell.Startup;
 
 public sealed class SingleInstanceCoordinator : IAsyncDisposable
 {
+    public const string SuccessAcknowledgment = "OK";
+    public const string ErrorAcknowledgment = "ERROR";
+    private static readonly TimeSpan[] RetryDelays =
+    [
+        TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(200),
+        TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(500)
+    ];
+
     private readonly Mutex _mutex;
     private readonly string _pipeName;
     private readonly CancellationTokenSource _stopping = new();
@@ -26,7 +34,18 @@ public sealed class SingleInstanceCoordinator : IAsyncDisposable
     public static SingleInstanceCoordinator Create()
     {
         var sid = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
-        var suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sid)))[..16];
+        return CreateWithSuffix(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sid)))[..16]);
+    }
+
+    public static SingleInstanceCoordinator CreateForScope(string scope)
+    {
+        var sid = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
+        var suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{sid}\0{scope}")))[..16];
+        return CreateWithSuffix(suffix);
+    }
+
+    private static SingleInstanceCoordinator CreateWithSuffix(string suffix)
+    {
         var mutex = new Mutex(true, $"QingToolbox.{suffix}.Instance", out var created);
         return new SingleInstanceCoordinator(mutex, $"QingToolbox.{suffix}.Activation", created);
     }
@@ -39,20 +58,31 @@ public sealed class SingleInstanceCoordinator : IAsyncDisposable
 
     public async Task<bool> SendAsync(InstanceActivationMessage message, CancellationToken cancellationToken = default)
     {
-        try
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budget.CancelAfter(TimeSpan.FromSeconds(5));
+        var attempt = 0;
+        while (!budget.IsCancellationRequested)
         {
-            using var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.Out,
-                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-            await client.ConnectAsync(1500, cancellationToken);
-            await using var writer = new StreamWriter(client, new UTF8Encoding(false), 128, leaveOpen: false);
-            await writer.WriteLineAsync(message.ToString().AsMemory(), cancellationToken);
-            await writer.FlushAsync(cancellationToken);
-            return true;
+            try
+            {
+                using var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut,
+                    PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+                await client.ConnectAsync(500, budget.Token);
+                using var reader = new StreamReader(client, Encoding.UTF8, false, 128, leaveOpen: true);
+                await using var writer = new StreamWriter(client, new UTF8Encoding(false), 128, leaveOpen: true)
+                    { AutoFlush = true };
+                await writer.WriteLineAsync(message.ToString().AsMemory(), budget.Token);
+                var acknowledgment = await reader.ReadLineAsync(budget.Token);
+                return string.Equals(acknowledgment, SuccessAcknowledgment, StringComparison.Ordinal);
+            }
+            catch (Exception exception) when (exception is IOException or TimeoutException or OperationCanceledException)
+            {
+                if (budget.IsCancellationRequested) break;
+                var delay = RetryDelays[Math.Min(attempt++, RetryDelays.Length - 1)];
+                await Task.Delay(delay, budget.Token);
+            }
         }
-        catch (Exception exception) when (exception is IOException or TimeoutException or OperationCanceledException)
-        {
-            return false;
-        }
+        return false;
     }
 
     private async Task RunServerAsync(CancellationToken cancellationToken)
@@ -61,13 +91,21 @@ public sealed class SingleInstanceCoordinator : IAsyncDisposable
         {
             try
             {
-                await using var server = new NamedPipeServerStream(_pipeName, PipeDirection.In, 1,
+                await using var server = new NamedPipeServerStream(_pipeName, PipeDirection.InOut, 1,
                     PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 await server.WaitForConnectionAsync(cancellationToken);
                 using var reader = new StreamReader(server, Encoding.UTF8, false, 128, leaveOpen: true);
+                await using var writer = new StreamWriter(server, new UTF8Encoding(false), 128, leaveOpen: true)
+                    { AutoFlush = true };
                 var line = await reader.ReadLineAsync(cancellationToken);
-                if (InstanceActivationProtocol.TryParse(line, out var message) && MessageReceived is { } handler)
-                    await handler(message);
+                if (!InstanceActivationProtocol.TryParse(line, out var message))
+                {
+                    await writer.WriteLineAsync(ErrorAcknowledgment.AsMemory(), cancellationToken);
+                    continue;
+                }
+
+                if (MessageReceived is { } handler) await handler(message);
+                await writer.WriteLineAsync(SuccessAcknowledgment.AsMemory(), cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
             catch (IOException) { }
@@ -82,7 +120,8 @@ public sealed class SingleInstanceCoordinator : IAsyncDisposable
             try { await _serverTask; } catch (OperationCanceledException) { }
         }
         _stopping.Dispose();
-        if (IsPrimary) _mutex.ReleaseMutex();
+        // Closing the process-scoped handle releases the kernel object without
+        // relying on async continuations returning to the acquiring thread.
         _mutex.Dispose();
     }
 }

@@ -1320,7 +1320,9 @@
             <Grid Grid.Row="2" Grid.RowSpan="2"
                   Style="{StaticResource PageTransitionStyle}"
                   Visibility="{Binding IsSettingsSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <Border MaxWidth="720" Padding="36" HorizontalAlignment="Center"
+                <ScrollViewer behaviors:SmoothScrollBehavior.IsEnabled="True"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <Border MaxWidth="720" Margin="20" Padding="36" HorizontalAlignment="Center"
                         VerticalAlignment="Center" Background="White"
                         BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
                         Style="{StaticResource LiquidGlassPanelStyle}">
@@ -1369,6 +1371,25 @@
                         </ComboBox>
                         <TextBlock Margin="0,8,0,0" Text="{Binding StartupSettingsMessage}"
                                    TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <TextBlock Margin="0,16,0,0"
+                                   Text="{Binding StartupAuthorizationSummary}"
+                                   Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <TextBlock Margin="0,4,0,0"
+                                   Text="{Binding MissingStartupAuthorizationSummary}"
+                                   Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <Button Margin="0,10,0,0" HorizontalAlignment="Left"
+                                Content="{Binding Strings[startup.clearMissing]}"
+                                Command="{Binding ClearMissingStartupAuthorizationsCommand}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource SecondaryActionButtonStyle}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding MissingStartupAuthorizationCount}" Value="0">
+                                            <Setter Property="IsEnabled" Value="False"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
                         <Border Margin="0,24,0,0" Height="1" Background="#E2E8F0"/>
                         <Border Margin="0,20,0,0" Padding="18"
                                 Style="{StaticResource LiquidGlassPanelStyle}">
@@ -1402,6 +1423,7 @@
                         </Border>
                     </StackPanel>
                 </Border>
+                </ScrollViewer>
             </Grid>
         </Grid>
         </Grid>

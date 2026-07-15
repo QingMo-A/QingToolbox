@@ -30,6 +30,10 @@ public sealed partial class MainWindowViewModel(
     ILocalizationService localization) : ObservableObject
 {
     private bool _initialized;
+    private bool _suppressPresentationSave;
+    private int _presentationSaveVersion;
+    private readonly SemaphoreSlim _presentationSaveGate = new(1, 1);
+    private StartupPresentationMode _persistedStartupPresentationMode;
     [ObservableProperty]
     private string _statusMessage = localization.GetString("status.ready");
 
@@ -80,8 +84,12 @@ public sealed partial class MainWindowViewModel(
     [ObservableProperty] private bool _isStartupSettingsBusy;
     [ObservableProperty] private StartupPresentationMode _selectedStartupPresentationMode = StartupPresentationMode.FloatingBadge;
     [ObservableProperty] private string _startupSettingsMessage = string.Empty;
+    [ObservableProperty] private int _startupAuthorizationCount;
+    [ObservableProperty] private int _missingStartupAuthorizationCount;
 
     public IReadOnlyList<StartupPresentationMode> StartupPresentationModes { get; } = Enum.GetValues<StartupPresentationMode>();
+    public string StartupAuthorizationSummary => localization.GetString("startup.authorizationSummary", StartupAuthorizationCount);
+    public string MissingStartupAuthorizationSummary => localization.GetString("startup.missingSummary", MissingStartupAuthorizationCount);
 
     public string Title => localization.GetString("app.name");
     public string VersionDisplay =>
@@ -203,6 +211,8 @@ public sealed partial class MainWindowViewModel(
         OnPropertyChanged(nameof(PageTitle));
         OnPropertyChanged(nameof(PageSubtitle));
         OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(StartupAuthorizationSummary));
+        OnPropertyChanged(nameof(MissingStartupAuthorizationSummary));
         RefreshLanguageOptionLabels();
         var option = LanguageOptions.FirstOrDefault(
             item => item.Code == languageCode);
@@ -281,9 +291,21 @@ public sealed partial class MainWindowViewModel(
                     runtimeManager.GetRecord(module.Manifest.Id));
                 if (authorizations.TryGetValue(module.Manifest.Id, out var authorization))
                 {
-                    moduleViewModel.IsStartupEnabled = await fingerprintService.MatchesAsync(module, authorization);
-                    if (!moduleViewModel.IsStartupEnabled)
-                        moduleViewModel.StartupAuthorizationMessage = localization.GetString("startup.moduleChanged");
+                    try
+                    {
+                        moduleViewModel.IsStartupEnabled = await fingerprintService.MatchesAsync(module, authorization);
+                        moduleViewModel.StartupAuthorizationState = moduleViewModel.IsStartupEnabled
+                            ? StartupAuthorizationState.Enabled
+                            : StartupAuthorizationState.ChangedNeedsConfirmation;
+                        moduleViewModel.StartupAuthorizationMessage = localization.GetString(
+                            moduleViewModel.IsStartupEnabled ? "startup.moduleEnabled" : "startup.moduleChanged");
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch
+                    {
+                        moduleViewModel.StartupAuthorizationState = StartupAuthorizationState.Unavailable;
+                        moduleViewModel.StartupAuthorizationMessage = localization.GetString("startup.moduleUnavailable");
+                    }
                 }
                 refreshedModules.Add(moduleViewModel);
             }
@@ -297,6 +319,10 @@ public sealed partial class MainWindowViewModel(
 
             SelectedModule = Modules.FirstOrDefault(
                 module => module.Id == selectedModuleId) ?? Modules.FirstOrDefault();
+
+            StartupAuthorizationCount = settings.StartupModules.Count;
+            MissingStartupAuthorizationCount = settings.StartupModules.Count(
+                authorization => Modules.All(module => module.Id != authorization.ModuleId));
 
             UpdateStatistics();
             StatusMessage = localization.GetString(
@@ -511,33 +537,76 @@ public sealed partial class MainWindowViewModel(
         OnPropertyChanged(nameof(HasNoModules));
     }
 
-    public async Task InitializeAsync()
+    public async Task InitializeDiscoveryAsync(CancellationToken cancellationToken = default)
     {
         if (_initialized) return;
         _initialized = true;
-        var settings = await settingsService.ReadAsync();
+        var settings = await settingsService.ReadAsync(cancellationToken);
         try { await startupRegistrationService.ReconcileAsync(settings); }
-        catch (Exception exception) { StartupSettingsMessage = exception.Message; }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"Startup registration reconciliation failed: {exception.GetType().Name}");
+            StartupSettingsMessage = localization.GetString("startup.registrationFailed");
+        }
         LaunchAtLogin = (await startupRegistrationService.GetStateAsync()).MatchesCurrentExecutable;
+        _suppressPresentationSave = true;
         SelectedStartupPresentationMode = settings.StartupPresentationMode;
+        _persistedStartupPresentationMode = settings.StartupPresentationMode;
+        _suppressPresentationSave = false;
         await RefreshModulesAsync();
+    }
 
+    public async Task RestoreAuthorizedStartupModulesAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = await settingsService.ReadAsync(cancellationToken);
         var succeeded = 0; var skipped = 0; var failed = 0;
         foreach (var authorization in settings.StartupModules)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var module = Modules.FirstOrDefault(item => item.Id == authorization.ModuleId);
-            if (module is null || !await fingerprintService.MatchesAsync(module.Module, authorization))
+            if (module is null)
             {
+                skipped++;
+                continue;
+            }
+            bool matches;
+            try
+            {
+                matches = await fingerprintService.MatchesAsync(module.Module, authorization, cancellationToken);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch
+            {
+                module.StartupAuthorizationState = StartupAuthorizationState.Unavailable;
+                module.StartupAuthorizationMessage = localization.GetString("startup.moduleUnavailable");
+                skipped++;
+                continue;
+            }
+            if (!matches)
+            {
+                module.IsStartupEnabled = false;
+                module.StartupAuthorizationState = StartupAuthorizationState.ChangedNeedsConfirmation;
+                module.StartupAuthorizationMessage = localization.GetString("startup.moduleChanged");
                 skipped++;
                 continue;
             }
             try
             {
-                await runtimeManager.LoadAsync(module.Id, applicationPaths.ModuleDataDirectory);
-                if (authorization.ActivateOnStartup) await runtimeManager.ActivateAsync(module.Id);
+                // Recompute immediately before execution to minimize the remaining filesystem TOCTOU window.
+                if (!await fingerprintService.MatchesAsync(module.Module, authorization, cancellationToken))
+                {
+                    module.IsStartupEnabled = false;
+                    module.StartupAuthorizationState = StartupAuthorizationState.ChangedNeedsConfirmation;
+                    module.StartupAuthorizationMessage = localization.GetString("startup.moduleChanged");
+                    skipped++;
+                    continue;
+                }
+                await runtimeManager.LoadAsync(module.Id, applicationPaths.ModuleDataDirectory, cancellationToken);
+                if (authorization.ActivateOnStartup) await runtimeManager.ActivateAsync(module.Id, cancellationToken);
                 module.UpdateRuntimeState(runtimeManager.GetRecord(module.Id));
                 succeeded++;
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception exception)
             {
                 module.UpdateRuntimeState(runtimeManager.GetRecord(module.Id));
@@ -564,15 +633,17 @@ public sealed partial class MainWindowViewModel(
                 await settingsService.UpdateAsync(settings =>
                 {
                     settings.StartupModules.RemoveAll(item => item.ModuleId == module.Id);
-                    settings.StartupModules.Add(authorization);
+                settings.StartupModules.Add(authorization);
                 });
                 module.StartupAuthorizationMessage = localization.GetString("startup.moduleEnabled");
+                module.StartupAuthorizationState = StartupAuthorizationState.Enabled;
             }
             else
             {
                 await settingsService.UpdateAsync(settings =>
                     settings.StartupModules.RemoveAll(item => item.ModuleId == module.Id));
                 module.StartupAuthorizationMessage = localization.GetString("startup.moduleDisabled");
+                module.StartupAuthorizationState = StartupAuthorizationState.NotEnabled;
             }
         }
         catch (Exception exception)
@@ -598,17 +669,69 @@ public sealed partial class MainWindowViewModel(
         }
         catch (Exception exception)
         {
+            Debug.WriteLine($"Startup registration update failed: {exception.GetType().Name}");
             LaunchAtLogin = (await startupRegistrationService.GetStateAsync()).MatchesCurrentExecutable;
-            StartupSettingsMessage = exception.Message;
+            StartupSettingsMessage = localization.GetString("startup.registrationFailed");
         }
         finally { IsStartupSettingsBusy = false; }
     }
 
     partial void OnSelectedStartupPresentationModeChanged(StartupPresentationMode value)
     {
-        if (!_initialized) return;
-        _ = settingsService.UpdateAsync(settings => settings.StartupPresentationMode = value);
+        if (!_initialized || _suppressPresentationSave) return;
+        var version = Interlocked.Increment(ref _presentationSaveVersion);
+        _ = SaveStartupPresentationAsync(value, version);
     }
+
+    private async Task SaveStartupPresentationAsync(
+        StartupPresentationMode newValue, int version)
+    {
+        IsStartupSettingsBusy = true;
+        try
+        {
+            await _presentationSaveGate.WaitAsync();
+            try
+            {
+                if (version != Volatile.Read(ref _presentationSaveVersion)) return;
+                await settingsService.UpdateAsync(settings => settings.StartupPresentationMode = newValue);
+                _persistedStartupPresentationMode = newValue;
+                StartupSettingsMessage = localization.GetString("startup.presentationSaved");
+            }
+            finally { _presentationSaveGate.Release(); }
+        }
+        catch (Exception)
+        {
+            if (version == Volatile.Read(ref _presentationSaveVersion))
+            {
+                _suppressPresentationSave = true;
+                SelectedStartupPresentationMode = _persistedStartupPresentationMode;
+                _suppressPresentationSave = false;
+                StartupSettingsMessage = localization.GetString("startup.presentationSaveFailed");
+            }
+        }
+        finally
+        {
+            if (version == Volatile.Read(ref _presentationSaveVersion)) IsStartupSettingsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ClearMissingStartupAuthorizationsAsync()
+    {
+        var discoveredIds = Modules.Select(module => module.Id).ToHashSet(StringComparer.Ordinal);
+        await settingsService.UpdateAsync(settings =>
+            settings.StartupModules.RemoveAll(item => !discoveredIds.Contains(item.ModuleId)));
+        var settings = await settingsService.ReadAsync();
+        StartupAuthorizationCount = settings.StartupModules.Count;
+        MissingStartupAuthorizationCount = 0;
+        StartupSettingsMessage = localization.GetString("startup.missingCleared");
+    }
+
+    partial void OnStartupAuthorizationCountChanged(int value) =>
+        OnPropertyChanged(nameof(StartupAuthorizationSummary));
+
+    partial void OnMissingStartupAuthorizationCountChanged(int value) =>
+        OnPropertyChanged(nameof(MissingStartupAuthorizationSummary));
 
     [RelayCommand]
     private async Task ImportModuleAsync()

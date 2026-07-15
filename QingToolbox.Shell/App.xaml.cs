@@ -17,6 +17,7 @@ public partial class App : Application
 {
     private ServiceProvider? _serviceProvider;
     private SingleInstanceCoordinator? _singleInstance;
+    private StartupSessionCoordinator? _startupSession;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -33,6 +34,16 @@ public partial class App : Application
             return;
         }
 
+        _startupSession = new StartupSessionCoordinator(launchOptions);
+        _singleInstance.MessageReceived += message =>
+        {
+            if (message != InstanceActivationMessage.Activate) return Task.CompletedTask;
+            _startupSession.MarkManualActivationRequested();
+            if (_serviceProvider is null) return Task.CompletedTask;
+            return Dispatcher.InvokeAsync(() => _startupSession.ActivateMainWindowAsync()).Task.Unwrap();
+        };
+        _singleInstance.StartServer();
+
         var services = new ServiceCollection();
         services.AddSingleton<ModuleRegistry>();
         services.AddSingleton<ModuleManifestReader>();
@@ -42,6 +53,7 @@ public partial class App : Application
         services.AddSingleton<ModuleRuntimeManager>();
         services.AddSingleton<UserSettingsService>();
         services.AddSingleton(launchOptions);
+        services.AddSingleton(_startupSession);
         services.AddSingleton<IStartupRegistrationStore, WindowsRunRegistrationStore>();
         services.AddSingleton<WindowsStartupRegistrationService>();
         services.AddSingleton<ModuleStartupFingerprintService>();
@@ -67,21 +79,9 @@ public partial class App : Application
             .InitializeAsync(localizationDirectory);
 
         var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
-        _singleInstance.MessageReceived += message => Dispatcher.InvokeAsync(async () =>
-        {
-            if (message == InstanceActivationMessage.Activate)
-            {
-                await _serviceProvider.GetRequiredService<FloatingBadgeManager>().RestoreAsync();
-                if (mainWindow.WindowState == WindowState.Minimized) mainWindow.WindowState = WindowState.Normal;
-                mainWindow.Show();
-                mainWindow.Activate();
-                mainWindow.Focus();
-            }
-        }).Task.Unwrap();
-        _singleInstance.StartServer();
-
         if (launchOptions.IsStartupLaunch) { mainWindow.Opacity = 0; mainWindow.ShowActivated = false; }
         mainWindow.Show();
+        if (_startupSession.ManualActivationRequested) await _startupSession.ActivateMainWindowAsync();
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -89,6 +89,7 @@ public partial class App : Application
         try
         {
             _serviceProvider?.GetService<FloatingBadgeManager>()?.PrepareForApplicationExit();
+            _startupSession?.PrepareForExit();
             var runtimeManager = _serviceProvider?.GetService<ModuleRuntimeManager>();
             runtimeManager?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }

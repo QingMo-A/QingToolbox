@@ -65,7 +65,11 @@ public sealed class WindowsStartupRegistrationService(
 
     public async Task ReconcileAsync(UserSettings settings)
     {
-        if (!settings.LaunchAtLogin) return;
+        if (!settings.LaunchAtLogin)
+        {
+            if ((await GetStateAsync()).IsRegistered) await Task.Run(store.Delete);
+            return;
+        }
         var state = await GetStateAsync();
         if (!state.IsRegistered || !state.MatchesCurrentExecutable) await Task.Run(() => store.Write(CurrentCommand));
     }

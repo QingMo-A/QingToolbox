@@ -163,5 +163,13 @@
   "startup.moduleDisabled": "已移除启动授权。",
   "startup.registrationEnabled": "已启用 Windows 登录自启动。",
   "startup.registrationDisabled": "已关闭 Windows 登录自启动。",
-  "startup.restoreSummary": "启动模块：已恢复 {0} 个，跳过 {1} 个，失败 {2} 个。"
+  "startup.restoreSummary": "启动模块：已恢复 {0} 个，跳过 {1} 个，失败 {2} 个。",
+  "startup.moduleUnavailable": "模块载荷不可用或包含不支持的链接。",
+  "startup.presentationSaved": "已保存启动显示模式。",
+  "startup.presentationSaveFailed": "无法保存启动显示模式，已恢复之前的选择。",
+  "startup.clearMissing": "清理缺失模块的启动授权",
+  "startup.missingCleared": "已清理缺失模块的启动授权。",
+  "startup.authorizationSummary": "启动授权总数：{0}",
+  "startup.missingSummary": "缺失模块授权：{0}",
+  "startup.registrationFailed": "无法更新 Windows 登录自启动设置。"
 }

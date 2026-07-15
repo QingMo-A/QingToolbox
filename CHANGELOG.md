@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Started current-user activation pipes before dependency injection and added bounded retry plus OK/ERROR acknowledgments.
+- Made manual activation override pending minimized or floating-badge startup presentation.
+- Split discovery, recoverable window presentation and cancellable startup-module restoration.
+- Bound startup authorization to a deterministic SHA256 inventory of every module payload file.
+- Legacy entry-only authorizations and changed dependencies/resources now require renewed confirmation.
+- Startup presentation changes are durably saved or rolled back, and missing authorizations can be cleared.
 - Added per-user single-instance activation with a restricted named-pipe protocol.
 - Added opt-in HKCU Windows login startup with main-window, minimized and floating-badge presentation modes.
 - Added explicit per-module startup authorization bound to manifest and entry-assembly SHA256 fingerprints.

@@ -6,6 +6,8 @@ using QingToolbox.Abstractions.Localization;
 
 namespace QingToolbox.Shell.ViewModels;
 
+public enum StartupAuthorizationState { NotEnabled, Enabled, ChangedNeedsConfirmation, Missing, Unavailable }
+
 public sealed partial class DiscoveredModuleViewModel : ObservableObject
 {
     private readonly ILocalizationService _localization;
@@ -86,7 +88,9 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     [ObservableProperty] private bool _isStartupEnabled;
     [ObservableProperty] private bool _isStartupAuthorizationBusy;
     [ObservableProperty] private string _startupAuthorizationMessage = string.Empty;
-    public bool CanChangeStartupAuthorization => IsValid && !IsStartupAuthorizationBusy;
+    [ObservableProperty] private StartupAuthorizationState _startupAuthorizationState;
+    public bool CanChangeStartupAuthorization => IsValid &&
+        StartupAuthorizationState != StartupAuthorizationState.Unavailable && !IsStartupAuthorizationBusy;
 
     [ObservableProperty]
     private string _runtimeState;
@@ -157,6 +161,9 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     }
 
     partial void OnIsStartupAuthorizationBusyChanged(bool value) =>
+        OnPropertyChanged(nameof(CanChangeStartupAuthorization));
+
+    partial void OnStartupAuthorizationStateChanged(StartupAuthorizationState value) =>
         OnPropertyChanged(nameof(CanChangeStartupAuthorization));
 
     private void NotifyCommandStatesChanged()

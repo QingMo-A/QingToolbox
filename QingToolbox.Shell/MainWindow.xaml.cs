@@ -13,18 +13,19 @@ public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
     private readonly FloatingBadgeManager _floatingBadgeManager;
-    private readonly ApplicationLaunchOptions _launchOptions;
+    private readonly StartupSessionCoordinator _startupSession;
 
     public MainWindow(
         MainWindowViewModel viewModel,
         FloatingBadgeManager floatingBadgeManager,
-        ApplicationLaunchOptions launchOptions)
+        StartupSessionCoordinator startupSession)
     {
         InitializeComponent();
 
         _viewModel = viewModel;
         _floatingBadgeManager = floatingBadgeManager;
-        _launchOptions = launchOptions;
+        _startupSession = startupSession;
+        _startupSession.Attach(this, floatingBadgeManager);
         _floatingBadgeManager.Attach(this);
         DataContext = viewModel;
         Loaded += OnLoaded;
@@ -54,31 +55,12 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
-        await _viewModel.InitializeAsync();
-        if (!_launchOptions.IsStartupLaunch) return;
-
-        switch (_viewModel.SelectedStartupPresentationMode)
-        {
-            case StartupPresentationMode.Minimized:
-                Opacity = 1;
-                ShowActivated = true;
-                WindowState = WindowState.Minimized;
-                break;
-            case StartupPresentationMode.FloatingBadge:
-                ShowActivated = true;
-                try
-                {
-                    await _floatingBadgeManager.EnterAsync();
-                    Opacity = 1;
-                }
-                catch { Opacity = 1; Show(); Activate(); }
-                break;
-            default:
-                Opacity = 1;
-                ShowActivated = true;
-                Activate();
-                break;
-        }
+        _startupSession.BeginDiscovery();
+        await _viewModel.InitializeDiscoveryAsync(_startupSession.LifetimeToken);
+        await _startupSession.PresentAsync(_viewModel.SelectedStartupPresentationMode);
+        _startupSession.BeginModuleRestore();
+        await _viewModel.RestoreAuthorizedStartupModulesAsync(_startupSession.LifetimeToken);
+        _startupSession.Complete();
     }
 
     private void OnSidebarMouseEnter(object sender, MouseEventArgs e)
@@ -126,6 +108,7 @@ public partial class MainWindow : Window
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
+        _startupSession.PrepareForExit();
         _floatingBadgeManager.OnMainWindowClosing();
         _viewModel.CloseModuleWindows();
     }

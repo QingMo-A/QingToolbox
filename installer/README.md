@@ -123,3 +123,5 @@ tag and does not upload or commit artifacts.
 # Startup registration
 
 The installer does not enable Windows login startup. When the user opts in from QingToolbox, the application owns only the `QingToolbox` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. Uninstall removes that obsolete value while preserving `settings.json`, user modules, and module data.
+
+At runtime, the application reconciles that owned value with the saved user intent. Disabling login startup removes only QingToolbox's value; no other Run values or the parent key are modified.

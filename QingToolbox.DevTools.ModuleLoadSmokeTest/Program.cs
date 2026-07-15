@@ -273,6 +273,33 @@ internal static class Program
                 "\"C:\\Program Files\\Qing Toolbox\\QingToolbox.Shell.exe\" --startup",
             "Startup command quoting is incorrect.");
 
+        var pipeScope = $"Smoke.{Guid.NewGuid():N}";
+        await using (var primary = SingleInstanceCoordinator.CreateForScope(pipeScope))
+        {
+            Require(primary.IsPrimary, "The first coordinator must own the current-user instance.");
+            var received = new List<InstanceActivationMessage>();
+            primary.MessageReceived += message => { received.Add(message); return Task.CompletedTask; };
+            await using var secondary = SingleInstanceCoordinator.CreateForScope(pipeScope);
+            var delayedSend = secondary.SendAsync(InstanceActivationMessage.Activate);
+            await Task.Delay(250);
+            primary.StartServer();
+            Require(!secondary.IsPrimary && await delayedSend &&
+                    await secondary.SendAsync(InstanceActivationMessage.StartupProbe),
+                "Pipe retry or acknowledgment failed.");
+            Require(received.SequenceEqual([InstanceActivationMessage.Activate, InstanceActivationMessage.StartupProbe]),
+                "Pipe messages were not acknowledged and delivered in order.");
+        }
+        await using (var restarted = SingleInstanceCoordinator.CreateForScope(pipeScope))
+            Require(restarted.IsPrimary, "Instance ownership was not released after shutdown.");
+
+        var startupSession = new StartupSessionCoordinator(new ApplicationLaunchOptions(true));
+        startupSession.MarkManualActivationRequested();
+        startupSession.MarkManualActivationRequested();
+        Require(startupSession.ManualActivationRequested &&
+                startupSession.GetEffectivePresentation(StartupPresentationMode.FloatingBadge) == StartupPresentationMode.MainWindow,
+            "Pending manual activation must be coalesced into one durable flag.");
+        startupSession.Dispose();
+
         var root = Path.Combine(Path.GetTempPath(), $"QingToolbox-startup-smoke-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
         try
@@ -315,7 +342,18 @@ internal static class Program
             };
             var fingerprint = new ModuleStartupFingerprintService();
             var authorization = await fingerprint.CreateAuthorizationAsync(module);
+            Require(authorization.FingerprintVersion == ModuleStartupFingerprintService.CurrentFingerprintVersion &&
+                    authorization.PayloadFileCount == 2 && !string.IsNullOrWhiteSpace(authorization.PayloadSha256),
+                "Complete payload authorization was not created.");
             Require(await fingerprint.MatchesAsync(module, authorization), "Stable module fingerprint did not match.");
+            var legacyAuthorization = new StartupModuleAuthorization
+            {
+                ModuleId = module.Manifest.Id, Version = module.Manifest.Version,
+                ManifestSha256 = authorization.ManifestSha256,
+                EntryAssemblySha256 = authorization.EntryAssemblySha256
+            };
+            Require(!await fingerprint.MatchesAsync(module, legacyAuthorization),
+                "Legacy entry-only authorization must require renewed confirmation.");
             File.SetLastWriteTimeUtc(entry, DateTime.UtcNow.AddMinutes(1));
             Require(await fingerprint.MatchesAsync(module, authorization), "Timestamp-only change altered the fingerprint.");
             await File.AppendAllTextAsync(manifest, "changed");
@@ -323,6 +361,28 @@ internal static class Program
             var updatedAuthorization = await fingerprint.CreateAuthorizationAsync(module);
             await File.AppendAllTextAsync(entry, "changed");
             Require(!await fingerprint.MatchesAsync(module, updatedAuthorization), "Entry assembly content change was not detected.");
+
+            await File.WriteAllTextAsync(manifest, "manifest-payload");
+            await File.WriteAllTextAsync(entry, "entry-payload");
+            var dependency = Path.Combine(moduleRoot, "dependency.dll");
+            await File.WriteAllTextAsync(dependency, "dependency-a");
+            var payloadAuthorization = await fingerprint.CreateAuthorizationAsync(module);
+            File.SetLastWriteTimeUtc(dependency, DateTime.UtcNow.AddHours(1));
+            Require(await fingerprint.MatchesAsync(module, payloadAuthorization),
+                "Timestamp-only payload change altered authorization.");
+            await File.AppendAllTextAsync(dependency, "changed");
+            Require(!await fingerprint.MatchesAsync(module, payloadAuthorization),
+                "Dependency content change was not detected.");
+            await File.WriteAllTextAsync(dependency, "dependency-a");
+            payloadAuthorization = await fingerprint.CreateAuthorizationAsync(module);
+            var resource = Path.Combine(moduleRoot, "resource.json");
+            await File.WriteAllTextAsync(resource, "{}");
+            Require(!await fingerprint.MatchesAsync(module, payloadAuthorization),
+                "Adding a payload file was not detected.");
+            payloadAuthorization = await fingerprint.CreateAuthorizationAsync(module);
+            File.Delete(resource);
+            Require(!await fingerprint.MatchesAsync(module, payloadAuthorization),
+                "Deleting a payload file was not detected.");
             var traversal = new DiscoveredModule
             {
                 ModuleDirectory = moduleRoot, ManifestPath = manifest,
@@ -332,6 +392,19 @@ internal static class Program
             var rejected = false;
             try { await fingerprint.CreateAuthorizationAsync(traversal); } catch (InvalidOperationException) { rejected = true; }
             Require(rejected, "Entry path traversal was not rejected.");
+
+            var linkPath = Path.Combine(moduleRoot, "linked-resource.json");
+            try
+            {
+                File.CreateSymbolicLink(linkPath, Path.Combine(root, "outside.dll"));
+                rejected = false;
+                try { await fingerprint.CreateAuthorizationAsync(module); } catch (InvalidOperationException) { rejected = true; }
+                Require(rejected, "A symbolic-link payload was not rejected.");
+            }
+            catch (Exception exception) when (exception is UnauthorizedAccessException or IOException)
+            {
+                Console.WriteLine("Symbolic-link creation is unavailable; reparse rejection remains enforced by contract.");
+            }
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
         Console.WriteLine("Startup safety infrastructure passed.");

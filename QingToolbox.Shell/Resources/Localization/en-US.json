@@ -163,5 +163,13 @@
   "startup.moduleDisabled": "Startup authorization removed.",
   "startup.registrationEnabled": "Windows login startup enabled.",
   "startup.registrationDisabled": "Windows login startup disabled.",
-  "startup.restoreSummary": "Startup modules: {0} restored, {1} skipped, {2} failed."
+  "startup.restoreSummary": "Startup modules: {0} restored, {1} skipped, {2} failed.",
+  "startup.moduleUnavailable": "This module payload is unavailable or contains an unsupported link.",
+  "startup.presentationSaved": "Startup presentation saved.",
+  "startup.presentationSaveFailed": "Startup presentation could not be saved; the previous choice was restored.",
+  "startup.clearMissing": "Clear missing startup authorizations",
+  "startup.missingCleared": "Missing startup authorizations cleared.",
+  "startup.authorizationSummary": "Startup authorizations: {0}",
+  "startup.missingSummary": "Missing module authorizations: {0}",
+  "startup.registrationFailed": "Windows login startup could not be updated."
 }

@@ -2,7 +2,7 @@ namespace QingToolbox.Core.Settings;
 
 public sealed class UserSettings
 {
-    public int SettingsSchemaVersion { get; set; } = 2;
+    public int SettingsSchemaVersion { get; set; } = 3;
     public string Language { get; set; } = "system";
     public double? FloatingBadgeLeft { get; set; }
     public double? FloatingBadgeTop { get; set; }
@@ -16,7 +16,7 @@ public sealed class UserSettings
 
     internal void Normalize()
     {
-        SettingsSchemaVersion = Math.Max(2, SettingsSchemaVersion);
+        SettingsSchemaVersion = Math.Max(3, SettingsSchemaVersion);
         Language = string.IsNullOrWhiteSpace(Language) ? "system" : Language;
         FloatingBadgeLeft = FiniteOrNull(FloatingBadgeLeft);
         FloatingBadgeTop = FiniteOrNull(FloatingBadgeTop);
@@ -54,6 +54,9 @@ public sealed class StartupModuleAuthorization
     public string ManifestSha256 { get; set; } = string.Empty;
     public string EntryAssemblySha256 { get; set; } = string.Empty;
     public bool ActivateOnStartup { get; set; } = true;
+    public int FingerprintVersion { get; set; }
+    public string PayloadSha256 { get; set; } = string.Empty;
+    public int PayloadFileCount { get; set; }
 
     internal StartupModuleAuthorization Normalized() => new()
     {
@@ -61,6 +64,9 @@ public sealed class StartupModuleAuthorization
         Version = Version.Trim(),
         ManifestSha256 = ManifestSha256.Trim().ToUpperInvariant(),
         EntryAssemblySha256 = EntryAssemblySha256.Trim().ToUpperInvariant(),
+        FingerprintVersion = Math.Max(0, FingerprintVersion),
+        PayloadSha256 = PayloadSha256.Trim().ToUpperInvariant(),
+        PayloadFileCount = Math.Max(0, PayloadFileCount),
         ActivateOnStartup = ActivateOnStartup
     };
 }
