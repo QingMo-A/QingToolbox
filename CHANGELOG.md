@@ -24,6 +24,9 @@
 - Pinned SHA256 verification for the official Simplified Chinese Inno messages.
 - Isolated no-shortcut installer roundtrip logs and failure diagnostics.
 - Reusable Preview asset verification and optional CI preflight deduplication.
+- Centralized Preview version, runtime, filenames, and artifact metadata.
+- Immutable upstream pins for official Actions and Inno localization.
+- Machine-readable release manifest with source commit, sizes, and SHA256 hashes.
 
 ### Known Issues
 

@@ -1,16 +1,22 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("win-x64")]
-    [string]$Runtime = "win-x64",
+    [string]$Runtime,
     [bool]$SelfContained = $false
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+. (Join-Path $PSScriptRoot "get-preview-release-metadata.ps1")
+$metadata = if ([string]::IsNullOrWhiteSpace($Runtime)) {
+    Get-PreviewReleaseMetadata
+}
+else {
+    Get-PreviewReleaseMetadata -Runtime $Runtime
+}
+$Runtime = $metadata.Runtime
 $artifactsRoot = Join-Path $repoRoot "artifacts"
 $publishDirectory = Join-Path $artifactsRoot "publish\$Runtime"
-$version = "0.1.0-alpha"
-$archivePath = Join-Path $artifactsRoot "QingToolbox-$version-$Runtime.zip"
+$archivePath = Join-Path $artifactsRoot $metadata.PortableFileName
 $checksumPath = "$archivePath.sha256"
 $shellProject = Join-Path $repoRoot "QingToolbox.Shell\QingToolbox.Shell.csproj"
 
@@ -38,7 +44,7 @@ try {
     New-Item -ItemType Directory -Force -Path $artifactsRoot | Out-Null
 
     $selfContainedValue = $SelfContained.ToString().ToLowerInvariant()
-    Write-Host "Publishing QingToolbox $version for $Runtime..."
+    Write-Host "Publishing $($metadata.ProductName) $($metadata.Version) for $Runtime..."
     dotnet publish $shellProject `
         --configuration Release `
         --runtime $Runtime `
@@ -59,7 +65,8 @@ try {
     New-Item -ItemType Directory -Force -Path $releaseDocsDirectory | Out-Null
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\QMOD_FORMAT.md") `
         -Destination $releaseDocsDirectory -Force
-    Copy-Item -LiteralPath (Join-Path $repoRoot "docs\releases\0.1.0-alpha.md") `
+    Copy-Item -LiteralPath (Join-Path $repoRoot `
+        "docs\releases\$($metadata.Version).md") `
         -Destination $releaseDocsDirectory -Force
 
     if (Test-Path -LiteralPath $archivePath) {

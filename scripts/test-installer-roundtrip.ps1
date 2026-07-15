@@ -8,6 +8,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+. (Join-Path $PSScriptRoot "get-preview-release-metadata.ps1")
+$metadata = Get-PreviewReleaseMetadata
 $createdTestRoot = [string]::IsNullOrWhiteSpace($TestRoot)
 $testSucceeded = $false
 $failure = $null
@@ -132,7 +135,7 @@ try {
         $shellExe,
         (Join-Path $installDirectory "LICENSE"),
         (Join-Path $installDirectory "CHANGELOG.md"),
-        (Join-Path $installDirectory "docs\0.1.0-alpha.md"),
+        (Join-Path $installDirectory "docs\$($metadata.Version).md"),
         (Join-Path $installDirectory "Resources\Localization\en-US.json"),
         (Join-Path $installDirectory "Resources\Localization\zh-CN.json")
     )
@@ -172,7 +175,7 @@ try {
 
     $shellVersionInfo = (Get-Item -LiteralPath $shellExe).VersionInfo
     $shellFileVersion = $shellVersionInfo.FileVersion.Trim()
-    if ($shellFileVersion -ne "0.1.0.0") {
+    if ($shellFileVersion -ne $metadata.FileVersion) {
         throw "Unexpected Shell file version: $($shellVersionInfo.FileVersion)"
     }
     Write-Host "Shell FileVersion:  $shellFileVersion"
@@ -183,7 +186,7 @@ try {
     $installerFileVersion = $installerVersionInfo.FileVersion.Trim()
     $installerProductName = $installerVersionInfo.ProductName.Trim()
     $installerCompanyName = $installerVersionInfo.CompanyName.Trim()
-    if ($installerFileVersion -ne "0.1.0.0") {
+    if ($installerFileVersion -ne $metadata.FileVersion) {
         throw "Unexpected installer FileVersion: $($installerVersionInfo.FileVersion)"
     }
     if ($installerProductName -ne "QingToolbox") {

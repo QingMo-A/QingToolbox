@@ -6,8 +6,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+. (Join-Path $PSScriptRoot "get-preview-release-metadata.ps1")
 
-function Assert-AssetChecksum {
+function Get-VerifiedAsset {
     param([Parameter(Mandatory = $true)][string]$AssetPath)
 
     if (-not (Test-Path -LiteralPath $AssetPath -PathType Leaf)) {
@@ -19,17 +20,15 @@ function Assert-AssetChecksum {
     }
 
     $checksumText = (Get-Content -LiteralPath $checksumPath -Raw).Trim()
-    $match = [regex]::Match($checksumText, `
+    $match = [regex]::Match($checksumText,
         '^(?<hash>[0-9A-Fa-f]{64})\s{2}(?<file>[^\r\n]+)$')
     if (-not $match.Success) {
         throw "Invalid SHA256 file format: $checksumPath"
     }
 
-    $expectedFilename = Split-Path -Leaf $AssetPath
-    $recordedFilename = $match.Groups["file"].Value
-    if ($recordedFilename -ne $expectedFilename) {
-        throw "Checksum filename mismatch for $AssetPath. " +
-              "Expected '$expectedFilename', recorded '$recordedFilename'."
+    $fileName = Split-Path -Leaf $AssetPath
+    if ($match.Groups["file"].Value -ne $fileName) {
+        throw "Checksum filename mismatch for $AssetPath."
     }
 
     $expectedHash = $match.Groups["hash"].Value.ToUpperInvariant()
@@ -39,33 +38,84 @@ function Assert-AssetChecksum {
               "Expected $expectedHash, actual $actualHash."
     }
 
-    $size = (Get-Item -LiteralPath $AssetPath).Length
-    Write-Host "Verified: $AssetPath"
-    Write-Host "Size:     $size bytes"
-    Write-Host "SHA256:   $actualHash"
+    return [pscustomobject]@{
+        FileName = $fileName
+        Path = $AssetPath
+        ChecksumPath = $checksumPath
+        SizeBytes = (Get-Item -LiteralPath $AssetPath).Length
+        Sha256 = $actualHash
+    }
 }
 
 try {
+    $metadata = Get-PreviewReleaseMetadata
     if ([string]::IsNullOrWhiteSpace($ArtifactsRoot)) {
         $ArtifactsRoot = Join-Path $repoRoot "artifacts"
     }
     $resolvedArtifactsRoot = [System.IO.Path]::GetFullPath($ArtifactsRoot)
-    $propsPath = Join-Path $repoRoot "Directory.Build.props"
-    [xml]$props = Get-Content -LiteralPath $propsPath -Raw
-    $version = [string]@($props.Project.PropertyGroup.Version)[0]
-    if ([string]::IsNullOrWhiteSpace($version)) {
-        throw "Version is missing from Directory.Build.props."
+    $portable = Get-VerifiedAsset -AssetPath (
+        Join-Path $resolvedArtifactsRoot $metadata.PortableFileName)
+    $installer = Get-VerifiedAsset -AssetPath (
+        Join-Path $resolvedArtifactsRoot `
+            "installer\output\$($metadata.InstallerFileName)")
+
+    $manifestPath = Join-Path $resolvedArtifactsRoot $metadata.ManifestFileName
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "Preview manifest is missing: $manifestPath"
+    }
+    $manifestText = Get-Content -LiteralPath $manifestPath -Raw
+    if ($manifestText -match '[A-Za-z]:[\\/]' -or
+        $manifestText -match '(?i)runner\.temp') {
+        throw "Preview manifest contains an absolute or runner-temp path."
+    }
+    $manifest = $manifestText | ConvertFrom-Json
+
+    if ([int]$manifest.schemaVersion -ne 1 -or
+        $manifest.product -ne $metadata.ProductName -or
+        $manifest.channel -ne "Preview" -or
+        $manifest.version -ne $metadata.Version -or
+        $manifest.fileVersion -ne $metadata.FileVersion -or
+        $manifest.runtime -ne $metadata.Runtime) {
+        throw "Preview manifest metadata does not match release metadata."
+    }
+    if ($manifest.sourceCommit -notmatch '^[0-9a-fA-F]{40}$') {
+        throw "Preview manifest sourceCommit is not a full Git commit."
     }
 
-    $runtime = "win-x64"
-    $archivePath = Join-Path $resolvedArtifactsRoot `
-        "QingToolbox-$version-$runtime.zip"
-    $installerPath = Join-Path $resolvedArtifactsRoot `
-        "installer\output\QingToolbox-$version-$runtime-setup.exe"
+    $gitDirectory = & git -C $repoRoot rev-parse --git-dir 2>$null
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($gitDirectory)) {
+        $headCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
+        if ($manifest.sourceCommit -ne $headCommit) {
+            throw "Preview manifest sourceCommit does not match HEAD. " +
+                  "Manifest $($manifest.sourceCommit), HEAD $headCommit."
+        }
+    }
 
-    Assert-AssetChecksum -AssetPath $archivePath
-    Assert-AssetChecksum -AssetPath $installerPath
+    $manifestArtifacts = @($manifest.artifacts)
+    if ($manifestArtifacts.Count -ne 2 -or
+        $manifestArtifacts[0].type -ne "portable" -or
+        $manifestArtifacts[1].type -ne "installer") {
+        throw "Preview manifest must contain portable then installer artifacts."
+    }
+
+    $expectedAssets = @($portable, $installer)
+    for ($index = 0; $index -lt $expectedAssets.Count; $index++) {
+        $entry = $manifestArtifacts[$index]
+        $expected = $expectedAssets[$index]
+        if ($entry.fileName -ne $expected.FileName -or
+            [long]$entry.sizeBytes -ne $expected.SizeBytes -or
+            ([string]$entry.sha256).ToUpperInvariant() -ne $expected.Sha256) {
+            throw "Preview manifest artifact does not match: $($expected.FileName)"
+        }
+    }
+
     Write-Host "Preview asset verification passed."
+    Write-Host "Source:    $($manifest.sourceCommit)"
+    Write-Host "Portable:  $($portable.FileName) ($($portable.SizeBytes) bytes)"
+    Write-Host "SHA256:    $($portable.Sha256)"
+    Write-Host "Installer: $($installer.FileName) ($($installer.SizeBytes) bytes)"
+    Write-Host "SHA256:    $($installer.Sha256)"
+    Write-Host "Manifest:  $($metadata.ManifestFileName)"
 }
 catch {
     Write-Error -ErrorRecord $_

@@ -82,7 +82,21 @@ SHA256 is stored in `installer/dependencies.psd1`; updating the translation
 requires reviewing the upstream file and explicitly updating that hash. The
 script validates existing files without overwriting a different local copy.
 
+The upstream translation is pinned to repository `jrsoftware/issrc`, commit
+`683ee7eabfbce807f901c5da83fc5ff1a3ecb693`, path
+`Files/Languages/ChineseSimplified.isl`, plus its SHA256. To update it, review a
+specific upstream commit, recompute the file hash, and update all provenance
+fields in `installer/dependencies.psd1` together.
+
 Roundtrip installation passes `/NOICONS`, so automated tests create no Start
 Menu or desktop shortcuts. With `-KeepTestFiles`, `install.log`, `uninstall.log`,
 and failure diagnostics remain under `TestRoot`; CI uploads only these text logs
 and then removes its isolated test/profile directories.
+
+Release versioning and asset names come from
+`scripts/get-preview-release-metadata.ps1`. After both assets are built,
+`scripts/write-preview-manifest.ps1` writes a JSON manifest containing the
+source commit and recomputed hashes; `scripts/verify-preview-assets.ps1`
+validates the assets, checksum files, manifest, and current Git HEAD. Official
+GitHub Actions are pinned to full release commit SHAs in the workflow and must
+be upgraded explicitly.

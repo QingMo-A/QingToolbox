@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("win-x64")]
-    [string]$Runtime = "win-x64",
+    [string]$Runtime,
     [ValidateSet("Release")]
     [string]$Configuration = "Release",
     [string]$IsccPath,
@@ -10,10 +9,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+. (Join-Path $PSScriptRoot "get-preview-release-metadata.ps1")
+$metadata = if ([string]::IsNullOrWhiteSpace($Runtime)) {
+    Get-PreviewReleaseMetadata
+}
+else {
+    Get-PreviewReleaseMetadata -Runtime $Runtime
+}
+$Runtime = $metadata.Runtime
 $installerRoot = Join-Path $repoRoot "artifacts\installer"
 $payloadDirectory = Join-Path $installerRoot "payload"
 $outputDirectory = Join-Path $installerRoot "output"
-$propsPath = Join-Path $repoRoot "Directory.Build.props"
 $shellProject = Join-Path $repoRoot "QingToolbox.Shell\QingToolbox.Shell.csproj"
 $smokeProject = Join-Path $repoRoot "QingToolbox.DevTools.ModuleLoadSmokeTest\QingToolbox.DevTools.ModuleLoadSmokeTest.csproj"
 $installerScript = Join-Path $repoRoot "installer\QingToolbox.iss"
@@ -69,16 +75,6 @@ function Resolve-IsccPath {
 }
 
 try {
-    [xml]$props = Get-Content -LiteralPath $propsPath -Raw
-    $version = @($props.Project.PropertyGroup.Version)[0]
-    $fileVersion = @($props.Project.PropertyGroup.FileVersion)[0]
-    if ($version -ne "0.1.0-alpha") {
-        throw "Expected version 0.1.0-alpha in Directory.Build.props, found '$version'."
-    }
-    if ($fileVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') {
-        throw "FileVersion must contain four numeric components, found '$fileVersion'."
-    }
-
     foreach ($path in @($payloadDirectory, $outputDirectory)) {
         Assert-InstallerArtifactPath -Path $path
         if (Test-Path -LiteralPath $path) {
@@ -156,13 +152,14 @@ try {
     New-Item -ItemType Directory -Force -Path $docsDirectory | Out-Null
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\QMOD_FORMAT.md") `
         -Destination $docsDirectory -Force
-    Copy-Item -LiteralPath (Join-Path $repoRoot "docs\releases\0.1.0-alpha.md") `
+    Copy-Item -LiteralPath (Join-Path $repoRoot `
+        "docs\releases\$($metadata.Version).md") `
         -Destination $docsDirectory -Force
 
     $requiredPayloadFiles = @(
         "LICENSE",
         "CHANGELOG.md",
-        "docs\0.1.0-alpha.md",
+        "docs\$($metadata.Version).md",
         "Resources\Localization\en-US.json",
         "Resources\Localization\zh-CN.json"
     )
@@ -183,10 +180,10 @@ try {
         }
     }
 
-    $outputBaseFilename = "QingToolbox-$version-$Runtime-setup"
+    $outputBaseFilename = $metadata.InstallerBaseName
     & $resolvedIsccPath `
-        "/DAppVersion=$version" `
-        "/DFileVersion=$fileVersion" `
+        "/DAppVersion=$($metadata.Version)" `
+        "/DFileVersion=$($metadata.FileVersion)" `
         "/DSourceDir=$payloadDirectory" `
         "/DOutputDir=$outputDirectory" `
         "/DOutputBaseFilename=$outputBaseFilename" `

@@ -27,6 +27,14 @@ try {
 
     $dependencies = Import-PowerShellDataFile -LiteralPath $dependenciesPath
     $translation = $dependencies.ChineseSimplifiedMessages
+    $upstreamCommit = [string]$translation.Commit
+    if ($upstreamCommit -notmatch '^[0-9a-fA-F]{40}$') {
+        throw "Pinned Inno translation commit is invalid: $upstreamCommit"
+    }
+    $translationUri = [string]$translation.Uri
+    if (-not $translationUri.Contains("/$upstreamCommit/")) {
+        throw "Pinned Inno translation URI does not contain its commit SHA."
+    }
     $expectedHash = ([string]$translation.Sha256).ToUpperInvariant()
     if ($expectedHash -notmatch '^[0-9A-F]{64}$') {
         throw "Pinned ChineseSimplified.isl SHA256 is invalid: $expectedHash"
@@ -43,7 +51,7 @@ try {
         $downloadPath = Join-Path $languageDirectory (
             "ChineseSimplified.{0}.download" -f [guid]::NewGuid().ToString("N"))
         Write-Host "Downloading ChineseSimplified.isl from the pinned official source."
-        Invoke-WebRequest -Uri ([string]$translation.Uri) -OutFile $downloadPath
+        Invoke-WebRequest -Uri $translationUri -OutFile $downloadPath
         $downloadHash = (Get-FileHash -LiteralPath $downloadPath `
             -Algorithm SHA256).Hash
         if ($downloadHash -ne $expectedHash) {

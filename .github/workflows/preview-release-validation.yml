@@ -25,10 +25,23 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Resolve Preview release metadata
+        id: release
+        shell: pwsh
+        run: |
+          $metadata = ./scripts/get-preview-release-metadata.ps1
+          "version=$($metadata.Version)" | Out-File $env:GITHUB_OUTPUT -Append
+          "file_version=$($metadata.FileVersion)" | Out-File $env:GITHUB_OUTPUT -Append
+          "runtime=$($metadata.Runtime)" | Out-File $env:GITHUB_OUTPUT -Append
+          "portable_file=$($metadata.PortableFileName)" | Out-File $env:GITHUB_OUTPUT -Append
+          "installer_file=$($metadata.InstallerFileName)" | Out-File $env:GITHUB_OUTPUT -Append
+          "manifest_file=$($metadata.ManifestFileName)" | Out-File $env:GITHUB_OUTPUT -Append
+          "artifact_name=$($metadata.ValidationArtifactName)" | Out-File $env:GITHUB_OUTPUT -Append
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
           dotnet-version: 10.0.x
 
@@ -92,21 +105,26 @@ jobs:
         env:
           LOCALAPPDATA: ${{ runner.temp }}\QingToolboxProfile\LocalAppData
           APPDATA: ${{ runner.temp }}\QingToolboxProfile\AppData
-        run: >-
-          ./scripts/test-installer-roundtrip.ps1
-          -InstallerPath
-          ./artifacts/installer/output/QingToolbox-0.1.0-alpha-win-x64-setup.exe
-          -TestRoot
-          ${{ runner.temp }}\QingToolboxInstallerRoundtrip
-          -KeepTestFiles
+          INSTALLER_FILE: ${{ steps.release.outputs.installer_file }}
+        run: |
+          $installerPath = Join-Path `
+            "./artifacts/installer/output" $env:INSTALLER_FILE
+          ./scripts/test-installer-roundtrip.ps1 `
+            -InstallerPath $installerPath `
+            -TestRoot "${{ runner.temp }}\QingToolboxInstallerRoundtrip" `
+            -KeepTestFiles
 
-      - name: Verify Preview asset checksums
+      - name: Write Preview manifest
+        shell: pwsh
+        run: ./scripts/write-preview-manifest.ps1
+
+      - name: Verify Preview assets and manifest
         shell: pwsh
         run: ./scripts/verify-preview-assets.ps1
 
       - name: Upload Preview validation diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: QingToolbox-preview-validation-diagnostics-${{ github.run_number }}
           retention-days: 10
@@ -131,13 +149,14 @@ jobs:
           }
 
       - name: Upload Preview validation artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: QingToolbox-0.1.0-alpha-preview-win-x64
+          name: ${{ steps.release.outputs.artifact_name }}
           retention-days: 10
           if-no-files-found: error
           path: |
-            artifacts/QingToolbox-0.1.0-alpha-win-x64.zip
-            artifacts/QingToolbox-0.1.0-alpha-win-x64.zip.sha256
-            artifacts/installer/output/QingToolbox-0.1.0-alpha-win-x64-setup.exe
-            artifacts/installer/output/QingToolbox-0.1.0-alpha-win-x64-setup.exe.sha256
+            artifacts/${{ steps.release.outputs.portable_file }}
+            artifacts/${{ steps.release.outputs.portable_file }}.sha256
+            artifacts/installer/output/${{ steps.release.outputs.installer_file }}
+            artifacts/installer/output/${{ steps.release.outputs.installer_file }}.sha256
+            artifacts/${{ steps.release.outputs.manifest_file }}
