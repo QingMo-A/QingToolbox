@@ -544,6 +544,41 @@
         <Setter Property="MaxWidth" Value="360"/>
     </Style>
 
+    <Style x:Key="EmptyStateCardStyle"
+           TargetType="Border"
+           BasedOn="{StaticResource LiquidGlassPanelStyle}">
+        <Setter Property="Padding" Value="28"/>
+        <Setter Property="BorderBrush" Value="#CFE0F7"/>
+        <Setter Property="Effect" Value="{StaticResource SoftPanelShadow}"/>
+    </Style>
+
+    <Style x:Key="EmptyStateIconStyle" TargetType="Border">
+        <Setter Property="Width" Value="58"/>
+        <Setter Property="Height" Value="58"/>
+        <Setter Property="CornerRadius" Value="18"/>
+        <Setter Property="Background" Value="{StaticResource PrimaryAccentSoftBrush}"/>
+        <Setter Property="BorderBrush" Value="#BFDBFE"/>
+        <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+
+    <Style x:Key="EmptyStateStepStyle" TargetType="Border">
+        <Setter Property="MinWidth" Value="190"/>
+        <Setter Property="Margin" Value="0,0,10,10"/>
+        <Setter Property="Padding" Value="16"/>
+        <Setter Property="Background" Value="#BFFFFFFF"/>
+        <Setter Property="BorderBrush" Value="#DCE8F8"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="14"/>
+    </Style>
+
+    <Style x:Key="SecurityNoticeStyle" TargetType="Border">
+        <Setter Property="Padding" Value="14,11"/>
+        <Setter Property="Background" Value="#EAF2FF"/>
+        <Setter Property="BorderBrush" Value="#C7DAF8"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="12"/>
+    </Style>
+
     <Style x:Key="ModuleViewHeaderStyle" TargetType="TextBlock">
         <Setter Property="FontSize" Value="17"/>
         <Setter Property="FontWeight" Value="SemiBold"/>

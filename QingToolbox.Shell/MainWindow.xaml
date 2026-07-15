@@ -503,14 +503,11 @@
                         </ColumnDefinition.Style>
                     </ColumnDefinition>
                 </Grid.ColumnDefinitions>
-                <TextBlock HorizontalAlignment="Center"
-                           VerticalAlignment="Center"
-                           Text="{Binding Strings[module.noModulesDiscoveredHint]}"
-                           Foreground="#64748B"
-                           TextAlignment="Center"
-                           Grid.Column="0">
-                    <TextBlock.Style>
-                        <Style TargetType="TextBlock">
+                <ScrollViewer Grid.ColumnSpan="2"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer.Style>
+                        <Style TargetType="ScrollViewer">
                             <Setter Property="Visibility" Value="Collapsed"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding Modules.Count}" Value="0">
@@ -518,8 +515,55 @@
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
-                    </TextBlock.Style>
-                </TextBlock>
+                    </ScrollViewer.Style>
+                    <Border Margin="2,2,10,12" Style="{StaticResource EmptyStateCardStyle}">
+                        <StackPanel>
+                            <Border HorizontalAlignment="Left" Style="{StaticResource EmptyStateIconStyle}">
+                                <TextBlock Text="&#xE71D;" FontFamily="Segoe Fluent Icons"
+                                           FontSize="28" Foreground="{StaticResource AccentBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock Margin="0,18,0,0" Text="{Binding Strings[empty.modules.title]}"
+                                       FontSize="23" FontWeight="SemiBold"
+                                       Foreground="{StaticResource PrimaryTextBrush}" TextWrapping="Wrap"/>
+                            <TextBlock Margin="0,8,0,0" Text="{Binding Strings[empty.modules.description]}"
+                                       Foreground="{StaticResource SecondaryTextBrush}"
+                                       FontSize="14" TextWrapping="Wrap"/>
+                            <WrapPanel Margin="0,22,0,0">
+                                <Border Style="{StaticResource EmptyStateStepStyle}">
+                                    <StackPanel><TextBlock Text="1" Foreground="{StaticResource AccentBrush}" FontWeight="Bold"/><TextBlock Margin="0,7,0,0" Text="{Binding Strings[empty.modules.step.obtain.title]}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/><TextBlock Margin="0,5,0,0" Text="{Binding Strings[empty.modules.step.obtain.description]}" TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/></StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource EmptyStateStepStyle}">
+                                    <StackPanel><TextBlock Text="2" Foreground="{StaticResource AccentBrush}" FontWeight="Bold"/><TextBlock Margin="0,7,0,0" Text="{Binding Strings[empty.modules.step.import.title]}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/><TextBlock Margin="0,5,0,0" Text="{Binding Strings[empty.modules.step.import.description]}" TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/></StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource EmptyStateStepStyle}">
+                                    <StackPanel><TextBlock Text="3" Foreground="{StaticResource AccentBrush}" FontWeight="Bold"/><TextBlock Margin="0,7,0,0" Text="{Binding Strings[empty.modules.step.load.title]}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/><TextBlock Margin="0,5,0,0" Text="{Binding Strings[empty.modules.step.load.description]}" TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/></StackPanel>
+                                </Border>
+                            </WrapPanel>
+                            <WrapPanel Margin="0,12,0,0">
+                                <Button Margin="0,0,10,10" Command="{Binding ImportModuleCommand}"
+                                        AutomationProperties.Name="{Binding Strings[empty.modules.import]}"
+                                        Style="{StaticResource PrimaryActionButtonStyle}">
+                                    <TextBlock Text="{Binding Strings[empty.modules.import]}"/>
+                                </Button>
+                                <Button Margin="0,0,10,10" Command="{Binding OpenUserModulesDirectoryCommand}"
+                                        AutomationProperties.Name="{Binding Strings[empty.modules.openFolder]}"
+                                        Style="{StaticResource SecondaryActionButtonStyle}">
+                                    <TextBlock Text="{Binding Strings[empty.modules.openFolder]}"/>
+                                </Button>
+                                <Button Margin="0,0,0,10" Command="{Binding RefreshModulesCommand}"
+                                        AutomationProperties.Name="{Binding Strings[empty.modules.refresh]}"
+                                        Style="{StaticResource SecondaryActionButtonStyle}">
+                                    <TextBlock Text="{Binding Strings[empty.modules.refresh]}"/>
+                                </Button>
+                            </WrapPanel>
+                            <Border Margin="0,8,0,0" Style="{StaticResource SecurityNoticeStyle}">
+                                <TextBlock Text="{Binding Strings[empty.modules.securityNotice]}"
+                                           TextWrapping="Wrap" Foreground="#39577D"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </ScrollViewer>
 
                 <ScrollViewer Grid.Column="0"
                               behaviors:SmoothScrollBehavior.IsEnabled="True"
@@ -832,6 +876,40 @@
                               HorizontalContentAlignment="Stretch"
                               VerticalScrollBarVisibility="Auto">
                     <StackPanel HorizontalAlignment="Stretch">
+                        <Border Margin="0,2,0,18"
+                                Visibility="{Binding HasNoModules, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                Style="{StaticResource EmptyStateCardStyle}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Margin="0,0,20,0" Style="{StaticResource EmptyStateIconStyle}">
+                                    <TextBlock Text="&#xE8F1;" FontFamily="Segoe Fluent Icons" FontSize="27"
+                                               Foreground="{StaticResource AccentBrush}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{Binding Strings[empty.home.title]}" FontSize="20"
+                                               FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"
+                                               TextWrapping="Wrap"/>
+                                    <TextBlock Margin="0,7,0,0" Text="{Binding Strings[empty.home.description]}"
+                                               Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                                    <WrapPanel Margin="0,14,0,0">
+                                        <Button Margin="0,0,10,8" Command="{Binding ImportModuleCommand}"
+                                                AutomationProperties.Name="{Binding Strings[empty.home.importFirst]}"
+                                                Style="{StaticResource PrimaryActionButtonStyle}">
+                                            <TextBlock Text="{Binding Strings[empty.home.importFirst]}"/>
+                                        </Button>
+                                        <Button Margin="0,0,0,8" Command="{Binding OpenUserModulesDirectoryCommand}"
+                                                AutomationProperties.Name="{Binding Strings[empty.home.openFolder]}"
+                                                Style="{StaticResource SecondaryActionButtonStyle}">
+                                            <TextBlock Text="{Binding Strings[empty.home.openFolder]}"/>
+                                        </Button>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
                         <Border Padding="28" CornerRadius="22" BorderThickness="0"
                                 Effect="{StaticResource FloatingPanelShadow}">
                             <Border.Background>
@@ -952,11 +1030,10 @@
                   Style="{StaticResource PageTransitionStyle}"
                   Visibility="{Binding IsRunningSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Grid>
-                    <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
-                               Text="{Binding Strings[running.empty]}"
-                               Foreground="{StaticResource SecondaryTextBrush}">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
+                    <Border MaxWidth="600" Margin="24" HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                        <Border.Style>
+                            <Style TargetType="Border" BasedOn="{StaticResource EmptyStateCardStyle}">
                                 <Setter Property="Visibility" Value="Collapsed"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding RunningModules.Count}" Value="0">
@@ -964,8 +1041,27 @@
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
+                        </Border.Style>
+                        <StackPanel HorizontalAlignment="Center">
+                            <Border Style="{StaticResource EmptyStateIconStyle}">
+                                <TextBlock Text="&#xE768;" FontFamily="Segoe Fluent Icons" FontSize="27"
+                                           Foreground="{StaticResource AccentBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock Margin="0,18,0,0" Text="{Binding Strings[empty.running.title]}"
+                                       FontSize="21" FontWeight="SemiBold" TextAlignment="Center"
+                                       Foreground="{StaticResource PrimaryTextBrush}" TextWrapping="Wrap"/>
+                            <TextBlock Margin="0,8,0,16" Text="{Binding Strings[empty.running.description]}"
+                                       TextAlignment="Center" TextWrapping="Wrap"
+                                       Foreground="{StaticResource SecondaryTextBrush}"/>
+                            <Button HorizontalAlignment="Center" Command="{Binding SelectNavigationCommand}"
+                                    CommandParameter="Modules"
+                                    AutomationProperties.Name="{Binding Strings[empty.running.goToModules]}"
+                                    Style="{StaticResource PrimaryActionButtonStyle}">
+                                <TextBlock Text="{Binding Strings[empty.running.goToModules]}"/>
+                            </Button>
+                        </StackPanel>
+                    </Border>
                     <ItemsControl ItemsSource="{Binding RunningModules}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>

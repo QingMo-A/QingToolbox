@@ -109,6 +109,18 @@ CI 还会生成机器可读 manifest，记录构建源码 commit、ZIP 与安装
 SHA256；官方 GitHub Actions 与 Inno 中文翻译均固定到不可变 commit。该流程
 继续只做发布门禁，不创建 Release 或 tag。
 
+## 首次使用
+
+QingToolbox 主程序不内置任何具体工具模块。首次启动后请前往“模块”页面，导入来自
+可信开发者或可信发布页面的 `.qmod` 文件；导入和刷新只发现并校验模块清单，不会加载
+模块 DLL，只有用户主动点击“加载”后才会载入程序集。用户模块目录为：
+
+```text
+%LOCALAPPDATA%\QingToolbox\Modules
+```
+
+模块加载后拥有当前用户权限，因此请勿导入来源不明的模块。
+
 ## Preview release candidate
 
 最终 Preview 候选必须从干净且与 `origin/toolbox` 同步的 `toolbox` 分支构建：

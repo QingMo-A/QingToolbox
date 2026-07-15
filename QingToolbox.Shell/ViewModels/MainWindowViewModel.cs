@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -107,6 +108,8 @@ public sealed partial class MainWindowViewModel(
 
     public ObservableCollection<DiscoveredModuleViewModel> Modules { get; } = [];
     public ObservableCollection<DiscoveredModuleViewModel> RunningModules { get; } = [];
+    public bool HasModules => Modules.Count > 0;
+    public bool HasNoModules => !HasModules;
 
     [RelayCommand]
     private void ToggleSidebarPin()
@@ -119,6 +122,28 @@ public sealed partial class MainWindowViewModel(
     private void SelectNavigation(string key)
     {
         SelectedNavigationKey = key;
+    }
+
+    [RelayCommand]
+    private void OpenUserModulesDirectory()
+    {
+        try
+        {
+            Directory.CreateDirectory(applicationPaths.UserModulesDirectory);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = applicationPaths.UserModulesDirectory,
+                UseShellExecute = true
+            });
+            StatusMessage = localization.GetString(
+                "status.userModulesFolderOpened");
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = localization.GetString(
+                "status.userModulesFolderOpenFailed",
+                exception.Message);
+        }
     }
 
     [RelayCommand]
@@ -451,6 +476,8 @@ public sealed partial class MainWindowViewModel(
         {
             RunningModules.Add(module);
         }
+        OnPropertyChanged(nameof(HasModules));
+        OnPropertyChanged(nameof(HasNoModules));
     }
 
     [RelayCommand]
@@ -475,7 +502,10 @@ public sealed partial class MainWindowViewModel(
                 applicationPaths.UserModulesDirectory,
                 Modules.Select(module => module.Id).ToArray());
             await RefreshModulesAsync();
-            StatusMessage = localization.GetString("status.moduleImported", moduleId);
+            SelectedModule = Modules.FirstOrDefault(module => module.Id == moduleId);
+            StatusMessage = localization.GetString(
+                "status.moduleImportedNextStep",
+                moduleId);
         }
         catch (Exception exception)
         {

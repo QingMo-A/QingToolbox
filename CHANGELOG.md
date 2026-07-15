@@ -30,6 +30,9 @@
 - Clean-source and origin-synchronization gates for final Preview candidates.
 - Schema-v2 release provenance with repository and clean-worktree assertions.
 - One-command Preview candidate orchestration and manual release handoff guide.
+- First-run empty toolbox onboarding across Home, Modules, and Running pages.
+- Direct trusted `.qmod` import guidance and a user module folder shortcut.
+- Clear in-product explanation that discovery and refresh do not load module DLLs.
 
 ### Known Issues
 
