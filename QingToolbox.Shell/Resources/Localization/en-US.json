@@ -134,5 +134,12 @@
   "status.moduleFocused": "Focused module '{0}'.",
   "status.moduleOpened": "Opened module '{0}'.",
   "status.moduleNoView": "Module '{0}' did not provide a view.",
-  "status.moduleOpenFailed": "Failed to open module '{0}': {1}"
+  "status.moduleOpenFailed": "Failed to open module '{0}': {1}",
+  "window.minimize": "Minimize",
+  "window.maximize": "Maximize",
+  "window.restore": "Restore",
+  "window.close": "Close",
+  "window.systemMenu": "System menu",
+  "window.titleBar": "Window title bar",
+  "moduleHost.subtitle": "QingToolbox module"
 }

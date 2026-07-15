@@ -1,9 +1,10 @@
 using System.Windows;
 using QingToolbox.Shell.Views;
+using QingToolbox.Abstractions.Localization;
 
 namespace QingToolbox.Shell.Services;
 
-public sealed class ModuleWindowManager
+public sealed class ModuleWindowManager(ILocalizationService localization)
 {
     private readonly Dictionary<string, ModuleHostWindow> _windows =
         new(StringComparer.Ordinal);
@@ -27,7 +28,7 @@ public sealed class ModuleWindowManager
             return;
         }
 
-        var window = new ModuleHostWindow(moduleId, title, moduleView)
+        var window = new ModuleHostWindow(moduleId, title, moduleView, localization)
         {
             Owner = owner
         };

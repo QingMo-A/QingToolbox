@@ -3,6 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:svgc="http://sharpvectors.codeplex.com/svgc/"
         xmlns:behaviors="clr-namespace:QingToolbox.Shell.Behaviors"
+        xmlns:controls="clr-namespace:QingToolbox.Shell.Controls"
+        xmlns:windowing="clr-namespace:QingToolbox.Shell.Windowing"
         Title="{Binding Title}"
         Width="1180"
         Height="760"
@@ -13,10 +15,30 @@
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="ClearType"
         Icon="Assets/Branding/QingToolbox.ico"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        windowing:WindowChromeBehavior.IsEnabled="True"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource ShellBackgroundGradientBrush}">
 
     <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <controls:WindowTitleBar Grid.Row="0"
+                                 Title="{Binding Title}"
+                                 MinimizeText="{Binding Strings[window.minimize]}"
+                                 MaximizeText="{Binding Strings[window.maximize]}"
+                                 RestoreText="{Binding Strings[window.restore]}"
+                                 CloseText="{Binding Strings[window.close]}"
+                                 SystemMenuText="{Binding Strings[window.systemMenu]}">
+            <controls:WindowTitleBar.IconSource>
+                <svgc:SvgViewbox Width="24" Height="24"
+                    Source="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.Mark.svg"/>
+            </controls:WindowTitleBar.IconSource>
+        </controls:WindowTitleBar>
+        <Grid Grid.Row="1">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto"/>
             <ColumnDefinition Width="*"/>
@@ -1211,6 +1233,7 @@
                     </StackPanel>
                 </Border>
             </Grid>
+        </Grid>
         </Grid>
     </Grid>
 </Window>

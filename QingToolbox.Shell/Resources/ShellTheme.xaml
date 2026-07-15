@@ -26,6 +26,7 @@
     <SolidColorBrush x:Key="SuccessSoftBrush" Color="#ECFDF3"/>
     <SolidColorBrush x:Key="MutedTextBrush" Color="#64748B"/>
     <SolidColorBrush x:Key="StrongTextBrush" Color="#172033"/>
+    <SolidColorBrush x:Key="WindowTitleBarDividerBrush" Color="#D9E2EF"/>
     <CornerRadius x:Key="GlassPanelCornerRadius">24</CornerRadius>
     <CornerRadius x:Key="CardCornerRadius">18</CornerRadius>
     <CornerRadius x:Key="ButtonCornerRadius">12</CornerRadius>
@@ -39,6 +40,78 @@
                       Opacity="0.16" Color="#334155"/>
     <DropShadowEffect x:Key="HoverCardShadow" BlurRadius="25" ShadowDepth="7"
                       Opacity="0.18" Color="#2563EB"/>
+
+    <Style x:Key="WindowTitleBarStyle" TargetType="UserControl">
+        <Setter Property="Background" Value="#F7FBFF"/>
+        <Setter Property="Focusable" Value="False"/>
+    </Style>
+
+    <Style x:Key="WindowTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{StaticResource StrongTextBrush}"/>
+        <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+    </Style>
+
+    <Style x:Key="WindowSubtitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+        <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        <Style.Triggers>
+            <Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="WindowCaptionButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="46"/>
+        <Setter Property="Height" Value="47"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Foreground" Value="{StaticResource StrongTextBrush}"/>
+        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="Focusable" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Background" Background="{TemplateBinding Background}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Background" Property="Background" Value="{StaticResource SidebarHoverBrush}"/></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Background" Property="Background" Value="#D8E7FF"/></Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Background" Property="BorderBrush" Value="{StaticResource AccentBrush}"/><Setter TargetName="Background" Property="BorderThickness" Value="1"/></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="WindowCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource WindowCaptionButtonStyle}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Background" Background="{TemplateBinding Background}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Background" Property="Background" Value="#E81123"/><Setter Property="Foreground" Value="White"/></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Background" Property="Background" Value="#C50F1F"/><Setter Property="Foreground" Value="White"/></Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Background" Property="BorderBrush" Value="{StaticResource AccentBrush}"/><Setter TargetName="Background" Property="BorderThickness" Value="1"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="WindowSystemMenuButtonStyle" TargetType="Button" BasedOn="{StaticResource WindowCaptionButtonStyle}">
+        <Setter Property="Width" Value="44"/>
+    </Style>
+
+    <Style x:Key="WindowTitleBarDividerStyle" TargetType="Border">
+        <Setter Property="BorderBrush" Value="{StaticResource WindowTitleBarDividerBrush}"/>
+        <Setter Property="BorderThickness" Value="0,0,0,1"/>
+    </Style>
 
     <Style x:Key="LiquidGlassPanelStyle" TargetType="Border">
         <Setter Property="Background" Value="{StaticResource GlassPanelBackgroundBrush}"/>

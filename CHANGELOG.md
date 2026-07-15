@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Replaced native title-bar visuals in the Shell and module host with one reusable, extensible WindowChrome title bar.
+- Preserved standard window commands, resize, drag and system-menu behavior.
+- Added DPI-aware `HTMAXBUTTON` handling for Windows 11 Snap Layout and an empty future action slot.
+- Desktop floating-window behavior is not implemented in this change.
+
 ## 0.1.0-alpha
 
 ### Added

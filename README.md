@@ -1,5 +1,7 @@
 # QingToolbox
 
+QingToolbox Shell 和模块宿主窗口共享可扩展的 WPF `WindowChrome` 标题栏基础设施。它保留系统拖动、缩放、系统菜单和标准窗口命令，并通过最大化按钮命中测试支持 Windows 11 Snap Layout；预留的自定义操作区尚未接入桌面悬浮窗功能。
+
 QingToolbox 是面向 Windows 的轻量模块化工具箱。Shell 提供现代化界面、
 模块发现和生命周期管理，实际工具功能由独立模块按需提供。
 

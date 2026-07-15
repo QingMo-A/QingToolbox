@@ -1,6 +1,9 @@
 <Window x:Class="QingToolbox.Shell.Views.ModuleHostWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:svgc="http://sharpvectors.codeplex.com/svgc/"
+        xmlns:controls="clr-namespace:QingToolbox.Shell.Controls"
+        xmlns:windowing="clr-namespace:QingToolbox.Shell.Windowing"
         Width="900"
         Height="650"
         MinWidth="520"
@@ -10,20 +13,29 @@
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="ClearType"
         WindowStartupLocation="CenterOwner"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        windowing:WindowChromeBehavior.IsEnabled="True"
         Background="{StaticResource ShellBackgroundGradientBrush}">
-    <Grid Margin="20">
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="48"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-        <StackPanel Margin="4,0,0,16">
-            <TextBlock Text="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=Title}"
-                       FontSize="22" FontWeight="SemiBold"
-                       Foreground="{StaticResource StrongTextBrush}"/>
-            <TextBlock Margin="0,4,0,0" Text="QingToolbox module"
-                       FontSize="12" Foreground="{StaticResource MutedTextBrush}"/>
-        </StackPanel>
+        <controls:WindowTitleBar x:Name="TitleBar" Title="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=Title}"
+                                 Subtitle="{Binding ModuleSubtitle, RelativeSource={RelativeSource AncestorType=Window}}"
+                                 MinimizeText="{Binding MinimizeText, RelativeSource={RelativeSource AncestorType=Window}}"
+                                 MaximizeText="{Binding MaximizeText, RelativeSource={RelativeSource AncestorType=Window}}"
+                                 RestoreText="{Binding RestoreText, RelativeSource={RelativeSource AncestorType=Window}}"
+                                 CloseText="{Binding CloseText, RelativeSource={RelativeSource AncestorType=Window}}"
+                                 SystemMenuText="{Binding SystemMenuText, RelativeSource={RelativeSource AncestorType=Window}}">
+            <controls:WindowTitleBar.IconSource>
+                <svgc:SvgViewbox Width="24" Height="24"
+                    Source="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.Mark.svg"/>
+            </controls:WindowTitleBar.IconSource>
+        </controls:WindowTitleBar>
         <Border Grid.Row="1"
+                Margin="20"
                 Padding="1"
                 Style="{StaticResource LiquidGlassPanelStyle}">
             <Border Background="#E6FFFFFF" CornerRadius="23" Padding="12">

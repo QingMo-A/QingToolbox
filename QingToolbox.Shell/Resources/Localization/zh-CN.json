@@ -134,5 +134,12 @@
   "status.moduleFocused": "已切换到模块“{0}”。",
   "status.moduleOpened": "已打开模块“{0}”。",
   "status.moduleNoView": "模块“{0}”未提供视图。",
-  "status.moduleOpenFailed": "打开模块“{0}”失败：{1}"
+  "status.moduleOpenFailed": "打开模块“{0}”失败：{1}",
+  "window.minimize": "最小化",
+  "window.maximize": "最大化",
+  "window.restore": "还原",
+  "window.close": "关闭",
+  "window.systemMenu": "系统菜单",
+  "window.titleBar": "窗口标题栏",
+  "moduleHost.subtitle": "QingToolbox 模块"
 }
