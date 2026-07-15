@@ -10,6 +10,7 @@ public partial class FloatingBadgeWindow : Window, INotifyPropertyChanged
     private readonly ILocalizationService _localization;
     private Point _mouseDownPoint;
     private bool _dragStarted;
+    private bool _suppressRestoreUntilButtonUp;
     private bool _allowClose;
 
     public FloatingBadgeWindow(ILocalizationService localization)
@@ -20,6 +21,7 @@ public partial class FloatingBadgeWindow : Window, INotifyPropertyChanged
         DataContext = this;
         BadgeSurface.ContextMenu.DataContext = this;
         Loaded += (_, _) => BadgeSurface.Focus();
+        Deactivated += (_, _) => ResetDragState(releaseCapture: true);
     }
 
     public string AutomationName => _localization.GetString("floatingBadge.automationName");
@@ -37,6 +39,7 @@ public partial class FloatingBadgeWindow : Window, INotifyPropertyChanged
     {
         _mouseDownPoint = e.GetPosition(this);
         _dragStarted = false;
+        _suppressRestoreUntilButtonUp = false;
         BadgeSurface.CaptureMouse();
         e.Handled = true;
     }
@@ -49,23 +52,36 @@ public partial class FloatingBadgeWindow : Window, INotifyPropertyChanged
             Math.Abs(current.Y - _mouseDownPoint.Y) < SystemParameters.MinimumVerticalDragDistance) return;
 
         _dragStarted = true;
+        _suppressRestoreUntilButtonUp = true;
         BadgeSurface.ReleaseMouseCapture();
-        try { DragMove(); }
+        var completed = false;
+        try { DragMove(); completed = true; }
         catch (InvalidOperationException) { }
-        finally { DragCompleted?.Invoke(this, EventArgs.Empty); }
+        finally
+        {
+            if (completed) DragCompleted?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        var wasDragging = _dragStarted || _suppressRestoreUntilButtonUp;
         if (BadgeSurface.IsMouseCaptured) BadgeSurface.ReleaseMouseCapture();
-        if (!_dragStarted) RestoreRequested?.Invoke(this, EventArgs.Empty);
-        _dragStarted = false;
+        ResetDragState(releaseCapture: false);
+        _suppressRestoreUntilButtonUp = false;
+        if (!wasDragging) RestoreRequested?.Invoke(this, EventArgs.Empty);
         e.Handled = true;
     }
 
     private void OnMouseRightButtonUp(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
+        ResetDragState(releaseCapture: true);
+        OpenContextMenu();
+    }
+
+    private void OpenContextMenu()
+    {
         BadgeSurface.ContextMenu.PlacementTarget = BadgeSurface;
         BadgeSurface.ContextMenu.IsOpen = true;
     }
@@ -83,8 +99,20 @@ public partial class FloatingBadgeWindow : Window, INotifyPropertyChanged
         else if ((e.Key == Key.F10 && Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) || e.Key == Key.Apps)
         {
             e.Handled = true;
-            BadgeSurface.ContextMenu.IsOpen = true;
+            OpenContextMenu();
         }
+    }
+
+    private void OnLostMouseCapture(object sender, MouseEventArgs e) =>
+        ResetDragState(releaseCapture: false);
+
+    private void OnContextMenuClosed(object sender, RoutedEventArgs e) => BadgeSurface.Focus();
+
+    private void ResetDragState(bool releaseCapture)
+    {
+        if (releaseCapture && BadgeSurface.IsMouseCaptured) BadgeSurface.ReleaseMouseCapture();
+        _dragStarted = false;
+        _mouseDownPoint = default;
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)

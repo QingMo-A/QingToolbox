@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Abstractions.Modules;
+using QingToolbox.Core.Settings;
 
 namespace QingToolbox.Core.Localization;
 
@@ -42,7 +43,7 @@ public sealed class LocalizationManager(UserSettingsService settingsService)
             }
         }
 
-        var settings = await settingsService.LoadAsync();
+        var settings = await settingsService.ReadAsync();
         ConfiguredLanguageCode = SupportedCodes.Contains(settings.Language)
             ? settings.Language
             : "system";
@@ -60,9 +61,7 @@ public sealed class LocalizationManager(UserSettingsService settingsService)
         var changed = ConfiguredLanguageCode != languageCode ||
                       CurrentCulture.Name != culture.Name;
         ConfiguredLanguageCode = languageCode;
-        var settings = await settingsService.LoadAsync();
-        settings.Language = languageCode;
-        await settingsService.SaveAsync(settings);
+        await settingsService.UpdateAsync(settings => settings.Language = languageCode);
         ApplyCulture(culture, changed);
     }
 

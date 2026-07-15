@@ -8,6 +8,7 @@ using QingToolbox.Shell.ViewModels;
 using QingToolbox.Shell.Services;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Core.Localization;
+using QingToolbox.Core.Settings;
 
 namespace QingToolbox.Shell;
 
@@ -55,6 +56,7 @@ public partial class App : Application
     {
         try
         {
+            _serviceProvider?.GetService<FloatingBadgeManager>()?.PrepareForApplicationExit();
             var runtimeManager = _serviceProvider?.GetService<ModuleRuntimeManager>();
             runtimeManager?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
@@ -77,5 +79,11 @@ public partial class App : Application
 
             base.OnExit(e);
         }
+    }
+
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        _serviceProvider?.GetService<FloatingBadgeManager>()?.PrepareForApplicationExit();
+        base.OnSessionEnding(e);
     }
 }

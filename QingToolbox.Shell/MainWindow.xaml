@@ -45,7 +45,18 @@
                         Click="OnFloatingBadgeClick">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE718;" FontFamily="Segoe Fluent Icons" FontSize="14"/>
-                        <TextBlock Margin="7,0,0,0" Text="{Binding Strings[floatingBadge.enable]}"/>
+                        <TextBlock Margin="7,0,0,0" Text="{Binding Strings[floatingBadge.enable]}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsCompactWindow}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Setter Property="Margin" Value="0"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
                     </StackPanel>
                 </Button>
             </controls:WindowTitleBar.AdditionalActions>

@@ -1,6 +1,7 @@
+using System.Diagnostics;
 using System.Windows;
 using QingToolbox.Abstractions.Localization;
-using QingToolbox.Core.Localization;
+using QingToolbox.Core.Settings;
 using QingToolbox.Shell.Views;
 using QingToolbox.Shell.Windowing;
 
@@ -12,9 +13,12 @@ public sealed class FloatingBadgeManager(
     ILocalizationService localization) : IDisposable
 {
     private readonly FloatingBadgeStateMachine _stateMachine = new();
+    private readonly SemaphoreSlim _transitionGate = new(1, 1);
     private MainWindow? _mainWindow;
     private FloatingBadgeWindow? _badgeWindow;
     private WindowSnapshot? _snapshot;
+    private bool _exitRequested;
+    private bool _disposed;
 
     public FloatingBadgeState State => _stateMachine.State;
     public bool IsTransitioning => State is FloatingBadgeState.EnteringBadge or FloatingBadgeState.Restoring;
@@ -22,108 +26,134 @@ public sealed class FloatingBadgeManager(
 
     public void Attach(MainWindow mainWindow) => _mainWindow = mainWindow;
 
-    public async Task EnterAsync()
+    public async Task EnterAsync(CancellationToken cancellationToken = default)
     {
-        if (_mainWindow is null || !_stateMachine.TryBeginEnter()) return;
-        RaiseStateChanged();
-        var mainWindow = _mainWindow;
-        FloatingBadgeWindow? badge = null;
+        await _transitionGate.WaitAsync(cancellationToken);
         try
         {
-            _snapshot = WindowSnapshot.Capture(mainWindow);
-            badge = CreateBadgeWindow();
-            PositionBadgeBeforeShow(badge, mainWindow, await settingsService.LoadAsync());
-            badge.Opacity = 0;
-            badge.Show();
-            badge.UpdateLayout();
-            ConstrainBadgeToCurrentMonitor(badge);
-            badge.Opacity = 1;
-
-            moduleWindowManager.SuspendForFloatingBadge();
-            mainWindow.ShowInTaskbar = false;
-            mainWindow.Hide();
-            _badgeWindow = badge;
-            badge.Activate();
-            badge.Focus();
-            _stateMachine.CompleteEnter();
-        }
-        catch
-        {
-            if (badge is not null)
+            if (_disposed || _exitRequested || _mainWindow is null || !_stateMachine.TryBeginEnter()) return;
+            RaiseStateChanged();
+            var mainWindow = _mainWindow;
+            FloatingBadgeWindow? badge = null;
+            try
             {
-                badge.AllowClose();
-                badge.Close();
+                _snapshot = WindowSnapshot.Capture(mainWindow);
+                var settings = await settingsService.ReadAsync(cancellationToken);
+                badge = CreateBadgeWindow();
+                badge.Opacity = 0;
+                badge.Show();
+                badge.UpdateLayout();
+                PositionVisibleBadge(badge, mainWindow, settings);
+                badge.Opacity = 1;
+
+                if (_exitRequested) return;
+                moduleWindowManager.SuspendForFloatingBadge();
+                mainWindow.ShowInTaskbar = false;
+                mainWindow.Hide();
+                _badgeWindow = badge;
+                badge.Activate();
+                badge.Focus();
+                _stateMachine.TryCompleteEnter();
             }
-            mainWindow.ShowInTaskbar = _snapshot?.ShowInTaskbar ?? true;
-            mainWindow.Show();
-            moduleWindowManager.RestoreAfterFloatingBadge();
-            _stateMachine.FailEnter();
-            throw;
+            catch
+            {
+                CloseBadge(badge);
+                if (!_exitRequested)
+                {
+                    mainWindow.ShowInTaskbar = _snapshot?.ShowInTaskbar ?? true;
+                    mainWindow.Show();
+                    moduleWindowManager.RestoreAfterFloatingBadge();
+                    _stateMachine.TryFailEnter();
+                    EnsureRecoverableWindow();
+                }
+                throw;
+            }
+            finally
+            {
+                if (_exitRequested) CloseBadge(badge);
+                RaiseStateChanged();
+            }
         }
         finally
         {
-            RaiseStateChanged();
+            _transitionGate.Release();
+            if (_exitRequested) await CompleteExitAfterTransitionAsync();
         }
     }
 
-    public async Task RestoreAsync()
+    public async Task RestoreAsync(CancellationToken cancellationToken = default)
     {
-        if (_mainWindow is null || !_stateMachine.TryBeginRestore()) return;
-        RaiseStateChanged();
-        var mainWindow = _mainWindow;
+        await _transitionGate.WaitAsync(cancellationToken);
         try
         {
-            var snapshot = _snapshot ?? WindowSnapshot.Capture(mainWindow);
-            mainWindow.ShowInTaskbar = snapshot.ShowInTaskbar;
-            mainWindow.Show();
-            RestoreMainWindow(mainWindow, snapshot);
-            moduleWindowManager.RestoreAfterFloatingBadge();
-            mainWindow.Activate();
-            mainWindow.Focus();
-
-            if (_badgeWindow is { } badge)
+            if (_disposed || _exitRequested || _mainWindow is null || !_stateMachine.TryBeginRestore()) return;
+            RaiseStateChanged();
+            var mainWindow = _mainWindow;
+            try
             {
-                await SaveBadgePositionAsync(badge);
-                badge.AllowClose();
-                badge.Close();
-                _badgeWindow = null;
+                var snapshot = _snapshot ?? WindowSnapshot.Capture(mainWindow);
+                mainWindow.ShowInTaskbar = snapshot.ShowInTaskbar;
+                mainWindow.Show();
+                RestoreMainWindow(mainWindow, snapshot);
+                moduleWindowManager.RestoreAfterFloatingBadge();
+                mainWindow.Activate();
+                mainWindow.Focus();
+
+                if (_badgeWindow is { } badge)
+                {
+                    await SaveBadgePositionAsync(badge, cancellationToken);
+                    CloseBadge(badge);
+                    _badgeWindow = null;
+                }
+                if (!_exitRequested) _stateMachine.TryCompleteRestore();
             }
-            _stateMachine.CompleteRestore();
-        }
-        catch
-        {
-            if (_badgeWindow is { } badge && !badge.IsVisible) badge.Show();
-            _stateMachine.FailRestore();
-            throw;
+            catch
+            {
+                if (!_exitRequested)
+                {
+                    if (_badgeWindow is { IsVisible: false } badge) badge.Show();
+                    _stateMachine.TryFailRestore();
+                    EnsureRecoverableWindow();
+                }
+                throw;
+            }
+            finally { RaiseStateChanged(); }
         }
         finally
         {
-            RaiseStateChanged();
+            _transitionGate.Release();
+            if (_exitRequested) await CompleteExitAfterTransitionAsync();
         }
     }
 
-    public void ExitApplication()
+    public async Task ExitApplicationAsync()
     {
-        if (_mainWindow is null || !_stateMachine.TryBeginExit()) return;
-        RaiseStateChanged();
-        if (_badgeWindow is { } badge)
-        {
-            badge.AllowClose();
-            badge.Close();
-            _badgeWindow = null;
-        }
-        _mainWindow.ShowInTaskbar = _snapshot?.ShowInTaskbar ?? true;
-        _mainWindow.Show();
-        _mainWindow.Close();
+        PrepareForApplicationExit();
+        await CompleteExitAfterTransitionAsync();
     }
 
-    public void OnMainWindowClosing()
+    public void PrepareForApplicationExit()
     {
+        if (_exitRequested) return;
+        _exitRequested = true;
         _stateMachine.TryBeginExit();
-        if (_badgeWindow is not { } badge) return;
-        badge.AllowClose();
-        badge.Close();
-        _badgeWindow = null;
+        _badgeWindow?.AllowClose();
+        RaiseStateChanged();
+    }
+
+    public void OnMainWindowClosing() => PrepareForApplicationExit();
+
+    private async Task CompleteExitAfterTransitionAsync()
+    {
+        await _transitionGate.WaitAsync();
+        try
+        {
+            if (_mainWindow is null) return;
+            CloseBadge(_badgeWindow);
+            _badgeWindow = null;
+            if (!_mainWindow.Dispatcher.HasShutdownStarted) _mainWindow.Close();
+        }
+        finally { _transitionGate.Release(); }
     }
 
     private FloatingBadgeWindow CreateBadgeWindow()
@@ -131,83 +161,128 @@ public sealed class FloatingBadgeManager(
         if (_badgeWindow is not null) return _badgeWindow;
         var badge = new FloatingBadgeWindow(localization);
         badge.RestoreRequested += async (_, _) => await RestoreSafelyAsync();
-        badge.ExitRequested += (_, _) => ExitApplication();
+        badge.ExitRequested += async (_, _) => await ExitSafelyAsync();
         badge.DragCompleted += async (_, _) =>
         {
-            ConstrainBadgeToCurrentMonitor(badge);
-            await SaveBadgePositionAsync(badge);
+            try
+            {
+                ConstrainBadgeToCurrentMonitor(badge);
+                await SaveBadgePositionAsync(badge);
+            }
+            catch (Exception exception) { Debug.WriteLine($"Could not save badge position: {exception.GetType().Name}"); }
         };
+        badge.Closed += (_, _) => OnBadgeClosed(badge);
+        _badgeWindow = badge;
         return badge;
     }
 
     private async Task RestoreSafelyAsync()
     {
         try { await RestoreAsync(); }
-        catch { /* Keep the badge alive so the application remains recoverable. */ }
+        catch (Exception exception) { Debug.WriteLine($"Could not restore the main window: {exception.GetType().Name}"); }
     }
 
-    private static void PositionBadgeBeforeShow(
-        FloatingBadgeWindow badge, Window mainWindow, LanguageSettings settings)
+    private async Task ExitSafelyAsync()
     {
-        var center = mainWindow.PointToScreen(
-            new Point(mainWindow.ActualWidth / 2, mainWindow.ActualHeight / 2));
-        var workArea = FloatingBadgePlacement.GetWorkAreaInDips(center);
-        var requested = settings.HasFloatingBadgePosition &&
-                        settings.FloatingBadgeLeft is { } left && double.IsFinite(left) &&
-                        settings.FloatingBadgeTop is { } top && double.IsFinite(top)
-            ? new Point(left, top)
-            : FloatingBadgePlacement.Initial(workArea, new Size(badge.Width, badge.Height));
-        var position = FloatingBadgePlacement.Constrain(
-            requested, workArea, new Size(badge.Width, badge.Height));
-        badge.Left = position.X;
-        badge.Top = position.Y;
+        try { await ExitApplicationAsync(); }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"Could not exit from the floating badge: {exception.GetType().Name}");
+            if (!_exitRequested) EnsureRecoverableWindow();
+        }
+    }
+
+    private void OnBadgeClosed(FloatingBadgeWindow badge)
+    {
+        if (!ReferenceEquals(_badgeWindow, badge)) return;
+        _badgeWindow = null;
+        if (!_exitRequested && _mainWindow is { IsVisible: false }) _ = RestoreSafelyAsync();
+    }
+
+    private static void PositionVisibleBadge(FloatingBadgeWindow badge, Window mainWindow, UserSettings settings)
+    {
+        var fallbackPixel = mainWindow.PointToScreen(new Point(mainWindow.ActualWidth / 2, mainWindow.ActualHeight / 2));
+        var monitor = FloatingBadgePlacement.ResolveMonitor(settings.FloatingBadgeMonitorDeviceName, fallbackPixel);
+        var badgePixels = FloatingBadgePlacement.GetBadgePixelSize(badge, monitor);
+        Point requested;
+        if (settings.FloatingBadgeHorizontalRatio is not null && settings.FloatingBadgeVerticalRatio is not null)
+        {
+            requested = FloatingBadgePlacement.PositionFromRatios(
+                monitor, badgePixels, settings.FloatingBadgeHorizontalRatio, settings.FloatingBadgeVerticalRatio);
+        }
+        else if (settings.HasFloatingBadgePosition && settings.FloatingBadgeLeft is { } left &&
+                 settings.FloatingBadgeTop is { } top && double.IsFinite(left) && double.IsFinite(top))
+        {
+            requested = new Point(left * monitor.ScaleX, top * monitor.ScaleY);
+        }
+        else
+        {
+            requested = FloatingBadgePlacement.PositionFromRatios(monitor, badgePixels, 1, 0);
+        }
+        FloatingBadgePlacement.SetBadgePixelPosition(badge, monitor, requested);
     }
 
     private static void ConstrainBadgeToCurrentMonitor(FloatingBadgeWindow badge)
     {
-        var center = badge.PointToScreen(new Point(badge.ActualWidth / 2, badge.ActualHeight / 2));
-        var workArea = FloatingBadgePlacement.GetWorkAreaInDips(center);
-        var position = FloatingBadgePlacement.Constrain(
-            new Point(badge.Left, badge.Top), workArea,
-            new Size(badge.ActualWidth, badge.ActualHeight));
-        badge.Left = position.X;
-        badge.Top = position.Y;
+        var topLeft = FloatingBadgePlacement.GetWindowPixelTopLeft(badge);
+        var monitor = FloatingBadgePlacement.GetMonitorAt(topLeft);
+        FloatingBadgePlacement.SetBadgePixelPosition(badge, monitor, topLeft);
     }
 
-    private async Task SaveBadgePositionAsync(FloatingBadgeWindow badge)
+    private async Task SaveBadgePositionAsync(FloatingBadgeWindow badge, CancellationToken cancellationToken = default)
     {
-        if (!double.IsFinite(badge.Left) || !double.IsFinite(badge.Top)) return;
-        try
+        var topLeft = FloatingBadgePlacement.GetWindowPixelTopLeft(badge);
+        var monitor = FloatingBadgePlacement.GetMonitorAt(topLeft);
+        var badgePixels = FloatingBadgePlacement.GetBadgePixelSize(badge, monitor);
+        var ratios = FloatingBadgePlacement.RatiosFromPosition(monitor, topLeft, badgePixels);
+        await settingsService.UpdateAsync(settings =>
         {
-            var settings = await settingsService.LoadAsync();
             settings.FloatingBadgeLeft = badge.Left;
             settings.FloatingBadgeTop = badge.Top;
-            settings.HasFloatingBadgePosition = true;
-            await settingsService.SaveAsync(settings);
-        }
-        catch
-        {
-        }
+            settings.HasFloatingBadgePosition = double.IsFinite(badge.Left) && double.IsFinite(badge.Top);
+            settings.FloatingBadgeMonitorDeviceName = monitor.DeviceName;
+            settings.FloatingBadgeHorizontalRatio = ratios.Horizontal;
+            settings.FloatingBadgeVerticalRatio = ratios.Vertical;
+        }, cancellationToken);
     }
 
     private static void RestoreMainWindow(MainWindow window, WindowSnapshot snapshot)
     {
         window.WindowState = WindowState.Normal;
-        var workArea = FloatingBadgePlacement.GetWorkAreaInDips(
-            window.PointToScreen(new Point(window.ActualWidth / 2, window.ActualHeight / 2)));
-        var position = FloatingBadgePlacement.Constrain(
-            new Point(snapshot.Bounds.Left, snapshot.Bounds.Top), workArea,
-            snapshot.Bounds.Size);
-        window.Left = position.X;
-        window.Top = position.Y;
-        window.Width = Math.Max(window.MinWidth, snapshot.Bounds.Width);
-        window.Height = Math.Max(window.MinHeight, snapshot.Bounds.Height);
+        var centerPixel = window.PointToScreen(new Point(window.ActualWidth / 2, window.ActualHeight / 2));
+        var monitor = FloatingBadgePlacement.GetMonitorAt(centerPixel);
+        var workArea = FloatingBadgePlacement.MonitorWorkAreaToWindowDips(monitor, window);
+        var bounds = FloatingBadgePlacement.ConstrainWindowBounds(
+            snapshot.Bounds, workArea, new Size(window.MinWidth, window.MinHeight));
+        window.Width = bounds.Width;
+        window.Height = bounds.Height;
+        window.Left = bounds.Left;
+        window.Top = bounds.Top;
         if (snapshot.State == WindowState.Maximized) window.WindowState = WindowState.Maximized;
+    }
+
+    private void EnsureRecoverableWindow()
+    {
+        if (_exitRequested || _mainWindow is null || _mainWindow.IsVisible || _badgeWindow?.IsVisible == true) return;
+        _mainWindow.ShowInTaskbar = _snapshot?.ShowInTaskbar ?? true;
+        _mainWindow.Show();
+        moduleWindowManager.RestoreAfterFloatingBadge();
+    }
+
+    private static void CloseBadge(FloatingBadgeWindow? badge)
+    {
+        if (badge is null) return;
+        badge.AllowClose();
+        badge.Close();
     }
 
     private void RaiseStateChanged() => StateChanged?.Invoke(this, EventArgs.Empty);
 
-    public void Dispose() => OnMainWindowClosing();
+    public void Dispose()
+    {
+        _disposed = true;
+        PrepareForApplicationExit();
+    }
 
     private sealed record WindowSnapshot(WindowState State, Rect Bounds, bool ShowInTaskbar)
     {
@@ -216,9 +291,7 @@ public sealed class FloatingBadgeManager(
             var bounds = window.WindowState == WindowState.Normal
                 ? new Rect(window.Left, window.Top, window.Width, window.Height)
                 : window.RestoreBounds;
-            var state = window.WindowState == WindowState.Maximized
-                ? WindowState.Maximized
-                : WindowState.Normal;
+            var state = window.WindowState == WindowState.Maximized ? WindowState.Maximized : WindowState.Normal;
             return new WindowSnapshot(state, bounds, window.ShowInTaskbar);
         }
     }

@@ -2,10 +2,12 @@ using System.IO;
 using System.IO.Compression;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Windows;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Abstractions.Modules;
 using QingToolbox.Core.Runtime;
+using QingToolbox.Core.Settings;
 using QingToolbox.ModuleLoader;
 using QingToolbox.Shell.Services;
 using QingToolbox.Shell.Windowing;
@@ -108,6 +110,7 @@ internal static class Program
         }
 
         Console.WriteLine("CreateView scenario unloaded successfully.");
+        VerifyUserSettingsAsync().GetAwaiter().GetResult();
         VerifyWindowChromeContracts();
         RunQmodImportScenario(repositoryRoot);
         Console.WriteLine("Smoke test passed.");
@@ -166,14 +169,97 @@ internal static class Program
         Require(FloatingBadgePlacement.Constrain(new Point(50, 50), tinyArea, badgeSize) == tinyArea.TopLeft,
             "A badge must remain visible in a smaller work area.");
 
+        var secondMonitor = new MonitorWorkArea(
+            @"\\.\DISPLAY2", new Rect(-2560, -200, 1280, 1024),
+            new Rect(-2560, -160, 1280, 984), 144, 144);
+        var savedPoint = FloatingBadgePlacement.PositionFromRatios(secondMonitor, new Size(102, 102), .25, .75);
+        var savedRatios = FloatingBadgePlacement.RatiosFromPosition(secondMonitor, savedPoint, new Size(102, 102));
+        Require(Math.Abs(savedRatios.Horizontal - .25) < .0001 && Math.Abs(savedRatios.Vertical - .75) < .0001,
+            "Monitor-local badge ratios must round-trip on a negative-coordinate mixed-DPI monitor.");
+        var resizedMonitor = secondMonitor with { PixelWorkArea = new Rect(-1920, -120, 960, 720) };
+        var resizedPoint = FloatingBadgePlacement.PositionFromRatios(resizedMonitor, new Size(102, 102), savedRatios.Horizontal, savedRatios.Vertical);
+        Require(resizedMonitor.PixelWorkArea.Contains(resizedPoint),
+            "A saved badge ratio must remain in the changed work area.");
+        var constrainedWindow = FloatingBadgePlacement.ConstrainWindowBounds(
+            new Rect(-4000, -2000, 2000, 1600), resizedMonitor.PixelWorkArea, new Size(500, 580));
+        Require(resizedMonitor.PixelWorkArea.Contains(constrainedWindow),
+            "An oversized main window must be constrained to the current work area.");
+
         var badgeState = new FloatingBadgeStateMachine();
         Require(badgeState.TryBeginEnter() && !badgeState.TryBeginEnter(),
             "Repeated floating badge entry must be rejected.");
-        badgeState.CompleteEnter();
+        Require(badgeState.TryCompleteEnter(), "Floating badge entry must complete.");
         Require(badgeState.TryBeginRestore() && !badgeState.TryBeginRestore(),
             "Repeated floating badge restore must be rejected.");
-        badgeState.CompleteRestore();
+        Require(badgeState.TryCompleteRestore(), "Floating badge restore must complete.");
+        var exitDuringEnter = new FloatingBadgeStateMachine();
+        Require(exitDuringEnter.TryBeginEnter() && exitDuringEnter.TryBeginExit(),
+            "Exit must be accepted while entering badge mode.");
+        Require(!exitDuringEnter.TryCompleteEnter() && exitDuringEnter.State == FloatingBadgeState.Exiting,
+            "Completing entry after exit must not leave Exiting.");
+        var exitDuringRestore = new FloatingBadgeStateMachine();
+        Require(exitDuringRestore.TryBeginEnter() && exitDuringRestore.TryCompleteEnter() &&
+                exitDuringRestore.TryBeginRestore() && exitDuringRestore.TryBeginExit(),
+            "Exit must be accepted while restoring.");
+        Require(!exitDuringRestore.TryCompleteRestore() && exitDuringRestore.State == FloatingBadgeState.Exiting,
+            "Completing restore after exit must not return to Normal.");
         Console.WriteLine("Custom window chrome contracts passed.");
+    }
+
+    private static async Task VerifyUserSettingsAsync()
+    {
+        Console.WriteLine("Verifying durable shared user settings...");
+        var root = Path.Combine(Path.GetTempPath(), $"QingToolbox-settings-smoke-{Guid.NewGuid():N}");
+        var path = Path.Combine(root, "settings.json");
+        Directory.CreateDirectory(root);
+        try
+        {
+            using var service = new UserSettingsService(path);
+            await File.WriteAllTextAsync(path, "{\"Language\":\"zh-CN\",\"UnknownFutureField\":true}");
+            var legacyLanguage = await service.ReadAsync();
+            Require(legacyLanguage.Language == "zh-CN", "Legacy language-only settings must load.");
+
+            await File.WriteAllTextAsync(path,
+                "{\"Language\":\"en-US\",\"FloatingBadgeLeft\":120,\"FloatingBadgeTop\":240,\"HasFloatingBadgePosition\":true}");
+            var legacyBadge = await service.ReadAsync();
+            Require(legacyBadge.HasFloatingBadgePosition && legacyBadge.FloatingBadgeLeft == 120,
+                "Legacy badge coordinates must load.");
+
+            var languageUpdate = service.UpdateAsync(settings => settings.Language = "zh-CN");
+            var badgeUpdate = service.UpdateAsync(settings =>
+            {
+                settings.FloatingBadgeMonitorDeviceName = @"\\.\DISPLAY2";
+                settings.FloatingBadgeHorizontalRatio = .2;
+                settings.FloatingBadgeVerticalRatio = .8;
+            });
+            await Task.WhenAll(languageUpdate, badgeUpdate);
+            for (var index = 0; index < 12; index++)
+                await service.UpdateAsync(settings => settings.SettingsSchemaVersion = index + 1);
+
+            var combined = await service.ReadAsync();
+            Require(combined.Language == "zh-CN" && combined.FloatingBadgeMonitorDeviceName == @"\\.\DISPLAY2" &&
+                    combined.FloatingBadgeHorizontalRatio == .2 && combined.FloatingBadgeVerticalRatio == .8,
+                "Concurrent partial settings updates must not overwrite each other.");
+            _ = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+            Require(!Directory.EnumerateFiles(root, "*.tmp.*").Any(),
+                "Atomic settings updates must clean temporary files.");
+
+            await File.WriteAllTextAsync(path, "{ not valid json");
+            var recovered = await service.ReadAsync();
+            Require(recovered.Language == "system", "Corrupt settings must return safe defaults.");
+            Require(Directory.EnumerateFiles(root, "settings.corrupt-*.json").Count() == 1,
+                "Corrupt settings must be preserved exactly once.");
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+        Console.WriteLine("Durable shared user settings passed.");
+    }
+
+    private static void Require(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException(message);
     }
 
     private static void RunQmodImportScenario(string repositoryRoot)

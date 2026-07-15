@@ -5,8 +5,15 @@
 - Added an opt-in 68 DIP desktop floating badge from the MainWindow title bar.
 - Preserved the existing Shell, module windows and module runtime state while switching modes.
 - Added constrained, persisted badge placement plus localized Open and Exit controls.
+- Serialized user settings updates and atomically persisted the complete settings document.
+- Prevented language and floating badge position updates from overwriting one another.
+- Preserved the selected monitor and monitor-local relative badge position across work-area changes.
+- Serialized window-mode transitions and made Enter/Restore races with Exit safe.
+- Removed the hidden MainWindow flash during Exit and prevented restoration during session shutdown.
+- Changed the floating badge title-bar action to icon-only in compact windows.
 - Hardened native maximize-button cancellation for capture loss, deactivation and non-client leave.
 - Floating badge mode never starts automatically and does not include system-tray integration.
+- Startup registration and automatic module loading remain future work.
 - Centralized title-bar metrics and cached DPI-aware maximize-button hit targets.
 - Added native icon single/right/double-click arbitration and capability-aware caption buttons.
 - Added minimal non-client maximize click handling so `HTMAXBUTTON` executes maximize or restore exactly once.

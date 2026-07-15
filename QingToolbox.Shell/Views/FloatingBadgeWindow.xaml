@@ -7,23 +7,26 @@
         ShowInTaskbar="False" Topmost="True"
         WindowStartupLocation="Manual"
         AllowsTransparency="True" Background="Transparent"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
         Title="{Binding AutomationName, RelativeSource={RelativeSource AncestorType=Window}}"
         KeyDown="OnKeyDown" Closing="OnClosing"
         AutomationProperties.Name="{Binding AutomationName, RelativeSource={RelativeSource AncestorType=Window}}">
-    <Border x:Name="BadgeSurface" Margin="5" Padding="12"
-            CornerRadius="20" Background="{StaticResource AccentBrush}"
+    <Border x:Name="BadgeSurface" Margin="4" Padding="8"
+            CornerRadius="20" Background="Transparent"
             Style="{StaticResource FloatingBadgeButtonStyle}"
             Focusable="True"
             AutomationProperties.Name="{Binding AutomationName, RelativeSource={RelativeSource AncestorType=Window}}"
             MouseLeftButtonDown="OnMouseLeftButtonDown"
             MouseMove="OnMouseMove"
             MouseLeftButtonUp="OnMouseLeftButtonUp"
+            LostMouseCapture="OnLostMouseCapture"
             MouseRightButtonUp="OnMouseRightButtonUp">
         <Border.Effect>
             <DropShadowEffect BlurRadius="16" ShadowDepth="4" Opacity="0.25" Color="#334155"/>
         </Border.Effect>
         <Border.ContextMenu>
             <ContextMenu Style="{StaticResource FloatingBadgeContextMenuStyle}"
+                         Closed="OnContextMenuClosed"
                          AutomationProperties.Name="{Binding ContextMenuText}">
                 <MenuItem Header="{Binding OpenText}" Click="OnOpenClick"/>
                 <Separator/>
