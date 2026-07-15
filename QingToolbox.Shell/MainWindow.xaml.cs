@@ -4,6 +4,8 @@ using System.Windows.Input;
 using System.Windows.Media.Animation;
 using QingToolbox.Shell.ViewModels;
 using QingToolbox.Shell.Services;
+using QingToolbox.Shell.Startup;
+using QingToolbox.Core.Settings;
 
 namespace QingToolbox.Shell;
 
@@ -11,15 +13,18 @@ public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
     private readonly FloatingBadgeManager _floatingBadgeManager;
+    private readonly ApplicationLaunchOptions _launchOptions;
 
     public MainWindow(
         MainWindowViewModel viewModel,
-        FloatingBadgeManager floatingBadgeManager)
+        FloatingBadgeManager floatingBadgeManager,
+        ApplicationLaunchOptions launchOptions)
     {
         InitializeComponent();
 
         _viewModel = viewModel;
         _floatingBadgeManager = floatingBadgeManager;
+        _launchOptions = launchOptions;
         _floatingBadgeManager.Attach(this);
         DataContext = viewModel;
         Loaded += OnLoaded;
@@ -49,7 +54,31 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
-        await _viewModel.RefreshModulesCommand.ExecuteAsync(null);
+        await _viewModel.InitializeAsync();
+        if (!_launchOptions.IsStartupLaunch) return;
+
+        switch (_viewModel.SelectedStartupPresentationMode)
+        {
+            case StartupPresentationMode.Minimized:
+                Opacity = 1;
+                ShowActivated = true;
+                WindowState = WindowState.Minimized;
+                break;
+            case StartupPresentationMode.FloatingBadge:
+                ShowActivated = true;
+                try
+                {
+                    await _floatingBadgeManager.EnterAsync();
+                    Opacity = 1;
+                }
+                catch { Opacity = 1; Show(); Activate(); }
+                break;
+            default:
+                Opacity = 1;
+                ShowActivated = true;
+                Activate();
+                break;
+        }
     }
 
     private void OnSidebarMouseEnter(object sender, MouseEventArgs e)

@@ -9,16 +9,29 @@ using QingToolbox.Shell.Services;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Core.Localization;
 using QingToolbox.Core.Settings;
+using QingToolbox.Shell.Startup;
 
 namespace QingToolbox.Shell;
 
 public partial class App : Application
 {
     private ServiceProvider? _serviceProvider;
+    private SingleInstanceCoordinator? _singleInstance;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        var launchOptions = ApplicationLaunchOptions.Parse(e.Args);
+        _singleInstance = SingleInstanceCoordinator.Create();
+        if (!_singleInstance.IsPrimary)
+        {
+            await _singleInstance.SendAsync(launchOptions.IsStartupLaunch
+                ? InstanceActivationMessage.StartupProbe
+                : InstanceActivationMessage.Activate);
+            Shutdown();
+            return;
+        }
 
         var services = new ServiceCollection();
         services.AddSingleton<ModuleRegistry>();
@@ -28,6 +41,10 @@ public partial class App : Application
         services.AddSingleton<InProcessModuleLoader>();
         services.AddSingleton<ModuleRuntimeManager>();
         services.AddSingleton<UserSettingsService>();
+        services.AddSingleton(launchOptions);
+        services.AddSingleton<IStartupRegistrationStore, WindowsRunRegistrationStore>();
+        services.AddSingleton<WindowsStartupRegistrationService>();
+        services.AddSingleton<ModuleStartupFingerprintService>();
         services.AddSingleton<LocalizationManager>();
         services.AddSingleton<ILocalizationService>(
             provider => provider.GetRequiredService<LocalizationManager>());
@@ -49,7 +66,22 @@ public partial class App : Application
             .GetRequiredService<LocalizationManager>()
             .InitializeAsync(localizationDirectory);
 
-        _serviceProvider.GetRequiredService<MainWindow>().Show();
+        var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
+        _singleInstance.MessageReceived += message => Dispatcher.InvokeAsync(async () =>
+        {
+            if (message == InstanceActivationMessage.Activate)
+            {
+                await _serviceProvider.GetRequiredService<FloatingBadgeManager>().RestoreAsync();
+                if (mainWindow.WindowState == WindowState.Minimized) mainWindow.WindowState = WindowState.Normal;
+                mainWindow.Show();
+                mainWindow.Activate();
+                mainWindow.Focus();
+            }
+        }).Task.Unwrap();
+        _singleInstance.StartServer();
+
+        if (launchOptions.IsStartupLaunch) { mainWindow.Opacity = 0; mainWindow.ShowActivated = false; }
+        mainWindow.Show();
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -70,6 +102,7 @@ public partial class App : Application
             try
             {
                 _serviceProvider?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                _singleInstance?.DisposeAsync().AsTask().GetAwaiter().GetResult();
             }
             catch (Exception exception)
             {

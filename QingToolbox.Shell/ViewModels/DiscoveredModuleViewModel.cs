@@ -15,6 +15,7 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         ILocalizationService localization,
         IReadOnlyList<string>? localizationDiagnostics = null)
     {
+        Module = module;
         _localization = localization;
         Id = module.Manifest.Id;
         Name = module.Manifest.Name;
@@ -80,6 +81,12 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     public string? IconPath { get; }
     public bool HasIcon => !string.IsNullOrWhiteSpace(IconPath);
     public IReadOnlyList<string> Errors { get; }
+    internal DiscoveredModule Module { get; }
+
+    [ObservableProperty] private bool _isStartupEnabled;
+    [ObservableProperty] private bool _isStartupAuthorizationBusy;
+    [ObservableProperty] private string _startupAuthorizationMessage = string.Empty;
+    public bool CanChangeStartupAuthorization => IsValid && !IsStartupAuthorizationBusy;
 
     [ObservableProperty]
     private string _runtimeState;
@@ -148,6 +155,9 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     {
         NotifyCommandStatesChanged();
     }
+
+    partial void OnIsStartupAuthorizationBusyChanged(bool value) =>
+        OnPropertyChanged(nameof(CanChangeStartupAuthorization));
 
     private void NotifyCommandStatesChanged()
     {

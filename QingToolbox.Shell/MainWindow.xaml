@@ -5,6 +5,7 @@
         xmlns:behaviors="clr-namespace:QingToolbox.Shell.Behaviors"
         xmlns:controls="clr-namespace:QingToolbox.Shell.Controls"
         xmlns:windowing="clr-namespace:QingToolbox.Shell.Windowing"
+        xmlns:settings="clr-namespace:QingToolbox.Core.Settings;assembly=QingToolbox.Core"
         Title="{Binding Title}"
         Width="1180"
         Height="760"
@@ -763,6 +764,17 @@
                                                    TextWrapping="Wrap"
                                                    Foreground="#475569"/>
 
+                                        <CheckBox Margin="0,0,0,12"
+                                                  Content="{Binding DataContext.Strings[startup.moduleLabel], RelativeSource={RelativeSource AncestorType=Window}}"
+                                                  ToolTip="{Binding DataContext.Strings[startup.moduleDescription], RelativeSource={RelativeSource AncestorType=Window}}"
+                                                  AutomationProperties.Name="{Binding DataContext.Strings[startup.moduleLabel], RelativeSource={RelativeSource AncestorType=Window}}"
+                                                  IsChecked="{Binding IsStartupEnabled, Mode=TwoWay}"
+                                                  IsEnabled="{Binding CanChangeStartupAuthorization}"
+                                                  Command="{Binding DataContext.ToggleModuleStartupCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                  CommandParameter="{Binding}"/>
+                                        <TextBlock Margin="0,0,0,8" Text="{Binding StartupAuthorizationMessage}"
+                                                   TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/>
+
                                         <Button HorizontalAlignment="Left"
                                                 Command="{Binding DataContext.SelectModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                 CommandParameter="{Binding}"
@@ -978,6 +990,16 @@
                             </Border>
                             <TextBlock Text="{Binding DisplayDescription}"
                                        TextWrapping="Wrap" Foreground="#475569"/>
+                            <CheckBox Margin="0,14,0,0"
+                                      Content="{Binding DataContext.Strings[startup.moduleLabel], RelativeSource={RelativeSource AncestorType=Window}}"
+                                      ToolTip="{Binding DataContext.Strings[startup.moduleDescription], RelativeSource={RelativeSource AncestorType=Window}}"
+                                      AutomationProperties.Name="{Binding DataContext.Strings[startup.moduleLabel], RelativeSource={RelativeSource AncestorType=Window}}"
+                                      IsChecked="{Binding IsStartupEnabled, Mode=TwoWay}"
+                                      IsEnabled="{Binding CanChangeStartupAuthorization}"
+                                      Command="{Binding DataContext.ToggleModuleStartupCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                      CommandParameter="{Binding}"/>
+                            <TextBlock Margin="0,5,0,0" Text="{Binding StartupAuthorizationMessage}"
+                                       TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/>
 
                             <Border Margin="0,22,0,18" Height="1" Background="#E2E8F0"/>
                             <TextBlock Text="{Binding DataContext.Strings[modules.details], RelativeSource={RelativeSource AncestorType=Window}}"
@@ -1319,6 +1341,34 @@
                                   DisplayMemberPath="DisplayText"
                                   SelectedValuePath="Code"
                                   SelectedValue="{Binding SelectedLanguageCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <Border Margin="0,24,0,0" Height="1" Background="#E2E8F0"/>
+                        <TextBlock Margin="0,20,0,0" Text="{Binding Strings[startup.settingsTitle]}"
+                                   FontSize="16" FontWeight="SemiBold"/>
+                        <CheckBox Margin="0,12,0,0"
+                                  Content="{Binding Strings[startup.launchAtLogin]}"
+                                  ToolTip="{Binding Strings[startup.launchAtLoginDescription]}"
+                                  IsChecked="{Binding LaunchAtLogin, Mode=TwoWay}"
+                                  Command="{Binding ApplyLaunchAtLoginCommand}">
+                            <CheckBox.Style>
+                                <Style TargetType="CheckBox">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsStartupSettingsBusy}" Value="True">
+                                            <Setter Property="IsEnabled" Value="False"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </CheckBox.Style>
+                        </CheckBox>
+                        <TextBlock Margin="0,16,0,7" Text="{Binding Strings[startup.presentation]}"/>
+                        <ComboBox Width="280" HorizontalAlignment="Left"
+                                  SelectedValuePath="Tag"
+                                  SelectedValue="{Binding SelectedStartupPresentationMode, Mode=TwoWay}">
+                            <ComboBoxItem Tag="{x:Static settings:StartupPresentationMode.FloatingBadge}" Content="{Binding DataContext.Strings[startup.presentationFloating], RelativeSource={RelativeSource AncestorType=Window}}"/>
+                            <ComboBoxItem Tag="{x:Static settings:StartupPresentationMode.Minimized}" Content="{Binding DataContext.Strings[startup.presentationMinimized], RelativeSource={RelativeSource AncestorType=Window}}"/>
+                            <ComboBoxItem Tag="{x:Static settings:StartupPresentationMode.MainWindow}" Content="{Binding DataContext.Strings[startup.presentationMain], RelativeSource={RelativeSource AncestorType=Window}}"/>
+                        </ComboBox>
+                        <TextBlock Margin="0,8,0,0" Text="{Binding StartupSettingsMessage}"
+                                   TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/>
                         <Border Margin="0,24,0,0" Height="1" Background="#E2E8F0"/>
                         <Border Margin="0,20,0,0" Padding="18"
                                 Style="{StaticResource LiquidGlassPanelStyle}">

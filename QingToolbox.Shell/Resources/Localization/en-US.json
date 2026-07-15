@@ -148,5 +148,20 @@
   "floatingBadge.exit": "Exit QingToolbox",
   "floatingBadge.contextMenu": "Floating badge menu",
   "floatingBadge.automationName": "QingToolbox floating badge",
-  "floatingBadge.restoreFailed": "QingToolbox could not switch window modes safely."
+  "floatingBadge.restoreFailed": "QingToolbox could not switch window modes safely.",
+  "startup.settingsTitle": "Startup",
+  "startup.launchAtLogin": "Start with Windows",
+  "startup.launchAtLoginDescription": "Start QingToolbox after signing in to Windows",
+  "startup.presentation": "Startup presentation",
+  "startup.presentationFloating": "Floating badge",
+  "startup.presentationMinimized": "Minimized",
+  "startup.presentationMain": "Main window",
+  "startup.moduleLabel": "Start with QingToolbox",
+  "startup.moduleDescription": "Automatically load and activate this module when QingToolbox starts.",
+  "startup.moduleChanged": "Module files changed. Confirm Start with QingToolbox again.",
+  "startup.moduleEnabled": "Startup authorization saved.",
+  "startup.moduleDisabled": "Startup authorization removed.",
+  "startup.registrationEnabled": "Windows login startup enabled.",
+  "startup.registrationDisabled": "Windows login startup disabled.",
+  "startup.restoreSummary": "Startup modules: {0} restored, {1} skipped, {2} failed."
 }

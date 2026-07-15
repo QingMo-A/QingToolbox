@@ -11,6 +11,7 @@ using QingToolbox.Core.Settings;
 using QingToolbox.ModuleLoader;
 using QingToolbox.Shell.Services;
 using QingToolbox.Shell.Windowing;
+using QingToolbox.Shell.Startup;
 
 namespace QingToolbox.DevTools.ModuleLoadSmokeTest;
 
@@ -111,6 +112,7 @@ internal static class Program
 
         Console.WriteLine("CreateView scenario unloaded successfully.");
         VerifyUserSettingsAsync().GetAwaiter().GetResult();
+        VerifyStartupInfrastructureAsync(helloModule).GetAwaiter().GetResult();
         VerifyWindowChromeContracts();
         RunQmodImportScenario(repositoryRoot);
         Console.WriteLine("Smoke test passed.");
@@ -257,9 +259,95 @@ internal static class Program
         Console.WriteLine("Durable shared user settings passed.");
     }
 
+    private static async Task VerifyStartupInfrastructureAsync(DiscoveredModule helloModule)
+    {
+        Console.WriteLine("Verifying startup safety infrastructure...");
+        Require(InstanceActivationProtocol.TryParse("Activate", out var activate) && activate == InstanceActivationMessage.Activate,
+            "Activate protocol message was rejected.");
+        Require(InstanceActivationProtocol.TryParse("StartupProbe", out var probe) && probe == InstanceActivationMessage.StartupProbe,
+            "StartupProbe protocol message was rejected.");
+        Require(!InstanceActivationProtocol.TryParse("run C:\\bad.exe", out _) &&
+                !InstanceActivationProtocol.TryParse(new string('A', 64), out _),
+            "Unsafe activation protocol input was accepted.");
+        Require(WindowsStartupRegistrationService.BuildCommand(@"C:\Program Files\Qing Toolbox\QingToolbox.Shell.exe") ==
+                "\"C:\\Program Files\\Qing Toolbox\\QingToolbox.Shell.exe\" --startup",
+            "Startup command quoting is incorrect.");
+
+        var root = Path.Combine(Path.GetTempPath(), $"QingToolbox-startup-smoke-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var settingsPath = Path.Combine(root, "settings.json");
+            using var settingsService = new UserSettingsService(settingsPath);
+            await settingsService.UpdateAsync(settings =>
+            {
+                settings.Language = "zh-CN";
+                settings.LaunchAtLogin = true;
+                settings.StartupModules =
+                [
+                    new StartupModuleAuthorization { ModuleId = " qing.hello ", ManifestSha256 = "aa", EntryAssemblySha256 = "bb" },
+                    new StartupModuleAuthorization { ModuleId = "qing.hello", ManifestSha256 = "cc", EntryAssemblySha256 = "dd" }
+                ];
+            });
+            var normalized = await settingsService.ReadAsync();
+            Require(normalized.Language == "zh-CN" && normalized.LaunchAtLogin && normalized.StartupModules.Count == 1 &&
+                    normalized.StartupModules[0].ManifestSha256 == "CC",
+                "Startup settings did not preserve fields or normalize duplicate module ids.");
+            var fakeStore = new FakeStartupRegistrationStore();
+            var registration = new WindowsStartupRegistrationService(settingsService, fakeStore);
+            await registration.SetEnabledAsync(true);
+            Require(fakeStore.Value?.EndsWith(" --startup", StringComparison.Ordinal) == true,
+                "Enabling startup did not write the owned registration value.");
+            await registration.SetEnabledAsync(false);
+            Require(fakeStore.Value is null, "Disabling startup did not remove the owned registration value.");
+
+            var moduleRoot = Path.Combine(root, "module");
+            Directory.CreateDirectory(moduleRoot);
+            var manifest = Path.Combine(moduleRoot, "module.json");
+            var entry = Path.Combine(moduleRoot, "entry.dll");
+            await File.WriteAllTextAsync(manifest, "manifest-a");
+            await File.WriteAllTextAsync(entry, "entry-a");
+            var module = new DiscoveredModule
+            {
+                ModuleDirectory = moduleRoot,
+                ManifestPath = manifest,
+                Manifest = new ModuleManifest { Id = "test.module", Name = "Test", Version = "1.0", Entry = "entry.dll" }
+            };
+            var fingerprint = new ModuleStartupFingerprintService();
+            var authorization = await fingerprint.CreateAuthorizationAsync(module);
+            Require(await fingerprint.MatchesAsync(module, authorization), "Stable module fingerprint did not match.");
+            File.SetLastWriteTimeUtc(entry, DateTime.UtcNow.AddMinutes(1));
+            Require(await fingerprint.MatchesAsync(module, authorization), "Timestamp-only change altered the fingerprint.");
+            await File.AppendAllTextAsync(manifest, "changed");
+            Require(!await fingerprint.MatchesAsync(module, authorization), "Manifest content change was not detected.");
+            var updatedAuthorization = await fingerprint.CreateAuthorizationAsync(module);
+            await File.AppendAllTextAsync(entry, "changed");
+            Require(!await fingerprint.MatchesAsync(module, updatedAuthorization), "Entry assembly content change was not detected.");
+            var traversal = new DiscoveredModule
+            {
+                ModuleDirectory = moduleRoot, ManifestPath = manifest,
+                Manifest = new ModuleManifest { Id = "bad", Name = "Bad", Version = "1", Entry = "../outside.dll" }
+            };
+            await File.WriteAllTextAsync(Path.Combine(root, "outside.dll"), "outside");
+            var rejected = false;
+            try { await fingerprint.CreateAuthorizationAsync(traversal); } catch (InvalidOperationException) { rejected = true; }
+            Require(rejected, "Entry path traversal was not rejected.");
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        Console.WriteLine("Startup safety infrastructure passed.");
+    }
+
     private static void Require(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private sealed class FakeStartupRegistrationStore : IStartupRegistrationStore
+    {
+        public string? Value { get; private set; }
+        public string? Read() => Value;
+        public void Write(string command) => Value = command;
+        public void Delete() => Value = null;
     }
 
     private static void RunQmodImportScenario(string repositoryRoot)

@@ -148,5 +148,20 @@
   "floatingBadge.exit": "退出 QingToolbox",
   "floatingBadge.contextMenu": "悬浮标菜单",
   "floatingBadge.automationName": "QingToolbox 桌面悬浮标",
-  "floatingBadge.restoreFailed": "QingToolbox 无法安全切换窗口模式。"
+  "floatingBadge.restoreFailed": "QingToolbox 无法安全切换窗口模式。",
+  "startup.settingsTitle": "启动",
+  "startup.launchAtLogin": "开机自启动",
+  "startup.launchAtLoginDescription": "登录 Windows 后自动启动 QingToolbox",
+  "startup.presentation": "启动后显示",
+  "startup.presentationFloating": "桌面悬浮标",
+  "startup.presentationMinimized": "最小化到任务栏",
+  "startup.presentationMain": "显示主窗口",
+  "startup.moduleLabel": "随工具箱启动",
+  "startup.moduleDescription": "启动 QingToolbox 后自动加载并运行此模块。",
+  "startup.moduleChanged": "模块文件已更新，请重新确认随工具箱启动。",
+  "startup.moduleEnabled": "已保存启动授权。",
+  "startup.moduleDisabled": "已移除启动授权。",
+  "startup.registrationEnabled": "已启用 Windows 登录自启动。",
+  "startup.registrationDisabled": "已关闭 Windows 登录自启动。",
+  "startup.restoreSummary": "启动模块：已恢复 {0} 个，跳过 {1} 个，失败 {2} 个。"
 }

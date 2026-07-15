@@ -77,3 +77,6 @@ Name: "{autodesktop}\QingToolbox"; Filename: "{app}\QingToolbox.Shell.exe"; Work
 
 [Run]
 Filename: "{app}\QingToolbox.Shell.exe"; WorkingDir: "{app}"; Description: "{cm:RunQingToolbox}"; Flags: nowait postinstall skipifsilent
+
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "QingToolbox"; Flags: uninsdeletevalue

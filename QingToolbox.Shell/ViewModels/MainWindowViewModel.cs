@@ -12,6 +12,7 @@ using QingToolbox.Abstractions.Localization;
 using QingToolbox.Core.Localization;
 using Microsoft.Win32;
 using System.Reflection;
+using QingToolbox.Core.Settings;
 
 namespace QingToolbox.Shell.ViewModels;
 
@@ -23,8 +24,12 @@ public sealed partial class MainWindowViewModel(
     ModulePackageImporter modulePackageImporter,
     ApplicationPaths applicationPaths,
     LocalizationManager localizationManager,
+    UserSettingsService settingsService,
+    WindowsStartupRegistrationService startupRegistrationService,
+    ModuleStartupFingerprintService fingerprintService,
     ILocalizationService localization) : ObservableObject
 {
+    private bool _initialized;
     [ObservableProperty]
     private string _statusMessage = localization.GetString("status.ready");
 
@@ -70,6 +75,13 @@ public sealed partial class MainWindowViewModel(
 
     [ObservableProperty]
     private DiscoveredModuleViewModel? _selectedModule;
+
+    [ObservableProperty] private bool _launchAtLogin;
+    [ObservableProperty] private bool _isStartupSettingsBusy;
+    [ObservableProperty] private StartupPresentationMode _selectedStartupPresentationMode = StartupPresentationMode.FloatingBadge;
+    [ObservableProperty] private string _startupSettingsMessage = string.Empty;
+
+    public IReadOnlyList<StartupPresentationMode> StartupPresentationModes { get; } = Enum.GetValues<StartupPresentationMode>();
 
     public string Title => localization.GetString("app.name");
     public string VersionDisplay =>
@@ -255,6 +267,8 @@ public sealed partial class MainWindowViewModel(
             runtimeManager.ReplaceDiscoveredModules(discoveredModules);
             registry.ReplaceAll(discoveredModules);
 
+            var settings = await settingsService.ReadAsync();
+            var authorizations = settings.StartupModules.ToDictionary(item => item.ModuleId, StringComparer.Ordinal);
             var refreshedModules = new List<DiscoveredModuleViewModel>();
             foreach (var module in discoveredModules)
             {
@@ -265,6 +279,12 @@ public sealed partial class MainWindowViewModel(
                         module.Manifest.Id));
                 moduleViewModel.UpdateRuntimeState(
                     runtimeManager.GetRecord(module.Manifest.Id));
+                if (authorizations.TryGetValue(module.Manifest.Id, out var authorization))
+                {
+                    moduleViewModel.IsStartupEnabled = await fingerprintService.MatchesAsync(module, authorization);
+                    if (!moduleViewModel.IsStartupEnabled)
+                        moduleViewModel.StartupAuthorizationMessage = localization.GetString("startup.moduleChanged");
+                }
                 refreshedModules.Add(moduleViewModel);
             }
 
@@ -489,6 +509,105 @@ public sealed partial class MainWindowViewModel(
         }
         OnPropertyChanged(nameof(HasModules));
         OnPropertyChanged(nameof(HasNoModules));
+    }
+
+    public async Task InitializeAsync()
+    {
+        if (_initialized) return;
+        _initialized = true;
+        var settings = await settingsService.ReadAsync();
+        try { await startupRegistrationService.ReconcileAsync(settings); }
+        catch (Exception exception) { StartupSettingsMessage = exception.Message; }
+        LaunchAtLogin = (await startupRegistrationService.GetStateAsync()).MatchesCurrentExecutable;
+        SelectedStartupPresentationMode = settings.StartupPresentationMode;
+        await RefreshModulesAsync();
+
+        var succeeded = 0; var skipped = 0; var failed = 0;
+        foreach (var authorization in settings.StartupModules)
+        {
+            var module = Modules.FirstOrDefault(item => item.Id == authorization.ModuleId);
+            if (module is null || !await fingerprintService.MatchesAsync(module.Module, authorization))
+            {
+                skipped++;
+                continue;
+            }
+            try
+            {
+                await runtimeManager.LoadAsync(module.Id, applicationPaths.ModuleDataDirectory);
+                if (authorization.ActivateOnStartup) await runtimeManager.ActivateAsync(module.Id);
+                module.UpdateRuntimeState(runtimeManager.GetRecord(module.Id));
+                succeeded++;
+            }
+            catch (Exception exception)
+            {
+                module.UpdateRuntimeState(runtimeManager.GetRecord(module.Id));
+                module.RuntimeError = exception.Message;
+                failed++;
+            }
+        }
+        UpdateStatistics();
+        if (settings.StartupModules.Count > 0)
+            StatusMessage = localization.GetString("startup.restoreSummary", succeeded, skipped, failed);
+    }
+
+    [RelayCommand]
+    private async Task ToggleModuleStartupAsync(DiscoveredModuleViewModel module)
+    {
+        if (!module.CanChangeStartupAuthorization) return;
+        var desired = module.IsStartupEnabled;
+        module.IsStartupAuthorizationBusy = true;
+        try
+        {
+            if (desired)
+            {
+                var authorization = await fingerprintService.CreateAuthorizationAsync(module.Module);
+                await settingsService.UpdateAsync(settings =>
+                {
+                    settings.StartupModules.RemoveAll(item => item.ModuleId == module.Id);
+                    settings.StartupModules.Add(authorization);
+                });
+                module.StartupAuthorizationMessage = localization.GetString("startup.moduleEnabled");
+            }
+            else
+            {
+                await settingsService.UpdateAsync(settings =>
+                    settings.StartupModules.RemoveAll(item => item.ModuleId == module.Id));
+                module.StartupAuthorizationMessage = localization.GetString("startup.moduleDisabled");
+            }
+        }
+        catch (Exception exception)
+        {
+            module.IsStartupEnabled = !desired;
+            module.StartupAuthorizationMessage = exception.Message;
+        }
+        finally { module.IsStartupAuthorizationBusy = false; }
+    }
+
+    [RelayCommand]
+    private async Task ApplyLaunchAtLoginAsync()
+    {
+        if (IsStartupSettingsBusy) return;
+        IsStartupSettingsBusy = true;
+        var desired = LaunchAtLogin;
+        try
+        {
+            await startupRegistrationService.SetEnabledAsync(desired);
+            var state = await startupRegistrationService.GetStateAsync();
+            LaunchAtLogin = state.MatchesCurrentExecutable;
+            StartupSettingsMessage = localization.GetString(LaunchAtLogin ? "startup.registrationEnabled" : "startup.registrationDisabled");
+        }
+        catch (Exception exception)
+        {
+            LaunchAtLogin = (await startupRegistrationService.GetStateAsync()).MatchesCurrentExecutable;
+            StartupSettingsMessage = exception.Message;
+        }
+        finally { IsStartupSettingsBusy = false; }
+    }
+
+    partial void OnSelectedStartupPresentationModeChanged(StartupPresentationMode value)
+    {
+        if (!_initialized) return;
+        _ = settingsService.UpdateAsync(settings => settings.StartupPresentationMode = value);
     }
 
     [RelayCommand]

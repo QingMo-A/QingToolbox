@@ -120,3 +120,6 @@ complete build, smoke test, isolated installer roundtrip, schema-v2 provenance
 manifest generation, and final source-state verification. See
 `docs/PREVIEW_RELEASE_PROCESS.md`. It deliberately does not create a Release or
 tag and does not upload or commit artifacts.
+# Startup registration
+
+The installer does not enable Windows login startup. When the user opts in from QingToolbox, the application owns only the `QingToolbox` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. Uninstall removes that obsolete value while preserving `settings.json`, user modules, and module data.

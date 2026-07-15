@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added per-user single-instance activation with a restricted named-pipe protocol.
+- Added opt-in HKCU Windows login startup with main-window, minimized and floating-badge presentation modes.
+- Added explicit per-module startup authorization bound to manifest and entry-assembly SHA256 fingerprints.
+- Startup initialization now loads and activates only matching authorizations without opening module views.
+- Changed module files require renewed startup confirmation; Refresh and Import remain discovery-only.
+- Uninstall removes QingToolbox's obsolete Run value while preserving settings and module data.
 - Added an opt-in 68 DIP desktop floating badge from the MainWindow title bar.
 - Preserved the existing Shell, module windows and module runtime state while switching modes.
 - Added constrained, persisted badge placement plus localized Open and Exit controls.
