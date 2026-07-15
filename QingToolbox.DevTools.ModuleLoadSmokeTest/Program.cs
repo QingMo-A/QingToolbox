@@ -8,6 +8,7 @@ using QingToolbox.Abstractions.Modules;
 using QingToolbox.Core.Runtime;
 using QingToolbox.ModuleLoader;
 using QingToolbox.Shell.Services;
+using QingToolbox.Shell.Windowing;
 
 namespace QingToolbox.DevTools.ModuleLoadSmokeTest;
 
@@ -107,9 +108,44 @@ internal static class Program
         }
 
         Console.WriteLine("CreateView scenario unloaded successfully.");
+        VerifyWindowChromeContracts();
         RunQmodImportScenario(repositoryRoot);
         Console.WriteLine("Smoke test passed.");
         return 0;
+    }
+
+    private static void VerifyWindowChromeContracts()
+    {
+        Console.WriteLine("Verifying custom window chrome contracts...");
+        static IntPtr Pack(short x, short y) =>
+            new(unchecked((int)((uint)(ushort)x | ((uint)(ushort)y << 16))));
+        static void Require(bool condition, string message)
+        {
+            if (!condition) throw new InvalidOperationException(message);
+        }
+
+        Require(WindowHitTestService.DecodeScreenPoint(Pack(120, 250)) == new Point(120, 250),
+            "Positive screen coordinates were decoded incorrectly.");
+        Require(WindowHitTestService.DecodeScreenPoint(Pack(-120, -30)) == new Point(-120, -30),
+            "Negative screen coordinates were decoded incorrectly.");
+        Require(WindowHitTestService.Contains(new Point(10, 10), 46, 48),
+            "An interior caption point was not hit.");
+        Require(WindowHitTestService.Contains(new Point(46, 48), 46, 48),
+            "A caption boundary point was not hit.");
+        Require(!WindowHitTestService.Contains(new Point(47, 10), 46, 48),
+            "An exterior caption point was hit.");
+
+        Require(WindowCaptionCapabilities.FromResizeMode(ResizeMode.CanResize) == new WindowCaptionCapabilities(true, true),
+            "CanResize capabilities are incorrect.");
+        Require(WindowCaptionCapabilities.FromResizeMode(ResizeMode.CanMinimize) == new WindowCaptionCapabilities(true, false),
+            "CanMinimize capabilities are incorrect.");
+        Require(WindowCaptionCapabilities.FromResizeMode(ResizeMode.NoResize) == new WindowCaptionCapabilities(false, false),
+            "NoResize capabilities are incorrect.");
+        Require(WindowCaptionCapabilities.UsesRestoreAction(WindowState.Maximized),
+            "Maximized windows must expose Restore.");
+        Require(!WindowCaptionCapabilities.UsesRestoreAction(WindowState.Normal),
+            "Normal windows must expose Maximize.");
+        Console.WriteLine("Custom window chrome contracts passed.");
     }
 
     private static void RunQmodImportScenario(string repositoryRoot)

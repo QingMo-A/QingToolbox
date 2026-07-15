@@ -62,10 +62,11 @@ public sealed class ModuleWindowManager(ILocalizationService localization)
         }
     }
 
-    public void RefreshOpenWindowLocalization()
+    public void RefreshOpenWindowLocalization(Func<string, string?> titleResolver)
     {
-        foreach (var window in _windows.Values)
+        foreach (var (moduleId, window) in _windows)
         {
+            window.UpdateLocalizedTitle(titleResolver(moduleId));
             window.RefreshLocalization();
         }
     }

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Centralized title-bar metrics and cached DPI-aware maximize-button hit targets.
+- Added native icon single/right/double-click arbitration and capability-aware caption buttons.
+- Added minimal non-client maximize click handling so `HTMAXBUTTON` executes maximize or restore exactly once.
+- Open module windows now refresh localized titles without recreating views or loading assemblies.
+- Empty title-bar action slots collapse, and the Shell provides a verified 500 DIP compact layout foundation.
+- Desktop floating-badge mode remains future work.
 - Replaced native title-bar visuals in the Shell and module host with one reusable, extensible WindowChrome title bar.
 - Preserved standard window commands, resize, drag and system-menu behavior.
 - Added DPI-aware `HTMAXBUTTON` handling for Windows 11 Snap Layout and an empty future action slot.

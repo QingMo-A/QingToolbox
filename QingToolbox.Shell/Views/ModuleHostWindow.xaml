@@ -8,6 +8,7 @@
         Height="650"
         MinWidth="520"
         MinHeight="380"
+        Icon="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.ico"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
@@ -19,7 +20,7 @@
         Background="{StaticResource ShellBackgroundGradientBrush}">
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="48"/>
+            <RowDefinition Height="{x:Static windowing:WindowChromeMetrics.TitleBarGridLength}"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
         <controls:WindowTitleBar x:Name="TitleBar" Title="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=Title}"
@@ -28,7 +29,8 @@
                                  MaximizeText="{Binding MaximizeText, RelativeSource={RelativeSource AncestorType=Window}}"
                                  RestoreText="{Binding RestoreText, RelativeSource={RelativeSource AncestorType=Window}}"
                                  CloseText="{Binding CloseText, RelativeSource={RelativeSource AncestorType=Window}}"
-                                 SystemMenuText="{Binding SystemMenuText, RelativeSource={RelativeSource AncestorType=Window}}">
+                                 SystemMenuText="{Binding SystemMenuText, RelativeSource={RelativeSource AncestorType=Window}}"
+                                 AutomationName="{Binding TitleBarAutomationName, RelativeSource={RelativeSource AncestorType=Window}}">
             <controls:WindowTitleBar.IconSource>
                 <svgc:SvgViewbox Width="24" Height="24"
                     Source="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.Mark.svg"/>

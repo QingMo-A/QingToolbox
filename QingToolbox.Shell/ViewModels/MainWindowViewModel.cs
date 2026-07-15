@@ -38,6 +38,9 @@ public sealed partial class MainWindowViewModel(
     private bool _isSidebarPinned;
 
     [ObservableProperty]
+    private bool _isCompactWindow;
+
+    [ObservableProperty]
     private string _selectedNavigationKey = "Home";
 
     [ObservableProperty]
@@ -110,6 +113,7 @@ public sealed partial class MainWindowViewModel(
     public ObservableCollection<DiscoveredModuleViewModel> RunningModules { get; } = [];
     public bool HasModules => Modules.Count > 0;
     public bool HasNoModules => !HasModules;
+    public bool HasSelectedModule => SelectedModule is not null;
 
     [RelayCommand]
     private void ToggleSidebarPin()
@@ -152,6 +156,12 @@ public sealed partial class MainWindowViewModel(
         SelectedModule = module;
     }
 
+    [RelayCommand]
+    private void CloseModuleDetails() => SelectedModule = null;
+
+    partial void OnSelectedModuleChanged(DiscoveredModuleViewModel? value) =>
+        OnPropertyChanged(nameof(HasSelectedModule));
+
     partial void OnSelectedNavigationKeyChanged(string value)
     {
         OnPropertyChanged(nameof(IsHomeSelected));
@@ -175,7 +185,8 @@ public sealed partial class MainWindowViewModel(
         {
             module.RefreshLocalization();
         }
-        moduleWindowManager.RefreshOpenWindowLocalization();
+        moduleWindowManager.RefreshOpenWindowLocalization(moduleId =>
+            Modules.FirstOrDefault(module => module.Id == moduleId)?.DisplayName);
 
         OnPropertyChanged(nameof(PageTitle));
         OnPropertyChanged(nameof(PageSubtitle));

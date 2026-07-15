@@ -29,6 +29,7 @@ public partial class ModuleHostWindow : Window
     public string RestoreText => _localization.GetString("window.restore");
     public string CloseText => _localization.GetString("window.close");
     public string SystemMenuText => _localization.GetString("window.systemMenu");
+    public string TitleBarAutomationName => _localization.GetString("window.titleBar");
 
     public void RefreshLocalization()
     {
@@ -51,6 +52,12 @@ public partial class ModuleHostWindow : Window
         TitleBar.RestoreText = RestoreText;
         TitleBar.CloseText = CloseText;
         TitleBar.SystemMenuText = SystemMenuText;
+        TitleBar.AutomationName = TitleBarAutomationName;
+    }
+
+    public void UpdateLocalizedTitle(string? title)
+    {
+        if (!string.IsNullOrWhiteSpace(title)) Title = title;
     }
 
     private void OnClosed(object? sender, EventArgs e)

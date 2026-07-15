@@ -8,7 +8,7 @@
         Title="{Binding Title}"
         Width="1180"
         Height="760"
-        MinWidth="900"
+        MinWidth="500"
         MinHeight="580"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
@@ -23,7 +23,7 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="48"/>
+            <RowDefinition Height="{x:Static windowing:WindowChromeMetrics.TitleBarGridLength}"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
         <controls:WindowTitleBar Grid.Row="0"
@@ -32,7 +32,8 @@
                                  MaximizeText="{Binding Strings[window.maximize]}"
                                  RestoreText="{Binding Strings[window.restore]}"
                                  CloseText="{Binding Strings[window.close]}"
-                                 SystemMenuText="{Binding Strings[window.systemMenu]}">
+                                 SystemMenuText="{Binding Strings[window.systemMenu]}"
+                                 AutomationName="{Binding Strings[window.titleBar]}">
             <controls:WindowTitleBar.IconSource>
                 <svgc:SvgViewbox Width="24" Height="24"
                     Source="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.Mark.svg"/>
@@ -388,7 +389,17 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Column="1" Margin="34,28,34,30">
+        <Grid Grid.Column="1">
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Setter Property="Margin" Value="34,28,34,30"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsCompactWindow}" Value="True">
+                            <Setter Property="Margin" Value="14,16,14,18"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -397,6 +408,10 @@
             </Grid.RowDefinitions>
 
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
@@ -415,6 +430,18 @@
                             VerticalAlignment="Center"
                             Orientation="Horizontal"
                             Visibility="{Binding IsModulesSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCompactWindow}" Value="True">
+                                    <Setter Property="Grid.Row" Value="1"/>
+                                    <Setter Property="Grid.Column" Value="0"/>
+                                    <Setter Property="Margin" Value="0,14,0,0"/>
+                                    <Setter Property="HorizontalAlignment" Value="Left"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
                     <Button Margin="0,0,10,0"
                             AutomationProperties.Name="Import Module"
                             Command="{Binding ImportModuleCommand}"
@@ -454,6 +481,9 @@
                                 </MultiDataTrigger.Conditions>
                                 <Setter Property="Visibility" Value="Visible"/>
                             </MultiDataTrigger>
+                            <DataTrigger Binding="{Binding IsCompactWindow}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
                         </Style.Triggers>
                     </Style>
                 </Grid.Style>
@@ -518,6 +548,9 @@
             <Grid Grid.Row="3"
                   Style="{StaticResource PageTransitionStyle}"
                   Visibility="{Binding IsModulesSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="3*"/>
                     <ColumnDefinition>
@@ -526,6 +559,9 @@
                                 <Setter Property="Width" Value="2*"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding SelectedModule}" Value="{x:Null}">
+                                        <Setter Property="Width" Value="0"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsCompactWindow}" Value="True">
                                         <Setter Property="Width" Value="0"/>
                                     </DataTrigger>
                                 </Style.Triggers>
@@ -616,6 +652,26 @@
                 <ScrollViewer Grid.Column="0"
                               behaviors:SmoothScrollBehavior.IsEnabled="True"
                               VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer.Style>
+                        <Style TargetType="ScrollViewer">
+                            <Style.Triggers>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding IsCompactWindow}" Value="True"/>
+                                        <Condition Binding="{Binding SelectedModule}" Value="{x:Null}"/>
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </MultiDataTrigger>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding IsCompactWindow}" Value="True"/>
+                                        <Condition Binding="{Binding HasSelectedModule}" Value="True"/>
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </MultiDataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ScrollViewer.Style>
                     <ItemsControl ItemsSource="{Binding Modules}">
                         <ItemsControl.Style>
                             <Style TargetType="ItemsControl">
@@ -835,10 +891,41 @@
                     </ItemsControl>
                 </ScrollViewer>
 
-                <Border Grid.Column="1" Style="{StaticResource WorkspacePanelStyle}">
+                <Border Grid.Column="1">
+                    <Border.Style>
+                        <Style TargetType="Border" BasedOn="{StaticResource WorkspacePanelStyle}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCompactWindow}" Value="True">
+                                    <Setter Property="Grid.Column" Value="0"/>
+                                </DataTrigger>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding IsCompactWindow}" Value="True"/>
+                                        <Condition Binding="{Binding HasSelectedModule}" Value="False"/>
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </MultiDataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <ScrollViewer behaviors:SmoothScrollBehavior.IsEnabled="True"
                                   VerticalScrollBarVisibility="Auto">
                         <StackPanel Margin="24" DataContext="{Binding SelectedModule}">
+                            <Button Margin="0,0,0,14" HorizontalAlignment="Left"
+                                    Command="{Binding DataContext.CloseModuleDetailsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    >
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource SecondaryActionButtonStyle}">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding DataContext.IsCompactWindow, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                                <TextBlock Text="&#xE72B;" FontFamily="Segoe Fluent Icons"/>
+                            </Button>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
@@ -971,7 +1058,18 @@
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="180"/>
+                                    <ColumnDefinition>
+                                        <ColumnDefinition.Style>
+                                            <Style TargetType="ColumnDefinition">
+                                                <Setter Property="Width" Value="180"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsCompactWindow}" Value="True">
+                                                        <Setter Property="Width" Value="0"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </ColumnDefinition.Style>
+                                    </ColumnDefinition>
                                 </Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="{Binding Strings[home.systemStatus]}"

@@ -50,20 +50,62 @@ public static class WindowChromeBehavior
     {
         private readonly Window _window;
         private HwndSource? _source;
+        private WeakReference<WindowTitleBar>? _titleBarReference;
+        private WeakReference<FrameworkElement>? _maximizeButtonReference;
+        private bool _maximizeButtonPressed;
+        private bool _trackingNonClientMouse;
 
         internal Controller(Window window)
         {
             _window = window;
             WindowChrome.SetWindowChrome(window, new WindowChrome
             {
-                CaptionHeight = 48,
+                CaptionHeight = WindowChromeMetrics.TitleBarHeight,
                 ResizeBorderThickness = SystemParameters.WindowResizeBorderThickness,
                 GlassFrameThickness = new Thickness(0),
                 CornerRadius = new CornerRadius(0),
                 UseAeroCaptionButtons = false
             });
             window.SourceInitialized += OnSourceInitialized;
+            window.Loaded += OnWindowLoaded;
+            window.ContentRendered += OnContentRendered;
             window.Closed += OnClosed;
+        }
+
+        private void OnWindowLoaded(object sender, RoutedEventArgs e) => CacheTitleBar();
+
+        private void OnContentRendered(object? sender, EventArgs e) => CacheTitleBar();
+
+        private void CacheTitleBar()
+        {
+            if (_titleBarReference?.TryGetTarget(out var existing) == true && existing.IsLoaded)
+            {
+                return;
+            }
+
+            var titleBar = FindVisualChild<WindowTitleBar>(_window);
+            if (titleBar is null)
+            {
+                ClearTitleBarReferences();
+                return;
+            }
+
+            titleBar.Unloaded -= OnTitleBarUnloaded;
+            titleBar.Unloaded += OnTitleBarUnloaded;
+            _titleBarReference = new WeakReference<WindowTitleBar>(titleBar);
+            _maximizeButtonReference = new WeakReference<FrameworkElement>(titleBar.MaximizeButtonElement);
+        }
+
+        private void OnTitleBarUnloaded(object sender, RoutedEventArgs e) => ClearTitleBarReferences();
+
+        private void ClearTitleBarReferences()
+        {
+            if (_titleBarReference?.TryGetTarget(out var titleBar) == true)
+            {
+                titleBar.Unloaded -= OnTitleBarUnloaded;
+            }
+            _titleBarReference = null;
+            _maximizeButtonReference = null;
         }
 
         private void OnSourceInitialized(object? sender, EventArgs e)
@@ -81,30 +123,86 @@ public static class WindowChromeBehavior
             IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam,
             ref bool handled)
         {
-            if (message != NativeWindowMessages.WindowNonClientHitTest)
+            if (message == NativeWindowMessages.WindowNonClientMouseLeave)
+            {
+                SetNativeMaximizeState(false, false);
+                _trackingNonClientMouse = false;
+                return IntPtr.Zero;
+            }
+
+            if (message == NativeWindowMessages.WindowNonClientMouseMove &&
+                wParam.ToInt64() == NativeWindowMessages.HitTestMaximizeButton)
+            {
+                SetNativeMaximizeState(true, _maximizeButtonPressed);
+                if (!_trackingNonClientMouse)
+                {
+                    NativeWindowMessages.TrackNonClientMouseLeave(hwnd);
+                    _trackingNonClientMouse = true;
+                }
+                return IntPtr.Zero;
+            }
+
+            if (message == NativeWindowMessages.WindowNonClientLeftButtonDown &&
+                wParam.ToInt64() == NativeWindowMessages.HitTestMaximizeButton)
+            {
+                _maximizeButtonPressed = true;
+                SetNativeMaximizeState(true, true);
+                handled = true;
+                return IntPtr.Zero;
+            }
+
+            if (message == NativeWindowMessages.WindowNonClientLeftButtonUp && _maximizeButtonPressed)
+            {
+                var invoke = wParam.ToInt64() == NativeWindowMessages.HitTestMaximizeButton;
+                _maximizeButtonPressed = false;
+                SetNativeMaximizeState(invoke, false);
+                handled = true;
+                if (invoke && _titleBarReference?.TryGetTarget(out var pressedTitleBar) == true)
+                {
+                    // HTMAXBUTTON promotes the region to non-client input, so WPF Click
+                    // is not reliable. Consume the matching release and execute exactly once.
+                    pressedTitleBar.ExecuteMaximizeRestore();
+                }
+                return IntPtr.Zero;
+            }
+
+            if (message != NativeWindowMessages.WindowNonClientHitTest) return IntPtr.Zero;
+
+            if (_titleBarReference?.TryGetTarget(out var titleBar) != true || titleBar is null ||
+                _maximizeButtonReference?.TryGetTarget(out var maximizeButton) != true || maximizeButton is null ||
+                !titleBar.EffectiveShowMaximizeButton ||
+                maximizeButton is not { IsVisible: true, IsEnabled: true } ||
+                maximizeButton.ActualWidth <= 0 || maximizeButton.ActualHeight <= 0)
             {
                 return IntPtr.Zero;
             }
 
-            var titleBar = FindVisualChild<WindowTitleBar>(_window);
-            var maximizeButton = titleBar?.MaximizeButtonElement;
-            if (maximizeButton is not { IsVisible: true, IsEnabled: true })
+            Point point;
+            try
             {
+                point = maximizeButton.PointFromScreen(
+                    WindowHitTestService.DecodeScreenPoint(lParam));
+            }
+            catch (InvalidOperationException)
+            {
+                // The visual can briefly lose its PresentationSource during teardown.
                 return IntPtr.Zero;
             }
 
-            var x = unchecked((short)(long)lParam);
-            var y = unchecked((short)((long)lParam >> 16));
-            var point = maximizeButton.PointFromScreen(new Point(x, y));
-            if (point.X >= 0 && point.Y >= 0 &&
-                point.X <= maximizeButton.ActualWidth &&
-                point.Y <= maximizeButton.ActualHeight)
+            if (WindowHitTestService.Contains(
+                point, maximizeButton.ActualWidth, maximizeButton.ActualHeight))
             {
                 handled = true;
                 return new IntPtr(NativeWindowMessages.HitTestMaximizeButton);
             }
 
             return IntPtr.Zero;
+        }
+
+        private void SetNativeMaximizeState(bool hovered, bool pressed)
+        {
+            if (_titleBarReference?.TryGetTarget(out var titleBar) == true)
+                titleBar.SetNativeMaximizeButtonState(hovered, pressed);
         }
 
         private static T? FindVisualChild<T>(DependencyObject root)
@@ -133,7 +231,10 @@ public static class WindowChromeBehavior
         public void Dispose()
         {
             _window.SourceInitialized -= OnSourceInitialized;
+            _window.Loaded -= OnWindowLoaded;
+            _window.ContentRendered -= OnContentRendered;
             _window.Closed -= OnClosed;
+            ClearTitleBarReferences();
             if (_source is not null)
             {
                 _source.RemoveHook(WindowProcedure);

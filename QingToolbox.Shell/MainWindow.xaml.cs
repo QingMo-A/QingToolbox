@@ -17,7 +17,18 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         DataContext = viewModel;
         Loaded += OnLoaded;
+        SizeChanged += OnSizeChanged;
         Closing += OnClosing;
+    }
+
+    private void OnSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        _viewModel.IsCompactWindow = e.NewSize.Width < 720;
+        if (_viewModel.IsCompactWindow)
+        {
+            _viewModel.IsSidebarExpanded = false;
+            AnimateSidebarWidth(76, TimeSpan.FromMilliseconds(180));
+        }
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -28,6 +39,7 @@ public partial class MainWindow : Window
 
     private void OnSidebarMouseEnter(object sender, MouseEventArgs e)
     {
+        if (_viewModel.IsCompactWindow) return;
         _viewModel.IsSidebarExpanded = true;
         AnimateSidebarWidth(236, TimeSpan.FromMilliseconds(380));
     }
@@ -45,6 +57,7 @@ public partial class MainWindow : Window
 
     private void OnPinSidebarClick(object sender, RoutedEventArgs e)
     {
+        if (_viewModel.IsCompactWindow) return;
         _viewModel.ToggleSidebarPinCommand.Execute(null);
         _viewModel.IsSidebarExpanded = _viewModel.IsSidebarPinned || Sidebar.IsMouseOver;
         AnimateSidebarWidth(
