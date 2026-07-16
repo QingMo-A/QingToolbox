@@ -37,31 +37,28 @@
 - Removed the hidden MainWindow flash during Exit and prevented restoration during session shutdown.
 - Changed the floating badge title-bar action to icon-only in compact windows.
 - Hardened native maximize-button cancellation for capture loss, deactivation and non-client leave.
-- Floating badge mode never starts automatically and does not include system-tray integration.
-- PowerGuard remains separate future work on the modules branch.
+- PowerGuard remains a separately distributed `.qmod` on the modules branch and is not bundled with the host release.
 - Centralized title-bar metrics and cached DPI-aware maximize-button hit targets.
 - Added native icon single/right/double-click arbitration and capability-aware caption buttons.
 - Added minimal non-client maximize click handling so `HTMAXBUTTON` executes maximize or restore exactly once.
 - Open module windows now refresh localized titles without recreating views or loading assemblies.
 - Empty title-bar action slots collapse, and the Shell provides a verified 500 DIP compact layout foundation.
-- Desktop floating-badge mode remains future work.
 - Replaced native title-bar visuals in the Shell and module host with one reusable, extensible WindowChrome title bar.
 - Preserved standard window commands, resize, drag and system-menu behavior.
 - Added DPI-aware `HTMAXBUTTON` handling for Windows 11 Snap Layout and an empty future action slot.
-- Desktop floating-window behavior is not implemented in this change.
 
 ## 0.1.0-alpha
 
 ### Added
 
-- Modular Shell with manual module discovery, loading, activation, deactivation and unload.
+- Modular Shell with discovery-only Refresh/Import, manual lifecycle controls, and explicit fingerprint-bound startup authorization.
 - In-process module loader with collectible `AssemblyLoadContext`.
 - Module manifest discovery without loading DLLs.
 - Module windows.
 - Shell localization and module localization.
 - Module templates with en-US and zh-CN resources.
 - `.qmod` package import preview.
-- TextTools, ScreenPin and WindowTopmost preview modules.
+- Separately distributed TextTools, ScreenPin and WindowTopmost preview modules; none are bundled with the host release.
 - Per-user Inno Setup installer and uninstaller.
 - Start Menu shortcuts and an optional desktop shortcut.
 - Uninstall behavior that preserves user modules, module data and settings.

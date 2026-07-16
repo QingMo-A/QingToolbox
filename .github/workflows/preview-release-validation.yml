@@ -24,6 +24,14 @@ jobs:
     timeout-minutes: 45
 
     steps:
+      - name: Describe Preview validation scope
+        shell: pwsh
+        run: |
+          Write-Host "QingToolbox Preview validation"
+          Write-Host "Host-only release"
+          Write-Host "No bundled modules"
+          Write-Host "No GitHub Release created"
+
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 

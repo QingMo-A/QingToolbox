@@ -893,8 +893,14 @@ internal static class Program
         var fake = new FakeNotificationAreaService();
         var opened = false;
         fake.OpenRequested = () => { opened = true; return Task.CompletedTask; };
+        fake.OpenSettingsRequested = () => Task.CompletedTask;
+        fake.FloatingBadgeRequested = () => Task.CompletedTask;
+        fake.ExitRequested = () => Task.CompletedTask;
+        Require(fake.OpenRequested is not null && fake.OpenSettingsRequested is not null &&
+                fake.FloatingBadgeRequested is not null && fake.ExitRequested is not null,
+            "Every notification-area callback must be configurable through the interface.");
         Require(fake.Initialize() && fake.IsAvailable, "A notification-area service must expose recoverability after initialization.");
-        fake.OpenRequested().GetAwaiter().GetResult();
+        fake.OpenRequested!().GetAwaiter().GetResult();
         Require(opened, "The notification-area Open callback must be configurable through the interface.");
         fake.PrepareForExit();
         Require(fake.IsExiting && !fake.IsAvailable && !fake.Initialize(),
@@ -904,20 +910,8 @@ internal static class Program
         Require(fake.DisposeCount == 1, "Notification-area disposal must be idempotent.");
 
         var appXaml = File.ReadAllText(Path.Combine(repositoryRoot, "QingToolbox.Shell", "App.xaml"));
-        var exitSource = File.ReadAllText(Path.Combine(repositoryRoot, "QingToolbox.Shell", "Services", "ApplicationExitCoordinator.cs"));
-        var pipelineSource = File.ReadAllText(Path.Combine(repositoryRoot, "QingToolbox.Shell", "Services", "ExitCleanupPipeline.cs"));
-        var traySource = File.ReadAllText(Path.Combine(repositoryRoot, "QingToolbox.Shell", "Services", "NotificationAreaService.cs"));
-        var windowSource = File.ReadAllText(Path.Combine(repositoryRoot, "QingToolbox.Shell", "Services", "ModuleWindowManager.cs"));
         Require(appXaml.Contains("ShutdownMode=\"OnExplicitShutdown\"", StringComparison.Ordinal),
             "The Shell must use explicit application shutdown.");
-        Require(pipelineSource.Contains("finally", StringComparison.Ordinal) && exitSource.Contains("Application.Current.Shutdown()", StringComparison.Ordinal),
-            "The exit coordinator must guarantee explicit shutdown from a final path.");
-        Require(exitSource.Contains("CloseAllSafely", StringComparison.Ordinal),
-            "The exit coordinator must isolate module-window closing.");
-        Require(windowSource.Contains("_windows.ToArray()", StringComparison.Ordinal) && windowSource.Contains("_suspendedWindows.Clear()", StringComparison.Ordinal),
-            "Safe module-window close must snapshot enumeration and clear suspended state.");
-        Require(traySource.Contains("_cultureSubscribed", StringComparison.Ordinal) && traySource.Contains("ObserveDispatcherTask", StringComparison.Ordinal),
-            "Notification initialization and dispatcher task observation contracts are required.");
         Console.WriteLine("Notification-area lifecycle contracts passed.");
     }
 

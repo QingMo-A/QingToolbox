@@ -42,6 +42,7 @@ manifest。manifest 记录 `QingMo-A/QingToolbox`、完整 source commit、
 - [ ] 从通知区直接切换悬浮标时不闪现 Shell，并保留挂起的模块窗口。
 - [ ] manifest 的 source commit 与准备发布的 commit 完全一致。
 - [ ] ZIP、安装包、两个 SHA256 文件和 manifest 文件名与摘要一致。
+- [ ] ZIP 和安装器均为 host-only，不包含 TextTools、PowerGuard 或其他具体模块；模块只能通过独立 `.qmod` 导入。
 - [ ] 在真实 Windows 用户会话中启动 Shell，确认首页和模块页显示正常。
 - [ ] 验证首次关闭选择、持久化关闭行为、托盘左键恢复和本地化右键菜单。
 - [ ] 验证正常退出后通知区域图标和 QingToolbox.Shell.exe 均不残留。
@@ -52,6 +53,7 @@ manifest。manifest 记录 `QingMo-A/QingToolbox`、完整 source commit、
 - [ ] 手动验证卸载入口、运行中阻止覆盖，以及用户模块和设置保留策略。
 - [ ] 手动验证便携 ZIP 在已安装 .NET 10 Desktop Runtime 的机器上启动。
 - [ ] 核对 `.qmod` 未签名、程序未签名和 SmartScreen 风险说明仍然醒目。
+- [ ] 核对 Module API 标记为 Experimental，且未宣称已发布稳定 NuGet SDK 或兼容承诺。
 - [ ] 核对 Release Notes、CHANGELOG、许可证和第三方声明。
 - [ ] 人工决定是否创建 GitHub Release/tag，并单独上传已复核资产。
 - [ ] 发布后从 GitHub 重新下载资产并再次核对 SHA256。

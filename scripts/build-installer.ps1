@@ -163,10 +163,29 @@ try {
         throw "Installer payload contains source or project files: $($sourceFiles.FullName -join ', ')"
     }
 
+    $modulePlaceholder = Join-Path $payloadDirectory "Modules"
+    if (Test-Path -LiteralPath $modulePlaceholder -PathType Container) {
+        $moduleEntries = @(Get-ChildItem -LiteralPath $modulePlaceholder -Force -Recurse |
+            Where-Object { $_.PSIsContainer -or $_.Name -ne "README.md" })
+        if ($moduleEntries.Count -gt 0) {
+            throw "Installer payload contains bundled module content: $($moduleEntries.FullName -join ', ')"
+        }
+        Remove-Item -LiteralPath $modulePlaceholder -Recurse -Force
+    }
+
+    $forbiddenSupportFiles = @($payloadFiles | Where-Object {
+        $_.Name -eq "stop-qingtoolbox.bat" -or
+        $_.Name -match '^settings(\.corrupt-[^.]*)?\.json$'
+    })
+    if ($forbiddenSupportFiles.Count -gt 0) {
+        throw "Installer payload contains forbidden support or user files: " +
+              ($forbiddenSupportFiles.FullName -join ', ')
+    }
+
     $buildDirectories = @(Get-ChildItem -LiteralPath $payloadDirectory -Recurse -Directory |
-        Where-Object Name -In @("bin", "obj"))
+        Where-Object Name -In @("Modules", "modules", "tests", "bin", "obj", ".git"))
     if ($buildDirectories.Count -gt 0) {
-        throw "Installer payload contains bin/obj directories: $($buildDirectories.FullName -join ', ')"
+        throw "Installer payload contains forbidden directories: $($buildDirectories.FullName -join ', ')"
     }
 
     Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") `

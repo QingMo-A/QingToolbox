@@ -54,7 +54,7 @@ try {
         throw "dotnet publish failed with exit code $LASTEXITCODE."
     }
 
-    Get-ChildItem -LiteralPath $publishDirectory -Filter "*.pdb" -File |
+    Get-ChildItem -LiteralPath $publishDirectory -Filter "*.pdb" -File -Recurse |
         Remove-Item -Force
 
     Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") `
@@ -68,6 +68,52 @@ try {
     Copy-Item -LiteralPath (Join-Path $repoRoot `
         "docs\releases\$($metadata.Version).md") `
         -Destination $releaseDocsDirectory -Force
+
+    $modulePlaceholder = Join-Path $publishDirectory "Modules"
+    if (Test-Path -LiteralPath $modulePlaceholder -PathType Container) {
+        $moduleEntries = @(Get-ChildItem -LiteralPath $modulePlaceholder -Force -Recurse |
+            Where-Object { $_.PSIsContainer -or $_.Name -ne "README.md" })
+        if ($moduleEntries.Count -gt 0) {
+            throw "Portable payload contains bundled module content: $($moduleEntries.FullName -join ', ')"
+        }
+        Remove-Item -LiteralPath $modulePlaceholder -Recurse -Force
+    }
+
+    $publishedFiles = @(Get-ChildItem -LiteralPath $publishDirectory -Recurse -File)
+    $forbiddenFiles = @($publishedFiles | Where-Object {
+        $_.Name -eq "stop-qingtoolbox.bat" -or
+        $_.Name -match '^settings(\.corrupt-[^.]*)?\.json$' -or
+        $_.Name -like 'QingToolbox.Modules.*' -or
+        $_.Extension -in @('.pdb', '.cs', '.csproj', '.sln')
+    })
+    if ($forbiddenFiles.Count -gt 0) {
+        throw "Portable payload contains forbidden files: $($forbiddenFiles.FullName -join ', ')"
+    }
+    $forbiddenDirectories = @(Get-ChildItem -LiteralPath $publishDirectory -Recurse -Directory |
+        Where-Object { $_.Name -in @('Modules', 'modules', 'tests', 'bin', 'obj', '.git') })
+    if ($forbiddenDirectories.Count -gt 0) {
+        throw "Portable payload contains forbidden directories: $($forbiddenDirectories.FullName -join ', ')"
+    }
+    $requiredFiles = @(
+        'QingToolbox.Shell.exe',
+        'Resources\Localization\en-US.json',
+        'Resources\Localization\zh-CN.json',
+        'LICENSE',
+        'CHANGELOG.md'
+    )
+    foreach ($relativePath in $requiredFiles) {
+        if (-not (Test-Path -LiteralPath (Join-Path $publishDirectory $relativePath) -PathType Leaf)) {
+            throw "Portable payload is missing required file: $relativePath"
+        }
+    }
+    Add-Type -AssemblyName System.Drawing
+    $publishedIcon = [System.Drawing.Icon]::ExtractAssociatedIcon(
+        (Join-Path $publishDirectory 'QingToolbox.Shell.exe'))
+    if ($null -eq $publishedIcon) {
+        throw "Portable Shell does not expose the official embedded application icon."
+    }
+    $publishedIcon.Dispose()
+    Write-Host "Host-only portable payload audit passed; no bundled modules."
 
     if (Test-Path -LiteralPath $archivePath) {
         Remove-Item -LiteralPath $archivePath -Force
