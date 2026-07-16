@@ -29,6 +29,12 @@ public sealed class FloatingBadgeManager(
     public void ConfigureApplicationExit(Func<Task> request) => _applicationExitRequest = request;
 
     public async Task EnterAsync(CancellationToken cancellationToken = default)
+        => await EnterCoreAsync(false, cancellationToken);
+
+    public async Task EnterFromNotificationAreaAsync(CancellationToken cancellationToken = default)
+        => await EnterCoreAsync(true, cancellationToken);
+
+    private async Task EnterCoreAsync(bool preserveSuspendedWindows, CancellationToken cancellationToken)
     {
         await _transitionGate.WaitAsync(cancellationToken);
         try
@@ -39,7 +45,7 @@ public sealed class FloatingBadgeManager(
             FloatingBadgeWindow? badge = null;
             try
             {
-                _snapshot = WindowSnapshot.Capture(mainWindow);
+                _snapshot = WindowSnapshot.Capture(mainWindow, preserveSuspendedWindows ? true : null);
                 var settings = await settingsService.ReadAsync(cancellationToken);
                 badge = CreateBadgeWindow();
                 badge.Opacity = 0;
@@ -49,7 +55,7 @@ public sealed class FloatingBadgeManager(
                 badge.Opacity = 1;
 
                 if (_exitRequested) return;
-                moduleWindowManager.SuspendForFloatingBadge();
+                if (!preserveSuspendedWindows) moduleWindowManager.SuspendForFloatingBadge();
                 mainWindow.ShowInTaskbar = false;
                 mainWindow.Hide();
                 _badgeWindow = badge;
@@ -293,13 +299,13 @@ public sealed class FloatingBadgeManager(
 
     private sealed record WindowSnapshot(WindowState State, Rect Bounds, bool ShowInTaskbar)
     {
-        internal static WindowSnapshot Capture(Window window)
+        internal static WindowSnapshot Capture(Window window, bool? showInTaskbarOverride = null)
         {
             var bounds = window.WindowState == WindowState.Normal
                 ? new Rect(window.Left, window.Top, window.Width, window.Height)
                 : window.RestoreBounds;
             var state = window.WindowState == WindowState.Maximized ? WindowState.Maximized : WindowState.Normal;
-            return new WindowSnapshot(state, bounds, window.ShowInTaskbar);
+            return new WindowSnapshot(state, bounds, showInTaskbarOverride ?? window.ShowInTaskbar);
         }
     }
 }

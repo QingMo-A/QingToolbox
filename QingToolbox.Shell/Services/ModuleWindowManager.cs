@@ -81,6 +81,25 @@ public sealed class ModuleWindowManager(ILocalizationService localization)
         }
     }
 
+    public int CloseAllSafely()
+    {
+        var failures = 0;
+        foreach (var (moduleId, window) in _windows.ToArray())
+        {
+            try
+            {
+                window.Close();
+                if (!window.IsVisible) _windows.Remove(moduleId);
+            }
+            catch
+            {
+                failures++;
+            }
+        }
+        _suspendedWindows.Clear();
+        return failures;
+    }
+
     public void SuspendForFloatingBadge()
     {
         _suspendedWindows.Clear();

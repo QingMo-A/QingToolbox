@@ -16,7 +16,7 @@ public enum ApplicationExitReason
 
 public sealed class ApplicationExitCoordinator(
     StartupSessionCoordinator startupSession,
-    NotificationAreaService notificationArea,
+    INotificationAreaIcon notificationArea,
     FloatingBadgeManager floatingBadgeManager,
     ModuleWindowManager moduleWindowManager,
     ModuleRuntimeManager runtimeManager)
@@ -26,6 +26,7 @@ public sealed class ApplicationExitCoordinator(
     private Func<Task>? _stopActivation;
 
     public bool ApplicationExitRequested { get; private set; }
+    public bool RuntimeCleanupCompleted { get; private set; }
     public void ConfigureStopActivation(Func<Task> stopActivation) => _stopActivation = stopActivation;
 
     public Task RequestExitAsync(ApplicationExitReason reason)
@@ -33,24 +34,62 @@ public sealed class ApplicationExitCoordinator(
         lock (_sync)
         {
             ApplicationExitRequested = true;
-            return _exitTask ??= Application.Current.Dispatcher.InvokeAsync(() => ExitCoreAsync(reason)).Task.Unwrap();
+            return _exitTask ??= RunExitAsync(reason);
+        }
+    }
+
+    private async Task RunExitAsync(ApplicationExitReason reason)
+    {
+        try
+        {
+            var dispatcher = Application.Current.Dispatcher;
+            if (dispatcher.CheckAccess()) await ExitCoreAsync(reason);
+            else if (!dispatcher.HasShutdownStarted && !dispatcher.HasShutdownFinished)
+                await dispatcher.InvokeAsync(() => ExitCoreAsync(reason)).Task.Unwrap();
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"Exit dispatch failed: {exception.GetType().Name}");
+            try { Application.Current.Shutdown(); }
+            catch (Exception shutdownException)
+            {
+                Debug.WriteLine($"Exit fallback shutdown failed: {shutdownException.GetType().Name}");
+            }
         }
     }
 
     private async Task ExitCoreAsync(ApplicationExitReason reason)
     {
-        startupSession.PrepareForExit();
-        notificationArea.PrepareForExit();
-        floatingBadgeManager.PrepareForApplicationExit();
-        if (_stopActivation is not null)
+        var stages = new List<ExitCleanupStage>
         {
-            try { await _stopActivation(); }
-            catch (Exception exception) { Debug.WriteLine($"Could not stop instance activation: {exception.GetType().Name}"); }
-        }
-        moduleWindowManager.CloseAll();
-        try { await runtimeManager.DisposeAsync(); }
-        catch (Exception exception) { Debug.WriteLine($"Failed to unload modules during {reason}: {exception}"); }
-        if (Application.Current.MainWindow is { } mainWindow) mainWindow.Close();
-        Application.Current.Shutdown();
+            SyncStage("startup session", startupSession.PrepareForExit),
+            SyncStage("notification area", notificationArea.PrepareForExit),
+            SyncStage("floating badge", floatingBadgeManager.PrepareForApplicationExit),
+            new("instance activation", () => _stopActivation?.Invoke() ?? Task.CompletedTask),
+            SyncStage("module windows", () =>
+            {
+                var failed = moduleWindowManager.CloseAllSafely();
+                if (failed > 0) Debug.WriteLine($"Exit stage module windows failed: {failed} window(s)");
+            }),
+            new("module runtime", async () =>
+            {
+                await runtimeManager.DisposeAsync();
+                RuntimeCleanupCompleted = true;
+            }),
+            SyncStage("main window", () => Application.Current.MainWindow?.Close())
+        };
+        await ExitCleanupPipeline.RunAsync(
+            stages,
+            () => Application.Current.Shutdown(),
+            (stage, exception) => Debug.WriteLine($"Exit stage {stage} failed: {exception.GetType().Name}"));
+    }
+
+    private static ExitCleanupStage SyncStage(string stage, Action action)
+    {
+        return new ExitCleanupStage(stage, () =>
+        {
+            action();
+            return Task.CompletedTask;
+        });
     }
 }

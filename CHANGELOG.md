@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Hardened explicit background shutdown so module-window, module-runtime, activation-pipe, badge, and notification-area cleanup failures cannot block final application shutdown.
+- Made notification-area initialization transactional and retryable, and observed dispatcher failures without permanently disabling tray actions.
+- Preserved suspended module windows when switching directly from the notification area to the floating badge.
+
 - Added a localized Windows notification-area icon with Open, Settings, Floating Badge and Exit actions.
 - Added a persisted main-window close preference with an explicit first-close choice and an Ask-again option.
 - Unified native close routes, secondary-instance activation, floating-badge exit and tray exit around recoverable window and clean shutdown coordination.

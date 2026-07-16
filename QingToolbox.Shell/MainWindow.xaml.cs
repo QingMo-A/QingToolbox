@@ -8,6 +8,7 @@ using QingToolbox.Shell.Startup;
 using QingToolbox.Core.Settings;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Shell.Views;
+using QingToolbox.Shell.Windowing;
 
 namespace QingToolbox.Shell;
 
@@ -235,6 +236,26 @@ public partial class MainWindow : Window
         Activate();
         Focus();
     }
+
+    internal async Task SwitchToFloatingBadgeFromNotificationAreaAsync()
+    {
+        if (_exitCoordinator.ApplicationExitRequested) return;
+        try
+        {
+            await _floatingBadgeManager.EnterFromNotificationAreaAsync();
+        }
+        catch (Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine($"Notification area badge transition failed: {exception.GetType().Name}");
+            EnsureMainWindowVisible();
+            _moduleWindowManager.RestoreAfterFloatingBadge();
+            _viewModel.StatusMessage = _localization.GetString("floatingBadge.restoreFailed");
+        }
+    }
+
+    internal bool HasRecoverySurface =>
+        _exitCoordinator.ApplicationExitRequested || IsVisible || _floatingBadgeManager.State == FloatingBadgeState.Badge ||
+        _notificationArea.IsAvailable || (ShowInTaskbar && WindowState == WindowState.Minimized);
 
     private void EnsureMainWindowVisible()
     {

@@ -41,6 +41,8 @@ internal static class Program
         var options = ParseOptions(args);
         VerifyCloseBehaviorSettings();
         var repositoryRoot = FindRepositoryRoot(AppContext.BaseDirectory);
+        VerifyNotificationAreaLifecycleContracts(repositoryRoot);
+        VerifyExitFailureIsolation();
         var configuration = GetBuildConfiguration(AppContext.BaseDirectory);
         var shellOutput = Path.Combine(
             repositoryRoot,
@@ -873,8 +875,111 @@ internal static class Program
                 .GetAwaiter().GetResult();
             Require(service.ReadAsync().GetAwaiter().GetResult().MainWindowCloseBehavior == MainWindowCloseBehavior.MinimizeToNotificationArea,
                 "Close behavior must persist through the transactional settings update.");
+            service.UpdateAsync(settings => settings.MainWindowCloseBehavior = MainWindowCloseBehavior.ExitApplication)
+                .GetAwaiter().GetResult();
+            Require(service.ReadAsync().GetAwaiter().GetResult().MainWindowCloseBehavior == MainWindowCloseBehavior.ExitApplication,
+                "Exit close behavior must persist.");
+            service.UpdateAsync(settings => settings.MainWindowCloseBehavior = MainWindowCloseBehavior.Ask)
+                .GetAwaiter().GetResult();
+            Require(service.ReadAsync().GetAwaiter().GetResult().MainWindowCloseBehavior == MainWindowCloseBehavior.Ask,
+                "Ask must remain selectable after another close behavior.");
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    private static void VerifyNotificationAreaLifecycleContracts(string repositoryRoot)
+    {
+        Console.WriteLine("Verifying notification-area lifecycle contracts...");
+        var fake = new FakeNotificationAreaService();
+        var opened = false;
+        fake.OpenRequested = () => { opened = true; return Task.CompletedTask; };
+        Require(fake.Initialize() && fake.IsAvailable, "A notification-area service must expose recoverability after initialization.");
+        fake.OpenRequested().GetAwaiter().GetResult();
+        Require(opened, "The notification-area Open callback must be configurable through the interface.");
+        fake.PrepareForExit();
+        Require(fake.IsExiting && !fake.IsAvailable && !fake.Initialize(),
+            "A notification-area service must reject recovery and reinitialization while exiting.");
+        fake.Dispose();
+        fake.Dispose();
+        Require(fake.DisposeCount == 1, "Notification-area disposal must be idempotent.");
+
+        var appXaml = File.ReadAllText(Path.Combine(repositoryRoot, "QingToolbox.Shell", "App.xaml"));
+        var exitSource = File.ReadAllText(Path.Combine(repositoryRoot, "QingToolbox.Shell", "Services", "ApplicationExitCoordinator.cs"));
+        var pipelineSource = File.ReadAllText(Path.Combine(repositoryRoot, "QingToolbox.Shell", "Services", "ExitCleanupPipeline.cs"));
+        var traySource = File.ReadAllText(Path.Combine(repositoryRoot, "QingToolbox.Shell", "Services", "NotificationAreaService.cs"));
+        var windowSource = File.ReadAllText(Path.Combine(repositoryRoot, "QingToolbox.Shell", "Services", "ModuleWindowManager.cs"));
+        Require(appXaml.Contains("ShutdownMode=\"OnExplicitShutdown\"", StringComparison.Ordinal),
+            "The Shell must use explicit application shutdown.");
+        Require(pipelineSource.Contains("finally", StringComparison.Ordinal) && exitSource.Contains("Application.Current.Shutdown()", StringComparison.Ordinal),
+            "The exit coordinator must guarantee explicit shutdown from a final path.");
+        Require(exitSource.Contains("CloseAllSafely", StringComparison.Ordinal),
+            "The exit coordinator must isolate module-window closing.");
+        Require(windowSource.Contains("_windows.ToArray()", StringComparison.Ordinal) && windowSource.Contains("_suspendedWindows.Clear()", StringComparison.Ordinal),
+            "Safe module-window close must snapshot enumeration and clear suspended state.");
+        Require(traySource.Contains("_cultureSubscribed", StringComparison.Ordinal) && traySource.Contains("ObserveDispatcherTask", StringComparison.Ordinal),
+            "Notification initialization and dispatcher task observation contracts are required.");
+        Console.WriteLine("Notification-area lifecycle contracts passed.");
+    }
+
+    private static void VerifyExitFailureIsolation()
+    {
+        Console.WriteLine("Verifying exit failure isolation...");
+        for (var failingStage = 0; failingStage < 6; failingStage++)
+        {
+            var completed = new List<int>();
+            var failures = new List<string>();
+            var shutdownCount = 0;
+            var stages = Enumerable.Range(0, 6).Select(index => new ExitCleanupStage(
+                $"stage-{index}",
+                () =>
+                {
+                    if (index == failingStage) throw new InvalidOperationException("simulated");
+                    completed.Add(index);
+                    return Task.CompletedTask;
+                }));
+            ExitCleanupPipeline.RunAsync(
+                stages,
+                () => shutdownCount++,
+                (stage, _) => failures.Add(stage)).GetAwaiter().GetResult();
+            Require(shutdownCount == 1, "Every failed exit stage must still reach shutdown exactly once.");
+            Require(completed.Count == 5 && failures.SequenceEqual([$"stage-{failingStage}"]),
+                "A failed exit stage must not prevent remaining cleanup stages.");
+        }
+
+        var finalShutdownAttempts = 0;
+        var task = ExitCleanupPipeline.RunAsync(
+            [new ExitCleanupStage("cleanup", () => throw new InvalidOperationException("simulated"))],
+            () => { finalShutdownAttempts++; throw new InvalidOperationException("simulated shutdown"); },
+            (_, _) => { });
+        task.GetAwaiter().GetResult();
+        Require(task.IsCompletedSuccessfully && finalShutdownAttempts == 1,
+            "Observed cleanup and shutdown failures must not leave a permanently faulted exit task.");
+        Console.WriteLine("Exit failure isolation passed.");
+    }
+
+    private sealed class FakeNotificationAreaService : INotificationAreaIcon
+    {
+        private bool _disposed;
+        public bool IsAvailable { get; private set; }
+        public bool IsExiting { get; private set; }
+        public int DisposeCount { get; private set; }
+        public Func<Task>? OpenRequested { get; set; }
+        public Func<Task>? OpenSettingsRequested { get; set; }
+        public Func<Task>? FloatingBadgeRequested { get; set; }
+        public Func<Task>? ExitRequested { get; set; }
+        public bool Initialize()
+        {
+            if (_disposed || IsExiting) return false;
+            return IsAvailable = true;
+        }
+        public void PrepareForExit() { IsExiting = true; IsAvailable = false; }
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            DisposeCount++;
+            PrepareForExit();
+        }
     }
 
     private static void Require(bool condition, string message)

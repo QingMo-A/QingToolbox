@@ -6,10 +6,14 @@ using Forms = System.Windows.Forms;
 
 namespace QingToolbox.Shell.Services;
 
-public interface INotificationAreaIcon
+public interface INotificationAreaIcon : IDisposable
 {
     bool IsAvailable { get; }
     bool IsExiting { get; }
+    Func<Task>? OpenRequested { get; set; }
+    Func<Task>? OpenSettingsRequested { get; set; }
+    Func<Task>? FloatingBadgeRequested { get; set; }
+    Func<Task>? ExitRequested { get; set; }
     bool Initialize();
     void PrepareForExit();
 }
@@ -21,6 +25,7 @@ public sealed class NotificationAreaService : INotificationAreaIcon, IDisposable
     private Forms.ContextMenuStrip? _menu;
     private Icon? _icon;
     private bool _disposed;
+    private bool _cultureSubscribed;
     private int _dispatchPending;
 
     public NotificationAreaService(ILocalizationService localization) =>
@@ -37,32 +42,60 @@ public sealed class NotificationAreaService : INotificationAreaIcon, IDisposable
     {
         if (IsAvailable) return true;
         if (_disposed || IsExiting) return false;
+        Icon? icon = null;
+        Forms.ContextMenuStrip? menu = null;
+        Forms.NotifyIcon? notifyIcon = null;
         try
         {
             var resource = Application.GetResourceStream(new Uri(
                 "pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.ico"));
             if (resource?.Stream is null) return false;
             using (resource.Stream)
-            using (var source = new Icon(resource.Stream)) _icon = (Icon)source.Clone();
-            _menu = new Forms.ContextMenuStrip();
-            _notifyIcon = new Forms.NotifyIcon
+            using (var source = new Icon(resource.Stream)) icon = (Icon)source.Clone();
+            menu = new Forms.ContextMenuStrip();
+            BuildMenu(menu);
+            notifyIcon = new Forms.NotifyIcon
             {
-                Icon = _icon,
+                Icon = icon,
                 Text = "QingToolbox",
-                ContextMenuStrip = _menu,
+                ContextMenuStrip = menu,
                 Visible = true
             };
-            _notifyIcon.MouseClick += OnMouseClick;
-            _notifyIcon.DoubleClick += OnDoubleClick;
+            notifyIcon.MouseClick += OnMouseClick;
+            notifyIcon.DoubleClick += OnDoubleClick;
+
+            _icon = icon;
+            _menu = menu;
+            _notifyIcon = notifyIcon;
+            icon = null;
+            menu = null;
+            notifyIcon = null;
             _localization.CultureChanged += OnCultureChanged;
-            RebuildMenu();
+            _cultureSubscribed = true;
             return true;
         }
         catch (Exception exception)
         {
             Debug.WriteLine($"Notification area initialization failed: {exception.GetType().Name}");
+            if (_cultureSubscribed)
+            {
+                _localization.CultureChanged -= OnCultureChanged;
+                _cultureSubscribed = false;
+            }
             DisposeResources();
             return false;
+        }
+        finally
+        {
+            if (notifyIcon is not null)
+            {
+                notifyIcon.Visible = false;
+                notifyIcon.MouseClick -= OnMouseClick;
+                notifyIcon.DoubleClick -= OnDoubleClick;
+                notifyIcon.Dispose();
+            }
+            menu?.Dispose();
+            icon?.Dispose();
         }
     }
 
@@ -84,34 +117,71 @@ public sealed class NotificationAreaService : INotificationAreaIcon, IDisposable
     {
         if (_menu is null || IsExiting) return;
         _menu.Items.Clear();
-        AddItem("notificationArea.open", "Open QingToolbox", OpenRequested);
-        AddItem("notificationArea.floatingBadge", "Switch to floating badge", FloatingBadgeRequested);
-        AddItem("notificationArea.settings", "Open settings", OpenSettingsRequested);
-        _menu.Items.Add(new Forms.ToolStripSeparator());
-        AddItem("notificationArea.exit", "Exit QingToolbox", ExitRequested);
+        BuildMenu(_menu);
     }
 
-    private void AddItem(string key, string fallback, Func<Task>? action)
+    private void BuildMenu(Forms.ContextMenuStrip menu)
+    {
+        AddItem(menu, "notificationArea.open", "Open QingToolbox", OpenRequested);
+        AddItem(menu, "notificationArea.floatingBadge", "Switch to floating badge", FloatingBadgeRequested);
+        AddItem(menu, "notificationArea.settings", "Open settings", OpenSettingsRequested);
+        menu.Items.Add(new Forms.ToolStripSeparator());
+        AddItem(menu, "notificationArea.exit", "Exit QingToolbox", ExitRequested);
+    }
+
+    private void AddItem(Forms.ContextMenuStrip menu, string key, string fallback, Func<Task>? action)
     {
         var item = new Forms.ToolStripMenuItem(_localization.GetString(key));
         if (item.Text == key) item.Text = fallback;
         item.Click += (_, _) => Dispatch(action);
-        _menu!.Items.Add(item);
+        menu.Items.Add(item);
     }
 
     private void Dispatch(Func<Task>? action)
     {
         if (action is null || IsExiting || Interlocked.Exchange(ref _dispatchPending, 1) != 0) return;
-        _ = Application.Current.Dispatcher.InvokeAsync(async () =>
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
         {
-            try { await action(); }
-            catch (Exception exception) { Debug.WriteLine($"Notification area action failed: {exception.GetType().Name}"); }
-            finally { Interlocked.Exchange(ref _dispatchPending, 0); }
-        }).Task.Unwrap();
+            Interlocked.Exchange(ref _dispatchPending, 0);
+            return;
+        }
+        try
+        {
+            var task = dispatcher.InvokeAsync(async () =>
+            {
+                try { await action(); }
+                catch (Exception exception) { Debug.WriteLine($"Notification area action failed: {exception.GetType().Name}"); }
+            }).Task.Unwrap();
+            ObserveDispatcherTask(task, "action", resetDispatch: true);
+        }
+        catch (Exception exception)
+        {
+            Interlocked.Exchange(ref _dispatchPending, 0);
+            Debug.WriteLine($"Notification area dispatch failed: {exception.GetType().Name}");
+        }
     }
 
-    private void OnCultureChanged(object? sender, EventArgs e) =>
-        Application.Current.Dispatcher.InvokeAsync(RebuildMenu);
+    private void OnCultureChanged(object? sender, EventArgs e)
+    {
+        if (IsExiting) return;
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished) return;
+        try { ObserveDispatcherTask(dispatcher.InvokeAsync(RebuildMenu).Task, "menu refresh", resetDispatch: false); }
+        catch (Exception exception) { Debug.WriteLine($"Notification area menu refresh failed: {exception.GetType().Name}"); }
+    }
+
+    private void ObserveDispatcherTask(Task task, string operation, bool resetDispatch)
+    {
+        _ = task.ContinueWith(completed =>
+        {
+            if (completed.IsFaulted)
+                Debug.WriteLine($"Notification area {operation} failed: {completed.Exception?.GetBaseException().GetType().Name}");
+            else if (completed.IsCanceled)
+                Debug.WriteLine($"Notification area {operation} canceled");
+            if (resetDispatch) Interlocked.Exchange(ref _dispatchPending, 0);
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
 
     private void DisposeResources()
     {
@@ -134,7 +204,11 @@ public sealed class NotificationAreaService : INotificationAreaIcon, IDisposable
         if (_disposed) return;
         _disposed = true;
         IsExiting = true;
-        _localization.CultureChanged -= OnCultureChanged;
+        if (_cultureSubscribed)
+        {
+            _localization.CultureChanged -= OnCultureChanged;
+            _cultureSubscribed = false;
+        }
         DisposeResources();
     }
 }

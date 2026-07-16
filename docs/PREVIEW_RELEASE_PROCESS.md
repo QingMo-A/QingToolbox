@@ -37,6 +37,9 @@ manifest。manifest 记录 `QingMo-A/QingToolbox`、完整 source commit、
 
 - [ ] 候选脚本完整通过，终端摘要中的 clean 和 origin sync 均为 `True`。
 - [ ] 对应 `toolbox` commit 的 Preview validation GitHub Actions 成功。
+- [ ] 显式退出在模块窗口或模块运行时清理失败时仍能完成，且通知区图标被移除。
+- [ ] 通知区初始化失败后可重试，Dispatcher 操作失败不会禁用后续菜单操作。
+- [ ] 从通知区直接切换悬浮标时不闪现 Shell，并保留挂起的模块窗口。
 - [ ] manifest 的 source commit 与准备发布的 commit 完全一致。
 - [ ] ZIP、安装包、两个 SHA256 文件和 manifest 文件名与摘要一致。
 - [ ] 在真实 Windows 用户会话中启动 Shell，确认首页和模块页显示正常。
