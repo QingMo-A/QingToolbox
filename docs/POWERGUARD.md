@@ -29,4 +29,8 @@ Build and verify:
 
 The automated tests use an in-memory HTTP handler, fake process launcher, fake warning presenter, and injectable atomic file replacer. CI covers stale presentation, settings rollback, atomic replacement, and disposal retry races without a live network probe or shutdown operation. UPS state remains unsupported, and protection still depends on QingToolbox remaining active.
 
+All duration decisions use monotonic timestamps from an injectable .NET `TimeProvider`: startup grace, offline and recovery confirmation, countdown and extension, probe/backoff intervals, ticker cadence, and cleanup timeouts. UTC from the same provider is retained only for display, probe health, diagnostics, and event records. Automatic clock synchronization, manual clock changes, and time-zone changes therefore cannot shorten or extend a guard duration. Automated release-candidate tests independently adjust wall UTC and monotonic virtual time without real waits.
+
+Probe health exposes only the latest check time, latest successful check time, and consecutive failure count. Successful probe events are recorded on first success, recovery from failure, or after a 30-minute quiet interval; state-transition events are never suppressed. See [POWERGUARD-ACCEPTANCE.md](POWERGUARD-ACCEPTANCE.md) for the manual deployment checklist. No test result in that checklist is claimed automatically.
+
 The package is written to `artifacts/modules/QingToolbox.PowerGuard-0.1.0.qmod` with a SHA256 sidecar. Build artifacts are not committed.

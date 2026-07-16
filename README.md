@@ -55,3 +55,5 @@ Before committing module changes, run:
 `modules/TextTools` is the first standalone module. It is developed on this branch and
 uses a configurable `QingToolboxHostRoot` to reference the host's Abstractions project
 without copying toolbox source into this branch.
+
+PowerGuard release-candidate duration decisions use monotonic `TimeProvider` timestamps; UTC remains limited to UI and event records. Its automated tests use deterministic virtual time, and successful probe events are rate-limited without hiding transitions. Before deployment, complete [the manual PowerGuard acceptance checklist](docs/POWERGUARD-ACCEPTANCE.md). UPS is not supported, and protection depends on QingToolbox remaining active.

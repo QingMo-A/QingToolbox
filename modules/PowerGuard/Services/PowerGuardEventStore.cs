@@ -4,14 +4,22 @@ using QingToolbox.Modules.PowerGuard.Models;
 
 namespace QingToolbox.Modules.PowerGuard.Services;
 
-public sealed class PowerGuardEventStore(string dataDirectory) : IDisposable
+public sealed class PowerGuardEventStore : IDisposable
 {
+    private readonly TimeProvider _timeProvider;
     public event EventHandler? EventAppended;
     internal void ClearSubscribers()=>EventAppended=null;
     private const long MaximumBytes = 1024 * 1024;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly string _path = Path.Combine(dataDirectory, "events.jsonl");
-    private readonly string _previous = Path.Combine(dataDirectory, "events.previous.jsonl");
+    private readonly string _path;
+    private readonly string _previous;
+
+    public PowerGuardEventStore(string dataDirectory, TimeProvider? timeProvider = null)
+    {
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _path = Path.Combine(dataDirectory, "events.jsonl");
+        _previous = Path.Combine(dataDirectory, "events.previous.jsonl");
+    }
 
     public async Task AppendAsync(string type, string? detail = null, CancellationToken token = default)
     {
@@ -26,7 +34,7 @@ public sealed class PowerGuardEventStore(string dataDirectory) : IDisposable
                     File.Move(_path, _previous, true);
                 }
                 var safeDetail = string.IsNullOrWhiteSpace(detail) ? null : detail.Length > 160 ? detail[..160] : detail;
-                await File.AppendAllTextAsync(_path, JsonSerializer.Serialize(new GuardEvent(DateTimeOffset.UtcNow, type, safeDetail)) + Environment.NewLine, token);
+                await File.AppendAllTextAsync(_path, JsonSerializer.Serialize(new GuardEvent(_timeProvider.GetUtcNow(), type, safeDetail)) + Environment.NewLine, token);
                 EventAppended?.Invoke(this, EventArgs.Empty);
             }
             finally { _gate.Release(); }

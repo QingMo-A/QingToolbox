@@ -34,6 +34,7 @@ jobs:
           Write-Host "SAFE TEST MODE"
           Write-Host "NO REAL SHUTDOWN"
           Write-Host "NO LIVE NETWORK PROBE"
+          Write-Host "DETERMINISTIC TIME PROVIDER"
           ./modules-source/scripts/check-module-i18n.ps1 -ModulesRoot "$PWD/modules-source/modules"
           ./modules-source/scripts/verify-modules.ps1 -QingToolboxHostRoot "$PWD/toolbox-host" -Configuration Release
       - name: Package and integration test PowerGuard

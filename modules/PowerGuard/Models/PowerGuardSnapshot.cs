@@ -7,6 +7,9 @@ public sealed record PowerGuardSnapshot(
     bool GuardEnabled,
     bool IsOnline,
     DateTimeOffset? LastOnlineUtc,
+    DateTimeOffset? LastProbeUtc,
+    DateTimeOffset? LastSuccessfulProbeUtc,
+    int ConsecutiveProbeFailures,
     int RemainingSeconds,
     bool IsSuppressed,
     string? Error = null)

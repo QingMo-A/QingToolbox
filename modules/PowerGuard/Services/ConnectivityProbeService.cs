@@ -15,7 +15,8 @@ public sealed class ConnectivityProbeService : IConnectivityProbe, IDisposable
     private readonly HttpClient _client;
     private readonly IReadOnlyList<ConnectivityTarget> _targets;
     private readonly TimeSpan _budget;
-    public ConnectivityProbeService(HttpMessageHandler? handler=null,IReadOnlyList<ConnectivityTarget>? targets=null,TimeSpan? budget=null)
+    private readonly TimeProvider _timeProvider;
+    public ConnectivityProbeService(HttpMessageHandler? handler=null,IReadOnlyList<ConnectivityTarget>? targets=null,TimeSpan? budget=null,TimeProvider? timeProvider=null)
     {
         handler??=new HttpClientHandler{AllowAutoRedirect=false};
         _client=new(handler,true){Timeout=Timeout.InfiniteTimeSpan};
@@ -23,14 +24,15 @@ public sealed class ConnectivityProbeService : IConnectivityProbe, IDisposable
             new("Microsoft",new("https://www.msftconnecttest.com/connecttest.txt"),HttpStatusCode.OK,"Microsoft Connect Test"),
             new("Cloudflare",new("https://cp.cloudflare.com/generate_204"),HttpStatusCode.NoContent,null)];
         _budget=budget??TimeSpan.FromSeconds(5);
+        _timeProvider=timeProvider??TimeProvider.System;
     }
     public async Task<ConnectivityProbeResult> ProbeAsync(CancellationToken token=default)
     {
-        using var budget=CancellationTokenSource.CreateLinkedTokenSource(token);budget.CancelAfter(_budget);
+        using var timeout=new CancellationTokenSource(_budget,_timeProvider);using var budget=CancellationTokenSource.CreateLinkedTokenSource(token,timeout.Token);
         var tasks=_targets.Select(target=>ProbeTargetAsync(target,budget.Token,token)).ToArray();
         var results=await Task.WhenAll(tasks);
         token.ThrowIfCancellationRequested();
-        return new(results.Any(x=>x.Succeeded),NetworkInterface.GetIsNetworkAvailable(),results,DateTimeOffset.UtcNow);
+        return new(results.Any(x=>x.Succeeded),NetworkInterface.GetIsNetworkAvailable(),results,_timeProvider.GetUtcNow());
     }
     private async Task<ProbeEndpointResult> ProbeTargetAsync(ConnectivityTarget target,CancellationToken budget,CancellationToken caller)
     {

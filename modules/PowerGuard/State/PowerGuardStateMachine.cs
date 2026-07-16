@@ -17,18 +17,23 @@ public sealed class PowerGuardStateMachine
         [PowerGuardState.Stopping]=[PowerGuardState.Disabled]
     };
     public PowerGuardState State { get; private set; } = PowerGuardState.Disabled;
-    public DateTimeOffset StateSinceUtc { get; private set; } = DateTimeOffset.UtcNow;
-    private PowerGuardTransition MoveTo(PowerGuardState next, DateTimeOffset now)
+    public DateTimeOffset StateSinceUtc { get; private set; } = DateTimeOffset.UnixEpoch;
+    public long StateSinceTimestamp { get; private set; }
+    private PowerGuardTransition MoveTo(PowerGuardState next, DateTimeOffset now, long timestamp)
     {
         var transition = new PowerGuardTransition(State, next, now);
         State = next;
         StateSinceUtc = now;
+        StateSinceTimestamp = timestamp;
         return transition;
     }
-    public bool TryTransition(PowerGuardState next, DateTimeOffset now, out PowerGuardTransition? transition)
+    public bool TryTransition(PowerGuardState next, DateTimeOffset now, long timestamp, out PowerGuardTransition? transition)
     {
         if (next==State) { transition=new(State,next,StateSinceUtc); return true; }
         if (!Allowed.GetValueOrDefault(State,[]).Contains(next)) { transition=null; return false; }
-        transition=MoveTo(next,now); return true;
+        transition=MoveTo(next,now,timestamp); return true;
     }
+
+    internal bool TryTransition(PowerGuardState next, DateTimeOffset now, out PowerGuardTransition? transition) =>
+        TryTransition(next, now, 0, out transition);
 }
