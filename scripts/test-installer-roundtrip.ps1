@@ -135,7 +135,9 @@ try {
         $shellExe,
         (Join-Path $installDirectory "LICENSE"),
         (Join-Path $installDirectory "CHANGELOG.md"),
-        (Join-Path $installDirectory "docs\$($metadata.Version).md"),
+        (Join-Path $installDirectory "docs\QMOD_FORMAT.md"),
+        (Join-Path $installDirectory "docs\releases\$($metadata.Version).md"),
+        (Join-Path $installDirectory "docs\sdk\README.md"),
         (Join-Path $installDirectory "Resources\Localization\en-US.json"),
         (Join-Path $installDirectory "Resources\Localization\zh-CN.json")
     )
@@ -159,11 +161,16 @@ try {
     }) -Description "Source or project files"
     Assert-NoFiles -Files @($installedFiles | Where-Object {
         $_.Name -like "QingToolbox.Modules.*" -or
-        $_.Name -match "^(TextTools|ScreenPin|WindowTopmost)(\.|$)"
+        $_.Name -match "^(TextTools|ScreenPin|WindowTopmost|PowerGuard)(\.|$)"
     }) -Description "Concrete module files"
+    Assert-NoFiles -Files @($installedFiles | Where-Object {
+        $_.Name -eq "stop-qingtoolbox.bat" -or
+        $_.Name -match '^settings(\.corrupt-[^.]*)?\.json$'
+    }) -Description "Forbidden support or user files"
 
     $buildDirectories = @(Get-ChildItem -LiteralPath $installDirectory `
-        -Recurse -Directory | Where-Object Name -In @("bin", "obj"))
+        -Recurse -Directory | Where-Object Name -In @(
+            "Modules", "modules", "tests", "bin", "obj", ".git"))
     if ($buildDirectories.Count -gt 0) {
         throw "Installed payload contains bin/obj directories: " +
               ($buildDirectories.FullName -join ", ")

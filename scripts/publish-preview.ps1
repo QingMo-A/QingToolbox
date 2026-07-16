@@ -62,12 +62,17 @@ try {
     Copy-Item -LiteralPath (Join-Path $repoRoot "CHANGELOG.md") `
         -Destination $publishDirectory -Force
     $releaseDocsDirectory = Join-Path $publishDirectory "docs"
-    New-Item -ItemType Directory -Force -Path $releaseDocsDirectory | Out-Null
+    $releaseNotesDirectory = Join-Path $releaseDocsDirectory "releases"
+    $sdkDocsDirectory = Join-Path $releaseDocsDirectory "sdk"
+    New-Item -ItemType Directory -Force -Path $releaseNotesDirectory | Out-Null
+    New-Item -ItemType Directory -Force -Path $sdkDocsDirectory | Out-Null
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\QMOD_FORMAT.md") `
         -Destination $releaseDocsDirectory -Force
+    Copy-Item -LiteralPath (Join-Path $repoRoot "docs\sdk\README.md") `
+        -Destination $sdkDocsDirectory -Force
     Copy-Item -LiteralPath (Join-Path $repoRoot `
         "docs\releases\$($metadata.Version).md") `
-        -Destination $releaseDocsDirectory -Force
+        -Destination $releaseNotesDirectory -Force
 
     $modulePlaceholder = Join-Path $publishDirectory "Modules"
     if (Test-Path -LiteralPath $modulePlaceholder -PathType Container) {
@@ -99,7 +104,10 @@ try {
         'Resources\Localization\en-US.json',
         'Resources\Localization\zh-CN.json',
         'LICENSE',
-        'CHANGELOG.md'
+        'CHANGELOG.md',
+        'docs\QMOD_FORMAT.md',
+        "docs\releases\$($metadata.Version).md",
+        'docs\sdk\README.md'
     )
     foreach ($relativePath in $requiredFiles) {
         if (-not (Test-Path -LiteralPath (Join-Path $publishDirectory $relativePath) -PathType Leaf)) {
@@ -125,6 +133,41 @@ try {
     Compress-Archive -Path (Join-Path $publishDirectory "*") `
         -DestinationPath $archivePath `
         -CompressionLevel Optimal
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($archivePath)
+    try {
+        $archiveNames = @($archive.Entries | ForEach-Object { $_.FullName.Replace('/', '\') })
+        $duplicateEntries = @($archiveNames |
+            Group-Object { $_.ToUpperInvariant() } |
+            Where-Object Count -GT 1)
+        if ($duplicateEntries.Count -gt 0) {
+            throw "Portable ZIP contains duplicate conflicting paths: " +
+                ($duplicateEntries.Name -join ', ')
+        }
+        $unsafeEntries = @($archiveNames | Where-Object {
+            [System.IO.Path]::IsPathRooted($_) -or
+            $_ -match '^[A-Za-z]:' -or
+            $_ -match '^\\\\' -or
+            $_ -match '(^|\\)\.\.(\\|$)' -or
+            $_ -match '(^|\\)(Modules|modules|tests|bin|obj|\.git)(\\|$)' -or
+            $_ -match '(^|\\)(stop-qingtoolbox\.bat|settings\.json|settings\.corrupt-[^\\]*\.json)$' -or
+            $_ -match '\.(pdb|cs|csproj|sln)$' -or
+            $_ -match '(^|\\)(QingToolbox\.Modules\.[^\\]*|TextTools|ScreenPin|WindowTopmost|PowerGuard)(\.|\\|$)'
+        })
+        if ($unsafeEntries.Count -gt 0) {
+            throw "Portable ZIP contains unsafe or forbidden entries: $($unsafeEntries -join ', ')"
+        }
+        foreach ($requiredEntry in $requiredFiles) {
+            if ($archiveNames -notcontains $requiredEntry) {
+                throw "Portable ZIP is missing required entry: $requiredEntry"
+            }
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+    Write-Host "Portable ZIP content audit passed."
     $hash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
     "$hash  $(Split-Path -Leaf $archivePath)" |
         Set-Content -LiteralPath $checksumPath -Encoding ASCII

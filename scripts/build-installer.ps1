@@ -151,7 +151,7 @@ try {
     }
 
     $forbiddenModuleFiles = @($payloadFiles | Where-Object {
-        $_.Name -match '^(TextTools|ScreenPin|WindowTopmost)(\.|$)' -or
+        $_.Name -match '^(TextTools|ScreenPin|WindowTopmost|PowerGuard)(\.|$)' -or
         $_.Name -like 'QingToolbox.Modules.*'
     })
     if ($forbiddenModuleFiles.Count -gt 0) {
@@ -193,17 +193,24 @@ try {
     Copy-Item -LiteralPath (Join-Path $repoRoot "CHANGELOG.md") `
         -Destination $payloadDirectory -Force
     $docsDirectory = Join-Path $payloadDirectory "docs"
-    New-Item -ItemType Directory -Force -Path $docsDirectory | Out-Null
+    $releaseNotesDirectory = Join-Path $docsDirectory "releases"
+    $sdkDocsDirectory = Join-Path $docsDirectory "sdk"
+    New-Item -ItemType Directory -Force -Path $releaseNotesDirectory | Out-Null
+    New-Item -ItemType Directory -Force -Path $sdkDocsDirectory | Out-Null
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\QMOD_FORMAT.md") `
         -Destination $docsDirectory -Force
+    Copy-Item -LiteralPath (Join-Path $repoRoot "docs\sdk\README.md") `
+        -Destination $sdkDocsDirectory -Force
     Copy-Item -LiteralPath (Join-Path $repoRoot `
         "docs\releases\$($metadata.Version).md") `
-        -Destination $docsDirectory -Force
+        -Destination $releaseNotesDirectory -Force
 
     $requiredPayloadFiles = @(
         "LICENSE",
         "CHANGELOG.md",
-        "docs\$($metadata.Version).md",
+        "docs\QMOD_FORMAT.md",
+        "docs\releases\$($metadata.Version).md",
+        "docs\sdk\README.md",
         "Resources\Localization\en-US.json",
         "Resources\Localization\zh-CN.json"
     )

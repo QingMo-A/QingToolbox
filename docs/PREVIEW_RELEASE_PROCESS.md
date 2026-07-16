@@ -35,6 +35,12 @@ manifest。manifest 记录 `QingMo-A/QingToolbox`、完整 source commit、
 
 ## 人工发布交接清单
 
+### 已记录的人工验收
+
+- **Pass — tested manually by project owner：**安装程序已由项目所有者在真实 Windows 环境中完成基本人工测试；安装和安装后的基本运行未发现阻塞问题。
+- 此结果不代表所有 Windows 版本、所有 DPI 与多显示器组合、Explorer 重启、注销与关机路径，或所有机器上的 SmartScreen 均已通过。
+- **Not tested manually：**便携版程序真实启动。
+
 - [ ] 候选脚本完整通过，终端摘要中的 clean 和 origin sync 均为 `True`。
 - [ ] 对应 `toolbox` commit 的 Preview validation GitHub Actions 成功。
 - [ ] 显式退出在模块窗口或模块运行时清理失败时仍能完成，且通知区图标被移除。
