@@ -21,6 +21,14 @@ else {
     [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $QingToolboxHostRoot))
 }
 
+$validatorProject = Join-Path $PSScriptRoot "..\tools\QingToolbox.ModuleUpdateMetadataValidator\QingToolbox.ModuleUpdateMetadataValidator.csproj"
+Write-Host "Running module update metadata validator self-test..."
+dotnet run --project $validatorProject -c $Configuration -- --self-test
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Write-Host "Validating module update metadata..."
+dotnet run --project $validatorProject -c $Configuration -- --modules-root $resolvedModulesRoot
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 & (Join-Path $PSScriptRoot "check-module-i18n.ps1") -ModulesRoot $resolvedModulesRoot
 if (-not $?) {
     exit 1

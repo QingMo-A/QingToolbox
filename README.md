@@ -57,3 +57,12 @@ uses a configurable `QingToolboxHostRoot` to reference the host's Abstractions p
 without copying toolbox source into this branch.
 
 PowerGuard release-candidate duration decisions use monotonic `TimeProvider` timestamps; UTC remains limited to UI and event records. Its automated tests use deterministic virtual time, and successful probe events are rate-limited without hiding transitions. Before deployment, complete [the manual PowerGuard acceptance checklist](docs/POWERGUARD-ACCEPTANCE.md). UPS is not supported, and protection depends on QingToolbox remaining active.
+
+Every official module directory contains an `update.json`, while `modules/index.json` is only a lightweight moduleId-to-manifest mapping. An empty `releases` array means the module has not yet been published through the official update source; it does not mean the module is absent. Changing a source `module.json` version does not expose that version to clients. See [the module update protocol](docs/MODULE_UPDATE_PROTOCOL.md).
+
+Validate the protocol and current metadata with:
+
+```powershell
+dotnet run --project tools/QingToolbox.ModuleUpdateMetadataValidator -c Release -- --self-test
+dotnet run --project tools/QingToolbox.ModuleUpdateMetadataValidator -c Release -- --modules-root modules
+```

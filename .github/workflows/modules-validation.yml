@@ -28,6 +28,11 @@ jobs:
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           dotnet-version: 10.0.x
+      - name: Validate module update metadata
+        shell: pwsh
+        run: |
+          dotnet run --project ./modules-source/tools/QingToolbox.ModuleUpdateMetadataValidator -c Release -- --self-test
+          dotnet run --project ./modules-source/tools/QingToolbox.ModuleUpdateMetadataValidator -c Release -- --modules-root ./modules-source/modules
       - name: Verify modules
         shell: pwsh
         run: |

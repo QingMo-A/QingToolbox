@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "sourceId": "qingtoolbox-official",
+  "modules": {
+    "qing.powerguard": {
+      "updateManifest": "PowerGuard/update.json"
+    },
+    "qing.screenpin": {
+      "updateManifest": "ScreenPin/update.json"
+    },
+    "qing.texttools": {
+      "updateManifest": "TextTools/update.json"
+    },
+    "qing.windowtopmost": {
+      "updateManifest": "WindowTopmost/update.json"
+    }
+  }
+}
