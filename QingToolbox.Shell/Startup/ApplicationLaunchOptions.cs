@@ -33,7 +33,14 @@ public sealed record ApplicationLaunchOptions(
             {
                 if (environmentSeen) throw new ArgumentException("Duplicate argument: --environment");
                 environmentSeen = true;
-                if (!Enum.TryParse(ReadValue(), true, out kind))
+                var environmentName = ReadValue();
+                if (environmentName.Equals("Production", StringComparison.OrdinalIgnoreCase))
+                    kind = ApplicationEnvironmentKind.Production;
+                else if (environmentName.Equals("Development", StringComparison.OrdinalIgnoreCase))
+                    kind = ApplicationEnvironmentKind.Development;
+                else if (environmentName.Equals("ModuleTest", StringComparison.OrdinalIgnoreCase))
+                    kind = ApplicationEnvironmentKind.ModuleTest;
+                else
                     throw new ArgumentException("Environment must be Production, Development or ModuleTest.");
             }
             else if (argument.Equals("--profile", StringComparison.OrdinalIgnoreCase))

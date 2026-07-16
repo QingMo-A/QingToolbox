@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Hardened local environment parsing, enforced repository-local sandbox layouts, rejected reparse-point escapes, and preserved `WhatIf` during forced Profile resets.
+
 - Added project-local Development and ModuleTest profiles under `.qingtoolbox`.
 - Isolated development instances, settings, modules, module data, and activation scopes from Production.
 - Prevented sandbox environments from reading or modifying Production login-startup registration and user data.

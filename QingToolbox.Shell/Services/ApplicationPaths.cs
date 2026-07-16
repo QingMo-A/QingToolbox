@@ -6,8 +6,10 @@ namespace QingToolbox.Shell.Services;
 public sealed class ApplicationPaths
 {
     private readonly bool _isProduction;
+    private readonly ApplicationExecutionEnvironment _environment;
     public ApplicationPaths(ApplicationExecutionEnvironment environment)
     {
+        _environment = environment;
         _isProduction = environment.IsProduction;
         var baseModules = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "Modules"));
         if (environment.IsProduction)
@@ -45,11 +47,17 @@ public sealed class ApplicationPaths
 
     public void EnsureDirectories()
     {
+        if (!_isProduction)
+            ApplicationExecutionEnvironment.AssertNoSandboxReparsePoints(
+                _environment.Kind, _environment.ProfileName, _environment.SandboxRoot!);
         var directories = _isProduction
             ? new[] { UserModulesDirectory, ModuleDataDirectory }
             : new[] { RoamingRoot, LocalRoot, UserModulesDirectory,
                 ModuleDataDirectory, LogsDirectory, CacheDirectory, TempDirectory };
         foreach (var directory in directories)
             Directory.CreateDirectory(directory);
+        if (!_isProduction)
+            ApplicationExecutionEnvironment.AssertNoSandboxReparsePoints(
+                _environment.Kind, _environment.ProfileName, _environment.SandboxRoot!);
     }
 }

@@ -275,6 +275,8 @@ internal static class Program
             "No-argument Release semantics must remain Production/Default.");
         Require(ApplicationLaunchOptions.Parse(["--startup"]).IsStartupLaunch,
             "Production startup launch was rejected.");
+        Require(ApplicationLaunchOptions.Parse(["--environment", "production"]).Environment.IsProduction,
+            "Case-insensitive Production name was rejected.");
         void Reject(params string[] args)
         {
             try { _ = ApplicationLaunchOptions.Parse(args); }
@@ -290,18 +292,51 @@ internal static class Program
         Reject("--startup", "--environment", "Development", "--profile", "Shell", "--data-root", @"C:\sandbox");
         Reject("--unknown");
         Reject("--environment", "Development", "--environment", "ModuleTest", "--profile", "Shell", "--data-root", @"C:\sandbox");
+        foreach (var invalidEnvironment in new[] { "0", "1", "2", "3", "999", "-1", "Unknown", " Development " })
+            Reject("--environment", invalidEnvironment);
+        try
+        {
+            _ = ApplicationExecutionEnvironment.Sandbox(
+                (ApplicationEnvironmentKind)999, "Shell", @"C:\repo\.qingtoolbox\development\Shell");
+            throw new InvalidOperationException("Undefined environment kind was accepted by Sandbox().");
+        }
+        catch (ArgumentException) { }
+        try
+        {
+            _ = ApplicationExecutionEnvironment.Sandbox(
+                ApplicationEnvironmentKind.Production, "Default", @"C:\repo\.qingtoolbox\development\Default");
+            throw new InvalidOperationException("Production was accepted by Sandbox().");
+        }
+        catch (ArgumentException) { }
 
         var root = Path.Combine(Path.GetTempPath(), $"QingToolbox-environment-smoke-{Guid.NewGuid():N}");
         try
         {
-            var devRoot = Path.Combine(root, "dev");
-            var testRoot = Path.Combine(root, "test");
+            var devRoot = Path.Combine(root, ".qingtoolbox", "development", "Shell");
+            var otherProfileRoot = Path.Combine(root, ".qingtoolbox", "development", "Other");
+            var testRoot = Path.Combine(root, ".qingtoolbox", "module-test", "Shell");
+            var otherRepositoryRoot = Path.Combine(root, "other-repository", ".qingtoolbox", "development", "Shell");
             var dev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "Shell", devRoot);
-            var sameDev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "Shell", devRoot + Path.DirectorySeparatorChar);
-            var otherDev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "Other", devRoot);
+            var sameDev = ApplicationExecutionEnvironment.Sandbox(
+                ApplicationEnvironmentKind.Development, "shell", devRoot.ToUpperInvariant() + Path.DirectorySeparatorChar);
+            var otherDev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "Other", otherProfileRoot);
             var otherRootDev = ApplicationExecutionEnvironment.Sandbox(
-                ApplicationEnvironmentKind.Development, "Shell", Path.Combine(root, "other-dev"));
+                ApplicationEnvironmentKind.Development, "Shell", otherRepositoryRoot);
             var moduleTest = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.ModuleTest, "Shell", testRoot);
+            Require(ApplicationLaunchOptions.Parse(["--environment", "development", "--profile", "Shell", "--data-root", devRoot]).Environment.IsDevelopment &&
+                    ApplicationLaunchOptions.Parse(["--environment", "moduletest", "--profile", "Shell", "--data-root", testRoot]).Environment.IsModuleTest,
+                "Named sandbox environments were not parsed case-insensitively.");
+            void RejectSandbox(ApplicationEnvironmentKind kind, string profile, string path)
+            {
+                try { _ = ApplicationExecutionEnvironment.Sandbox(kind, profile, path); }
+                catch (ArgumentException) { return; }
+                throw new InvalidOperationException($"Unsafe sandbox layout was accepted: {path}");
+            }
+            RejectSandbox(ApplicationEnvironmentKind.Development, "Shell", Path.Combine(root, "sandbox"));
+            RejectSandbox(ApplicationEnvironmentKind.Development, "Shell", testRoot);
+            RejectSandbox(ApplicationEnvironmentKind.Development, "Other", devRoot);
+            RejectSandbox(ApplicationEnvironmentKind.Development, "Shell", Path.Combine(root, "development", "Shell"));
+            RejectSandbox(ApplicationEnvironmentKind.Development, "Shell", Path.Combine(devRoot, "extra"));
             Require(dev.InstanceScope == sameDev.InstanceScope && dev.InstanceScope != otherDev.InstanceScope &&
                     dev.InstanceScope != otherRootDev.InstanceScope && dev.InstanceScope != moduleTest.InstanceScope,
                 "Sandbox instance scopes are not stable and isolated.");
@@ -334,6 +369,11 @@ internal static class Program
                     .All(path => Path.GetFullPath(path).StartsWith(Path.GetFullPath(devRoot) + Path.DirectorySeparatorChar,
                         StringComparison.OrdinalIgnoreCase)),
                 "Development writable paths escaped the sandbox.");
+            Require(new[] { testPaths.SettingsPath, testPaths.UserModulesDirectory, testPaths.ModuleDataDirectory,
+                    testPaths.LogsDirectory, testPaths.CacheDirectory, testPaths.TempDirectory }
+                    .All(path => Path.GetFullPath(path).StartsWith(Path.GetFullPath(testRoot) + Path.DirectorySeparatorChar,
+                        StringComparison.OrdinalIgnoreCase)),
+                "ModuleTest writable paths escaped the sandbox.");
             Require(devPaths.ModuleDiscoveryDirectories.Count == 2 &&
                     testPaths.ModuleDiscoveryDirectories.Count == 1 &&
                     testPaths.ModuleDiscoveryDirectories[0] == testPaths.UserModulesDirectory,
