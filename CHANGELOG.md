@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added a localized Windows notification-area icon with Open, Settings, Floating Badge and Exit actions.
+- Added a persisted main-window close preference with an explicit first-close choice and an Ask-again option.
+- Unified native close routes, secondary-instance activation, floating-badge exit and tray exit around recoverable window and clean shutdown coordination.
+- Kept a visible recovery surface while running and removed the notification icon during clean exit.
 - Contained startup cancellation during shutdown and stopped activation pipes before service disposal.
 - Acknowledged accepted single-instance messages before UI activation and isolated handler/client failures.
 - Enforced strictly bounded pipe reads and kept the server available after malformed or disconnected clients.

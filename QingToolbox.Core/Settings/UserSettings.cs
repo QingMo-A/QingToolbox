@@ -2,7 +2,7 @@ namespace QingToolbox.Core.Settings;
 
 public sealed class UserSettings
 {
-    public int SettingsSchemaVersion { get; set; } = 3;
+    public int SettingsSchemaVersion { get; set; } = 4;
     public string Language { get; set; } = "system";
     public double? FloatingBadgeLeft { get; set; }
     public double? FloatingBadgeTop { get; set; }
@@ -12,11 +12,12 @@ public sealed class UserSettings
     public double? FloatingBadgeVerticalRatio { get; set; }
     public bool LaunchAtLogin { get; set; }
     public StartupPresentationMode StartupPresentationMode { get; set; } = StartupPresentationMode.FloatingBadge;
+    public MainWindowCloseBehavior MainWindowCloseBehavior { get; set; } = MainWindowCloseBehavior.Ask;
     public List<StartupModuleAuthorization> StartupModules { get; set; } = [];
 
     internal void Normalize()
     {
-        SettingsSchemaVersion = Math.Max(3, SettingsSchemaVersion);
+        SettingsSchemaVersion = Math.Max(4, SettingsSchemaVersion);
         Language = string.IsNullOrWhiteSpace(Language) ? "system" : Language;
         FloatingBadgeLeft = FiniteOrNull(FloatingBadgeLeft);
         FloatingBadgeTop = FiniteOrNull(FloatingBadgeTop);
@@ -25,6 +26,8 @@ public sealed class UserSettings
         FloatingBadgeMonitorDeviceName = string.IsNullOrWhiteSpace(FloatingBadgeMonitorDeviceName)
             ? null
             : FloatingBadgeMonitorDeviceName.Trim();
+        if (!Enum.IsDefined(MainWindowCloseBehavior))
+            MainWindowCloseBehavior = MainWindowCloseBehavior.Ask;
 
         if (FloatingBadgeLeft is null || FloatingBadgeTop is null)
             HasFloatingBadgePosition = false;

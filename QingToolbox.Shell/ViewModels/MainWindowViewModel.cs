@@ -33,7 +33,11 @@ public sealed partial class MainWindowViewModel(
     private bool _suppressPresentationSave;
     private int _presentationSaveVersion;
     private readonly SemaphoreSlim _presentationSaveGate = new(1, 1);
+    private readonly SemaphoreSlim _closeBehaviorSaveGate = new(1, 1);
     private StartupPresentationMode _persistedStartupPresentationMode;
+    private bool _suppressCloseBehaviorSave;
+    private MainWindowCloseBehavior _persistedCloseBehavior = MainWindowCloseBehavior.Ask;
+    private int _closeBehaviorSaveVersion;
     [ObservableProperty]
     private string _statusMessage = localization.GetString("status.ready");
 
@@ -84,6 +88,9 @@ public sealed partial class MainWindowViewModel(
     [ObservableProperty] private bool _isStartupSettingsBusy;
     [ObservableProperty] private StartupPresentationMode _selectedStartupPresentationMode = StartupPresentationMode.FloatingBadge;
     [ObservableProperty] private string _startupSettingsMessage = string.Empty;
+    [ObservableProperty] private MainWindowCloseBehavior _selectedMainWindowCloseBehavior = MainWindowCloseBehavior.Ask;
+    [ObservableProperty] private bool _isCloseBehaviorBusy;
+    [ObservableProperty] private string _closeBehaviorMessage = string.Empty;
     [ObservableProperty] private int _startupAuthorizationCount;
     [ObservableProperty] private int _missingStartupAuthorizationCount;
 
@@ -559,7 +566,56 @@ public sealed partial class MainWindowViewModel(
         SelectedStartupPresentationMode = settings.StartupPresentationMode;
         _persistedStartupPresentationMode = settings.StartupPresentationMode;
         _suppressPresentationSave = false;
+        _suppressCloseBehaviorSave = true;
+        SelectedMainWindowCloseBehavior = settings.MainWindowCloseBehavior;
+        _persistedCloseBehavior = settings.MainWindowCloseBehavior;
+        _suppressCloseBehaviorSave = false;
         await RefreshModulesAsync(cancellationToken);
+    }
+
+    partial void OnSelectedMainWindowCloseBehaviorChanged(MainWindowCloseBehavior value)
+    {
+        if (!_initialized || _suppressCloseBehaviorSave) return;
+        var version = Interlocked.Increment(ref _closeBehaviorSaveVersion);
+        _ = SaveCloseBehaviorObservedAsync(value, version);
+    }
+
+    private async Task SaveCloseBehaviorObservedAsync(MainWindowCloseBehavior value, int version)
+    {
+        await _closeBehaviorSaveGate.WaitAsync();
+        try
+        {
+            if (version != Volatile.Read(ref _closeBehaviorSaveVersion)) return;
+            IsCloseBehaviorBusy = true;
+            await settingsService.UpdateAsync(settings => settings.MainWindowCloseBehavior = value);
+            _persistedCloseBehavior = value;
+            if (version == Volatile.Read(ref _closeBehaviorSaveVersion))
+                CloseBehaviorMessage = localization.GetString("closeBehavior.saved");
+        }
+        catch
+        {
+            if (version == Volatile.Read(ref _closeBehaviorSaveVersion))
+            {
+                _suppressCloseBehaviorSave = true;
+                SelectedMainWindowCloseBehavior = _persistedCloseBehavior;
+                _suppressCloseBehaviorSave = false;
+                CloseBehaviorMessage = localization.GetString("closeBehavior.saveFailed");
+            }
+        }
+        finally
+        {
+            if (version == Volatile.Read(ref _closeBehaviorSaveVersion))
+                IsCloseBehaviorBusy = false;
+            _closeBehaviorSaveGate.Release();
+        }
+    }
+
+    internal void SetCloseBehaviorFromCloseDialog(MainWindowCloseBehavior value)
+    {
+        _persistedCloseBehavior = value;
+        _suppressCloseBehaviorSave = true;
+        SelectedMainWindowCloseBehavior = value;
+        _suppressCloseBehaviorSave = false;
     }
 
     public async Task RestoreAuthorizedStartupModulesAsync(CancellationToken cancellationToken = default)

@@ -40,6 +40,9 @@ manifest。manifest 记录 `QingMo-A/QingToolbox`、完整 source commit、
 - [ ] manifest 的 source commit 与准备发布的 commit 完全一致。
 - [ ] ZIP、安装包、两个 SHA256 文件和 manifest 文件名与摘要一致。
 - [ ] 在真实 Windows 用户会话中启动 Shell，确认首页和模块页显示正常。
+- [ ] 验证首次关闭选择、持久化关闭行为、托盘左键恢复和本地化右键菜单。
+- [ ] 验证正常退出后通知区域图标和 QingToolbox.Shell.exe 均不残留。
+- [ ] 确认便携 ZIP 和安装器均不包含开发诊断用 `stop-qingtoolbox.bat`。
 - [ ] 确认 Refresh Modules 不会自动加载模块 DLL。
 - [ ] 手动验证中文和英文 Shell、本地化模块界面及安装向导。
 - [ ] 手动验证无管理员权限安装、开始菜单入口和可选桌面快捷方式。

@@ -39,6 +39,7 @@ internal static class Program
     private static int Run(string[] args)
     {
         var options = ParseOptions(args);
+        VerifyCloseBehaviorSettings();
         var repositoryRoot = FindRepositoryRoot(AppContext.BaseDirectory);
         var configuration = GetBuildConfiguration(AppContext.BaseDirectory);
         var shellOutput = Path.Combine(
@@ -511,11 +512,6 @@ internal static class Program
         while (!condition()) await Task.Delay(10, timeout.Token);
     }
 
-    private static void Require(bool condition, string message)
-    {
-        if (!condition) throw new InvalidOperationException(message);
-    }
-
     private sealed class FakeStartupRegistrationStore : IStartupRegistrationStore
     {
         public string? Value { get; private set; }
@@ -856,6 +852,34 @@ internal static class Program
 
         public void RaiseCultureChangedForTest() =>
             CultureChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static void VerifyCloseBehaviorSettings()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"QingToolbox-close-settings-{Guid.NewGuid():N}");
+        var path = Path.Combine(root, "settings.json");
+        Directory.CreateDirectory(root);
+        try
+        {
+            using var service = new UserSettingsService(path);
+            var missing = service.ReadAsync().GetAwaiter().GetResult();
+            Require(missing.MainWindowCloseBehavior == MainWindowCloseBehavior.Ask,
+                "Missing close behavior must default to Ask.");
+            File.WriteAllText(path, "{\"Language\":\"zh-CN\",\"MainWindowCloseBehavior\":999}");
+            var normalized = service.ReadAsync().GetAwaiter().GetResult();
+            Require(normalized.MainWindowCloseBehavior == MainWindowCloseBehavior.Ask && normalized.Language == "zh-CN",
+                "Invalid close behavior must normalize to Ask without losing other settings.");
+            service.UpdateAsync(settings => settings.MainWindowCloseBehavior = MainWindowCloseBehavior.MinimizeToNotificationArea)
+                .GetAwaiter().GetResult();
+            Require(service.ReadAsync().GetAwaiter().GetResult().MainWindowCloseBehavior == MainWindowCloseBehavior.MinimizeToNotificationArea,
+                "Close behavior must persist through the transactional settings update.");
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    private static void Require(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException(message);
     }
 
     private static string GetBuildConfiguration(string baseDirectory)

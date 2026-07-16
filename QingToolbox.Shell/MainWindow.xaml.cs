@@ -6,6 +6,8 @@ using QingToolbox.Shell.ViewModels;
 using QingToolbox.Shell.Services;
 using QingToolbox.Shell.Startup;
 using QingToolbox.Core.Settings;
+using QingToolbox.Abstractions.Localization;
+using QingToolbox.Shell.Views;
 
 namespace QingToolbox.Shell;
 
@@ -14,17 +16,34 @@ public partial class MainWindow : Window
     private readonly MainWindowViewModel _viewModel;
     private readonly FloatingBadgeManager _floatingBadgeManager;
     private readonly StartupSessionCoordinator _startupSession;
+    private readonly UserSettingsService _settingsService;
+    private readonly ILocalizationService _localization;
+    private readonly INotificationAreaIcon _notificationArea;
+    private readonly ApplicationExitCoordinator _exitCoordinator;
+    private readonly ModuleWindowManager _moduleWindowManager;
+    private int _closeRequestPending;
+    private WindowState _notificationAreaRestoreState = WindowState.Normal;
 
     public MainWindow(
         MainWindowViewModel viewModel,
         FloatingBadgeManager floatingBadgeManager,
-        StartupSessionCoordinator startupSession)
+        StartupSessionCoordinator startupSession,
+        UserSettingsService settingsService,
+        ILocalizationService localization,
+        INotificationAreaIcon notificationArea,
+        ApplicationExitCoordinator exitCoordinator,
+        ModuleWindowManager moduleWindowManager)
     {
         InitializeComponent();
 
         _viewModel = viewModel;
         _floatingBadgeManager = floatingBadgeManager;
         _startupSession = startupSession;
+        _settingsService = settingsService;
+        _localization = localization;
+        _notificationArea = notificationArea;
+        _exitCoordinator = exitCoordinator;
+        _moduleWindowManager = moduleWindowManager;
         _startupSession.Attach(this, floatingBadgeManager);
         _floatingBadgeManager.Attach(this);
         DataContext = viewModel;
@@ -131,8 +150,98 @@ public partial class MainWindow : Window
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
-        _startupSession.PrepareForExit();
-        _floatingBadgeManager.OnMainWindowClosing();
-        _viewModel.CloseModuleWindows();
+        if (_exitCoordinator.ApplicationExitRequested) return;
+        e.Cancel = true;
+        if (Interlocked.Exchange(ref _closeRequestPending, 1) != 0) return;
+        _ = HandleMainWindowCloseRequestObservedAsync();
+    }
+
+    private async Task HandleMainWindowCloseRequestObservedAsync()
+    {
+        try { await HandleMainWindowCloseRequestAsync(); }
+        catch (Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine($"Main window close request failed: {exception.GetType().Name}");
+            EnsureMainWindowVisible();
+            _viewModel.StatusMessage = _localization.GetString("closeBehavior.saveFailed");
+        }
+        finally { Interlocked.Exchange(ref _closeRequestPending, 0); }
+    }
+
+    internal async Task HandleMainWindowCloseRequestAsync()
+    {
+        if (_exitCoordinator.ApplicationExitRequested || _startupSession.State == StartupSessionState.Exiting) return;
+        var behavior = (await _settingsService.ReadAsync()).MainWindowCloseBehavior;
+        if (behavior == MainWindowCloseBehavior.Ask)
+        {
+            var dialog = new CloseBehaviorDialog(_localization) { Owner = this };
+            if (dialog.ShowDialog() != true || dialog.SelectedBehavior is not { } selected)
+            {
+                EnsureMainWindowVisible();
+                return;
+            }
+            if (selected == MainWindowCloseBehavior.MinimizeToNotificationArea && !_notificationArea.Initialize())
+            {
+                EnsureMainWindowVisible();
+                _viewModel.StatusMessage = _localization.GetString("notificationArea.unavailable");
+                return;
+            }
+            try
+            {
+                await _settingsService.UpdateAsync(settings => settings.MainWindowCloseBehavior = selected);
+                _viewModel.SetCloseBehaviorFromCloseDialog(selected);
+            }
+            catch
+            {
+                EnsureMainWindowVisible();
+                _viewModel.StatusMessage = _localization.GetString("closeBehavior.saveFailed");
+                return;
+            }
+            behavior = selected;
+        }
+
+        if (behavior == MainWindowCloseBehavior.MinimizeToNotificationArea)
+            await MinimizeMainWindowToNotificationAreaAsync();
+        else if (behavior == MainWindowCloseBehavior.ExitApplication)
+            await _exitCoordinator.RequestExitAsync(ApplicationExitReason.UserRequested);
+    }
+
+    internal Task MinimizeMainWindowToNotificationAreaAsync()
+    {
+        if (!_notificationArea.Initialize())
+        {
+            EnsureMainWindowVisible();
+            _viewModel.StatusMessage = _localization.GetString("notificationArea.unavailable");
+            return Task.CompletedTask;
+        }
+        _notificationAreaRestoreState = WindowState == WindowState.Maximized ? WindowState.Maximized : WindowState.Normal;
+        _moduleWindowManager.SuspendForFloatingBadge();
+        ShowInTaskbar = false;
+        Hide();
+        return Task.CompletedTask;
+    }
+
+    internal async Task RestoreMainWindowAsync()
+    {
+        if (_exitCoordinator.ApplicationExitRequested) return;
+        await _floatingBadgeManager.RestoreAsync();
+        if (_exitCoordinator.ApplicationExitRequested) return;
+        Opacity = 1;
+        ShowActivated = true;
+        ShowInTaskbar = true;
+        Show();
+        WindowState = _notificationAreaRestoreState;
+        _moduleWindowManager.RestoreAfterFloatingBadge();
+        Activate();
+        Focus();
+    }
+
+    private void EnsureMainWindowVisible()
+    {
+        Opacity = 1;
+        ShowInTaskbar = true;
+        if (!IsVisible) Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
     }
 }

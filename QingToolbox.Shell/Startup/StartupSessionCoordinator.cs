@@ -92,15 +92,7 @@ public sealed class StartupSessionCoordinator(ApplicationLaunchOptions launchOpt
     {
         if (!TryRequestManualActivation() || _lifetime.IsCancellationRequested ||
             _mainWindow is null || _badgeManager is null) return;
-        await _badgeManager.RestoreAsync(_lifetime.Token);
-        if (State == StartupSessionState.Exiting || _lifetime.IsCancellationRequested) return;
-        _mainWindow.Opacity = 1;
-        _mainWindow.ShowActivated = true;
-        _mainWindow.ShowInTaskbar = true;
-        if (_mainWindow.WindowState == WindowState.Minimized) _mainWindow.WindowState = WindowState.Normal;
-        _mainWindow.Show();
-        _mainWindow.Activate();
-        _mainWindow.Focus();
+        await _mainWindow.RestoreMainWindowAsync();
     }
 
     public void PrepareForExit()

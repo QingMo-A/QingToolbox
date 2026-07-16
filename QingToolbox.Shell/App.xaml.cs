@@ -93,6 +93,9 @@ public partial class App : Application
             provider => provider.GetRequiredService<LocalizationManager>());
         services.AddSingleton<ModuleWindowManager>();
         services.AddSingleton<FloatingBadgeManager>();
+        services.AddSingleton<NotificationAreaService>();
+        services.AddSingleton<INotificationAreaIcon>(provider => provider.GetRequiredService<NotificationAreaService>());
+        services.AddSingleton<ApplicationExitCoordinator>();
         services.AddSingleton<ApplicationPaths>();
         services.AddSingleton<ModulePackageImporter>();
         services.AddSingleton<MainWindowViewModel>();
@@ -110,6 +113,25 @@ public partial class App : Application
             .InitializeAsync(localizationDirectory);
 
         var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
+        var notificationArea = _serviceProvider.GetRequiredService<NotificationAreaService>();
+        var exitCoordinator = _serviceProvider.GetRequiredService<ApplicationExitCoordinator>();
+        var badgeManager = _serviceProvider.GetRequiredService<FloatingBadgeManager>();
+        var viewModel = _serviceProvider.GetRequiredService<MainWindowViewModel>();
+        exitCoordinator.ConfigureStopActivation(StopAcceptingActivationAsync);
+        badgeManager.ConfigureApplicationExit(() => exitCoordinator.RequestExitAsync(ApplicationExitReason.FloatingBadgeMenu));
+        notificationArea.OpenRequested = mainWindow.RestoreMainWindowAsync;
+        notificationArea.OpenSettingsRequested = async () =>
+        {
+            await mainWindow.RestoreMainWindowAsync();
+            viewModel.SelectedNavigationKey = "Settings";
+        };
+        notificationArea.FloatingBadgeRequested = async () =>
+        {
+            await mainWindow.RestoreMainWindowAsync();
+            await badgeManager.EnterAsync();
+        };
+        notificationArea.ExitRequested = () => exitCoordinator.RequestExitAsync(ApplicationExitReason.NotificationAreaMenu);
+        notificationArea.Initialize();
         if (launchOptions.IsStartupLaunch) { mainWindow.Opacity = 0; mainWindow.ShowActivated = false; }
         mainWindow.Show();
         if (_startupSession.ManualActivationRequested) await _startupSession.ActivateMainWindowAsync();
@@ -128,6 +150,7 @@ public partial class App : Application
                 _singleInstance = null;
             }
             _serviceProvider?.GetService<FloatingBadgeManager>()?.PrepareForApplicationExit();
+            _serviceProvider?.GetService<NotificationAreaService>()?.Dispose();
             var runtimeManager = _serviceProvider?.GetService<ModuleRuntimeManager>();
             runtimeManager?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
@@ -155,8 +178,18 @@ public partial class App : Application
 
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
     {
-        _startupSession?.PrepareForExit();
-        _serviceProvider?.GetService<FloatingBadgeManager>()?.PrepareForApplicationExit();
+        var coordinator = _serviceProvider?.GetService<ApplicationExitCoordinator>();
+        if (coordinator is not null) _ = coordinator.RequestExitAsync(ApplicationExitReason.SessionEnding);
+        else _startupSession?.PrepareForExit();
         base.OnSessionEnding(e);
+    }
+
+    private async Task StopAcceptingActivationAsync()
+    {
+        if (_singleInstance is null) return;
+        if (_activationHandler is not null)
+            _singleInstance.MessageReceived -= _activationHandler;
+        await _singleInstance.DisposeAsync();
+        _singleInstance = null;
     }
 }

@@ -18,6 +18,7 @@ public sealed class FloatingBadgeManager(
     private FloatingBadgeWindow? _badgeWindow;
     private WindowSnapshot? _snapshot;
     private bool _exitRequested;
+    private Func<Task>? _applicationExitRequest;
     private bool _disposed;
 
     public FloatingBadgeState State => _stateMachine.State;
@@ -25,6 +26,7 @@ public sealed class FloatingBadgeManager(
     public event EventHandler? StateChanged;
 
     public void Attach(MainWindow mainWindow) => _mainWindow = mainWindow;
+    public void ConfigureApplicationExit(Func<Task> request) => _applicationExitRequest = request;
 
     public async Task EnterAsync(CancellationToken cancellationToken = default)
     {
@@ -128,6 +130,11 @@ public sealed class FloatingBadgeManager(
 
     public async Task ExitApplicationAsync()
     {
+        if (_applicationExitRequest is not null)
+        {
+            await _applicationExitRequest();
+            return;
+        }
         PrepareForApplicationExit();
         await CompleteExitAfterTransitionAsync();
     }

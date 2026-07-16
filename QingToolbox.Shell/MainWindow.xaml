@@ -1344,6 +1344,19 @@
                                   SelectedValuePath="Code"
                                   SelectedValue="{Binding SelectedLanguageCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                         <Border Margin="0,24,0,0" Height="1" Background="#E2E8F0"/>
+                        <TextBlock Margin="0,20,0,0" Text="{Binding Strings[closeBehavior.title]}"
+                                   FontSize="16" FontWeight="SemiBold"/>
+                        <TextBlock Margin="0,8,0,7" Text="{Binding Strings[closeBehavior.whenClosing]}"/>
+                        <ComboBox Width="280" HorizontalAlignment="Left"
+                                  SelectedValuePath="Tag"
+                                  SelectedValue="{Binding SelectedMainWindowCloseBehavior, Mode=TwoWay}">
+                            <ComboBox.Style><Style TargetType="ComboBox"><Style.Triggers><DataTrigger Binding="{Binding IsCloseBehaviorBusy}" Value="True"><Setter Property="IsEnabled" Value="False"/></DataTrigger></Style.Triggers></Style></ComboBox.Style>
+                            <ComboBoxItem Tag="{x:Static settings:MainWindowCloseBehavior.MinimizeToNotificationArea}" Content="{Binding DataContext.Strings[closeBehavior.minimize], RelativeSource={RelativeSource AncestorType=Window}}"/>
+                            <ComboBoxItem Tag="{x:Static settings:MainWindowCloseBehavior.ExitApplication}" Content="{Binding DataContext.Strings[closeBehavior.exit], RelativeSource={RelativeSource AncestorType=Window}}"/>
+                            <ComboBoxItem Tag="{x:Static settings:MainWindowCloseBehavior.Ask}" Content="{Binding DataContext.Strings[closeBehavior.ask], RelativeSource={RelativeSource AncestorType=Window}}"/>
+                        </ComboBox>
+                        <TextBlock Margin="0,8,0,0" Text="{Binding CloseBehaviorMessage}" TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <Border Margin="0,24,0,0" Height="1" Background="#E2E8F0"/>
                         <TextBlock Margin="0,20,0,0" Text="{Binding Strings[startup.settingsTitle]}"
                                    FontSize="16" FontWeight="SemiBold"/>
                         <CheckBox Margin="0,12,0,0"
