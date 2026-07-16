@@ -10,7 +10,7 @@ QingToolbox separates the installed product, host development, and module testin
 
 Both sandbox environments store settings and module data under `roaming`, imported modules, logs and cache under `local`, and temporary files under `temp`. They never copy or fall back to Production data. `.qingtoolbox` is local state and must not be committed.
 
-The project-local layout is an enforced contract, not a convention. A Development data root must be exactly `<RepoRoot>\.qingtoolbox\development\<Profile>` and a ModuleTest data root must be exactly `<RepoRoot>\.qingtoolbox\module-test\<Profile>`. The repository may be on any drive, but the environment folder and final directory name must match the selected environment and Profile. Arbitrary absolute data roots are rejected rather than corrected or guessed.
+The project-local layout is an enforced contract, not a convention. The launch script explicitly passes `--repo-root`; the host validates stable QingToolbox source markers and never guesses the repository from the current directory, `.git`, the executable location, or a solution parent. SandboxRoot is then uniquely derived as `<RepositoryRoot>\.qingtoolbox\development\<Profile>` or `<RepositoryRoot>\.qingtoolbox\module-test\<Profile>`. A lookalike `.qingtoolbox` tree elsewhere is insufficient and arbitrary `--data-root` overrides are not supported. The repository itself may be on any drive.
 
 Existing `.qingtoolbox`, environment, and Profile path segments must be ordinary directories. Directory symbolic links, junctions, and other reparse points in these segments are rejected before startup and checked again after directory creation. Profile reset also refuses a Profile containing directory reparse points instead of following them outside the sandbox.
 
@@ -27,6 +27,8 @@ The main window, notification icon, and floating badge identify sandbox instance
 .\scripts\start-dev-host.ps1 -Profile Shell2
 ```
 
+The equivalent explicit host arguments are `--environment Development --profile Shell --repo-root <RepositoryRoot>`. Normally use the script so its own location supplies the real repository root.
+
 Debug builds intentionally reject an unqualified launch. Do not press F5 without explicit environment arguments; use the script above.
 
 ## Start a module-test host
@@ -34,6 +36,8 @@ Debug builds intentionally reject an unqualified launch. Do not press F5 without
 ```powershell
 .\scripts\start-module-test-host.ps1 -Profile PowerGuard
 ```
+
+The corresponding host arguments are `--environment ModuleTest --profile PowerGuard --repo-root <RepositoryRoot>`.
 
 Manually place the module payload in `.qingtoolbox\module-test\PowerGuard\local\modules`. This phase does not build, deploy, download, or automatically load a module. It uses the current source host only; versioned host caching is planned for a later phase.
 

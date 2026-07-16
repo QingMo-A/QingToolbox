@@ -12,6 +12,7 @@ $developmentProfile = "Contract-$suffix"
 $junctionProfile = "Junction-$suffix"
 $nestedJunctionProfile = "NestedJunction-$suffix"
 $targetRoot = Join-Path ([IO.Path]::GetTempPath()) "QingToolbox-junction-target-$suffix"
+$fakeRepositoryRoot = Join-Path ([IO.Path]::GetTempPath()) "QingToolbox-fake-repository-$suffix"
 
 function Invoke-Script {
     param([string]$Script, [string[]]$Arguments)
@@ -46,6 +47,28 @@ if (-not $development.LocalRoot.Equals($expectedLocalRoot, [StringComparison]::O
         [IO.Path]::GetFullPath((Join-Path $expectedLocalRoot "module-test\$junctionProfile")),
         [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Common helper did not resolve strict project-local profile paths.'
+}
+if (-not (Assert-LocalRepositoryRoot -RepositoryRoot $development.RepoRoot).Equals(
+        $development.RepoRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Common helper did not validate the real repository root.'
+}
+[IO.Directory]::CreateDirectory($fakeRepositoryRoot) > $null
+$fakeRejected = $false
+try { Assert-LocalRepositoryRoot -RepositoryRoot $fakeRepositoryRoot > $null }
+catch { $fakeRejected = $true }
+if (-not $fakeRejected) { throw 'Repository root without required markers was accepted.' }
+
+foreach ($launch in @(
+    @{ Script = $dev; Arguments = @('-Profile', $developmentProfile, '-NoBuild', '-ValidateOnly') },
+    @{ Script = $moduleTest; Arguments = @('-Profile', $junctionProfile, '-NoBuild', '-ValidateOnly') })) {
+    $launchArguments = $launch.Arguments
+    $output = @(& $shell -NoProfile -ExecutionPolicy Bypass -File $launch.Script @launchArguments)
+    if ($LASTEXITCODE -ne 0) { throw "Launch validation failed for $($launch.Script)." }
+    $repoArgument = [Array]::IndexOf($output, 'Argument: --repo-root')
+    if ($repoArgument -lt 0 -or $repoArgument + 1 -ge $output.Count -or
+        -not $output[$repoArgument + 1].Equals("Argument: $($development.RepoRoot)", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Launch arguments did not contain the validated repository root: $($launch.Script)"
+    }
 }
 
 foreach ($profile in @('..', '../escape', '..\escape', 'bad/name', 'bad\name', 'bad*name', 'bad?name')) {
@@ -126,6 +149,9 @@ finally {
             throw 'Junction target sentinel did not survive cleanup.'
         }
         Remove-Item -LiteralPath $targetRoot -Recurse -Force
+    }
+    if (Test-Path -LiteralPath $fakeRepositoryRoot) {
+        Remove-Item -LiteralPath $fakeRepositoryRoot -Recurse -Force
     }
     foreach ($entry in @(
         @{ Path = $development.EnvironmentRoot; Existed = $developmentRootExisted },

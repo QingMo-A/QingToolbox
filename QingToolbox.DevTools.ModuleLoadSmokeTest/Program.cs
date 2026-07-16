@@ -283,28 +283,29 @@ internal static class Program
             catch (ArgumentException) { return; }
             throw new InvalidOperationException($"Invalid launch arguments were accepted: {string.Join(' ', args)}");
         }
-        Reject("--environment", "Production", "--data-root", @"C:\sandbox");
-        Reject("--environment", "Development", "--data-root", @"C:\sandbox");
+        Reject("--environment", "Production", "--repo-root", @"C:\repo");
         Reject("--environment", "Development", "--profile", "Shell");
         Reject("--environment", "ModuleTest", "--profile", "PowerGuard");
         Reject("--environment", "Development", "--profile", "..");
-        Reject("--environment", "Development", "--profile", "Shell", "--data-root", "relative");
-        Reject("--startup", "--environment", "Development", "--profile", "Shell", "--data-root", @"C:\sandbox");
+        Reject("--environment", "Development", "--profile", "Shell", "--repo-root", "relative");
+        Reject("--startup", "--environment", "Development", "--profile", "Shell", "--repo-root", @"C:\repo");
         Reject("--unknown");
-        Reject("--environment", "Development", "--environment", "ModuleTest", "--profile", "Shell", "--data-root", @"C:\sandbox");
+        Reject("--environment", "Development", "--environment", "ModuleTest", "--profile", "Shell", "--repo-root", @"C:\repo");
+        Reject("--environment", "Development", "--profile", "Shell", "--repo-root", @"C:\repo", "--repo-root", @"D:\repo");
+        Reject("--environment", "Development", "--profile", "Shell", "--data-root", @"C:\lookalike\.qingtoolbox\development\Shell");
         foreach (var invalidEnvironment in new[] { "0", "1", "2", "3", "999", "-1", "Unknown", " Development " })
             Reject("--environment", invalidEnvironment);
         try
         {
             _ = ApplicationExecutionEnvironment.Sandbox(
-                (ApplicationEnvironmentKind)999, "Shell", @"C:\repo\.qingtoolbox\development\Shell");
+                (ApplicationEnvironmentKind)999, "Shell", @"C:\repo");
             throw new InvalidOperationException("Undefined environment kind was accepted by Sandbox().");
         }
         catch (ArgumentException) { }
         try
         {
             _ = ApplicationExecutionEnvironment.Sandbox(
-                ApplicationEnvironmentKind.Production, "Default", @"C:\repo\.qingtoolbox\development\Default");
+                ApplicationEnvironmentKind.Production, "Default", @"C:\repo");
             throw new InvalidOperationException("Production was accepted by Sandbox().");
         }
         catch (ArgumentException) { }
@@ -312,31 +313,42 @@ internal static class Program
         var root = Path.Combine(Path.GetTempPath(), $"QingToolbox-environment-smoke-{Guid.NewGuid():N}");
         try
         {
-            var devRoot = Path.Combine(root, ".qingtoolbox", "development", "Shell");
-            var otherProfileRoot = Path.Combine(root, ".qingtoolbox", "development", "Other");
-            var testRoot = Path.Combine(root, ".qingtoolbox", "module-test", "Shell");
-            var otherRepositoryRoot = Path.Combine(root, "other-repository", ".qingtoolbox", "development", "Shell");
-            var dev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "Shell", devRoot);
+            static void CreateFakeRepository(string repositoryRoot)
+            {
+                Directory.CreateDirectory(Path.Combine(repositoryRoot, "QingToolbox.Shell"));
+                Directory.CreateDirectory(Path.Combine(repositoryRoot, "scripts"));
+                File.WriteAllText(Path.Combine(repositoryRoot, "QingToolbox.Shell", "QingToolbox.Shell.csproj"), "<Project />");
+                File.WriteAllText(Path.Combine(repositoryRoot, "scripts", "start-dev-host.ps1"), "# marker");
+                File.WriteAllText(Path.Combine(repositoryRoot, "Directory.Build.props"), "<Project />");
+            }
+            var repositoryRoot = Path.Combine(root, "repository");
+            var otherRepositoryRoot = Path.Combine(root, "other-repository");
+            CreateFakeRepository(repositoryRoot);
+            CreateFakeRepository(otherRepositoryRoot);
+            var repositoryFile = Path.Combine(root, "repository-file.txt");
+            File.WriteAllText(repositoryFile, "not a repository");
+            var missingMarkersRoot = Path.Combine(root, "missing-markers");
+            Directory.CreateDirectory(missingMarkersRoot);
+            Reject("--environment", "Development", "--profile", "Shell", "--repo-root", repositoryFile);
+            Reject("--environment", "Development", "--profile", "Shell", "--repo-root", Path.GetPathRoot(root)!);
+            Reject("--environment", "Development", "--profile", "Shell", "--repo-root", missingMarkersRoot);
+
+            var devRoot = Path.Combine(repositoryRoot, ".qingtoolbox", "development", "Shell");
+            var testRoot = Path.Combine(repositoryRoot, ".qingtoolbox", "module-test", "Shell");
+            var dev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "Shell", repositoryRoot);
             var sameDev = ApplicationExecutionEnvironment.Sandbox(
-                ApplicationEnvironmentKind.Development, "shell", devRoot.ToUpperInvariant() + Path.DirectorySeparatorChar);
-            var otherDev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "Other", otherProfileRoot);
+                ApplicationEnvironmentKind.Development, "shell", repositoryRoot.ToUpperInvariant() + Path.DirectorySeparatorChar);
+            var otherDev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "Other", repositoryRoot);
             var otherRootDev = ApplicationExecutionEnvironment.Sandbox(
                 ApplicationEnvironmentKind.Development, "Shell", otherRepositoryRoot);
-            var moduleTest = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.ModuleTest, "Shell", testRoot);
-            Require(ApplicationLaunchOptions.Parse(["--environment", "development", "--profile", "Shell", "--data-root", devRoot]).Environment.IsDevelopment &&
-                    ApplicationLaunchOptions.Parse(["--environment", "moduletest", "--profile", "Shell", "--data-root", testRoot]).Environment.IsModuleTest,
+            var moduleTest = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.ModuleTest, "Shell", repositoryRoot);
+            Require(ApplicationLaunchOptions.Parse(["--environment", "development", "--profile", "Shell", "--repo-root", repositoryRoot]).Environment.IsDevelopment &&
+                    ApplicationLaunchOptions.Parse(["--environment", "moduletest", "--profile", "Shell", "--repo-root", repositoryRoot]).Environment.IsModuleTest,
                 "Named sandbox environments were not parsed case-insensitively.");
-            void RejectSandbox(ApplicationEnvironmentKind kind, string profile, string path)
-            {
-                try { _ = ApplicationExecutionEnvironment.Sandbox(kind, profile, path); }
-                catch (ArgumentException) { return; }
-                throw new InvalidOperationException($"Unsafe sandbox layout was accepted: {path}");
-            }
-            RejectSandbox(ApplicationEnvironmentKind.Development, "Shell", Path.Combine(root, "sandbox"));
-            RejectSandbox(ApplicationEnvironmentKind.Development, "Shell", testRoot);
-            RejectSandbox(ApplicationEnvironmentKind.Development, "Other", devRoot);
-            RejectSandbox(ApplicationEnvironmentKind.Development, "Shell", Path.Combine(root, "development", "Shell"));
-            RejectSandbox(ApplicationEnvironmentKind.Development, "Shell", Path.Combine(devRoot, "extra"));
+            Require(dev.RepositoryRoot == Path.GetFullPath(repositoryRoot) && dev.SandboxRoot == devRoot &&
+                    moduleTest.SandboxRoot == testRoot &&
+                    otherRootDev.SandboxRoot == Path.Combine(otherRepositoryRoot, ".qingtoolbox", "development", "Shell"),
+                "Sandbox roots were not derived from the declared repository root.");
             Require(dev.InstanceScope == sameDev.InstanceScope && dev.InstanceScope != otherDev.InstanceScope &&
                     dev.InstanceScope != otherRootDev.InstanceScope && dev.InstanceScope != moduleTest.InstanceScope,
                 "Sandbox instance scopes are not stable and isolated.");
@@ -354,7 +366,8 @@ internal static class Program
                 "Sandbox instance scopes did not isolate profiles and environment kinds.");
 
             var productionPaths = new ApplicationPaths(production.Environment);
-            Require(productionPaths.SettingsPath == Path.Combine(
+            Require(production.Environment.RepositoryRoot is null && production.Environment.SandboxRoot is null &&
+                    productionPaths.SettingsPath == Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "QingToolbox", "settings.json") &&
                     productionPaths.UserModulesDirectory == Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "QingToolbox", "Modules") &&

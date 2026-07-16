@@ -11,10 +11,12 @@ public sealed record ApplicationExecutionEnvironment
     private ApplicationExecutionEnvironment(
         ApplicationEnvironmentKind kind,
         string profileName,
+        string? repositoryRoot,
         string? sandboxRoot)
     {
         Kind = kind;
         ProfileName = profileName;
+        RepositoryRoot = repositoryRoot;
         SandboxRoot = sandboxRoot;
         IsProduction = kind == ApplicationEnvironmentKind.Production;
         IsDevelopment = kind == ApplicationEnvironmentKind.Development;
@@ -31,6 +33,7 @@ public sealed record ApplicationExecutionEnvironment
 
     public ApplicationEnvironmentKind Kind { get; }
     public string ProfileName { get; }
+    public string? RepositoryRoot { get; }
     public string? SandboxRoot { get; }
     public string InstanceScope { get; }
     public string DisplayName { get; }
@@ -40,21 +43,22 @@ public sealed record ApplicationExecutionEnvironment
     public bool AllowWindowsStartupRegistration { get; }
 
     public static ApplicationExecutionEnvironment Production() =>
-        new(ApplicationEnvironmentKind.Production, "Default", null);
+        new(ApplicationEnvironmentKind.Production, "Default", null, null);
 
     public static ApplicationExecutionEnvironment Sandbox(
         ApplicationEnvironmentKind kind,
         string profileName,
-        string sandboxRoot)
+        string repositoryRoot)
     {
         if (kind is not (ApplicationEnvironmentKind.Development or ApplicationEnvironmentKind.ModuleTest))
             throw new ArgumentException(
                 "Sandbox environment must be Development or ModuleTest; Production must use Production().",
                 nameof(kind));
         ValidateProfileName(profileName);
-        var normalized = ValidateSandboxRoot(kind, profileName, sandboxRoot);
-        AssertNoSandboxReparsePoints(kind, profileName, normalized);
-        return new(kind, profileName, normalized);
+        var normalizedRepositoryRoot = ValidateRepositoryRoot(repositoryRoot);
+        var sandboxRoot = BuildSandboxRoot(kind, profileName, normalizedRepositoryRoot);
+        AssertNoSandboxReparsePoints(kind, profileName, normalizedRepositoryRoot, sandboxRoot);
+        return new(kind, profileName, normalizedRepositoryRoot, sandboxRoot);
     }
 
     public static void ValidateProfileName(string profileName)
@@ -66,51 +70,58 @@ public sealed record ApplicationExecutionEnvironment
             throw new ArgumentException("Profile must contain 1-64 letters, digits, '.', '_' or '-' only.", nameof(profileName));
     }
 
-    public static string ValidateSandboxRoot(
-        ApplicationEnvironmentKind kind,
-        string profileName,
-        string sandboxRoot)
+    public static string ValidateRepositoryRoot(string repositoryRoot)
     {
-        if (kind is not (ApplicationEnvironmentKind.Development or ApplicationEnvironmentKind.ModuleTest))
-            throw new ArgumentException("Sandbox environment must be Development or ModuleTest.", nameof(kind));
-        ValidateProfileName(profileName);
-        if (string.IsNullOrWhiteSpace(sandboxRoot) || !Path.IsPathFullyQualified(sandboxRoot))
-            throw new ArgumentException("Data root must be an absolute path.", nameof(sandboxRoot));
-        var normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sandboxRoot));
+        if (string.IsNullOrWhiteSpace(repositoryRoot) || !Path.IsPathFullyQualified(repositoryRoot))
+            throw new ArgumentException("Repository root must be an absolute path.", nameof(repositoryRoot));
+        var normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryRoot));
         var pathRoot = Path.GetPathRoot(normalized);
         if (string.Equals(normalized, Path.TrimEndingDirectorySeparator(pathRoot ?? string.Empty),
                 StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("Data root cannot be a drive or UNC root.", nameof(sandboxRoot));
-        if (File.Exists(normalized)) throw new ArgumentException("Data root cannot point to a file.", nameof(sandboxRoot));
-        var profileDirectory = new DirectoryInfo(normalized);
-        var environmentDirectory = profileDirectory.Parent;
-        var localDirectory = environmentDirectory?.Parent;
-        var expectedEnvironmentDirectory = kind == ApplicationEnvironmentKind.Development
-            ? "development"
-            : "module-test";
-        if (!string.Equals(profileDirectory.Name, profileName, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(environmentDirectory?.Name, expectedEnvironmentDirectory, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(localDirectory?.Name, ".qingtoolbox", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Repository root cannot be a drive or UNC root.", nameof(repositoryRoot));
+        if (File.Exists(normalized) || !Directory.Exists(normalized))
+            throw new ArgumentException("Repository root must be an existing directory.", nameof(repositoryRoot));
+
+        var rootPrefix = normalized + Path.DirectorySeparatorChar;
+        foreach (var relativeMarker in new[]
         {
-            throw new ArgumentException(
-                $"{kind} data root must match <RepoRoot>\\.qingtoolbox\\{expectedEnvironmentDirectory}\\<Profile>.",
-                nameof(sandboxRoot));
-        }
-        foreach (var productionRoot in GetProductionRoots())
+            Path.Combine("QingToolbox.Shell", "QingToolbox.Shell.csproj"),
+            Path.Combine("scripts", "start-dev-host.ps1"),
+            "Directory.Build.props"
+        })
         {
-            if (normalized.Equals(productionRoot, StringComparison.OrdinalIgnoreCase) ||
-                normalized.StartsWith(productionRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("Data root cannot be the production data directory or a child of it.", nameof(sandboxRoot));
+            var marker = Path.GetFullPath(Path.Combine(normalized, relativeMarker));
+            if (!marker.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase) || !File.Exists(marker))
+                throw new ArgumentException(
+                    $"Repository root is not a valid QingToolbox source root; missing marker: {relativeMarker}.",
+                    nameof(repositoryRoot));
+            AssertOrdinaryPath(marker, expectDirectory: false, "repository marker");
+            AssertOrdinaryPath(Path.GetDirectoryName(marker)!, expectDirectory: true, "repository marker parent");
         }
         return normalized;
+    }
+
+    private static string BuildSandboxRoot(
+        ApplicationEnvironmentKind kind,
+        string profileName,
+        string repositoryRoot)
+    {
+        var environmentDirectory = kind == ApplicationEnvironmentKind.Development ? "development" : "module-test";
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(
+            repositoryRoot, ".qingtoolbox", environmentDirectory, profileName)));
     }
 
     public static void AssertNoSandboxReparsePoints(
         ApplicationEnvironmentKind kind,
         string profileName,
+        string repositoryRoot,
         string sandboxRoot)
     {
-        var normalized = ValidateSandboxRoot(kind, profileName, sandboxRoot);
+        var normalizedRepositoryRoot = ValidateRepositoryRoot(repositoryRoot);
+        var normalized = BuildSandboxRoot(kind, profileName, normalizedRepositoryRoot);
+        if (!normalized.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(sandboxRoot)),
+                StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Sandbox root does not belong to the declared repository root.");
         var profileDirectory = new DirectoryInfo(normalized);
         var environmentDirectory = profileDirectory.Parent!;
         var localDirectory = environmentDirectory.Parent!;
@@ -130,12 +141,19 @@ public sealed record ApplicationExecutionEnvironment
         }
     }
 
-    private static IEnumerable<string> GetProductionRoots()
+    private static void AssertOrdinaryPath(string path, bool expectDirectory, string description)
     {
-        yield return Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "QingToolbox")));
-        yield return Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "QingToolbox")));
+        try
+        {
+            if (expectDirectory ? !Directory.Exists(path) : !File.Exists(path))
+                throw new IOException($"Required {description} is unavailable: {path}");
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException($"Required {description} cannot be a reparse point: {path}");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new IOException($"Required {description} could not be verified safely: {path}", exception);
+        }
     }
 
     private static string BuildScope(ApplicationEnvironmentKind kind, string profileName, string root)

@@ -11,8 +11,8 @@ public sealed record ApplicationLaunchOptions(
     public static ApplicationLaunchOptions Parse(IEnumerable<string> arguments, bool requireExplicitEnvironment = false)
     {
         var args = arguments.ToArray();
-        bool startup = false, environmentSeen = false, profileSeen = false, rootSeen = false;
-        string? profile = null, dataRoot = null;
+        bool startup = false, environmentSeen = false, profileSeen = false, repositoryRootSeen = false;
+        string? profile = null, repositoryRoot = null;
         var kind = ApplicationEnvironmentKind.Production;
         for (var index = 0; index < args.Length; index++)
         {
@@ -48,10 +48,10 @@ public sealed record ApplicationLaunchOptions(
                 if (profileSeen) throw new ArgumentException("Duplicate argument: --profile");
                 profileSeen = true; profile = ReadValue();
             }
-            else if (argument.Equals("--data-root", StringComparison.OrdinalIgnoreCase))
+            else if (argument.Equals("--repo-root", StringComparison.OrdinalIgnoreCase))
             {
-                if (rootSeen) throw new ArgumentException("Duplicate argument: --data-root");
-                rootSeen = true; dataRoot = ReadValue();
+                if (repositoryRootSeen) throw new ArgumentException("Duplicate argument: --repo-root");
+                repositoryRootSeen = true; repositoryRoot = ReadValue();
             }
             else throw new ArgumentException($"Unknown argument: {argument}");
         }
@@ -60,14 +60,14 @@ public sealed record ApplicationLaunchOptions(
             throw new ArgumentException("Debug builds require --environment. Use scripts/start-dev-host.ps1.");
         if (kind == ApplicationEnvironmentKind.Production)
         {
-            if (rootSeen) throw new ArgumentException("Production does not accept --data-root.");
+            if (repositoryRootSeen) throw new ArgumentException("Production does not accept --repo-root.");
             if (profileSeen && !string.Equals(profile, "Default", StringComparison.Ordinal))
                 throw new ArgumentException("Production only supports profile Default.");
             return new(startup, ApplicationExecutionEnvironment.Production(), environmentSeen);
         }
         if (startup) throw new ArgumentException("--startup cannot be combined with a non-production environment.");
         if (!profileSeen) throw new ArgumentException("Development and ModuleTest require --profile.");
-        if (!rootSeen) throw new ArgumentException("Development and ModuleTest require --data-root.");
-        return new(false, ApplicationExecutionEnvironment.Sandbox(kind, profile!, dataRoot!), environmentSeen);
+        if (!repositoryRootSeen) throw new ArgumentException("Development and ModuleTest require --repo-root.");
+        return new(false, ApplicationExecutionEnvironment.Sandbox(kind, profile!, repositoryRoot!), environmentSeen);
     }
 }

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Bound Development and ModuleTest sandboxes to an explicitly validated QingToolbox repository root.
+
 - Hardened local environment parsing, enforced repository-local sandbox layouts, rejected reparse-point escapes, and preserved `WhatIf` during forced Profile resets.
 
 - Added project-local Development and ModuleTest profiles under `.qingtoolbox`.

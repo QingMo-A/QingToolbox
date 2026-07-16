@@ -7,6 +7,34 @@ function Assert-LocalProfileName {
     }
 }
 
+function Assert-LocalRepositoryRoot {
+    param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
+    if (-not [IO.Path]::IsPathRooted($RepositoryRoot)) { throw 'RepositoryRoot must be an absolute path.' }
+    $normalized = [IO.Path]::GetFullPath($RepositoryRoot).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    if ($normalized.Equals([IO.Path]::GetPathRoot($normalized).TrimEnd([IO.Path]::DirectorySeparatorChar),
+            [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $normalized -PathType Container)) {
+        throw 'RepositoryRoot must be an existing non-root directory.'
+    }
+    $prefix = $normalized + [IO.Path]::DirectorySeparatorChar
+    foreach ($relativeMarker in @(
+        'QingToolbox.Shell\QingToolbox.Shell.csproj',
+        'scripts\start-dev-host.ps1',
+        'Directory.Build.props')) {
+        $marker = [IO.Path]::GetFullPath((Join-Path $normalized $relativeMarker))
+        if (-not $marker.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $marker -PathType Leaf)) {
+            throw "RepositoryRoot is not a valid QingToolbox source root; missing marker: $relativeMarker"
+        }
+        foreach ($path in @($marker, [IO.Path]::GetDirectoryName($marker))) {
+            if (([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Repository marker path cannot be a reparse point: $path"
+            }
+        }
+    }
+    return $normalized
+}
+
 function Resolve-LocalEnvironmentProfile {
     param(
         [Parameter(Mandatory = $true)]
@@ -15,7 +43,7 @@ function Resolve-LocalEnvironmentProfile {
         [Parameter(Mandatory = $true)][string]$Profile
     )
     Assert-LocalProfileName -Profile $Profile
-    $repoRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+    $repoRoot = Assert-LocalRepositoryRoot -RepositoryRoot (Split-Path -Parent $PSScriptRoot)
     $localRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot '.qingtoolbox'))
     $environmentFolder = if ($Environment -eq 'Development') { 'development' } else { 'module-test' }
     $environmentRoot = [IO.Path]::GetFullPath((Join-Path $localRoot $environmentFolder))

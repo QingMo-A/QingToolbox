@@ -49,7 +49,7 @@ public sealed class ApplicationPaths
     {
         if (!_isProduction)
             ApplicationExecutionEnvironment.AssertNoSandboxReparsePoints(
-                _environment.Kind, _environment.ProfileName, _environment.SandboxRoot!);
+                _environment.Kind, _environment.ProfileName, _environment.RepositoryRoot!, _environment.SandboxRoot!);
         var directories = _isProduction
             ? new[] { UserModulesDirectory, ModuleDataDirectory }
             : new[] { RoamingRoot, LocalRoot, UserModulesDirectory,
@@ -58,6 +58,6 @@ public sealed class ApplicationPaths
             Directory.CreateDirectory(directory);
         if (!_isProduction)
             ApplicationExecutionEnvironment.AssertNoSandboxReparsePoints(
-                _environment.Kind, _environment.ProfileName, _environment.SandboxRoot!);
+                _environment.Kind, _environment.ProfileName, _environment.RepositoryRoot!, _environment.SandboxRoot!);
     }
 }
