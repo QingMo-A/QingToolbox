@@ -6,18 +6,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 . (Join-Path $PSScriptRoot "get-preview-release-metadata.ps1")
 . (Join-Path $PSScriptRoot "assert-preview-source.ps1")
-
-function Invoke-Checked {
-    param(
-        [Parameter(Mandatory = $true)][scriptblock]$Command,
-        [Parameter(Mandatory = $true)][string]$FailureMessage
-    )
-
-    & $Command
-    if ($LASTEXITCODE -ne 0) {
-        throw "$FailureMessage Exit code: $LASTEXITCODE."
-    }
-}
+. (Join-Path $PSScriptRoot "preview-stage-runner.ps1")
 
 function Resolve-CandidateIscc {
     param([string]$ExplicitPath)
@@ -45,6 +34,32 @@ $tempRoot = Join-Path $env:TEMP (
 $originalLocalAppData = $env:LOCALAPPDATA
 $originalAppData = $env:APPDATA
 
+function Assert-CandidateArtifactPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $artifactsRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "artifacts"))
+    $resolvedPath = [System.IO.Path]::GetFullPath($Path)
+    $artifactsPrefix = $artifactsRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar) +
+        [System.IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedPath.StartsWith(
+        $artifactsPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Candidate asset path is outside artifacts: $resolvedPath"
+    }
+    return $resolvedPath
+}
+
+function Assert-FileExists {
+    param(
+        [Parameter(Mandatory = $true)][string]$StageName,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Preview stage '$StageName' did not create expected file: $Path"
+    }
+}
+
 try {
     $initialSource = Assert-PreviewSource `
         -RequireToolboxBranch -RequireOriginSync
@@ -52,24 +67,49 @@ try {
     $resolvedIscc = Resolve-CandidateIscc -ExplicitPath $IsccPath
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 
+    $portablePath = Assert-CandidateArtifactPath (Join-Path $repoRoot (
+        "artifacts\$($metadata.PortableFileName)"))
+    $manifestPath = Assert-CandidateArtifactPath (Join-Path $repoRoot (
+        "artifacts\$($metadata.ManifestFileName)"))
+    $installerPath = Assert-CandidateArtifactPath (Join-Path $repoRoot (
+        "artifacts\installer\output\$($metadata.InstallerFileName)"))
+    foreach ($staleAsset in @(
+        $portablePath, "$portablePath.sha256", $manifestPath,
+        $installerPath, "$installerPath.sha256")) {
+        $verifiedStaleAsset = Assert-CandidateArtifactPath $staleAsset
+        if (Test-Path -LiteralPath $verifiedStaleAsset -PathType Leaf) {
+            Remove-Item -LiteralPath $verifiedStaleAsset -Force
+        }
+    }
+
+    Invoke-CheckedStage -StageName "Preview stage runner contracts" -Action {
+        & (Join-Path $PSScriptRoot "test-preview-stage-runner.ps1")
+    }
+
     Write-Host "`n==> Build Release"
-    Invoke-Checked -FailureMessage "Release build failed." -Command {
+    Invoke-CheckedStage -StageName "Build Release" -Action {
         dotnet build -c Release
     }
 
     Write-Host "`n==> Deploy development module"
-    & (Join-Path $PSScriptRoot "deploy-dev-modules.ps1") `
-        -Configuration Release
+    Invoke-CheckedStage -StageName "Deploy development module" -Action {
+        & (Join-Path $PSScriptRoot "deploy-dev-modules.ps1") `
+            -Configuration Release
+    }
 
     Write-Host "`n==> Run module load smoke test"
-    Invoke-Checked -FailureMessage "Module load smoke test failed." -Command {
+    Invoke-CheckedStage -StageName "Run module load smoke test" -Action {
         dotnet run `
             --project QingToolbox.DevTools.ModuleLoadSmokeTest `
             -c Release --no-build
     }
 
     Write-Host "`n==> Build portable Preview archive"
-    & (Join-Path $PSScriptRoot "publish-preview.ps1")
+    Invoke-CheckedStage -StageName "Build portable Preview archive" -Action {
+        & (Join-Path $PSScriptRoot "publish-preview.ps1")
+    }
+    Assert-FileExists "Build portable Preview archive" $portablePath
+    Assert-FileExists "Build portable Preview archive" "$portablePath.sha256"
 
     Write-Host "`n==> Prepare isolated Inno Setup"
     $isolatedInnoRoot = Join-Path $tempRoot "InnoSetup"
@@ -81,29 +121,50 @@ try {
     if (Test-Path -LiteralPath $isolatedChinese) {
         Remove-Item -LiteralPath $isolatedChinese -Force
     }
-    $preparedIscc = & (Join-Path $PSScriptRoot "prepare-inno-setup.ps1") `
-        -IsccPath (Join-Path $isolatedInnoRoot "ISCC.exe")
+    $preparedOutput = @(Invoke-CheckedStageWithOutput `
+        -StageName "Prepare isolated Inno Setup" -Action {
+            & (Join-Path $PSScriptRoot "prepare-inno-setup.ps1") `
+                -IsccPath (Join-Path $isolatedInnoRoot "ISCC.exe")
+        })
+    $preparedPaths = @($preparedOutput | Where-Object {
+        $_ -is [string] -and -not [string]::IsNullOrWhiteSpace($_)
+    })
+    if ($preparedPaths.Count -ne 1) {
+        throw "Preview stage 'Prepare isolated Inno Setup' returned " +
+              "$($preparedPaths.Count) candidate paths; expected exactly one."
+    }
+    $preparedIscc = [System.IO.Path]::GetFullPath($preparedPaths[0])
+    Assert-FileExists "Prepare isolated Inno Setup" $preparedIscc
 
     Write-Host "`n==> Build Preview installer"
-    & (Join-Path $PSScriptRoot "build-installer.ps1") `
-        -IsccPath $preparedIscc -SkipPreflight
+    Invoke-CheckedStage -StageName "Build Preview installer" -Action {
+        & (Join-Path $PSScriptRoot "build-installer.ps1") `
+            -IsccPath $preparedIscc -SkipPreflight
+    }
+    Assert-FileExists "Build Preview installer" $installerPath
+    Assert-FileExists "Build Preview installer" "$installerPath.sha256"
 
     Write-Host "`n==> Test isolated installer roundtrip"
     $profileRoot = Join-Path $tempRoot "Profile"
     $env:LOCALAPPDATA = Join-Path $profileRoot "LocalAppData"
     $env:APPDATA = Join-Path $profileRoot "AppData"
     $roundtripRoot = Join-Path $tempRoot "Roundtrip"
-    $installerPath = Join-Path $repoRoot (
-        "artifacts\installer\output\$($metadata.InstallerFileName)")
-    & (Join-Path $PSScriptRoot "test-installer-roundtrip.ps1") `
-        -InstallerPath $installerPath -TestRoot $roundtripRoot
+    Invoke-CheckedStage -StageName "Test isolated installer roundtrip" -Action {
+        & (Join-Path $PSScriptRoot "test-installer-roundtrip.ps1") `
+            -InstallerPath $installerPath -TestRoot $roundtripRoot
+    }
 
     $env:LOCALAPPDATA = $originalLocalAppData
     $env:APPDATA = $originalAppData
 
     Write-Host "`n==> Generate and verify Preview manifest"
-    & (Join-Path $PSScriptRoot "write-preview-manifest.ps1")
-    & (Join-Path $PSScriptRoot "verify-preview-assets.ps1")
+    Invoke-CheckedStage -StageName "Write Preview manifest" -Action {
+        & (Join-Path $PSScriptRoot "write-preview-manifest.ps1")
+    }
+    Assert-FileExists "Write Preview manifest" $manifestPath
+    Invoke-CheckedStage -StageName "Verify Preview assets" -Action {
+        & (Join-Path $PSScriptRoot "verify-preview-assets.ps1")
+    }
 
     $finalSource = Assert-PreviewSource `
         -RequireToolboxBranch -RequireOriginSync
@@ -111,10 +172,10 @@ try {
         throw "HEAD changed during the candidate build."
     }
 
-    $portablePath = Join-Path $repoRoot (
-        "artifacts\$($metadata.PortableFileName)")
-    $manifestPath = Join-Path $repoRoot (
-        "artifacts\$($metadata.ManifestFileName)")
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ($manifest.sourceCommit -ne $finalSource.Commit) {
+        throw "Verified manifest sourceCommit does not match current HEAD."
+    }
     $portable = Get-Item -LiteralPath $portablePath
     $installer = Get-Item -LiteralPath $installerPath
 
@@ -143,7 +204,12 @@ catch {
 finally {
     $env:LOCALAPPDATA = $originalLocalAppData
     $env:APPDATA = $originalAppData
-    if (Test-Path -LiteralPath $tempRoot) {
-        Remove-Item -LiteralPath $tempRoot -Recurse -Force
+    try {
+        if (Test-Path -LiteralPath $tempRoot) {
+            Remove-Item -LiteralPath $tempRoot -Recurse -Force
+        }
+    }
+    catch {
+        Write-Warning "Preview candidate temporary cleanup failed: $($_.Exception.Message)"
     }
 }

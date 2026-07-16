@@ -29,6 +29,10 @@
 Roundtrip、manifest v2 生成和资产复核。结束前会再次确认 HEAD 未变化、工作区干净且
 仍与 `origin/toolbox` 同步。
 
+RC 总控会对每个原生命令和 PowerShell 子阶段立即检查 PowerShell 成功状态与退出码。
+构建开始前会按集中式 metadata 的精确路径清除旧候选资产；任意阶段失败都会立即停止，
+不会生成 Manifest 或最终通过摘要。这项自动门禁不代表尚未完成的人工测试已经通过。
+
 输出资产位于 `artifacts/`，包括便携 ZIP、当前用户安装包、各自的 `.sha256` 和
 manifest。manifest 记录 `QingMo-A/QingToolbox`、完整 source commit、
 `sourceTreeClean: true`、资产大小和 SHA256。构建资产被 Git 忽略，不应提交。
