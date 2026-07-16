@@ -1,5 +1,7 @@
 # QingToolbox
 
+The Modules page provides read-only detection against the official per-module update metadata. Checks use isolated conditional-request caches and never download or install packages. See [module update detection](docs/MODULE_UPDATE_DETECTION.md).
+
 QingToolbox Shell 和模块宿主窗口共享可扩展的 WPF `WindowChrome` 标题栏基础设施。它保留系统拖动、缩放、系统菜单和标准窗口命令，并通过最大化按钮命中测试支持 Windows 11 Snap Layout；MainWindow 的自定义操作区提供主动切换桌面悬浮标的入口。
 
 标题栏度量、窗口能力映射和 DPI 感知命中测试由共享窗口层统一管理。模块窗口标题可随语言切换原位更新；空扩展区不会占位。Shell 在 500 DIP 宽度下进入紧凑布局，但 Windows 11 Snap 弹层、多显示器及不同 DPI 显示器切换仍需在对应实体环境中验证。

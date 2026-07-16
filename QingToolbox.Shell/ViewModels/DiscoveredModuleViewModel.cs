@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using QingToolbox.Abstractions.Modules;
 using QingToolbox.Core.Runtime;
 using QingToolbox.Abstractions.Localization;
+using QingToolbox.Core.Updates;
 
 namespace QingToolbox.Shell.ViewModels;
 
@@ -53,6 +54,7 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         ManifestPath = module.ManifestPath;
         IconPath = ResolveIconPath(module);
         _runtimeState = State;
+        _updateResult = new(module.Manifest.Id, ModuleUpdateStatus.NotChecked);
     }
 
     public string Id { get; }
@@ -101,6 +103,14 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     [ObservableProperty]
     private bool _isBusy;
 
+    [ObservableProperty]
+    private ModuleUpdateResult _updateResult;
+
+    public string DisplayUpdateStatus => _localization.GetString(
+        $"moduleUpdate.status.{UpdateResult.Status}",
+        UpdateResult.TargetVersion?.ToString() ?? string.Empty);
+    public bool HasUpdateReleaseNote => !string.IsNullOrWhiteSpace(UpdateResult.ReleaseNote);
+
     public bool HasRuntimeError => !string.IsNullOrWhiteSpace(RuntimeError);
 
     public string DisplayRuntimeState => _localization.GetString(
@@ -142,6 +152,13 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(DisplayDescription));
         OnPropertyChanged(nameof(DisplayRuntimeState));
+        OnPropertyChanged(nameof(DisplayUpdateStatus));
+    }
+
+    partial void OnUpdateResultChanged(ModuleUpdateResult value)
+    {
+        OnPropertyChanged(nameof(DisplayUpdateStatus));
+        OnPropertyChanged(nameof(HasUpdateReleaseNote));
     }
 
     partial void OnRuntimeStateChanged(string value)

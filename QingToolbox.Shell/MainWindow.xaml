@@ -462,6 +462,14 @@
                             </Style.Triggers>
                         </Style>
                     </StackPanel.Style>
+                    <Button Margin="0,0,10,0" Command="{Binding CheckModuleUpdatesCommand}"
+                            IsEnabled="{Binding CanCheckModuleUpdates}"
+                            Style="{StaticResource SecondaryActionButtonStyle}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE895;" Style="{StaticResource CompactFluentIconStyle}"/>
+                            <TextBlock Text="{Binding Strings[moduleUpdate.check]}"/>
+                        </StackPanel>
+                    </Button>
                     <Button Margin="0,0,10,0"
                             AutomationProperties.Name="Import Module"
                             Command="{Binding ImportModuleCommand}"
@@ -486,7 +494,11 @@
                     Margin="0,20,0,16"
                     Visibility="{Binding IsModulesSelected, Converter={StaticResource BooleanToVisibilityConverter}}"
                     Style="{StaticResource StatusMessageStyle}">
-                <TextBlock Text="{Binding StatusMessage}" Foreground="#475569"/>
+                <StackPanel>
+                    <TextBlock Text="{Binding StatusMessage}" Foreground="#475569"/>
+                    <TextBlock Margin="0,4,0,0" Text="{Binding ModuleUpdateSummary}" Foreground="#31598F"/>
+                    <TextBlock Margin="0,2,0,0" Text="{Binding ModuleUpdateLastChecked}" FontSize="12" Foreground="#64748B"/>
+                </StackPanel>
             </Border>
 
             <Grid Grid.Row="2" Margin="0,0,0,20">
@@ -760,6 +772,9 @@
                                                    Text="{Binding DisplayDescription}"
                                                    TextWrapping="Wrap"
                                                    Foreground="#475569"/>
+                                        <Border Margin="0,0,0,12" Padding="10,6" CornerRadius="10" Background="#EEF5FF">
+                                            <TextBlock Text="{Binding DisplayUpdateStatus}" TextWrapping="Wrap" Foreground="#31598F"/>
+                                        </Border>
 
                                         <CheckBox Margin="0,0,0,12"
                                                   Content="{Binding DataContext.Strings[startup.moduleLabel], RelativeSource={RelativeSource AncestorType=Window}}"

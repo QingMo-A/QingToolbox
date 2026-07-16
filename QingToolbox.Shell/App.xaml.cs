@@ -11,6 +11,10 @@ using QingToolbox.Abstractions.Localization;
 using QingToolbox.Core.Localization;
 using QingToolbox.Core.Settings;
 using QingToolbox.Shell.Startup;
+using QingToolbox.Core.Updates;
+using System.Net.Http.Headers;
+using System.Reflection;
+using System.Net.Http;
 
 namespace QingToolbox.Shell;
 
@@ -126,6 +130,27 @@ public partial class App : Application
             services.AddSingleton(provider => new UserSettingsService(
                 provider.GetRequiredService<ApplicationPaths>().SettingsPath));
             services.AddSingleton<ModulePackageImporter>();
+            services.AddSingleton(TimeProvider.System);
+            services.AddSingleton(provider =>
+            {
+                var handler = new HttpClientHandler { AllowAutoRedirect = false };
+                var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+                var version = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "unknown";
+                client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("QingToolbox", version));
+                return client;
+            });
+            services.AddSingleton<IModuleUpdateSource>(provider => new OfficialModuleUpdateSource(
+                provider.GetRequiredService<HttpClient>(), environment.IsModuleTest ? null :
+                new ModuleUpdateCache(Path.Combine(provider.GetRequiredService<ApplicationPaths>().CacheDirectory, "ModuleUpdates", "Official"), TimeProvider.System), TimeProvider.System));
+            services.AddSingleton(provider =>
+            {
+                var text = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0];
+                if (!SemanticVersion.TryParse(text, out var version)) throw new InvalidOperationException("Host informational version is not valid SemVer.");
+                return new ModuleUpdateCompatibilityEvaluator(version!, ModuleUpdateIdentity.ModuleApiVersion,
+                    version!.IsPrerelease ? ModuleUpdateChannel.Preview : ModuleUpdateChannel.Stable);
+            });
+            services.AddSingleton(provider => new ModuleUpdateChecker(provider.GetRequiredService<IModuleUpdateSource>(),
+                provider.GetRequiredService<ModuleUpdateCompatibilityEvaluator>(), TimeProvider.System, environment.IsModuleTest));
             services.AddSingleton<MainWindowViewModel>();
             services.AddSingleton<MainWindow>();
 
@@ -169,6 +194,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        try { _serviceProvider?.GetService<MainWindowViewModel>()?.StopUpdateChecks(); } catch { }
         try { _startupSession?.PrepareForExit(); }
         catch (Exception exception) { System.Diagnostics.Debug.WriteLine($"Final startup cleanup failed: {exception.GetType().Name}"); }
         try

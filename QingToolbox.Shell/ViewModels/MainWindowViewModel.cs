@@ -15,6 +15,7 @@ using System.Reflection;
 using QingToolbox.Core.Settings;
 using QingToolbox.Shell.Startup;
 using QingToolbox.Abstractions.Modules;
+using QingToolbox.Core.Updates;
 
 namespace QingToolbox.Shell.ViewModels;
 
@@ -30,17 +31,27 @@ public sealed partial class MainWindowViewModel(
     WindowsStartupRegistrationService startupRegistrationService,
     ModuleStartupFingerprintService fingerprintService,
     ILocalizationService localization,
-    ApplicationExecutionEnvironment executionEnvironment) : ObservableObject
+    ApplicationExecutionEnvironment executionEnvironment,
+    ModuleUpdateChecker moduleUpdateChecker) : ObservableObject
 {
     private bool _initialized;
     private bool _suppressPresentationSave;
     private int _presentationSaveVersion;
     private readonly SemaphoreSlim _presentationSaveGate = new(1, 1);
     private readonly SemaphoreSlim _closeBehaviorSaveGate = new(1, 1);
+    private readonly CancellationTokenSource _updateCancellation = new();
+    private readonly Dictionary<string, (string Version, ModuleUpdateResult Result)> _updateResults = new(StringComparer.Ordinal);
+    private bool _moduleUpdateUsedStaleCache;
+    private DateTimeOffset? _moduleUpdateLastCheckedAt;
     private StartupPresentationMode _persistedStartupPresentationMode;
     private bool _suppressCloseBehaviorSave;
     private MainWindowCloseBehavior _persistedCloseBehavior = MainWindowCloseBehavior.Ask;
     private int _closeBehaviorSaveVersion;
+    [ObservableProperty] private bool _isCheckingModuleUpdates;
+    [ObservableProperty] private int _moduleUpdateCount;
+    [ObservableProperty] private string _moduleUpdateSummary = string.Empty;
+    [ObservableProperty] private string _moduleUpdateLastChecked = string.Empty;
+    public bool CanCheckModuleUpdates => !executionEnvironment.IsModuleTest && !IsCheckingModuleUpdates;
     [ObservableProperty]
     private string _statusMessage = localization.GetString("status.ready");
 
@@ -226,12 +237,71 @@ public sealed partial class MainWindowViewModel(
         OnPropertyChanged(nameof(StartupAuthorizationSummary));
         OnPropertyChanged(nameof(MissingStartupAuthorizationSummary));
         RefreshLanguageOptionLabels();
+        if (!string.IsNullOrEmpty(ModuleUpdateLastChecked))
+        {
+            ModuleUpdateSummary = localization.GetString(
+                _moduleUpdateUsedStaleCache ? "moduleUpdate.completedStale" : "moduleUpdate.completed",
+                ModuleUpdateCount);
+            ModuleUpdateLastChecked = localization.GetString("moduleUpdate.lastChecked", _moduleUpdateLastCheckedAt!.Value.LocalDateTime.ToString("g"));
+        }
         var option = LanguageOptions.FirstOrDefault(
             item => item.Code == languageCode);
         StatusMessage = localization.GetString(
             "status.languageChanged",
             option?.DisplayText ?? languageCode);
     }
+
+    partial void OnIsCheckingModuleUpdatesChanged(bool value) => OnPropertyChanged(nameof(CanCheckModuleUpdates));
+
+    [RelayCommand(CanExecute = nameof(CanCheckModuleUpdates))]
+    private async Task CheckModuleUpdatesAsync()
+    {
+        if (IsCheckingModuleUpdates) return;
+        IsCheckingModuleUpdates = true;
+        CheckModuleUpdatesCommand.NotifyCanExecuteChanged();
+        ModuleUpdateSummary = localization.GetString("moduleUpdate.checking");
+        foreach (var module in Modules) module.UpdateResult = new(module.Id, ModuleUpdateStatus.Checking);
+        try
+        {
+            var results = await moduleUpdateChecker.CheckAllInstalledModulesAsync(
+                Modules.Select(x => new InstalledModuleVersion(x.Id, x.Version)).ToArray(), true, _updateCancellation.Token);
+            ApplyUpdateResults(results);
+        }
+        catch (OperationCanceledException) when (_updateCancellation.IsCancellationRequested) { }
+        catch { ModuleUpdateSummary = localization.GetString("moduleUpdate.sourceUnavailable"); }
+        finally { IsCheckingModuleUpdates = false; CheckModuleUpdatesCommand.NotifyCanExecuteChanged(); }
+    }
+
+    private void ApplyUpdateResults(IReadOnlyDictionary<string, ModuleUpdateResult> results)
+    {
+        foreach (var module in Modules)
+            if (results.TryGetValue(module.Id, out var result))
+            {
+                module.UpdateResult = result;
+                _updateResults[module.Id] = (module.Version, result);
+            }
+        ModuleUpdateCount = results.Values.Count(x => x.Status == ModuleUpdateStatus.UpdateAvailable);
+        var stale = results.Values.Any(x => x.IsFromStaleCache);
+        _moduleUpdateUsedStaleCache = stale;
+        _moduleUpdateLastCheckedAt = DateTimeOffset.Now;
+        ModuleUpdateLastChecked = localization.GetString("moduleUpdate.lastChecked", _moduleUpdateLastCheckedAt.Value.LocalDateTime.ToString("g"));
+        ModuleUpdateSummary = localization.GetString(stale ? "moduleUpdate.completedStale" : "moduleUpdate.completed", ModuleUpdateCount);
+    }
+
+    private async Task RunAutomaticUpdateCheckObservedAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(4), _updateCancellation.Token);
+            var results = await moduleUpdateChecker.CheckAllInstalledModulesAsync(
+                Modules.Select(x => new InstalledModuleVersion(x.Id, x.Version)).ToArray(), false, _updateCancellation.Token);
+            await Application.Current.Dispatcher.InvokeAsync(() => ApplyUpdateResults(results));
+        }
+        catch (OperationCanceledException) when (_updateCancellation.IsCancellationRequested) { }
+        catch (Exception exception) { Debug.WriteLine($"Background module update check failed: {exception.GetType().Name}"); }
+    }
+
+    public void StopUpdateChecks() => _updateCancellation.Cancel();
 
     private void RefreshLanguageOptionLabels()
     {
@@ -298,6 +368,10 @@ public sealed partial class MainWindowViewModel(
                     localization,
                     localizationDiagnosticsByModuleId.GetValueOrDefault(
                         module.Manifest.Id));
+                if (_updateResults.TryGetValue(module.Manifest.Id, out var prior) && prior.Version == module.Manifest.Version)
+                    moduleViewModel.UpdateResult = prior.Result;
+                else if (executionEnvironment.IsModuleTest)
+                    moduleViewModel.UpdateResult = new(module.Manifest.Id, ModuleUpdateStatus.DisabledByEnvironment);
                 moduleViewModel.UpdateRuntimeState(
                     runtimeManager.GetRecord(module.Manifest.Id));
                 if (authorizations.TryGetValue(module.Manifest.Id, out var authorization))
@@ -575,6 +649,7 @@ public sealed partial class MainWindowViewModel(
         _persistedCloseBehavior = settings.MainWindowCloseBehavior;
         _suppressCloseBehaviorSave = false;
         await RefreshModulesAsync(cancellationToken);
+        if (executionEnvironment.IsProduction) _ = RunAutomaticUpdateCheckObservedAsync();
     }
 
     partial void OnSelectedMainWindowCloseBehaviorChanged(MainWindowCloseBehavior value)

@@ -195,4 +195,23 @@
   "closeBehavior.saved": "Window close behavior saved.",
   "closeBehavior.saveFailed": "Window close behavior could not be saved. The main window remains open.",
   "startup.unavailableInSandbox": "Windows login startup is unavailable in development and module test environments."
+  ,"moduleUpdate.check": "Check for updates",
+  "moduleUpdate.lastChecked": "Last checked: {0}",
+  "moduleUpdate.checking": "Checking official module updates…",
+  "moduleUpdate.completed": "Update check complete. {0} update(s) available.",
+  "moduleUpdate.completedStale": "Update check complete using older cached metadata. {0} update(s) available.",
+  "moduleUpdate.sourceUnavailable": "The official update source is temporarily unavailable.",
+  "moduleUpdate.status.NotChecked": "Not checked",
+  "moduleUpdate.status.Checking": "Checking…",
+  "moduleUpdate.status.NotOfficial": "Not managed by the official source",
+  "moduleUpdate.status.NoPublishedRelease": "No release is currently published through the official source",
+  "moduleUpdate.status.UpToDate": "Up to date",
+  "moduleUpdate.status.UpdateAvailable": "Update available: {0}",
+  "moduleUpdate.status.HostUpdateRequired": "A newer QingToolbox version is required",
+  "moduleUpdate.status.ModuleApiIncompatible": "Module API version is incompatible",
+  "moduleUpdate.status.LocalVersionNewer": "Local version is newer than the official source",
+  "moduleUpdate.status.InvalidLocalVersion": "The local module version is invalid",
+  "moduleUpdate.status.SourceUnavailable": "Unable to check for updates",
+  "moduleUpdate.status.SourceInvalid": "The official update metadata is invalid",
+  "moduleUpdate.status.DisabledByEnvironment": "Update checks are disabled in ModuleTest"
 }

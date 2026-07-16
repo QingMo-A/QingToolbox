@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added read-only official module update detection with isolated ETag and Last-Modified caches.
+- Added module compatibility and availability states without downloading or installing packages.
+- Disabled real update checks and cache creation in ModuleTest environments.
+
 - Bound Development and ModuleTest sandboxes to an explicitly validated QingToolbox repository root.
 
 - Hardened local environment parsing, enforced repository-local sandbox layouts, rejected reparse-point escapes, and preserved `WhatIf` during forced Profile resets.

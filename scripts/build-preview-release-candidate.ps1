@@ -91,6 +91,14 @@ try {
         dotnet build -c Release
     }
 
+    Write-Host "`n==> Run module update smoke test"
+    Invoke-CheckedStage -StageName "Module update smoke test" -Action {
+        dotnet run `
+            --project (Join-Path $repoRoot "QingToolbox.DevTools.ModuleUpdateSmokeTest") `
+            -c Release `
+            --no-build
+    }
+
     Write-Host "`n==> Deploy development module"
     Invoke-CheckedStage -StageName "Deploy development module" -Action {
         & (Join-Path $PSScriptRoot "deploy-dev-modules.ps1") `
