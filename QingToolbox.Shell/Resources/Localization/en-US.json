@@ -67,6 +67,7 @@
   "settings.about.description": "Modular Windows toolbox.",
   "common.open": "Open",
   "common.close": "Close",
+  "common.cancel": "Cancel",
   "common.activate": "Activate",
   "common.deactivate": "Deactivate",
   "common.unload": "Unload",

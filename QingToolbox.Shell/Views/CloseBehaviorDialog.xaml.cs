@@ -10,6 +10,9 @@ public partial class CloseBehaviorDialog : Window
     {
         InitializeComponent();
         Title = localization.GetString("closeDialog.title");
+        DialogTitleBar.CloseText = localization.GetString("window.close");
+        DialogTitleBar.SystemMenuText = localization.GetString("window.systemMenu");
+        DialogTitleBar.AutomationName = localization.GetString("window.titleBar");
         HeadingText.Text = Title;
         DescriptionText.Text = localization.GetString("closeDialog.description");
         TrayTitleText.Text = localization.GetString("closeDialog.trayTitle");

@@ -67,6 +67,7 @@
   "settings.about.description": "模块化 Windows 工具箱。",
   "common.open": "打开",
   "common.close": "关闭",
+  "common.cancel": "取消",
   "common.activate": "启用",
   "common.deactivate": "停用",
   "common.unload": "卸载",

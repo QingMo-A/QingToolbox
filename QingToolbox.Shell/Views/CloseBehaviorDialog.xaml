@@ -1,24 +1,158 @@
 <Window x:Class="QingToolbox.Shell.Views.CloseBehaviorDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Width="500" SizeToContent="Height" ResizeMode="NoResize"
-        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
-        Background="#F7FBFF">
-    <Border Margin="18" Padding="26" Background="White" CornerRadius="18"
-            BorderBrush="#DCE8F8" BorderThickness="1">
-        <StackPanel>
-            <TextBlock x:Name="HeadingText" FontSize="22" FontWeight="SemiBold" Foreground="#102A56"/>
-            <TextBlock x:Name="DescriptionText" Margin="0,8,0,22" TextWrapping="Wrap" Foreground="#52647E"/>
-            <Button x:Name="TrayButton" Margin="0,0,0,10" Padding="16" HorizontalContentAlignment="Left"
-                    Click="OnTrayClick" AutomationProperties.AutomationId="MinimizeToNotificationArea">
-                <StackPanel><TextBlock x:Name="TrayTitleText" FontWeight="SemiBold"/><TextBlock x:Name="TrayDescriptionText" Margin="0,4,0,0" TextWrapping="Wrap" Foreground="#60708A"/></StackPanel>
+        xmlns:svgc="http://sharpvectors.codeplex.com/svgc/"
+        xmlns:controls="clr-namespace:QingToolbox.Shell.Controls"
+        xmlns:windowing="clr-namespace:QingToolbox.Shell.Windowing"
+        Width="560"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        Icon="../Assets/Branding/QingToolbox.ico"
+        Background="#F5F9FF"
+        windowing:WindowChromeBehavior.IsEnabled="True">
+    <Window.Resources>
+        <Style x:Key="CloseChoiceButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="94"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Background" Value="#F9FBFF"/>
+            <Setter Property="BorderBrush" Value="#DCE7F6"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Focusable" Value="True"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Surface"
+                                Padding="18,15"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="16">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Surface" Property="Background" Value="#F0F6FF"/>
+                                <Setter TargetName="Surface" Property="BorderBrush" Value="#9FC2FF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Surface" Property="Background" Value="#E5EFFF"/>
+                                <Setter TargetName="Surface" Property="BorderBrush" Value="#669BFA"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Surface" Property="BorderBrush" Value="#2563EB"/>
+                                <Setter TargetName="Surface" Property="BorderThickness" Value="2"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ChoiceIconSurfaceStyle" TargetType="Border">
+            <Setter Property="Width" Value="48"/>
+            <Setter Property="Height" Value="48"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="{x:Static windowing:WindowChromeMetrics.TitleBarGridLength}"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <controls:WindowTitleBar x:Name="DialogTitleBar"
+                                 Grid.Row="0"
+                                 Title="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=Title}"
+                                 ShowMinimizeButton="False"
+                                 ShowMaximizeButton="False">
+            <controls:WindowTitleBar.IconSource>
+                <svgc:SvgViewbox Width="22" Height="22"
+                    Source="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.Mark.svg"/>
+            </controls:WindowTitleBar.IconSource>
+        </controls:WindowTitleBar>
+
+        <Grid Grid.Row="1" Margin="30,26,30,28">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <StackPanel>
+                <TextBlock x:Name="HeadingText"
+                           FontSize="24" FontWeight="SemiBold" Foreground="#14213D"/>
+                <TextBlock x:Name="DescriptionText" Margin="0,7,0,0"
+                           FontSize="14" LineHeight="21" TextWrapping="Wrap" Foreground="#64748B"/>
+            </StackPanel>
+
+            <Button x:Name="TrayButton" Grid.Row="1" Margin="0,24,0,0"
+                    Style="{StaticResource CloseChoiceButtonStyle}"
+                    Click="OnTrayClick"
+                    AutomationProperties.AutomationId="MinimizeToNotificationArea">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource ChoiceIconSurfaceStyle}" Background="#DBEAFE">
+                        <TextBlock Text="&#xE718;" FontFamily="Segoe Fluent Icons" FontSize="20"
+                                   Foreground="#2563EB" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel Grid.Column="1" Margin="15,0,16,0" VerticalAlignment="Center">
+                        <TextBlock x:Name="TrayTitleText" FontSize="15" FontWeight="SemiBold" Foreground="#172033"/>
+                        <TextBlock x:Name="TrayDescriptionText" Margin="0,5,0,0" FontSize="13"
+                                   LineHeight="18" TextWrapping="Wrap" Foreground="#64748B"/>
+                    </StackPanel>
+                    <TextBlock Grid.Column="2" Text="&#xE76C;" FontFamily="Segoe Fluent Icons" FontSize="14"
+                               Foreground="#7A94BC" VerticalAlignment="Center"/>
+                </Grid>
             </Button>
-            <Button x:Name="ExitButton" Margin="0,0,0,16" Padding="16" HorizontalContentAlignment="Left"
-                    Click="OnExitClick" AutomationProperties.AutomationId="ExitApplication">
-                <StackPanel><TextBlock x:Name="ExitTitleText" FontWeight="SemiBold"/><TextBlock x:Name="ExitDescriptionText" Margin="0,4,0,0" TextWrapping="Wrap" Foreground="#60708A"/></StackPanel>
+
+            <Button x:Name="ExitButton" Grid.Row="2" Margin="0,12,0,0"
+                    Style="{StaticResource CloseChoiceButtonStyle}"
+                    Click="OnExitClick"
+                    AutomationProperties.AutomationId="ExitApplication">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource ChoiceIconSurfaceStyle}" Background="#FFF0F0">
+                        <TextBlock Text="&#xE7E8;" FontFamily="Segoe Fluent Icons" FontSize="20"
+                                   Foreground="#DC4C4C" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel Grid.Column="1" Margin="15,0,16,0" VerticalAlignment="Center">
+                        <TextBlock x:Name="ExitTitleText" FontSize="15" FontWeight="SemiBold" Foreground="#172033"/>
+                        <TextBlock x:Name="ExitDescriptionText" Margin="0,5,0,0" FontSize="13"
+                                   LineHeight="18" TextWrapping="Wrap" Foreground="#64748B"/>
+                    </StackPanel>
+                    <TextBlock Grid.Column="2" Text="&#xE76C;" FontFamily="Segoe Fluent Icons" FontSize="14"
+                               Foreground="#A6949A" VerticalAlignment="Center"/>
+                </Grid>
             </Button>
-            <Button x:Name="CancelButton" HorizontalAlignment="Right" MinWidth="92" Padding="14,8"
-                    IsCancel="True" Click="OnCancelClick" AutomationProperties.AutomationId="Cancel"/>
-        </StackPanel>
-    </Border>
+
+            <Grid Grid.Row="3" Margin="0,22,0,0">
+                <Border Height="1" VerticalAlignment="Top" Background="#E4EBF5"/>
+                <Button x:Name="CancelButton" Margin="0,18,0,0"
+                        HorizontalAlignment="Right" MinWidth="96"
+                        Style="{StaticResource SecondaryActionButtonStyle}"
+                        IsCancel="True" Click="OnCancelClick"
+                        AutomationProperties.AutomationId="Cancel"/>
+            </Grid>
+        </Grid>
+    </Grid>
 </Window>
