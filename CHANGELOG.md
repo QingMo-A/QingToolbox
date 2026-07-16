@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added project-local Development and ModuleTest profiles under `.qingtoolbox`.
+- Isolated development instances, settings, modules, module data, and activation scopes from Production.
+- Prevented sandbox environments from reading or modifying Production login-startup registration and user data.
+
 - Hardened explicit background shutdown so module-window, module-runtime, activation-pipe, badge, and notification-area cleanup failures cannot block final application shutdown.
 - Made notification-area initialization transactional and retryable, and observed dispatcher failures without permanently disabling tray actions.
 - Preserved suspended module windows when switching directly from the notification area to the floating badge.

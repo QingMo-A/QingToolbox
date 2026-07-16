@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Windows;
 using QingToolbox.Abstractions.Localization;
+using QingToolbox.Shell.Startup;
 using Forms = System.Windows.Forms;
 
 namespace QingToolbox.Shell.Services;
@@ -21,6 +22,7 @@ public interface INotificationAreaIcon : IDisposable
 public sealed class NotificationAreaService : INotificationAreaIcon, IDisposable
 {
     private readonly ILocalizationService _localization;
+    private readonly ApplicationExecutionEnvironment _environment;
     private Forms.NotifyIcon? _notifyIcon;
     private Forms.ContextMenuStrip? _menu;
     private Icon? _icon;
@@ -28,8 +30,8 @@ public sealed class NotificationAreaService : INotificationAreaIcon, IDisposable
     private bool _cultureSubscribed;
     private int _dispatchPending;
 
-    public NotificationAreaService(ILocalizationService localization) =>
-        _localization = localization;
+    public NotificationAreaService(ILocalizationService localization, ApplicationExecutionEnvironment environment)
+    { _localization = localization; _environment = environment; }
 
     public Func<Task>? OpenRequested { get; set; }
     public Func<Task>? OpenSettingsRequested { get; set; }
@@ -57,7 +59,7 @@ public sealed class NotificationAreaService : INotificationAreaIcon, IDisposable
             notifyIcon = new Forms.NotifyIcon
             {
                 Icon = icon,
-                Text = "QingToolbox",
+                Text = _environment.DisplayName,
                 ContextMenuStrip = menu,
                 Visible = true
             };

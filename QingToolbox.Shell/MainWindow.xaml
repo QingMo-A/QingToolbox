@@ -1360,6 +1360,7 @@
                                   Content="{Binding Strings[startup.launchAtLogin]}"
                                   ToolTip="{Binding Strings[startup.launchAtLoginDescription]}"
                                   IsChecked="{Binding LaunchAtLogin, Mode=TwoWay}"
+                                  IsEnabled="{Binding CanConfigureWindowsStartup}"
                                   Command="{Binding ApplyLaunchAtLoginCommand}">
                             <CheckBox.Style>
                                 <Style TargetType="CheckBox">

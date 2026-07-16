@@ -40,6 +40,7 @@ internal static class Program
     {
         var options = ParseOptions(args);
         VerifyCloseBehaviorSettings();
+        VerifyExecutionEnvironmentContractsAsync().GetAwaiter().GetResult();
         var repositoryRoot = FindRepositoryRoot(AppContext.BaseDirectory);
         VerifyNotificationAreaLifecycleContracts(repositoryRoot);
         VerifyExitFailureIsolation();
@@ -266,6 +267,106 @@ internal static class Program
         Console.WriteLine("Durable shared user settings passed.");
     }
 
+    private static async Task VerifyExecutionEnvironmentContractsAsync()
+    {
+        Console.WriteLine("Verifying execution environment isolation...");
+        var production = ApplicationLaunchOptions.Parse([]);
+        Require(production.Environment.IsProduction && production.Environment.ProfileName == "Default",
+            "No-argument Release semantics must remain Production/Default.");
+        Require(ApplicationLaunchOptions.Parse(["--startup"]).IsStartupLaunch,
+            "Production startup launch was rejected.");
+        void Reject(params string[] args)
+        {
+            try { _ = ApplicationLaunchOptions.Parse(args); }
+            catch (ArgumentException) { return; }
+            throw new InvalidOperationException($"Invalid launch arguments were accepted: {string.Join(' ', args)}");
+        }
+        Reject("--environment", "Production", "--data-root", @"C:\sandbox");
+        Reject("--environment", "Development", "--data-root", @"C:\sandbox");
+        Reject("--environment", "Development", "--profile", "Shell");
+        Reject("--environment", "ModuleTest", "--profile", "PowerGuard");
+        Reject("--environment", "Development", "--profile", "..");
+        Reject("--environment", "Development", "--profile", "Shell", "--data-root", "relative");
+        Reject("--startup", "--environment", "Development", "--profile", "Shell", "--data-root", @"C:\sandbox");
+        Reject("--unknown");
+        Reject("--environment", "Development", "--environment", "ModuleTest", "--profile", "Shell", "--data-root", @"C:\sandbox");
+
+        var root = Path.Combine(Path.GetTempPath(), $"QingToolbox-environment-smoke-{Guid.NewGuid():N}");
+        try
+        {
+            var devRoot = Path.Combine(root, "dev");
+            var testRoot = Path.Combine(root, "test");
+            var dev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "Shell", devRoot);
+            var sameDev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "Shell", devRoot + Path.DirectorySeparatorChar);
+            var otherDev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "Other", devRoot);
+            var otherRootDev = ApplicationExecutionEnvironment.Sandbox(
+                ApplicationEnvironmentKind.Development, "Shell", Path.Combine(root, "other-dev"));
+            var moduleTest = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.ModuleTest, "Shell", testRoot);
+            Require(dev.InstanceScope == sameDev.InstanceScope && dev.InstanceScope != otherDev.InstanceScope &&
+                    dev.InstanceScope != otherRootDev.InstanceScope && dev.InstanceScope != moduleTest.InstanceScope,
+                "Sandbox instance scopes are not stable and isolated.");
+            Require(dev.DisplayName == "QingToolbox [DEV: Shell]" &&
+                    moduleTest.DisplayName == "QingToolbox [MODULE TEST: Shell]",
+                "Sandbox display names are incorrect.");
+            var uniquePrefix = $"EnvironmentSmoke.{Guid.NewGuid():N}.";
+            await using var devPrimary = SingleInstanceCoordinator.CreateForScope(uniquePrefix + dev.InstanceScope);
+            await using var devSecondary = SingleInstanceCoordinator.CreateForScope(uniquePrefix + dev.InstanceScope);
+            await using var otherProfilePrimary = SingleInstanceCoordinator.CreateForScope(uniquePrefix + otherDev.InstanceScope);
+            await using var otherRootPrimary = SingleInstanceCoordinator.CreateForScope(uniquePrefix + otherRootDev.InstanceScope);
+            await using var moduleTestPrimary = SingleInstanceCoordinator.CreateForScope(uniquePrefix + moduleTest.InstanceScope);
+            Require(devPrimary.IsPrimary && !devSecondary.IsPrimary && otherProfilePrimary.IsPrimary &&
+                    otherRootPrimary.IsPrimary && moduleTestPrimary.IsPrimary,
+                "Sandbox instance scopes did not isolate profiles and environment kinds.");
+
+            var productionPaths = new ApplicationPaths(production.Environment);
+            Require(productionPaths.SettingsPath == Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "QingToolbox", "settings.json") &&
+                    productionPaths.UserModulesDirectory == Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "QingToolbox", "Modules") &&
+                    productionPaths.ModuleDataDirectory == Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "QingToolbox", "Data"),
+                "Production paths changed incompatibly.");
+
+            var devPaths = new ApplicationPaths(dev);
+            var testPaths = new ApplicationPaths(moduleTest);
+            Require(new[] { devPaths.SettingsPath, devPaths.UserModulesDirectory, devPaths.ModuleDataDirectory,
+                    devPaths.LogsDirectory, devPaths.CacheDirectory, devPaths.TempDirectory }
+                    .All(path => Path.GetFullPath(path).StartsWith(Path.GetFullPath(devRoot) + Path.DirectorySeparatorChar,
+                        StringComparison.OrdinalIgnoreCase)),
+                "Development writable paths escaped the sandbox.");
+            Require(devPaths.ModuleDiscoveryDirectories.Count == 2 &&
+                    testPaths.ModuleDiscoveryDirectories.Count == 1 &&
+                    testPaths.ModuleDiscoveryDirectories[0] == testPaths.UserModulesDirectory,
+                "Environment module discovery directories are incorrect.");
+            foreach (var (sandboxEnvironment, sandboxPaths) in new[] { (dev, devPaths), (moduleTest, testPaths) })
+            {
+                sandboxPaths.EnsureDirectories();
+                Require(Directory.Exists(sandboxPaths.UserModulesDirectory) &&
+                        Directory.Exists(sandboxPaths.ModuleDataDirectory),
+                    $"{sandboxEnvironment.Kind} directories were not created.");
+                using var settings = new UserSettingsService(sandboxPaths.SettingsPath);
+                await settings.UpdateAsync(value => value.Language = "zh-CN");
+                Require(File.Exists(sandboxPaths.SettingsPath),
+                    $"{sandboxEnvironment.Kind} settings were not written to the sandbox.");
+
+                var fakeStore = new FakeStartupRegistrationStore();
+                var registration = new WindowsStartupRegistrationService(settings, fakeStore, sandboxEnvironment);
+                Require(!registration.IsAvailable && !(await registration.GetStateAsync()).IsRegistered,
+                    $"{sandboxEnvironment.Kind} startup registration must be unavailable without reading the store.");
+                var rejected = false;
+                try { await registration.SetEnabledAsync(true); }
+                catch (InvalidOperationException) { rejected = true; }
+                Require(rejected && fakeStore.Value is null && fakeStore.ReadCount == 0,
+                    $"{sandboxEnvironment.Kind} startup registration was not rejected without store access.");
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+        Console.WriteLine("Execution environment isolation passed.");
+    }
+
     private static async Task VerifyStartupInfrastructureAsync(DiscoveredModule helloModule)
     {
         Console.WriteLine("Verifying startup safety infrastructure...");
@@ -337,7 +438,8 @@ internal static class Program
                     normalized.StartupModules[0].ManifestSha256 == "CC",
                 "Startup settings did not preserve fields or normalize duplicate module ids.");
             var fakeStore = new FakeStartupRegistrationStore();
-            var registration = new WindowsStartupRegistrationService(settingsService, fakeStore);
+            var registration = new WindowsStartupRegistrationService(
+                settingsService, fakeStore, ApplicationExecutionEnvironment.Production());
             await registration.SetEnabledAsync(true);
             Require(fakeStore.Value?.EndsWith(" --startup", StringComparison.Ordinal) == true,
                 "Enabling startup did not write the owned registration value.");
@@ -517,7 +619,8 @@ internal static class Program
     private sealed class FakeStartupRegistrationStore : IStartupRegistrationStore
     {
         public string? Value { get; private set; }
-        public string? Read() => Value;
+        public int ReadCount { get; private set; }
+        public string? Read() { ReadCount++; return Value; }
         public void Write(string command) => Value = command;
         public void Delete() => Value = null;
     }

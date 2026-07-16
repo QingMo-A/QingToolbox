@@ -1,5 +1,6 @@
 using Microsoft.Win32;
 using QingToolbox.Core.Settings;
+using QingToolbox.Shell.Startup;
 
 namespace QingToolbox.Shell.Services;
 
@@ -31,14 +32,18 @@ public sealed record StartupRegistrationState(bool IsRegistered, bool MatchesCur
 
 public sealed class WindowsStartupRegistrationService(
     UserSettingsService settingsService,
-    IStartupRegistrationStore store)
+    IStartupRegistrationStore store,
+    ApplicationExecutionEnvironment environment)
 {
+    public bool IsAvailable => environment.AllowWindowsStartupRegistration;
     public static string BuildCommand(string executablePath) => $"\"{executablePath}\" --startup";
     private static string CurrentCommand => BuildCommand(Environment.ProcessPath
         ?? throw new InvalidOperationException("The executable path is unavailable."));
 
     public Task<StartupRegistrationState> GetStateAsync() => Task.Run(() =>
     {
+        if (!IsAvailable) return new StartupRegistrationState(false, false,
+            "Windows login startup is unavailable in development and module test environments.");
         try
         {
             var actual = store.Read();
@@ -50,6 +55,9 @@ public sealed class WindowsStartupRegistrationService(
 
     public async Task SetEnabledAsync(bool enabled)
     {
+        if (!IsAvailable)
+            throw new InvalidOperationException(
+                "Windows login startup is unavailable in development and module test environments.");
         var previous = await Task.Run(store.Read);
         try
         {
@@ -65,6 +73,7 @@ public sealed class WindowsStartupRegistrationService(
 
     public async Task ReconcileAsync(UserSettings settings)
     {
+        if (!IsAvailable) return;
         if (!settings.LaunchAtLogin)
         {
             if ((await GetStateAsync()).IsRegistered) await Task.Run(store.Delete);

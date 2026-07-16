@@ -13,6 +13,8 @@ using QingToolbox.Core.Localization;
 using Microsoft.Win32;
 using System.Reflection;
 using QingToolbox.Core.Settings;
+using QingToolbox.Shell.Startup;
+using QingToolbox.Abstractions.Modules;
 
 namespace QingToolbox.Shell.ViewModels;
 
@@ -27,7 +29,8 @@ public sealed partial class MainWindowViewModel(
     UserSettingsService settingsService,
     WindowsStartupRegistrationService startupRegistrationService,
     ModuleStartupFingerprintService fingerprintService,
-    ILocalizationService localization) : ObservableObject
+    ILocalizationService localization,
+    ApplicationExecutionEnvironment executionEnvironment) : ObservableObject
 {
     private bool _initialized;
     private bool _suppressPresentationSave;
@@ -98,7 +101,8 @@ public sealed partial class MainWindowViewModel(
     public string StartupAuthorizationSummary => localization.GetString("startup.authorizationSummary", StartupAuthorizationCount);
     public string MissingStartupAuthorizationSummary => localization.GetString("startup.missingSummary", MissingStartupAuthorizationCount);
 
-    public string Title => localization.GetString("app.name");
+    public string Title => executionEnvironment.DisplayName;
+    public bool CanConfigureWindowsStartup => executionEnvironment.AllowWindowsStartupRegistration && !IsStartupSettingsBusy;
     public string VersionDisplay =>
         typeof(MainWindowViewModel).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
@@ -258,12 +262,10 @@ public sealed partial class MainWindowViewModel(
             StatusMessage = localization.GetString(
                 "status.scanningModules");
 
-            var developmentModules = await scanner.ScanAsync(
-                applicationPaths.DevelopmentModulesDirectory);
-            var userModules = await scanner.ScanAsync(
-                applicationPaths.UserModulesDirectory);
-            var discoveredModules = developmentModules
-                .Concat(userModules)
+            var scans = new List<DiscoveredModule>();
+            foreach (var directory in applicationPaths.ModuleDiscoveryDirectories)
+                scans.AddRange(await scanner.ScanAsync(directory));
+            var discoveredModules = scans
                 .GroupBy(module => module.Manifest.Id, StringComparer.Ordinal)
                 .Select(group => group.First())
                 .ToArray();
@@ -562,6 +564,8 @@ public sealed partial class MainWindowViewModel(
             StartupSettingsMessage = localization.GetString("startup.registrationFailed");
         }
         LaunchAtLogin = (await startupRegistrationService.GetStateAsync()).MatchesCurrentExecutable;
+        if (!executionEnvironment.AllowWindowsStartupRegistration)
+            StartupSettingsMessage = localization.GetString("startup.unavailableInSandbox");
         _suppressPresentationSave = true;
         SelectedStartupPresentationMode = settings.StartupPresentationMode;
         _persistedStartupPresentationMode = settings.StartupPresentationMode;
@@ -733,7 +737,7 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand]
     private async Task ApplyLaunchAtLoginAsync()
     {
-        if (IsStartupSettingsBusy) return;
+        if (IsStartupSettingsBusy || !executionEnvironment.AllowWindowsStartupRegistration) return;
         IsStartupSettingsBusy = true;
         var desired = LaunchAtLogin;
         try
@@ -751,6 +755,9 @@ public sealed partial class MainWindowViewModel(
         }
         finally { IsStartupSettingsBusy = false; }
     }
+
+    partial void OnIsStartupSettingsBusyChanged(bool value) =>
+        OnPropertyChanged(nameof(CanConfigureWindowsStartup));
 
     partial void OnSelectedStartupPresentationModeChanged(StartupPresentationMode value)
     {

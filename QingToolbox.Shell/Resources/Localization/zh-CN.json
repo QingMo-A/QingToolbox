@@ -193,5 +193,6 @@
   "closeBehavior.exit": "退出 QingToolbox",
   "closeBehavior.ask": "下次关闭时重新询问",
   "closeBehavior.saved": "窗口关闭行为已保存。",
-  "closeBehavior.saveFailed": "无法保存窗口关闭行为，主窗口已保持打开。"
+  "closeBehavior.saveFailed": "无法保存窗口关闭行为，主窗口已保持打开。",
+  "startup.unavailableInSandbox": "开发和模块测试环境不支持 Windows 登录自启动。"
 }

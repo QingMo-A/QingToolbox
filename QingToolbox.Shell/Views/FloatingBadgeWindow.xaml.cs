@@ -13,18 +13,20 @@ public partial class FloatingBadgeWindow : Window, INotifyPropertyChanged
     private bool _suppressRestoreUntilButtonUp;
     private bool _allowClose;
 
-    public FloatingBadgeWindow(ILocalizationService localization)
+    public FloatingBadgeWindow(ILocalizationService localization, string displayName = "QingToolbox")
     {
         _localization = localization;
         InitializeComponent();
         _localization.CultureChanged += OnCultureChanged;
         DataContext = this;
         BadgeSurface.ContextMenu.DataContext = this;
+        _displayName = displayName;
         Loaded += (_, _) => BadgeSurface.Focus();
         Deactivated += (_, _) => ResetDragState(releaseCapture: true);
     }
 
-    public string AutomationName => _localization.GetString("floatingBadge.automationName");
+    private readonly string _displayName;
+    public string AutomationName => _displayName;
     public string OpenText => _localization.GetString("floatingBadge.open");
     public string ExitText => _localization.GetString("floatingBadge.exit");
     public string ContextMenuText => _localization.GetString("floatingBadge.contextMenu");

@@ -193,5 +193,6 @@
   "closeBehavior.exit": "Exit QingToolbox",
   "closeBehavior.ask": "Ask again next time",
   "closeBehavior.saved": "Window close behavior saved.",
-  "closeBehavior.saveFailed": "Window close behavior could not be saved. The main window remains open."
+  "closeBehavior.saveFailed": "Window close behavior could not be saved. The main window remains open.",
+  "startup.unavailableInSandbox": "Windows login startup is unavailable in development and module test environments."
 }

@@ -14,12 +14,10 @@ public sealed class UserSettingsService : IDisposable
 
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public UserSettingsService(string? settingsPath = null)
+    public UserSettingsService(string settingsPath)
     {
-        SettingsPath = settingsPath ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "QingToolbox",
-            "settings.json");
+        ArgumentException.ThrowIfNullOrWhiteSpace(settingsPath);
+        SettingsPath = Path.GetFullPath(settingsPath);
     }
 
     public string SettingsPath { get; }

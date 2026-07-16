@@ -9,3 +9,6 @@ publish/
 *.dll
 *.exe
 *.pdb
+
+# Local QingToolbox development environments
+/.qingtoolbox/

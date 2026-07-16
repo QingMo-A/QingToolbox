@@ -26,8 +26,31 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        var launchOptions = ApplicationLaunchOptions.Parse(e.Args);
-        _singleInstance = SingleInstanceCoordinator.Create();
+        ApplicationLaunchOptions launchOptions;
+        try
+        {
+#if DEBUG
+            launchOptions = ApplicationLaunchOptions.Parse(e.Args, requireExplicitEnvironment: true);
+#else
+            launchOptions = ApplicationLaunchOptions.Parse(e.Args);
+#endif
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException)
+        {
+            System.Diagnostics.Debug.WriteLine($"Invalid QingToolbox launch options: {exception.Message}");
+            var chinese = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "zh";
+            MessageBox.Show(chinese
+                    ? $"启动参数无效：{exception.Message}\n请使用 scripts/start-dev-host.ps1 启动开发环境。"
+                    : $"Invalid launch options: {exception.Message}\nUse scripts/start-dev-host.ps1 for development.",
+                "QingToolbox", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown();
+            return;
+        }
+        var environment = launchOptions.Environment;
+        System.Diagnostics.Debug.WriteLine($"QingToolbox environment: {environment.Kind}; profile: {environment.ProfileName}; sandbox: {environment.SandboxRoot ?? "<production>"}");
+        _singleInstance = environment.IsProduction
+            ? SingleInstanceCoordinator.Create()
+            : SingleInstanceCoordinator.CreateForScope(environment.InstanceScope);
         if (!_singleInstance.IsPrimary)
         {
             var delivered = false;
@@ -85,8 +108,8 @@ public partial class App : Application
             services.AddSingleton<ModuleManifestScanner>();
             services.AddSingleton<InProcessModuleLoader>();
             services.AddSingleton<ModuleRuntimeManager>();
-            services.AddSingleton<UserSettingsService>();
             services.AddSingleton(launchOptions);
+            services.AddSingleton(environment);
             services.AddSingleton(_startupSession);
             services.AddSingleton<IStartupRegistrationStore, WindowsRunRegistrationStore>();
             services.AddSingleton<WindowsStartupRegistrationService>();
@@ -100,12 +123,14 @@ public partial class App : Application
             services.AddSingleton<INotificationAreaIcon>(provider => provider.GetRequiredService<NotificationAreaService>());
             services.AddSingleton<ApplicationExitCoordinator>();
             services.AddSingleton<ApplicationPaths>();
+            services.AddSingleton(provider => new UserSettingsService(
+                provider.GetRequiredService<ApplicationPaths>().SettingsPath));
             services.AddSingleton<ModulePackageImporter>();
             services.AddSingleton<MainWindowViewModel>();
             services.AddSingleton<MainWindow>();
 
             _serviceProvider = services.BuildServiceProvider();
-            _serviceProvider.GetRequiredService<ApplicationPaths>().EnsureUserDirectories();
+            _serviceProvider.GetRequiredService<ApplicationPaths>().EnsureDirectories();
 
             var localizationDirectory = Path.Combine(
                 AppContext.BaseDirectory,

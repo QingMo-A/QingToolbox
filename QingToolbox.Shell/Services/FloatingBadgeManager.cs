@@ -4,13 +4,15 @@ using QingToolbox.Abstractions.Localization;
 using QingToolbox.Core.Settings;
 using QingToolbox.Shell.Views;
 using QingToolbox.Shell.Windowing;
+using QingToolbox.Shell.Startup;
 
 namespace QingToolbox.Shell.Services;
 
 public sealed class FloatingBadgeManager(
     ModuleWindowManager moduleWindowManager,
     UserSettingsService settingsService,
-    ILocalizationService localization) : IDisposable
+    ILocalizationService localization,
+    ApplicationExecutionEnvironment environment) : IDisposable
 {
     private readonly FloatingBadgeStateMachine _stateMachine = new();
     private readonly SemaphoreSlim _transitionGate = new(1, 1);
@@ -172,7 +174,7 @@ public sealed class FloatingBadgeManager(
     private FloatingBadgeWindow CreateBadgeWindow()
     {
         if (_badgeWindow is not null) return _badgeWindow;
-        var badge = new FloatingBadgeWindow(localization);
+        var badge = new FloatingBadgeWindow(localization, environment.DisplayName);
         badge.RestoreRequested += async (_, _) => await RestoreSafelyAsync();
         badge.ExitRequested += async (_, _) => await ExitSafelyAsync();
         badge.DragCompleted += async (_, _) =>
