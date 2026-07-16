@@ -58,4 +58,5 @@ try {
 catch { }
 Assert-Condition (-not $nextStageExecuted) "A stage after failure was executed."
 
+$global:LASTEXITCODE = 0
 Write-Host "Preview stage runner contracts passed."
