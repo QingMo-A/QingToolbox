@@ -61,6 +61,14 @@ jobs:
         shell: pwsh
         run: dotnet build -c Release --no-restore
 
+      - name: Run module update smoke test
+        shell: pwsh
+        run: >-
+          dotnet run
+          --project QingToolbox.DevTools.ModuleUpdateSmokeTest
+          -c Release
+          --no-build
+
       - name: Deploy development module for smoke test
         shell: pwsh
         run: ./scripts/deploy-dev-modules.ps1 -Configuration Release
