@@ -40,25 +40,13 @@
                     Source="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.Mark.svg"/>
             </controls:WindowTitleBar.IconSource>
             <controls:WindowTitleBar.AdditionalActions>
-                <Button Style="{StaticResource WindowTitleActionButtonStyle}"
+                <Button Style="{StaticResource WindowCaptionButtonStyle}"
                         ToolTip="{Binding Strings[floatingBadge.enableTooltip]}"
                         AutomationProperties.Name="{Binding Strings[floatingBadge.enable]}"
                         Click="OnFloatingBadgeClick">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE718;" FontFamily="Segoe Fluent Icons" FontSize="14"/>
-                        <TextBlock Margin="7,0,0,0" Text="{Binding Strings[floatingBadge.enable]}">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsCompactWindow}" Value="True">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                            <Setter Property="Margin" Value="0"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
-                    </StackPanel>
+                    <TextBlock Text="&#xE718;"
+                               FontFamily="Segoe Fluent Icons"
+                               FontSize="14"/>
                 </Button>
             </controls:WindowTitleBar.AdditionalActions>
         </controls:WindowTitleBar>
@@ -440,6 +428,15 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsHomeSelected}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
                     <TextBlock Text="{Binding PageTitle}"
                                FontSize="30"
                                FontWeight="SemiBold"
