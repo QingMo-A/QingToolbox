@@ -211,6 +211,7 @@ public sealed partial class MainWindowViewModel(
         OnPropertyChanged(nameof(PageTitle));
         OnPropertyChanged(nameof(PageSubtitle));
         OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(PinLabel));
         OnPropertyChanged(nameof(StartupAuthorizationSummary));
         OnPropertyChanged(nameof(MissingStartupAuthorizationSummary));
         RefreshLanguageOptionLabels();
