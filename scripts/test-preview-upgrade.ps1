@@ -69,7 +69,9 @@ try {
     $matchingEntries = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' |
         Where-Object { $_.PSChildName -eq $appId })
     if ($matchingEntries.Count -ne 1) { throw "Expected one QingToolbox uninstall entry, found $($matchingEntries.Count)." }
-    $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\QingToolbox'
+    $programsFolder = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+    if ([string]::IsNullOrWhiteSpace($programsFolder)) { throw 'Windows Start Menu Programs folder could not be resolved.' }
+    $startMenu = Join-Path $programsFolder 'QingToolbox'
     $shortcuts = @(Get-ChildItem -LiteralPath $startMenu -Filter '*.lnk' -File -ErrorAction SilentlyContinue)
     if ($shortcuts.Count -ne 2 -or @($shortcuts.Name | Sort-Object -Unique).Count -ne 2) {
         throw "Expected one application and one uninstall Start Menu shortcut, found $($shortcuts.Count)."
