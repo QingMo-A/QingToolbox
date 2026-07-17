@@ -69,6 +69,14 @@ jobs:
           -c Release
           --no-build
 
+      - name: Run startup reliability smoke test
+        shell: pwsh
+        run: >-
+          dotnet run
+          --project QingToolbox.DevTools.StartupReliabilitySmokeTest
+          -c Release
+          --no-build
+
       - name: Run module package download smoke test
         shell: pwsh
         run: >-

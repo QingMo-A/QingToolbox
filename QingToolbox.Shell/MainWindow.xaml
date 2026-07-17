@@ -1438,6 +1438,36 @@
                         </ComboBox>
                         <TextBlock Margin="0,8,0,0" Text="{Binding StartupSettingsMessage}"
                                    TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <Border Margin="0,18,0,0" Padding="16" CornerRadius="14" Background="#F5F9FF" BorderBrush="#DCE7F6" BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Strings[startup.healthTitle]}" FontWeight="SemiBold" FontSize="15"/>
+                                <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Strings[startup.backend]}" Foreground="{StaticResource SecondaryTextBrush}"/><TextBlock Grid.Column="1" Text="{Binding StartupBackendDisplay}"/>
+                                </Grid>
+                                <Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Strings[startup.health]}" Foreground="{StaticResource SecondaryTextBrush}"/><TextBlock Grid.Column="1" Text="{Binding StartupHealthDisplay}" TextWrapping="Wrap"/>
+                                </Grid>
+                                <Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Strings[startup.lastAttempt]}" Foreground="{StaticResource SecondaryTextBrush}"/><TextBlock Grid.Column="1" Text="{Binding StartupLastAttemptDisplay}"/>
+                                </Grid>
+                                <Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Strings[startup.visibleDuration]}" Foreground="{StaticResource SecondaryTextBrush}"/><TextBlock Grid.Column="1" Text="{Binding StartupVisibleDurationDisplay}"/>
+                                </Grid>
+                                <Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Strings[startup.readyDuration]}" Foreground="{StaticResource SecondaryTextBrush}"/><TextBlock Grid.Column="1" Text="{Binding StartupReadyDurationDisplay}"/>
+                                </Grid>
+                                <Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Strings[startup.lastFailure]}" Foreground="{StaticResource SecondaryTextBrush}"/><TextBlock Grid.Column="1" Text="{Binding StartupFailureDisplay}" TextWrapping="Wrap"/>
+                                </Grid>
+                                <WrapPanel Margin="0,14,0,0">
+                                    <Button Content="{Binding Strings[startup.test]}" Command="{Binding TestStartupCommand}" Style="{StaticResource SecondaryActionButtonStyle}"/>
+                                    <Button Content="{Binding Strings[startup.repair]}" Command="{Binding RepairStartupCommand}" Style="{StaticResource SecondaryActionButtonStyle}"/>
+                                    <Button Content="{Binding Strings[startup.refreshHealth]}" Command="{Binding RefreshStartupHealthCommand}" Style="{StaticResource SecondaryActionButtonStyle}"/>
+                                    <Button Content="{Binding Strings[startup.openScheduler]}" Command="{Binding OpenTaskSchedulerCommand}" Style="{StaticResource SecondaryActionButtonStyle}"/>
+                                    <Button Content="{Binding Strings[startup.copyDiagnostics]}" Command="{Binding CopyStartupDiagnosticsCommand}" Style="{StaticResource SecondaryActionButtonStyle}"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
                         <TextBlock Margin="0,16,0,0"
                                    Text="{Binding StartupAuthorizationSummary}"
                                    Foreground="{StaticResource SecondaryTextBrush}"/>

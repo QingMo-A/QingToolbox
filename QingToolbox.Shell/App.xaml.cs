@@ -48,7 +48,8 @@ public partial class App : Application
                     ? $"启动参数无效：{exception.Message}\n请使用 scripts/start-dev-host.ps1 启动开发环境。"
                     : $"Invalid launch options: {exception.Message}\nUse scripts/start-dev-host.ps1 for development.",
                 "QingToolbox", MessageBoxButton.OK, MessageBoxImage.Error);
-            Shutdown();
+            Environment.ExitCode = (int)StartupExitCode.InvalidArguments;
+            Shutdown(Environment.ExitCode);
             return;
         }
         var environment = launchOptions.Environment;
@@ -56,7 +57,7 @@ public partial class App : Application
         _singleInstance = environment.IsProduction
             ? SingleInstanceCoordinator.Create()
             : SingleInstanceCoordinator.CreateForScope(environment.InstanceScope);
-        if (!_singleInstance.IsPrimary)
+            if (!_singleInstance.IsPrimary)
         {
             var delivered = false;
             try
@@ -82,7 +83,8 @@ public partial class App : Application
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
             }
-            Shutdown();
+            Environment.ExitCode = delivered ? (int)StartupExitCode.Success : (int)StartupExitCode.SingleInstanceDeliveryFailure;
+            Shutdown(Environment.ExitCode);
             return;
         }
 
@@ -117,7 +119,11 @@ public partial class App : Application
             services.AddSingleton(environment);
             services.AddSingleton(_startupSession);
             services.AddSingleton<IStartupRegistrationStore, WindowsRunRegistrationStore>();
+            services.AddSingleton<WindowsRunStartupBackend>();
+            services.AddSingleton<ITaskSchedulerStore, WindowsTaskSchedulerStore>();
+            services.AddSingleton<WindowsTaskSchedulerStartupBackend>();
             services.AddSingleton<WindowsStartupRegistrationService>();
+            services.AddSingleton<StartupPreferenceReader>();
             services.AddSingleton<ModuleStartupFingerprintService>();
             services.AddSingleton<LocalizationManager>();
             services.AddSingleton<ILocalizationService>(
@@ -128,6 +134,9 @@ public partial class App : Application
             services.AddSingleton<INotificationAreaIcon>(provider => provider.GetRequiredService<NotificationAreaService>());
             services.AddSingleton<ApplicationExitCoordinator>();
             services.AddSingleton<ApplicationPaths>();
+            services.AddSingleton(provider => new StartupHealthJournal(
+                provider.GetRequiredService<ApplicationPaths>().StartupHealthPath,
+                provider.GetRequiredService<TimeProvider>()));
             services.AddSingleton(provider => new UserSettingsService(
                 provider.GetRequiredService<ApplicationPaths>().SettingsPath));
             services.AddSingleton<ModulePackageImporter>();
@@ -171,6 +180,9 @@ public partial class App : Application
 
             _serviceProvider = services.BuildServiceProvider();
             _serviceProvider.GetRequiredService<ApplicationPaths>().EnsureDirectories();
+            var startupJournal = _serviceProvider.GetRequiredService<StartupHealthJournal>();
+            startupJournal.SetSource(launchOptions.StartupSource);
+            startupJournal.Mark(StartupPhase.InstanceReady);
 
             var localizationDirectory = Path.Combine(
                 AppContext.BaseDirectory,
@@ -195,15 +207,21 @@ public partial class App : Application
             };
             notificationArea.FloatingBadgeRequested = mainWindow.SwitchToFloatingBadgeFromNotificationAreaAsync;
             notificationArea.ExitRequested = () => exitCoordinator.RequestExitAsync(ApplicationExitReason.NotificationAreaMenu);
-            notificationArea.Initialize();
+            var notificationReady = notificationArea.Initialize();
+            startupJournal.Mark(StartupPhase.NotificationAreaReady,
+                notificationReady ? null : "startup.notificationUnavailable");
             if (launchOptions.IsStartupLaunch) { mainWindow.Opacity = 0; mainWindow.ShowActivated = false; }
             mainWindow.Show();
+            if (!notificationReady) _ = RetryNotificationAreaObservedAsync(notificationArea, _startupSession.LifetimeToken);
             if (_startupSession.ManualActivationRequested) await _startupSession.ActivateMainWindowAsync();
         }
         catch (Exception exception)
         {
             System.Diagnostics.Debug.WriteLine($"Application startup failed: {exception.GetType().Name}");
-            Shutdown();
+            Environment.ExitCode = (int)StartupExitCode.FatalInitializationFailure;
+            _serviceProvider?.GetService<StartupHealthJournal>()?.Fail(StartupPhase.MinimalServicesReady,
+                "startup.fatalInitialization", Environment.ExitCode);
+            Shutdown(Environment.ExitCode);
         }
     }
 
@@ -258,5 +276,15 @@ public partial class App : Application
             _singleInstance.MessageReceived -= _activationHandler;
         await _singleInstance.DisposeAsync();
         _singleInstance = null;
+    }
+
+    private static async Task RetryNotificationAreaObservedAsync(INotificationAreaIcon notificationArea,CancellationToken token)
+    {
+        for(var attempt=1;attempt<5&&!token.IsCancellationRequested&&!notificationArea.IsAvailable;attempt++)
+        {
+            try{await Task.Delay(TimeSpan.FromMilliseconds(200*attempt),token);notificationArea.Initialize();}
+            catch(OperationCanceledException)when(token.IsCancellationRequested){return;}
+            catch(Exception exception){System.Diagnostics.Debug.WriteLine($"Notification retry failed: {exception.GetType().Name}");}
+        }
     }
 }

@@ -35,7 +35,8 @@ public sealed partial class MainWindowViewModel(
     ApplicationExecutionEnvironment executionEnvironment,
     ModuleUpdateCheckCoordinator moduleUpdateCoordinator,
     ModulePackageDownloadCoordinator modulePackageDownloadCoordinator,
-    TimeProvider timeProvider) : ObservableObject
+    TimeProvider timeProvider,
+    StartupHealthJournal startupHealthJournal) : ObservableObject
 {
     private bool _initialized;
     private bool _suppressPresentationSave;
@@ -112,6 +113,12 @@ public sealed partial class MainWindowViewModel(
     [ObservableProperty] private string _closeBehaviorMessage = string.Empty;
     [ObservableProperty] private int _startupAuthorizationCount;
     [ObservableProperty] private int _missingStartupAuthorizationCount;
+    [ObservableProperty] private string _startupBackendDisplay = "—";
+    [ObservableProperty] private string _startupHealthDisplay = "—";
+    [ObservableProperty] private string _startupLastAttemptDisplay = "—";
+    [ObservableProperty] private string _startupVisibleDurationDisplay = "—";
+    [ObservableProperty] private string _startupReadyDurationDisplay = "—";
+    [ObservableProperty] private string _startupFailureDisplay = "—";
 
     public IReadOnlyList<StartupPresentationMode> StartupPresentationModes { get; } = Enum.GetValues<StartupPresentationMode>();
     public string StartupAuthorizationSummary => localization.GetString("startup.authorizationSummary", StartupAuthorizationCount);
@@ -793,13 +800,11 @@ public sealed partial class MainWindowViewModel(
         if (_initialized) return;
         _initialized = true;
         var settings = await settingsService.ReadAsync(cancellationToken);
-        try { await startupRegistrationService.ReconcileAsync(settings); }
-        catch (Exception exception)
-        {
-            Debug.WriteLine($"Startup registration reconciliation failed: {exception.GetType().Name}");
-            StartupSettingsMessage = localization.GetString("startup.registrationFailed");
-        }
-        LaunchAtLogin = (await startupRegistrationService.GetStateAsync()).MatchesCurrentExecutable;
+        var registration = await startupRegistrationService.GetStateAsync(cancellationToken);
+        LaunchAtLogin = registration.ConfiguredByUser && registration.MatchesCurrentExecutable;
+        StartupSettingsMessage = localization.GetString(registration.DiagnosticCode);
+        ApplyRegistrationHealth(registration);
+        await RefreshStartupJournalAsync(cancellationToken);
         if (!executionEnvironment.AllowWindowsStartupRegistration)
             StartupSettingsMessage = localization.GetString("startup.unavailableInSandbox");
         _suppressPresentationSave = true;
@@ -812,6 +817,71 @@ public sealed partial class MainWindowViewModel(
         _suppressCloseBehaviorSave = false;
         await RefreshModulesAsync(cancellationToken);
         if (executionEnvironment.IsProduction) _ = RunAutomaticUpdateCheckObservedAsync();
+    }
+
+    [RelayCommand]
+    private async Task RefreshStartupHealthAsync()
+    {
+        if (IsStartupSettingsBusy) return;
+        IsStartupSettingsBusy=true;
+        try{var state=await startupRegistrationService.GetStateAsync();ApplyRegistrationHealth(state);await RefreshStartupJournalAsync();}
+        finally{IsStartupSettingsBusy=false;}
+    }
+
+    [RelayCommand]
+    private async Task RepairStartupAsync()
+    {
+        if(!CanConfigureWindowsStartup)return;IsStartupSettingsBusy=true;
+        try{var state=await startupRegistrationService.RepairAsync();ApplyRegistrationHealth(state);LaunchAtLogin=state.MatchesCurrentExecutable;StartupSettingsMessage=localization.GetString(state.DiagnosticCode);}
+        catch{StartupSettingsMessage=localization.GetString("startup.registrationFailed");}
+        finally{IsStartupSettingsBusy=false;}
+    }
+
+    [RelayCommand]
+    private async Task TestStartupAsync()
+    {
+        if(!CanConfigureWindowsStartup)return;IsStartupSettingsBusy=true;
+        try{var state=await startupRegistrationService.RunTestAsync();ApplyRegistrationHealth(state);StartupSettingsMessage=localization.GetString("startup.testRequested");}
+        catch{StartupSettingsMessage=localization.GetString("startup.testFailed");}
+        finally{IsStartupSettingsBusy=false;}
+    }
+
+    [RelayCommand]
+    private void OpenTaskScheduler()
+    {
+        if(!executionEnvironment.IsProduction)return;
+        try{Process.Start(new ProcessStartInfo("taskschd.msc"){UseShellExecute=true});}catch{StartupSettingsMessage=localization.GetString("startup.schedulerOpenFailed");}
+    }
+
+    [RelayCommand]
+    private void CopyStartupDiagnostics()
+    {
+        try{Clipboard.SetText($"Backend: {StartupBackendDisplay}\nHealth: {StartupHealthDisplay}\nLast attempt: {StartupLastAttemptDisplay}\nVisible: {StartupVisibleDurationDisplay}\nReady: {StartupReadyDurationDisplay}\nFailure: {StartupFailureDisplay}");StartupSettingsMessage=localization.GetString("startup.diagnosticsCopied");}catch{StartupSettingsMessage=localization.GetString("startup.diagnosticsCopyFailed");}
+    }
+
+    private void ApplyRegistrationHealth(StartupRegistrationState state)
+    {StartupBackendDisplay=state.Backend.ToString();StartupHealthDisplay=localization.GetString(state.DiagnosticCode);}
+    private async Task RefreshStartupJournalAsync(CancellationToken token=default)
+    {
+        var last=(await startupHealthJournal.ReadAsync(token)).Where(x=>x.Source!=StartupLaunchSource.Manual).OrderByDescending(x=>x.ProcessStartedAt).FirstOrDefault();
+        StartupLastAttemptDisplay=last?.ProcessStartedAt.ToLocalTime().ToString("g")??"—";
+        StartupVisibleDurationDisplay=Duration(last,StartupPhase.PresentationReady);
+        StartupReadyDurationDisplay=Duration(last,StartupPhase.Ready);
+        StartupFailureDisplay=last?.FailurePhase is { } phase?$"{phase}: {last.FailureCode}":"—";
+    }
+    private static string Duration(StartupHealthRecord? record,StartupPhase phase)=>record is not null&&record.ElapsedMilliseconds.TryGetValue(phase.ToString(),out var value)?$"{value} ms":"—";
+
+    public void ApplyStartupPreferences(StartupPreferenceSnapshot snapshot)
+    {
+        _suppressPresentationSave = true;
+        SelectedStartupPresentationMode = snapshot.PresentationMode;
+        _persistedStartupPresentationMode = snapshot.PresentationMode;
+        _suppressPresentationSave = false;
+        _suppressCloseBehaviorSave = true;
+        SelectedMainWindowCloseBehavior = snapshot.CloseBehavior;
+        _persistedCloseBehavior = snapshot.CloseBehavior;
+        _suppressCloseBehaviorSave = false;
+        LaunchAtLogin = snapshot.LaunchAtLogin;
     }
 
     partial void OnSelectedMainWindowCloseBehaviorChanged(MainWindowCloseBehavior value)

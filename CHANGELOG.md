@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added resilient per-user Task Scheduler login startup with registry fallback.
+- Moved visible startup presentation ahead of module discovery and restoration.
+- Added startup health journaling, repair and test diagnostics.
+- Preserved external user disable decisions and least-privilege execution.
+
 - Corrected shared-download cancellation semantics and complete package identity binding.
 - Preserved committed verified packages across auxiliary record failures.
 - Added transfer inactivity timeout and prevented stale results from attaching after refresh.

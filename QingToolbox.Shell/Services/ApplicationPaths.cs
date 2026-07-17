@@ -28,6 +28,8 @@ public sealed class ApplicationPaths
         LogsDirectory = Path.Combine(LocalRoot, "logs");
         CacheDirectory = Path.Combine(LocalRoot, "cache");
         TempDirectory = environment.IsProduction ? Path.Combine(LocalRoot, "Temp") : Path.Combine(environment.SandboxRoot!, "temp");
+        StartupDirectory = Path.Combine(LocalRoot, "Startup");
+        StartupHealthPath = Path.Combine(StartupDirectory, "startup-health.json");
         DevelopmentModulesDirectory = baseModules;
         var discovery = environment.IsModuleTest ? [UserModulesDirectory] : new[] { baseModules, UserModulesDirectory };
         ModuleDiscoveryDirectories = discovery.Select(Path.GetFullPath)
@@ -43,6 +45,8 @@ public sealed class ApplicationPaths
     public string LogsDirectory { get; }
     public string CacheDirectory { get; }
     public string TempDirectory { get; }
+    public string StartupDirectory { get; }
+    public string StartupHealthPath { get; }
     public IReadOnlyList<string> ModuleDiscoveryDirectories { get; }
 
     public void EnsureDirectories()
@@ -51,7 +55,7 @@ public sealed class ApplicationPaths
             ApplicationExecutionEnvironment.AssertNoSandboxReparsePoints(
                 _environment.Kind, _environment.ProfileName, _environment.RepositoryRoot!, _environment.SandboxRoot!);
         var directories = _isProduction
-            ? new[] { UserModulesDirectory, ModuleDataDirectory }
+            ? new[] { UserModulesDirectory, ModuleDataDirectory, StartupDirectory }
             : new[] { RoamingRoot, LocalRoot, UserModulesDirectory,
                 ModuleDataDirectory, LogsDirectory, CacheDirectory, TempDirectory };
         foreach (var directory in directories)

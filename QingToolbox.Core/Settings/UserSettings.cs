@@ -11,6 +11,7 @@ public sealed class UserSettings
     public double? FloatingBadgeHorizontalRatio { get; set; }
     public double? FloatingBadgeVerticalRatio { get; set; }
     public bool LaunchAtLogin { get; set; }
+    public string StartupRegistrationBackend { get; set; } = "None";
     public StartupPresentationMode StartupPresentationMode { get; set; } = StartupPresentationMode.FloatingBadge;
     public MainWindowCloseBehavior MainWindowCloseBehavior { get; set; } = MainWindowCloseBehavior.Ask;
     public List<StartupModuleAuthorization> StartupModules { get; set; } = [];
@@ -19,6 +20,8 @@ public sealed class UserSettings
     {
         SettingsSchemaVersion = Math.Max(4, SettingsSchemaVersion);
         Language = string.IsNullOrWhiteSpace(Language) ? "system" : Language;
+        StartupRegistrationBackend = StartupRegistrationBackend is "TaskScheduler" or "RegistryRun"
+            ? StartupRegistrationBackend : "None";
         FloatingBadgeLeft = FiniteOrNull(FloatingBadgeLeft);
         FloatingBadgeTop = FiniteOrNull(FloatingBadgeTop);
         FloatingBadgeHorizontalRatio = RatioOrNull(FloatingBadgeHorizontalRatio);

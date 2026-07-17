@@ -99,6 +99,14 @@ try {
             --no-build
     }
 
+    Write-Host "`n==> Run startup reliability smoke test"
+    Invoke-CheckedStage -StageName "Startup reliability smoke test" -Action {
+        dotnet run `
+            --project (Join-Path $repoRoot "QingToolbox.DevTools.StartupReliabilitySmokeTest") `
+            -c Release `
+            --no-build
+    }
+
     Write-Host "`n==> Run module package download smoke test"
     Invoke-CheckedStage -StageName "Module package download smoke test" -Action {
         dotnet run `

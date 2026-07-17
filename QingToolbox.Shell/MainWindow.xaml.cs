@@ -22,6 +22,10 @@ public partial class MainWindow : Window
     private readonly INotificationAreaIcon _notificationArea;
     private readonly ApplicationExitCoordinator _exitCoordinator;
     private readonly ModuleWindowManager _moduleWindowManager;
+    private readonly StartupPreferenceReader _startupPreferenceReader;
+    private readonly ApplicationPaths _applicationPaths;
+    private readonly ApplicationLaunchOptions _launchOptions;
+    private readonly StartupHealthJournal _startupJournal;
     private int _closeRequestPending;
     private WindowState _notificationAreaRestoreState = WindowState.Normal;
 
@@ -33,7 +37,11 @@ public partial class MainWindow : Window
         ILocalizationService localization,
         INotificationAreaIcon notificationArea,
         ApplicationExitCoordinator exitCoordinator,
-        ModuleWindowManager moduleWindowManager)
+        ModuleWindowManager moduleWindowManager,
+        StartupPreferenceReader startupPreferenceReader,
+        ApplicationPaths applicationPaths,
+        ApplicationLaunchOptions launchOptions,
+        StartupHealthJournal startupJournal)
     {
         InitializeComponent();
 
@@ -45,6 +53,10 @@ public partial class MainWindow : Window
         _notificationArea = notificationArea;
         _exitCoordinator = exitCoordinator;
         _moduleWindowManager = moduleWindowManager;
+        _startupPreferenceReader = startupPreferenceReader;
+        _applicationPaths = applicationPaths;
+        _launchOptions = launchOptions;
+        _startupJournal = startupJournal;
         _startupSession.Attach(this, floatingBadgeManager);
         _floatingBadgeManager.Attach(this);
         DataContext = viewModel;
@@ -75,7 +87,7 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
-        try { await RunStartupAsync(); }
+        try { await PresentCriticalStartupAsync(); _ = InitializeApplicationInBackgroundAsync(); }
         catch (OperationCanceledException) when (_startupSession.State == StartupSessionState.Exiting)
         {
             // Application shutdown cancellation is an expected lifecycle outcome.
@@ -96,14 +108,33 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task RunStartupAsync()
+    private async Task PresentCriticalStartupAsync()
     {
+        var preferences = await _startupPreferenceReader.ReadAsync(
+            _applicationPaths.SettingsPath, _launchOptions.IsStartupLaunch, _startupSession.LifetimeToken);
+        _viewModel.ApplyStartupPreferences(preferences);
+        await _startupSession.PresentAsync(preferences.PresentationMode);
+        _startupJournal.Mark(StartupPhase.PresentationReady);
+    }
+
+    private async Task InitializeApplicationInBackgroundAsync()
+    {
+        try
+        {
         _startupSession.BeginDiscovery();
         await _viewModel.InitializeDiscoveryAsync(_startupSession.LifetimeToken);
-        await _startupSession.PresentAsync(_viewModel.SelectedStartupPresentationMode);
+        _startupJournal.Mark(StartupPhase.ModuleDiscoveryComplete);
         _startupSession.BeginModuleRestore();
         await _viewModel.RestoreAuthorizedStartupModulesAsync(_startupSession.LifetimeToken);
-        if (_startupSession.State != StartupSessionState.Exiting) _startupSession.Complete();
+        _startupJournal.Mark(StartupPhase.AuthorizedModulesRestored);
+        if (_startupSession.State != StartupSessionState.Exiting) { _startupSession.Complete(); _startupJournal.Mark(StartupPhase.Ready); }
+        }
+        catch(OperationCanceledException) when(_startupSession.State==StartupSessionState.Exiting){}
+        catch(Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine($"Background startup failed: {exception.GetType().Name}");
+            _viewModel.StatusMessage = _viewModel.Strings["status.startupFailed"];
+        }
     }
 
     private void OnSidebarMouseEnter(object sender, MouseEventArgs e)

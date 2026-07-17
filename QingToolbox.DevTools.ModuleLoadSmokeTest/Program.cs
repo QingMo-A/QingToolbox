@@ -403,7 +403,9 @@ internal static class Program
                     $"{sandboxEnvironment.Kind} settings were not written to the sandbox.");
 
                 var fakeStore = new FakeStartupRegistrationStore();
-                var registration = new WindowsStartupRegistrationService(settings, fakeStore, sandboxEnvironment);
+                var registration = new WindowsStartupRegistrationService(settings,
+                    new WindowsTaskSchedulerStartupBackend(new FakeTaskSchedulerStore(), sandboxEnvironment),
+                    new WindowsRunStartupBackend(fakeStore, sandboxEnvironment), sandboxEnvironment);
                 Require(!registration.IsAvailable && !(await registration.GetStateAsync()).IsRegistered,
                     $"{sandboxEnvironment.Kind} startup registration must be unavailable without reading the store.");
                 var rejected = false;
@@ -430,8 +432,8 @@ internal static class Program
         Require(!InstanceActivationProtocol.TryParse("run C:\\bad.exe", out _) &&
                 !InstanceActivationProtocol.TryParse(new string('A', 64), out _),
             "Unsafe activation protocol input was accepted.");
-        Require(WindowsStartupRegistrationService.BuildCommand(@"C:\Program Files\Qing Toolbox\QingToolbox.Shell.exe") ==
-                "\"C:\\Program Files\\Qing Toolbox\\QingToolbox.Shell.exe\" --startup",
+        Require(WindowsRunStartupBackend.BuildCommand(@"C:\Program Files\Qing Toolbox\QingToolbox.Shell.exe") ==
+                "\"C:\\Program Files\\Qing Toolbox\\QingToolbox.Shell.exe\" --startup --startup-source RegistryRun",
             "Startup command quoting is incorrect.");
 
         var pipeScope = $"Smoke.{Guid.NewGuid():N}";
@@ -492,12 +494,18 @@ internal static class Program
                 "Startup settings did not preserve fields or normalize duplicate module ids.");
             var fakeStore = new FakeStartupRegistrationStore();
             var registration = new WindowsStartupRegistrationService(
-                settingsService, fakeStore, ApplicationExecutionEnvironment.Production());
+                settingsService,
+                new WindowsTaskSchedulerStartupBackend(new FakeTaskSchedulerStore { Unavailable = true }, ApplicationExecutionEnvironment.Production()),
+                new WindowsRunStartupBackend(fakeStore, ApplicationExecutionEnvironment.Production()),
+                ApplicationExecutionEnvironment.Production());
             await registration.SetEnabledAsync(true);
-            Require(fakeStore.Value?.EndsWith(" --startup", StringComparison.Ordinal) == true,
+            Require(fakeStore.Value?.EndsWith(" --startup --startup-source RegistryRun", StringComparison.Ordinal) == true,
                 "Enabling startup did not write the owned registration value.");
-            await registration.SetEnabledAsync(false);
-            Require(fakeStore.Value is null, "Disabling startup did not remove the owned registration value.");
+            var partialDisableReported = false;
+            try { await registration.SetEnabledAsync(false); }
+            catch (IOException) { partialDisableReported = true; }
+            Require(partialDisableReported && fakeStore.Value is null,
+                "Disabling startup must remove Registry Run and report unverifiable Task Scheduler cleanup.");
 
             var moduleRoot = Path.Combine(root, "module");
             Directory.CreateDirectory(moduleRoot);
@@ -676,6 +684,24 @@ internal static class Program
         public string? Read() { ReadCount++; return Value; }
         public void Write(string command) => Value = command;
         public void Delete() => Value = null;
+    }
+
+    private sealed class FakeTaskSchedulerStore : ITaskSchedulerStore
+    {
+        public bool Unavailable { get; init; }
+        public ScheduledStartupDefinition? Definition { get; private set; }
+        public ScheduledStartupDefinition? Read()
+        {
+            if (Unavailable) throw new System.Runtime.InteropServices.COMException("Unavailable");
+            return Definition;
+        }
+        public void Register(ScheduledStartupDefinition definition)
+        {
+            if (Unavailable) throw new System.Runtime.InteropServices.COMException("Unavailable");
+            Definition = definition;
+        }
+        public void Delete() { if (!Unavailable) Definition = null; }
+        public void Run() { if (Definition is null) throw new FileNotFoundException(); }
     }
 
     private static void RunQmodImportScenario(string repositoryRoot)
