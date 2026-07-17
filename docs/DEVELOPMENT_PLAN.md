@@ -273,9 +273,12 @@ CI 和 RC Gate 必须使用精确最终 HEAD。没有旧版官方安装器时，
 
 当前本地状态：Release 构建、全部 Smoke Test、本地环境契约、便携 ZIP 审计、Host Payload/SemVer
 契约、安装器构建和当前版本 Roundtrip 已通过。官方 Preview 1 安装器及 sidecar 已核对，SHA256 为
-`2A565C8B6E4F9A588FCA7ED52473FDC4CE1096811154248BCDC1C8F824916F6A`。本机存在用户正在运行的
-Production Shell，因此安全门禁拒绝在本机执行真实原地升级；完整 Upgrade/Repair/Downgrade Gate 和 RC Gate
-必须由精确最终 HEAD 的隔离 GitHub Actions 验证。在该工作流成功前，当前最高优先级保持不变。
+`2A565C8B6E4F9A588FCA7ED52473FDC4CE1096811154248BCDC1C8F824916F6A`。GitHub Actions run
+`29621499590` 已对提交 `06c4f2b9c34e2ca436ac09a57429cd0a47bc7b38` 完成隔离的
+Upgrade/Repair/Downgrade、用户状态、未知文件、废弃文件和发布资产门禁。此结果不替代下面的人工验收。
+本机存在用户正在运行的 Production Shell，因此本地 RC Gate 按安全规则拒绝执行真实原地升级；不得为完成测试
+而强制终止用户进程。在人工升级、登录启动和代表性 Windows 环境验收完成前，当前最高优先级仍保持发布验收，
+不自动进入下一阶段。
 
 ### 6.2 人工验收
 
