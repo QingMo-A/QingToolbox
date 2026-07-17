@@ -215,6 +215,28 @@ public sealed partial class MainWindowViewModel(
     }
 
     [RelayCommand]
+    private void OpenModuleDirectory(DiscoveredModuleViewModel? module)
+    {
+        if (module is null) return;
+        try
+        {
+            var directory = Path.GetFullPath(module.ModuleDirectory);
+            if (!Directory.Exists(directory)) throw new DirectoryNotFoundException(directory);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = directory,
+                UseShellExecute = true
+            });
+            StatusMessage = localization.GetString("status.moduleDirectoryOpened", module.DisplayName);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+            System.ComponentModel.Win32Exception or ArgumentException or NotSupportedException)
+        {
+            StatusMessage = localization.GetString("status.moduleDirectoryOpenFailed", module.DisplayName);
+        }
+    }
+
+    [RelayCommand]
     private void SelectModule(DiscoveredModuleViewModel module)
     {
         SelectedModule = module;

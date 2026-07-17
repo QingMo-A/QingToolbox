@@ -246,8 +246,11 @@
   "startup.testRequiresHealthyTask": "Startup can only be tested when the Task Scheduler registration is healthy.",
   "startup.notificationRecovered": "The notification area icon recovered after Explorer became available.",
   "startup.notificationRetryExhausted": "The notification area is unavailable; the main window remains available.",
-  "startup.durationMilliseconds": "{0} ms"
-  ,"moduleUpdate.check": "Check for updates",
+  "startup.durationMilliseconds": "{0} ms",
+  "module.directoryOpenTooltip": "Open this module's installation folder in File Explorer",
+  "status.moduleDirectoryOpened": "Opened the installation folder for module '{0}'.",
+  "status.moduleDirectoryOpenFailed": "Could not open the installation folder for module '{0}'.",
+  "moduleUpdate.check": "Check for updates",
   "moduleUpdate.lastChecked": "Last checked: {0}",
   "moduleUpdate.checking": "Checking official module updates…",
   "moduleUpdate.completed": "Update check complete. {0} update(s) available.",

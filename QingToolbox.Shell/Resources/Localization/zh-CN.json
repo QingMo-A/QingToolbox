@@ -246,8 +246,11 @@
   "startup.testRequiresHealthyTask": "仅当任务计划程序注册状态正常时才能测试自启动。",
   "startup.notificationRecovered": "Explorer 可用后，通知区域图标已恢复。",
   "startup.notificationRetryExhausted": "通知区域暂不可用，主窗口仍可继续使用。",
-  "startup.durationMilliseconds": "{0} 毫秒"
-  ,"moduleUpdate.check": "检查更新",
+  "startup.durationMilliseconds": "{0} 毫秒",
+  "module.directoryOpenTooltip": "在 Windows 文件资源管理器中打开此模块的安装目录",
+  "status.moduleDirectoryOpened": "已打开模块“{0}”的安装目录。",
+  "status.moduleDirectoryOpenFailed": "无法打开模块“{0}”的安装目录。",
+  "moduleUpdate.check": "检查更新",
   "moduleUpdate.lastChecked": "上次检查：{0}",
   "moduleUpdate.checking": "正在检查官方模块更新…",
   "moduleUpdate.completed": "更新检查完成，可用更新 {0} 个。",

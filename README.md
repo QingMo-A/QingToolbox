@@ -64,6 +64,20 @@ SmartScreen 可能显示未知发布者警告。
 后解压，运行 `QingToolbox.Shell.exe`。便携版需要预先安装 .NET 10 Desktop
 Runtime。二进制文件没有代码签名，Windows SmartScreen 可能显示警告。
 
+当前 Preview 的便携 ZIP 是 **framework-dependent** 版本，适合已经安装
+.NET 10 Desktop Runtime 的开发者和测试用户。运行库应从 Microsoft 官方渠道
+安装；不要将独立的 Runtime 安装程序直接塞入 ZIP 后要求用户手动执行。
+
+后续正式发布计划同时提供两种清晰命名的便携包：
+
+- `win-x64-self-contained.zip`：内含应用所需的 .NET 运行时，解压即用，作为普通
+  用户的首选下载项；它不包含 .NET SDK，也不会内置任何具体工具模块。
+- `win-x64-framework-dependent.zip`：体积较小，需要预先安装对应版本的
+  .NET Desktop Runtime，供高级用户和受控部署环境选择。
+
+在 self-contained 便携包的发布脚本和 CI 校验完成之前，项目不会把当前 ZIP
+描述成“无需运行库”版本。两类包都应继续保持 host-only，并提供独立 SHA256。
+
 开发环境运行：
 
 ```powershell

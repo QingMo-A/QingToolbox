@@ -1105,7 +1105,14 @@
                                     <TextBlock Text="{Binding DataContext.Strings[module.entry], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource InfoLabelStyle}"/>
                                     <TextBlock Margin="0,0,0,12" Text="{Binding Entry}" Style="{StaticResource InfoValueStyle}"/>
                                     <TextBlock Text="{Binding DataContext.Strings[module.directory], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource InfoLabelStyle}"/>
-                                    <TextBlock Margin="0,0,0,12" Text="{Binding ModuleDirectory}" Style="{StaticResource InfoValueStyle}"/>
+                                    <Button Margin="0,0,0,12"
+                                            Command="{Binding DataContext.OpenModuleDirectoryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            ToolTip="{Binding DataContext.Strings[module.directoryOpenTooltip], RelativeSource={RelativeSource AncestorType=Window}}"
+                                            AutomationProperties.Name="{Binding DataContext.Strings[module.directoryOpenTooltip], RelativeSource={RelativeSource AncestorType=Window}}"
+                                            Style="{StaticResource ModuleDirectoryLinkStyle}">
+                                        <TextBlock Text="{Binding ModuleDirectory}" TextWrapping="Wrap"/>
+                                    </Button>
                                     <TextBlock Text="{Binding DataContext.Strings[module.manifest], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource InfoLabelStyle}"/>
                                     <TextBlock Margin="0,0,0,12" Text="{Binding ManifestPath}" Style="{StaticResource InfoValueStyle}"/>
                                     <TextBlock Text="{Binding DataContext.Strings[module.minimumHostVersion], RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource InfoLabelStyle}"/>

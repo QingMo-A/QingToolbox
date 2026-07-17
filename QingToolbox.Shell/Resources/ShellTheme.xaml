@@ -624,6 +624,39 @@
         <Setter Property="BorderBrush" Value="#FED7AA"/>
     </Style>
 
+    <Style x:Key="ModuleDirectoryLinkStyle" TargetType="Button">
+        <Setter Property="Padding" Value="5,3"/>
+        <Setter Property="HorizontalAlignment" Value="Left"/>
+        <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="LinkBackground" Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}" CornerRadius="6">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="LinkBackground" Property="Background" Value="#E7F0FF"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="LinkBackground" Property="Background" Value="#D8E8FF"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="LinkBackground" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            <Setter TargetName="LinkBackground" Property="BorderThickness" Value="1"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="PrimaryActionButtonStyle"
            TargetType="Button"
            BasedOn="{StaticResource LifecycleButtonStyle}">
