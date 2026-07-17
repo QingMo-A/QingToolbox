@@ -32,10 +32,10 @@ public partial class WindowTopmostView : UserControl, ILocalizedModuleView
         SubtitleText.Text = T(
             "view.subtitle",
             "Choose a visible window and toggle always-on-top.");
-        RefreshButton.Content = T("actions.refresh", "Refresh");
-        PickButton.Content = T("actions.pickWindow", "Pick Window");
-        SetTopmostButton.Content = T("actions.setTopmost", "Set Topmost");
-        RemoveTopmostButton.Content = T("actions.removeTopmost", "Remove Topmost");
+        RefreshButtonText.Text = T("actions.refresh", "Refresh");
+        PickButtonText.Text = T("actions.pickWindow", "Pick Window");
+        SetTopmostButtonText.Text = T("actions.setTopmost", "Set Topmost");
+        RemoveTopmostButtonText.Text = T("actions.removeTopmost", "Remove Topmost");
         TitleColumn.Header = T("columns.title", "Title");
         ProcessColumn.Header = T("columns.process", "Process");
         HwndColumn.Header = T("columns.hwnd", "HWND");
