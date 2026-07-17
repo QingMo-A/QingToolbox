@@ -1002,6 +1002,14 @@
                             </Border>
                             <TextBlock Text="{Binding DisplayDescription}"
                                        TextWrapping="Wrap" Foreground="#475569"/>
+                            <Border Margin="0,14,0,0" Padding="12,9" CornerRadius="10" Background="#EEF5FF">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding DisplayUpdateStatus}" Foreground="#31598F" FontWeight="SemiBold"/>
+                                    <TextBlock Margin="0,5,0,0" Text="{Binding DisplayUpdateReleaseNote}"
+                                               Visibility="{Binding HasUpdateReleaseNote, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                               TextWrapping="Wrap" Foreground="#526B8B"/>
+                                </StackPanel>
+                            </Border>
                             <CheckBox Margin="0,14,0,0"
                                       Content="{Binding DataContext.Strings[startup.moduleLabel], RelativeSource={RelativeSource AncestorType=Window}}"
                                       ToolTip="{Binding DataContext.Strings[startup.moduleDescription], RelativeSource={RelativeSource AncestorType=Window}}"

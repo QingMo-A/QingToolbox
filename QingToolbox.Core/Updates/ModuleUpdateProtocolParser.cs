@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Globalization;
 
 namespace QingToolbox.Core.Updates;
 
@@ -63,7 +64,10 @@ public static class ModuleUpdateProtocolParser
                 if (maximum!.CompareTo(minimum) <= 0) throw Error("Maximum host version must exceed minimum.");
             }
             var timestamp = Text(item, "publishedAt");
-            if (!timestamp.EndsWith('Z') || !DateTimeOffset.TryParse(timestamp, out var published) || published.Offset != TimeSpan.Zero) throw Error("publishedAt must be UTC with Z.");
+            var formats = new[] { "yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'" };
+            if (!DateTimeOffset.TryParseExact(timestamp, formats, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var published) ||
+                published.Offset != TimeSpan.Zero) throw Error("publishedAt must be strict UTC RFC3339 with Z.");
             var packageElement = Required(item, "package"); Object(packageElement, "package"); Fields(packageElement, "fileName", "url", "size", "sha256");
             var fileName = Text(packageElement, "fileName");
             if (Path.GetFileName(fileName) != fileName || !fileName.EndsWith(".qmod", StringComparison.OrdinalIgnoreCase)) throw Error("Invalid qmod fileName.");
@@ -103,8 +107,13 @@ public static class ModuleUpdateProtocolParser
     }
     private static void ValidatePath(string path)
     {
-        if (path.Contains('\\') || path.Contains('?') || path.Contains('#') || path.StartsWith('/') || Uri.TryCreate(path, UriKind.Absolute, out _) ||
-            path.Split('/').Any(x => x is "" or "." or "..") || !path.EndsWith("/update.json", StringComparison.Ordinal)) throw Error("Unsafe updateManifest path.");
+        if (path.Length == 0 || path.Any(c => c > 0x7F || char.IsWhiteSpace(c) || char.IsControl(c)) ||
+            path.IndexOfAny(['%', ':', '\\', '?', '#']) >= 0 || path.StartsWith('/') || path.Contains("//", StringComparison.Ordinal))
+            throw Error("Unsafe updateManifest path.");
+        var segments = path.Split('/');
+        if (segments.Length < 2 || segments[^1] != "update.json" || segments[..^1].Any(segment =>
+                segment is "" or "." or ".." || segment.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-'))))
+            throw Error("Unsafe updateManifest path.");
     }
     private static void Fields(JsonElement element, params string[] allowed)
     {

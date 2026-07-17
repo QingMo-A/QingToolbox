@@ -208,10 +208,13 @@
   "moduleUpdate.status.UpToDate": "已是最新版本",
   "moduleUpdate.status.UpdateAvailable": "有更新：{0}",
   "moduleUpdate.status.HostUpdateRequired": "需要先更新工具箱",
+  "moduleUpdate.status.HostVersionIncompatible": "当前工具箱版本不受该模块版本支持",
   "moduleUpdate.status.ModuleApiIncompatible": "模块接口版本不兼容",
   "moduleUpdate.status.LocalVersionNewer": "本地版本高于官方源",
   "moduleUpdate.status.InvalidLocalVersion": "本地模块版本无效",
   "moduleUpdate.status.SourceUnavailable": "暂时无法检查更新",
   "moduleUpdate.status.SourceInvalid": "官方更新源数据无效",
   "moduleUpdate.status.DisabledByEnvironment": "模块测试环境不检查更新"
+  ,"moduleUpdate.noModules": "没有可检查更新的模块。",
+  "moduleUpdate.unexpectedFailure": "未能完成更新检查。"
 }

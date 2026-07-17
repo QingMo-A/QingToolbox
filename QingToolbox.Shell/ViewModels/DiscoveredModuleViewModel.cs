@@ -109,7 +109,20 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     public string DisplayUpdateStatus => _localization.GetString(
         $"moduleUpdate.status.{UpdateResult.Status}",
         UpdateResult.TargetVersion?.ToString() ?? string.Empty);
-    public bool HasUpdateReleaseNote => !string.IsNullOrWhiteSpace(UpdateResult.ReleaseNote);
+    public string DisplayUpdateReleaseNote
+    {
+        get
+        {
+            if (UpdateResult.Status is not (ModuleUpdateStatus.UpdateAvailable or ModuleUpdateStatus.HostUpdateRequired or
+                ModuleUpdateStatus.HostVersionIncompatible or ModuleUpdateStatus.ModuleApiIncompatible) || UpdateResult.ReleaseNotes is null)
+                return string.Empty;
+            var language = _localization.CurrentLanguageCode;
+            if (UpdateResult.ReleaseNotes.TryGetValue(language, out var localized) && !string.IsNullOrWhiteSpace(localized)) return localized;
+            if (UpdateResult.ReleaseNotes.TryGetValue("en-US", out var english) && !string.IsNullOrWhiteSpace(english)) return english;
+            return UpdateResult.ReleaseNotes.Values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty;
+        }
+    }
+    public bool HasUpdateReleaseNote => !string.IsNullOrWhiteSpace(DisplayUpdateReleaseNote);
 
     public bool HasRuntimeError => !string.IsNullOrWhiteSpace(RuntimeError);
 
@@ -153,11 +166,13 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         OnPropertyChanged(nameof(DisplayDescription));
         OnPropertyChanged(nameof(DisplayRuntimeState));
         OnPropertyChanged(nameof(DisplayUpdateStatus));
+        OnPropertyChanged(nameof(DisplayUpdateReleaseNote));
     }
 
     partial void OnUpdateResultChanged(ModuleUpdateResult value)
     {
         OnPropertyChanged(nameof(DisplayUpdateStatus));
+        OnPropertyChanged(nameof(DisplayUpdateReleaseNote));
         OnPropertyChanged(nameof(HasUpdateReleaseNote));
     }
 

@@ -130,7 +130,7 @@ public partial class App : Application
             services.AddSingleton(provider => new UserSettingsService(
                 provider.GetRequiredService<ApplicationPaths>().SettingsPath));
             services.AddSingleton<ModulePackageImporter>();
-            services.AddSingleton(TimeProvider.System);
+            services.AddSingleton<TimeProvider>(TimeProvider.System);
             services.AddSingleton(provider =>
             {
                 var handler = new HttpClientHandler { AllowAutoRedirect = false };
@@ -141,7 +141,8 @@ public partial class App : Application
             });
             services.AddSingleton<IModuleUpdateSource>(provider => new OfficialModuleUpdateSource(
                 provider.GetRequiredService<HttpClient>(), environment.IsModuleTest ? null :
-                new ModuleUpdateCache(Path.Combine(provider.GetRequiredService<ApplicationPaths>().CacheDirectory, "ModuleUpdates", "Official"), TimeProvider.System), TimeProvider.System));
+                new ModuleUpdateCache(Path.Combine(provider.GetRequiredService<ApplicationPaths>().CacheDirectory, "ModuleUpdates", "Official"), provider.GetRequiredService<TimeProvider>()),
+                provider.GetRequiredService<TimeProvider>()));
             services.AddSingleton(provider =>
             {
                 var text = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0];
@@ -150,7 +151,8 @@ public partial class App : Application
                     version!.IsPrerelease ? ModuleUpdateChannel.Preview : ModuleUpdateChannel.Stable);
             });
             services.AddSingleton(provider => new ModuleUpdateChecker(provider.GetRequiredService<IModuleUpdateSource>(),
-                provider.GetRequiredService<ModuleUpdateCompatibilityEvaluator>(), TimeProvider.System, environment.IsModuleTest));
+                provider.GetRequiredService<ModuleUpdateCompatibilityEvaluator>(), provider.GetRequiredService<TimeProvider>(), environment.IsModuleTest));
+            services.AddSingleton<ModuleUpdateCheckCoordinator>();
             services.AddSingleton<MainWindowViewModel>();
             services.AddSingleton<MainWindow>();
 

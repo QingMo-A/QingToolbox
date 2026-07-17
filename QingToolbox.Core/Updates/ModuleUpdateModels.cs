@@ -8,7 +8,7 @@ public enum ModuleUpdateStatus
 {
     NotChecked, Checking, NotOfficial, NoPublishedRelease, UpToDate,
     UpdateAvailable, HostUpdateRequired, ModuleApiIncompatible,
-    LocalVersionNewer, InvalidLocalVersion, SourceUnavailable,
+    HostVersionIncompatible, LocalVersionNewer, InvalidLocalVersion, SourceUnavailable,
     SourceInvalid, DisabledByEnvironment
 }
 
@@ -22,8 +22,14 @@ public sealed record ModuleUpdateManifest(string ModuleId, string Publisher, IRe
 public sealed record OfficialModuleIndex(IReadOnlyDictionary<string, string> Modules);
 public sealed record ModuleUpdateResult(
     string ModuleId, ModuleUpdateStatus Status, SemanticVersion? TargetVersion = null,
-    string? ReleaseNote = null, bool IsFromStaleCache = false, DateTimeOffset? CheckedAt = null);
+    IReadOnlyDictionary<string, string>? ReleaseNotes = null,
+    bool IsFromStaleCache = false, DateTimeOffset? CheckedAt = null);
 public sealed record InstalledModuleVersion(string ModuleId, string Version);
+public sealed record VersionBoundModuleUpdateResult(string ModuleId, string LocalVersion, ModuleUpdateResult Result);
+public sealed record ModuleUpdateCheckRequest(IReadOnlyList<InstalledModuleVersion> Modules, bool IsManual, DateTimeOffset RequestedAt);
+public sealed record ModuleUpdateBatchResult(
+    IReadOnlyDictionary<string, VersionBoundModuleUpdateResult> Results,
+    bool UsedStaleCache, DateTimeOffset CompletedAt);
 
 public static class ModuleUpdateIdentity
 {
@@ -93,19 +99,22 @@ public sealed class ModuleUpdateCompatibilityEvaluator(
             return new(moduleId, ModuleUpdateStatus.InvalidLocalVersion, CheckedAt: checkedAt);
         if (manifest.Releases.Count == 0)
             return new(moduleId, ModuleUpdateStatus.NoPublishedRelease, CheckedAt: checkedAt);
-        var allowed = manifest.Releases.Where(r => channel == ModuleUpdateChannel.Preview || r.Channel == ModuleUpdateChannel.Stable).ToArray();
-        var api = allowed.Where(r => r.ModuleApiVersion == moduleApiVersion).ToArray();
-        if (api.Length == 0 && allowed.Length > 0)
-            return new(moduleId, ModuleUpdateStatus.ModuleApiIncompatible, CheckedAt: checkedAt);
-        var compatible = api.Where(r => hostVersion.CompareTo(r.MinimumHostVersion) >= 0 &&
-            (r.MaximumHostVersionExclusive is null || hostVersion.CompareTo(r.MaximumHostVersionExclusive) < 0)).ToArray();
-        if (compatible.Length == 0 && api.Any(r => hostVersion.CompareTo(r.MinimumHostVersion) < 0))
-            return new(moduleId, ModuleUpdateStatus.HostUpdateRequired, CheckedAt: checkedAt);
-        var target = compatible.FirstOrDefault();
-        if (target is null) return new(moduleId, ModuleUpdateStatus.UpToDate, CheckedAt: checkedAt);
-        var comparison = target.Version.CompareTo(local);
-        return new(moduleId, comparison > 0 ? ModuleUpdateStatus.UpdateAvailable :
-            comparison < 0 ? ModuleUpdateStatus.LocalVersionNewer : ModuleUpdateStatus.UpToDate,
-            target.Version, target.ReleaseNotes.GetValueOrDefault("en-US"), CheckedAt: checkedAt);
+        var allowed = manifest.Releases
+            .Where(r => channel == ModuleUpdateChannel.Preview || r.Channel == ModuleUpdateChannel.Stable)
+            .OrderByDescending(r => r.Version).ToArray();
+        var higher = allowed.Where(r => r.Version.CompareTo(local) > 0).ToArray();
+        foreach (var candidate in higher)
+        {
+            if (candidate.ModuleApiVersion != moduleApiVersion)
+                return new(moduleId, ModuleUpdateStatus.ModuleApiIncompatible, candidate.Version, candidate.ReleaseNotes, CheckedAt: checkedAt);
+            if (hostVersion.CompareTo(candidate.MinimumHostVersion) < 0)
+                return new(moduleId, ModuleUpdateStatus.HostUpdateRequired, candidate.Version, candidate.ReleaseNotes, CheckedAt: checkedAt);
+            if (candidate.MaximumHostVersionExclusive is not null && hostVersion.CompareTo(candidate.MaximumHostVersionExclusive) >= 0)
+                return new(moduleId, ModuleUpdateStatus.HostVersionIncompatible, candidate.Version, candidate.ReleaseNotes, CheckedAt: checkedAt);
+            return new(moduleId, ModuleUpdateStatus.UpdateAvailable, candidate.Version, candidate.ReleaseNotes, CheckedAt: checkedAt);
+        }
+        if (allowed.Any(r => r.Version.CompareTo(local) == 0))
+            return new(moduleId, ModuleUpdateStatus.UpToDate, CheckedAt: checkedAt);
+        return new(moduleId, ModuleUpdateStatus.LocalVersionNewer, CheckedAt: checkedAt);
     }
 }

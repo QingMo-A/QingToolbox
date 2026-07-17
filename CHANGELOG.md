@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Serialized automatic and manual update checks and bound results to the checked local module version.
+- Replaced split cache files with transactional cache envelopes and refreshed freshness timestamps after HTTP 304 responses.
+- Added an explicit maximum-host incompatibility status and rejected encoded metadata path bypasses.
+
 - Added read-only official module update detection with isolated ETag and Last-Modified caches.
 - Added module compatibility and availability states without downloading or installing packages.
 - Disabled real update checks and cache creation in ModuleTest environments.

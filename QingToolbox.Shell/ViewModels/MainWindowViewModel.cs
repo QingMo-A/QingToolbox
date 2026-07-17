@@ -32,7 +32,7 @@ public sealed partial class MainWindowViewModel(
     ModuleStartupFingerprintService fingerprintService,
     ILocalizationService localization,
     ApplicationExecutionEnvironment executionEnvironment,
-    ModuleUpdateChecker moduleUpdateChecker) : ObservableObject
+    ModuleUpdateCheckCoordinator moduleUpdateCoordinator) : ObservableObject
 {
     private bool _initialized;
     private bool _suppressPresentationSave;
@@ -40,6 +40,7 @@ public sealed partial class MainWindowViewModel(
     private readonly SemaphoreSlim _presentationSaveGate = new(1, 1);
     private readonly SemaphoreSlim _closeBehaviorSaveGate = new(1, 1);
     private readonly CancellationTokenSource _updateCancellation = new();
+    private CancellationTokenSource? _automaticUpdateDelay;
     private readonly Dictionary<string, (string Version, ModuleUpdateResult Result)> _updateResults = new(StringComparer.Ordinal);
     private bool _moduleUpdateUsedStaleCache;
     private DateTimeOffset? _moduleUpdateLastCheckedAt;
@@ -257,33 +258,55 @@ public sealed partial class MainWindowViewModel(
     private async Task CheckModuleUpdatesAsync()
     {
         if (IsCheckingModuleUpdates) return;
+        _automaticUpdateDelay?.Cancel();
+        await RunModuleUpdateCheckAsync(true);
+    }
+
+    private async Task RunModuleUpdateCheckAsync(bool manual)
+    {
+        if (IsCheckingModuleUpdates) return;
+        var snapshot = Modules.Select(x => new InstalledModuleVersion(x.Id, x.Version)).ToArray();
+        if (snapshot.Length == 0)
+        {
+            ModuleUpdateSummary = localization.GetString("moduleUpdate.noModules");
+            return;
+        }
         IsCheckingModuleUpdates = true;
         CheckModuleUpdatesCommand.NotifyCanExecuteChanged();
         ModuleUpdateSummary = localization.GetString("moduleUpdate.checking");
+        var previous = Modules.ToDictionary(x => x.Id, x => x.UpdateResult, StringComparer.Ordinal);
         foreach (var module in Modules) module.UpdateResult = new(module.Id, ModuleUpdateStatus.Checking);
         try
         {
-            var results = await moduleUpdateChecker.CheckAllInstalledModulesAsync(
-                Modules.Select(x => new InstalledModuleVersion(x.Id, x.Version)).ToArray(), true, _updateCancellation.Token);
-            ApplyUpdateResults(results);
+            var batch = await moduleUpdateCoordinator.CheckAsync(
+                new(snapshot, manual, DateTimeOffset.UtcNow), _updateCancellation.Token);
+            ApplyUpdateResults(batch);
         }
         catch (OperationCanceledException) when (_updateCancellation.IsCancellationRequested) { }
-        catch { ModuleUpdateSummary = localization.GetString("moduleUpdate.sourceUnavailable"); }
+        catch
+        {
+            foreach (var module in Modules)
+                module.UpdateResult = previous.GetValueOrDefault(module.Id) is { Status: not ModuleUpdateStatus.Checking } prior
+                    ? prior : new(module.Id, ModuleUpdateStatus.SourceUnavailable);
+            ModuleUpdateSummary = localization.GetString("moduleUpdate.unexpectedFailure");
+        }
         finally { IsCheckingModuleUpdates = false; CheckModuleUpdatesCommand.NotifyCanExecuteChanged(); }
     }
 
-    private void ApplyUpdateResults(IReadOnlyDictionary<string, ModuleUpdateResult> results)
+    private void ApplyUpdateResults(ModuleUpdateBatchResult batch)
     {
+        var currentIds = Modules.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var removed in _updateResults.Keys.Where(x => !currentIds.Contains(x)).ToArray()) _updateResults.Remove(removed);
         foreach (var module in Modules)
-            if (results.TryGetValue(module.Id, out var result))
+            if (batch.Results.TryGetValue(module.Id, out var bound) && bound.LocalVersion == module.Version)
             {
-                module.UpdateResult = result;
-                _updateResults[module.Id] = (module.Version, result);
+                module.UpdateResult = bound.Result;
+                _updateResults[module.Id] = (bound.LocalVersion, bound.Result);
             }
-        ModuleUpdateCount = results.Values.Count(x => x.Status == ModuleUpdateStatus.UpdateAvailable);
-        var stale = results.Values.Any(x => x.IsFromStaleCache);
+        ModuleUpdateCount = batch.Results.Values.Count(x => x.Result.Status == ModuleUpdateStatus.UpdateAvailable);
+        var stale = batch.UsedStaleCache;
         _moduleUpdateUsedStaleCache = stale;
-        _moduleUpdateLastCheckedAt = DateTimeOffset.Now;
+        _moduleUpdateLastCheckedAt = batch.CompletedAt;
         ModuleUpdateLastChecked = localization.GetString("moduleUpdate.lastChecked", _moduleUpdateLastCheckedAt.Value.LocalDateTime.ToString("g"));
         ModuleUpdateSummary = localization.GetString(stale ? "moduleUpdate.completedStale" : "moduleUpdate.completed", ModuleUpdateCount);
     }
@@ -292,16 +315,15 @@ public sealed partial class MainWindowViewModel(
     {
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(4), _updateCancellation.Token);
-            var results = await moduleUpdateChecker.CheckAllInstalledModulesAsync(
-                Modules.Select(x => new InstalledModuleVersion(x.Id, x.Version)).ToArray(), false, _updateCancellation.Token);
-            await Application.Current.Dispatcher.InvokeAsync(() => ApplyUpdateResults(results));
+            _automaticUpdateDelay = CancellationTokenSource.CreateLinkedTokenSource(_updateCancellation.Token);
+            await Task.Delay(TimeSpan.FromSeconds(4), _automaticUpdateDelay.Token);
+            await Application.Current.Dispatcher.InvokeAsync(() => RunModuleUpdateCheckAsync(false)).Task.Unwrap();
         }
-        catch (OperationCanceledException) when (_updateCancellation.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (_updateCancellation.IsCancellationRequested || _automaticUpdateDelay?.IsCancellationRequested == true) { }
         catch (Exception exception) { Debug.WriteLine($"Background module update check failed: {exception.GetType().Name}"); }
     }
 
-    public void StopUpdateChecks() => _updateCancellation.Cancel();
+    public void StopUpdateChecks() { _automaticUpdateDelay?.Cancel(); _updateCancellation.Cancel(); moduleUpdateCoordinator.Cancel(); }
 
     private void RefreshLanguageOptionLabels()
     {
@@ -404,6 +426,8 @@ public sealed partial class MainWindowViewModel(
 
             SelectedModule = Modules.FirstOrDefault(
                 module => module.Id == selectedModuleId) ?? Modules.FirstOrDefault();
+            foreach (var removed in _updateResults.Keys.Where(id => Modules.All(module => module.Id != id)).ToArray())
+                _updateResults.Remove(removed);
 
             StartupAuthorizationCount = settings.StartupModules.Count;
             MissingStartupAuthorizationCount = settings.StartupModules.Count(
