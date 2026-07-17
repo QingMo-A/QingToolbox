@@ -32,7 +32,8 @@ public sealed partial class MainWindowViewModel(
     ModuleStartupFingerprintService fingerprintService,
     ILocalizationService localization,
     ApplicationExecutionEnvironment executionEnvironment,
-    ModuleUpdateCheckCoordinator moduleUpdateCoordinator) : ObservableObject
+    ModuleUpdateCheckCoordinator moduleUpdateCoordinator,
+    TimeProvider timeProvider) : ObservableObject
 {
     private bool _initialized;
     private bool _suppressPresentationSave;
@@ -279,7 +280,13 @@ public sealed partial class MainWindowViewModel(
         try
         {
             var batch = await moduleUpdateCoordinator.CheckAsync(
-                new(snapshot, manual, DateTimeOffset.UtcNow), _updateCancellation.Token);
+                new(snapshot, manual, timeProvider.GetUtcNow()), _updateCancellation.Token);
+            if (batch.Disposition == ModuleUpdateBatchDisposition.DuplicateSuppressed)
+            {
+                foreach (var module in Modules)
+                    if (previous.TryGetValue(module.Id, out var prior)) module.UpdateResult = prior;
+                return;
+            }
             ApplyUpdateResults(batch);
         }
         catch (OperationCanceledException) when (_updateCancellation.IsCancellationRequested) { }
@@ -297,14 +304,21 @@ public sealed partial class MainWindowViewModel(
     {
         var currentIds = Modules.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var removed in _updateResults.Keys.Where(x => !currentIds.Contains(x)).ToArray()) _updateResults.Remove(removed);
+        var currentVersions = Modules.ToDictionary(module => module.Id, module => module.Version, StringComparer.Ordinal);
+        var application = ModuleUpdateBatchApplicator.Apply(currentVersions, batch);
+        if (application.ResultsOutdated)
+        {
+            ModuleUpdateSummary = localization.GetString("moduleUpdate.resultsOutdated");
+            return;
+        }
         foreach (var module in Modules)
-            if (batch.Results.TryGetValue(module.Id, out var bound) && bound.LocalVersion == module.Version)
+            if (application.AppliedResults.TryGetValue(module.Id, out var bound))
             {
                 module.UpdateResult = bound.Result;
                 _updateResults[module.Id] = (bound.LocalVersion, bound.Result);
             }
-        ModuleUpdateCount = batch.Results.Values.Count(x => x.Result.Status == ModuleUpdateStatus.UpdateAvailable);
-        var stale = batch.UsedStaleCache;
+        ModuleUpdateCount = application.UpdateCount;
+        var stale = application.UsedStaleCache;
         _moduleUpdateUsedStaleCache = stale;
         _moduleUpdateLastCheckedAt = batch.CompletedAt;
         ModuleUpdateLastChecked = localization.GetString("moduleUpdate.lastChecked", _moduleUpdateLastCheckedAt.Value.LocalDateTime.ToString("g"));
@@ -394,6 +408,8 @@ public sealed partial class MainWindowViewModel(
                     moduleViewModel.UpdateResult = prior.Result;
                 else if (executionEnvironment.IsModuleTest)
                     moduleViewModel.UpdateResult = new(module.Manifest.Id, ModuleUpdateStatus.DisabledByEnvironment);
+                if (_updateResults.TryGetValue(module.Manifest.Id, out prior) && prior.Version != module.Manifest.Version)
+                    _updateResults.Remove(module.Manifest.Id);
                 moduleViewModel.UpdateRuntimeState(
                     runtimeManager.GetRecord(module.Manifest.Id));
                 if (authorizations.TryGetValue(module.Manifest.Id, out var authorization))

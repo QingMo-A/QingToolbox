@@ -27,9 +27,33 @@ public sealed record ModuleUpdateResult(
 public sealed record InstalledModuleVersion(string ModuleId, string Version);
 public sealed record VersionBoundModuleUpdateResult(string ModuleId, string LocalVersion, ModuleUpdateResult Result);
 public sealed record ModuleUpdateCheckRequest(IReadOnlyList<InstalledModuleVersion> Modules, bool IsManual, DateTimeOffset RequestedAt);
+public enum ModuleUpdateBatchDisposition { Completed, NoModules, DuplicateSuppressed }
 public sealed record ModuleUpdateBatchResult(
     IReadOnlyDictionary<string, VersionBoundModuleUpdateResult> Results,
-    bool UsedStaleCache, DateTimeOffset CompletedAt);
+    bool UsedStaleCache, DateTimeOffset CompletedAt,
+    ModuleUpdateBatchDisposition Disposition = ModuleUpdateBatchDisposition.Completed);
+
+public sealed record ModuleUpdateApplicationResult(
+    IReadOnlyDictionary<string, VersionBoundModuleUpdateResult> AppliedResults,
+    int UpdateCount, bool UsedStaleCache, bool ResultsOutdated);
+
+public static class ModuleUpdateBatchApplicator
+{
+    public static ModuleUpdateApplicationResult Apply(
+        IReadOnlyDictionary<string, string> currentVersions,
+        ModuleUpdateBatchResult batch)
+    {
+        var applied = batch.Results
+            .Where(item => currentVersions.TryGetValue(item.Key, out var version) &&
+                           string.Equals(version, item.Value.LocalVersion, StringComparison.Ordinal))
+            .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+        return new(
+            applied,
+            applied.Values.Count(item => item.Result.Status == ModuleUpdateStatus.UpdateAvailable),
+            applied.Values.Any(item => item.Result.IsFromStaleCache),
+            batch.Results.Count > 0 && applied.Count == 0);
+    }
+}
 
 public static class ModuleUpdateIdentity
 {
@@ -102,8 +126,17 @@ public sealed class ModuleUpdateCompatibilityEvaluator(
         var allowed = manifest.Releases
             .Where(r => channel == ModuleUpdateChannel.Preview || r.Channel == ModuleUpdateChannel.Stable)
             .OrderByDescending(r => r.Version).ToArray();
+        if (allowed.Length == 0)
+            return new(moduleId, ModuleUpdateStatus.NoPublishedRelease, CheckedAt: checkedAt);
         var higher = allowed.Where(r => r.Version.CompareTo(local) > 0).ToArray();
-        foreach (var candidate in higher)
+        var compatible = higher.FirstOrDefault(candidate =>
+            candidate.ModuleApiVersion == moduleApiVersion &&
+            hostVersion.CompareTo(candidate.MinimumHostVersion) >= 0 &&
+            (candidate.MaximumHostVersionExclusive is null ||
+             hostVersion.CompareTo(candidate.MaximumHostVersionExclusive) < 0));
+        if (compatible is not null)
+            return new(moduleId, ModuleUpdateStatus.UpdateAvailable, compatible.Version, compatible.ReleaseNotes, CheckedAt: checkedAt);
+        if (higher.FirstOrDefault() is { } candidate)
         {
             if (candidate.ModuleApiVersion != moduleApiVersion)
                 return new(moduleId, ModuleUpdateStatus.ModuleApiIncompatible, candidate.Version, candidate.ReleaseNotes, CheckedAt: checkedAt);
@@ -111,7 +144,6 @@ public sealed class ModuleUpdateCompatibilityEvaluator(
                 return new(moduleId, ModuleUpdateStatus.HostUpdateRequired, candidate.Version, candidate.ReleaseNotes, CheckedAt: checkedAt);
             if (candidate.MaximumHostVersionExclusive is not null && hostVersion.CompareTo(candidate.MaximumHostVersionExclusive) >= 0)
                 return new(moduleId, ModuleUpdateStatus.HostVersionIncompatible, candidate.Version, candidate.ReleaseNotes, CheckedAt: checkedAt);
-            return new(moduleId, ModuleUpdateStatus.UpdateAvailable, candidate.Version, candidate.ReleaseNotes, CheckedAt: checkedAt);
         }
         if (allowed.Any(r => r.Version.CompareTo(local) == 0))
             return new(moduleId, ModuleUpdateStatus.UpToDate, CheckedAt: checkedAt);

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Selected the highest compatible module release before reporting compatibility blockers.
+- Propagated stale index provenance into module results.
+- Decoupled cache persistence failures from valid metadata responses.
+- Counted only version-matched update results in the UI.
+
 - Serialized automatic and manual update checks and bound results to the checked local module version.
 - Replaced split cache files with transactional cache envelopes and refreshed freshness timestamps after HTTP 304 responses.
 - Added an explicit maximum-host incompatibility status and rejected encoded metadata path bypasses.

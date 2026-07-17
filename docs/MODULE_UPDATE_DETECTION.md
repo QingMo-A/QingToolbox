@@ -12,6 +12,8 @@ The mapped path is resolved against the fixed official modules base URL. HTTPS, 
 
 Protocol JSON is strict and size limited. Versions use SemVer 2.0 precedence. A prerelease host follows Preview and may select preview or stable releases; a stable host accepts only stable releases. Releases must match the centralized temporary Module API identity `experimental-0.1` and the inclusive minimum/exclusive maximum host range.
 
+Selection always prefers the highest compatible release, even when a newer release is incompatible. A compatibility blocker is reported only when no higher compatible release exists, using the highest higher release as the deterministic target and reason. A channel with no eligible release reports `NoPublishedRelease`.
+
 Results distinguish not checked, checking, non-official, no published release, up to date, update available, host update required, Module API incompatible, newer local version, invalid local version, unavailable/invalid source, and ModuleTest-disabled states. Empty releases mean no version is currently published through the official source.
 
 ## HTTP cache and environments
@@ -21,6 +23,10 @@ Production schedules a non-blocking check after UI and module discovery initiali
 Automatic and manual checks pass through one coordinator, so only one complete check can run at a time. A manual request queued behind an automatic request performs its own conditional request rather than reusing the automatic result. An empty installed-module snapshot returns immediately without requesting the index or creating cache. Every result carries the exact local module version from its discovery snapshot; refresh discards results when that version changes or the module disappears.
 
 Validated payloads, source URL, ETag, Last-Modified, and fetch time are stored below `<ApplicationPaths.CacheDirectory>/ModuleUpdates/Official`, so profiles do not share writable state. Each key is one versioned JSON cache envelope written through a temporary file and atomically replaced. Manual checks ignore the 24-hour gate but retain conditional requests. A `304` revalidates the payload, refreshes `FetchedAt`, and atomically saves the envelope; the following 24-hour automatic check stays offline. A future `FetchedAt` or malformed/oversized envelope is invalid. Network failure may use valid older metadata marked stale; damaged cache is ignored.
+
+Stale provenance from either the official index or a module manifest propagates to the derived module result, including `NotOfficial`. Cache persistence is an optimization: an `IOException` or access failure while saving a valid HTTP 200 or revalidated 304 response is recorded diagnostically but does not replace the valid fresh result with stale data or a source failure.
+
+The checker itself short-circuits an empty module list without contacting the source. UI summaries count only results whose bound local version still matches the current discovered module. Results for changed or removed module versions are discarded; if every result is outdated, the previous valid summary remains and the user is asked to run the check again.
 
 Minimum-host failure means QingToolbox must be upgraded. `HostVersionIncompatible` instead means the current host is at or above the release's exclusive maximum and that release no longer supports it. Module API mismatch remains a separate state. Release notes are retained bilingually and selected from the current effective UI language, with English and then any non-empty note as fallbacks.
 

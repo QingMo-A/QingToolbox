@@ -6,7 +6,9 @@ using System.Text.Json;
 
 namespace QingToolbox.Core.Updates;
 
-public sealed record ModuleUpdateSourceResponse<T>(T Value, bool IsFromStaleCache, DateTimeOffset FetchedAt);
+public sealed record ModuleUpdateSourceResponse<T>(
+    T Value, bool IsFromStaleCache, DateTimeOffset FetchedAt,
+    bool CachePersistenceFailed = false);
 public interface IModuleUpdateSource
 {
     Task<ModuleUpdateSourceResponse<OfficialModuleIndex>> GetIndexAsync(bool manual, CancellationToken cancellationToken);
@@ -17,7 +19,14 @@ public sealed record ModuleUpdateCacheEnvelope(
     int SchemaVersion, string SourceUrl, string? ETag,
     DateTimeOffset? LastModified, DateTimeOffset FetchedAt, byte[] Payload);
 
-public sealed class ModuleUpdateCache(string root, TimeProvider timeProvider)
+public interface IModuleUpdateCache
+{
+    Task<ModuleUpdateCacheEnvelope?> ReadAsync(string key, string sourceUrl, int payloadLimit, CancellationToken token);
+    Task WriteAsync(string key, ModuleUpdateCacheEnvelope envelope, CancellationToken token);
+    bool IsFresh(ModuleUpdateCacheEnvelope entry);
+}
+
+public sealed class ModuleUpdateCache(string root, TimeProvider timeProvider) : IModuleUpdateCache
 {
     private readonly SemaphoreSlim[] _writeStripes = Enumerable.Range(0, 64).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
     public string Root { get; } = root;
@@ -64,7 +73,7 @@ public sealed class ModuleUpdateCache(string root, TimeProvider timeProvider)
 }
 
 public sealed class OfficialModuleUpdateSource(
-    HttpClient httpClient, ModuleUpdateCache? cache, TimeProvider timeProvider) : IModuleUpdateSource
+    HttpClient httpClient, IModuleUpdateCache? cache, TimeProvider timeProvider) : IModuleUpdateSource
 {
     private static readonly Uri IndexUri = new(ModuleUpdateIdentity.OfficialIndexUrl);
     private static readonly Uri BaseUri = new(ModuleUpdateIdentity.OfficialModulesBaseUrl);
@@ -96,8 +105,8 @@ public sealed class OfficialModuleUpdateSource(
                 var refreshed = cached with { FetchedAt = refreshTime,
                     ETag = response.Headers.ETag?.ToString() ?? cached.ETag,
                     LastModified = response.Content.Headers.LastModified ?? cached.LastModified };
-                if (cache is not null) await cache.WriteAsync(key, refreshed, token);
-                return new(cachedValue, false, refreshTime);
+                var refreshPersistenceFailed = cache is not null && !await TryWriteCacheAsync(key, refreshed, token);
+                return new(cachedValue, false, refreshTime, refreshPersistenceFailed);
             }
             if ((int)response.StatusCode is >= 300 and < 400)
                 throw new ModuleUpdateProtocolException("Metadata redirects are not allowed.");
@@ -105,9 +114,9 @@ public sealed class OfficialModuleUpdateSource(
             if (response.RequestMessage?.RequestUri is not { } final || final.Host != "raw.githubusercontent.com") throw new ModuleUpdateProtocolException("Update metadata redirected to an untrusted host.");
             var payload = await ReadLimitedAsync(response.Content, limit, token); var value = parse(payload);
             var now = timeProvider.GetUtcNow();
-            if (cache is not null) await cache.WriteAsync(key, new(1, uri.AbsoluteUri,
+            var persistenceFailed = cache is not null && !await TryWriteCacheAsync(key, new(1, uri.AbsoluteUri,
                 response.Headers.ETag?.ToString(), response.Content.Headers.LastModified, now, payload), token);
-            return new(value, false, now);
+            return new(value, false, now, persistenceFailed);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch (ModuleUpdateProtocolException) { throw; }
@@ -115,6 +124,15 @@ public sealed class OfficialModuleUpdateSource(
         {
             if (cached is not null) return new(parse(cached.Payload), true, cached.FetchedAt);
             throw new ModuleUpdateSourceUnavailableException(ex.Message, ex);
+        }
+    }
+    private async Task<bool> TryWriteCacheAsync(string key, ModuleUpdateCacheEnvelope envelope, CancellationToken token)
+    {
+        try { await cache!.WriteAsync(key, envelope, token); return true; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Debug.WriteLine("Module update cache persistence failed.");
+            return false;
         }
     }
     private static async Task<byte[]> ReadLimitedAsync(HttpContent content, int limit, CancellationToken token)
@@ -136,14 +154,16 @@ public sealed class ModuleUpdateChecker(
     public async Task<IReadOnlyDictionary<string, ModuleUpdateResult>> CheckAllInstalledModulesAsync(
         IReadOnlyCollection<InstalledModuleVersion> installed, bool manual, CancellationToken token)
     {
+        if (installed.Count == 0) return new Dictionary<string, ModuleUpdateResult>(StringComparer.Ordinal);
         if (disabledByEnvironment) return installed.ToDictionary(x => x.ModuleId, x => new ModuleUpdateResult(x.ModuleId, ModuleUpdateStatus.DisabledByEnvironment), StringComparer.Ordinal);
         ModuleUpdateSourceResponse<OfficialModuleIndex> index;
         try { index = await source.GetIndexAsync(manual, token); }
         catch (ModuleUpdateProtocolException) { return All(installed, ModuleUpdateStatus.SourceInvalid); }
         catch (ModuleUpdateSourceUnavailableException) { return All(installed, ModuleUpdateStatus.SourceUnavailable); }
         var tasks = installed.Select(item => index.Value.Modules.TryGetValue(item.ModuleId, out var path)
-            ? RunMappedAsync(item, path, manual, token)
-            : Task.FromResult(new ModuleUpdateResult(item.ModuleId, ModuleUpdateStatus.NotOfficial, CheckedAt: timeProvider.GetUtcNow())));
+            ? RunMappedAsync(item, path, manual, index.IsFromStaleCache, token)
+            : Task.FromResult(new ModuleUpdateResult(item.ModuleId, ModuleUpdateStatus.NotOfficial,
+                IsFromStaleCache: index.IsFromStaleCache, CheckedAt: timeProvider.GetUtcNow())));
         var results = await Task.WhenAll(tasks); return results.ToDictionary(x => x.ModuleId, StringComparer.Ordinal);
     }
     public async Task<ModuleUpdateResult> CheckModuleAsync(InstalledModuleVersion module, bool manual, CancellationToken token)
@@ -153,20 +173,21 @@ public sealed class ModuleUpdateChecker(
         {
             var index = await source.GetIndexAsync(manual, token);
             return index.Value.Modules.TryGetValue(module.ModuleId, out var path)
-                ? await RunMappedAsync(module, path, manual, token)
-                : new(module.ModuleId, ModuleUpdateStatus.NotOfficial, CheckedAt: timeProvider.GetUtcNow());
+                ? await RunMappedAsync(module, path, manual, index.IsFromStaleCache, token)
+                : new(module.ModuleId, ModuleUpdateStatus.NotOfficial,
+                    IsFromStaleCache: index.IsFromStaleCache, CheckedAt: timeProvider.GetUtcNow());
         }
         catch (ModuleUpdateProtocolException) { return new(module.ModuleId, ModuleUpdateStatus.SourceInvalid); }
         catch (ModuleUpdateSourceUnavailableException) { return new(module.ModuleId, ModuleUpdateStatus.SourceUnavailable); }
     }
-    private async Task<ModuleUpdateResult> RunMappedAsync(InstalledModuleVersion module, string path, bool manual, CancellationToken token)
+    private async Task<ModuleUpdateResult> RunMappedAsync(InstalledModuleVersion module, string path, bool manual, bool indexIsStale, CancellationToken token)
     {
         await _parallelism.WaitAsync(token);
         try
         {
             var response = await source.GetManifestAsync(module.ModuleId, path, manual, token);
             var result = evaluator.Evaluate(module.ModuleId, module.Version, response.Value, timeProvider.GetUtcNow());
-            return result with { IsFromStaleCache = response.IsFromStaleCache };
+            return result with { IsFromStaleCache = indexIsStale || response.IsFromStaleCache };
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch (ModuleUpdateProtocolException) { return new(module.ModuleId, ModuleUpdateStatus.SourceInvalid); }
@@ -186,9 +207,11 @@ public sealed class ModuleUpdateCheckCoordinator(
 
     public async Task<ModuleUpdateBatchResult> CheckAsync(ModuleUpdateCheckRequest request, CancellationToken callerToken = default)
     {
-        if (request.Modules.Count == 0) return new(new Dictionary<string, VersionBoundModuleUpdateResult>(), false, timeProvider.GetUtcNow());
+        if (request.Modules.Count == 0) return new(new Dictionary<string, VersionBoundModuleUpdateResult>(), false,
+            timeProvider.GetUtcNow(), ModuleUpdateBatchDisposition.NoModules);
         if (request.IsManual && Interlocked.Exchange(ref _manualPending, 1) != 0)
-            return new(new Dictionary<string, VersionBoundModuleUpdateResult>(), false, timeProvider.GetUtcNow());
+            return new(new Dictionary<string, VersionBoundModuleUpdateResult>(), false,
+                timeProvider.GetUtcNow(), ModuleUpdateBatchDisposition.DuplicateSuppressed);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(callerToken, _lifetime.Token);
         await _operationGate.WaitAsync(linked.Token);
         try

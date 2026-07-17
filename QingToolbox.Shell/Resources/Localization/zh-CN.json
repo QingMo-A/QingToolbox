@@ -200,6 +200,7 @@
   "moduleUpdate.checking": "正在检查官方模块更新…",
   "moduleUpdate.completed": "更新检查完成，可用更新 {0} 个。",
   "moduleUpdate.completedStale": "已使用较旧的缓存元数据完成检查，可用更新 {0} 个。",
+  "moduleUpdate.resultsOutdated": "模块列表已发生变化，本次检查结果未应用，请重新检查。",
   "moduleUpdate.sourceUnavailable": "官方更新源暂时不可用。",
   "moduleUpdate.status.NotChecked": "尚未检查",
   "moduleUpdate.status.Checking": "正在检查…",

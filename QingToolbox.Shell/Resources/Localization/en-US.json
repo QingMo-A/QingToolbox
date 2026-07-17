@@ -200,6 +200,7 @@
   "moduleUpdate.checking": "Checking official module updates…",
   "moduleUpdate.completed": "Update check complete. {0} update(s) available.",
   "moduleUpdate.completedStale": "Update check complete using older cached metadata. {0} update(s) available.",
+  "moduleUpdate.resultsOutdated": "The module list changed during the check. Run the update check again.",
   "moduleUpdate.sourceUnavailable": "The official update source is temporarily unavailable.",
   "moduleUpdate.status.NotChecked": "Not checked",
   "moduleUpdate.status.Checking": "Checking…",
