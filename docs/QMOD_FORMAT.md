@@ -1,6 +1,6 @@
 # QingToolbox `.qmod` Package Format
 
-Version: `0.1.0-alpha` Preview
+Version: `0.2.0-alpha` Preview 2
 
 ## Container
 
@@ -61,11 +61,11 @@ Rename-Item .\Example.zip Example.qmod
 ```
 
 Test both a valid package and rejected packages using the manual release
-checklist in [`releases/0.1.0-alpha.md`](releases/0.1.0-alpha.md).
+checklist in [`releases/0.2.0-alpha.md`](releases/0.2.0-alpha.md).
 
 ## Preview security notice
 
-QingToolbox `0.1.0-alpha` does not verify module signatures. A loaded module
+QingToolbox `0.2.0-alpha` does not verify module signatures. A loaded module
 runs in the user process and has the current user's permissions. Only import
 packages from sources you trust.
 

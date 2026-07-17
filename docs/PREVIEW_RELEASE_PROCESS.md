@@ -1,6 +1,9 @@
 # Preview Release Candidate Process
 
-本文说明 QingToolbox `0.1.0-alpha` Preview 的最终候选构建与人工发布交接流程。
+本文说明 QingToolbox `0.2.0-alpha` Preview 2 的最终候选构建与人工发布交接流程。
+
+Preview 2 RC 必须使用经过官方 SHA256 sidecar 验证的 `v0.1.0-alpha` 安装器，
+完成原地覆盖、同版本修复、降级拒绝、用户状态保留和单一卸载身份验证。
 该流程只验证候选产物，不创建 GitHub Release、tag，也不上传正式发布资产。
 
 ## 前置条件

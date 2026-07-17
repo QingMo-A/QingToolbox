@@ -108,6 +108,7 @@ try {
     if ($forbiddenDirectories.Count -gt 0) {
         throw "Portable payload contains forbidden directories: $($forbiddenDirectories.FullName -join ', ')"
     }
+    & (Join-Path $PSScriptRoot "write-host-payload-manifest.ps1") -PayloadDirectory $publishDirectory
     $requiredFiles = @(
         'QingToolbox.Shell.exe',
         'QingToolbox.StartupMaintenance.exe',
@@ -117,7 +118,8 @@ try {
         'CHANGELOG.md',
         'docs\QMOD_FORMAT.md',
         "docs\releases\$($metadata.Version).md",
-        'docs\sdk\README.md'
+        'docs\sdk\README.md',
+        'host-payload.manifest.json'
     )
     foreach ($relativePath in $requiredFiles) {
         if (-not (Test-Path -LiteralPath (Join-Path $publishDirectory $relativePath) -PathType Leaf)) {

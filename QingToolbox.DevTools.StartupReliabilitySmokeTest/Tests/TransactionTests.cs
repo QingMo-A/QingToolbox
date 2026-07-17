@@ -83,6 +83,11 @@ internal static class TransactionTests
             try { await timeoutService.SetEnabledAsync(true); } catch (Exception exception) { timeoutFailure = exception; }
             AssertEx.True(timeoutFailure is StartupRegistrationTransactionException,
                 "Bounded rollback timeout was not reported as a partial transaction failure.");
+            var recoveryWait = System.Diagnostics.Stopwatch.StartNew();
+            await timeoutService.GetSnapshotAsync();
+            recoveryWait.Stop();
+            AssertEx.True(recoveryWait.Elapsed >= TimeSpan.FromMilliseconds(150),
+                "A second operation did not wait for the tracked recovery task.");
 
             var gateTask = new FakeTaskStore();
             var gateRun = new FakeRunStore();

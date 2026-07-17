@@ -16,13 +16,19 @@
 #ifndef BrandIconPath
   #error BrandIconPath must be provided by scripts/build-installer.ps1
 #endif
+#ifndef ReleaseDisplayName
+  #error ReleaseDisplayName must be provided by scripts/build-installer.ps1
+#endif
+#ifndef ObsoleteIncludePath
+  #error ObsoleteIncludePath must be provided by scripts/build-installer.ps1
+#endif
 
 [Setup]
 AppId={{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}
 AppName=QingToolbox
 AppPublisher=QingMo-A
 AppVersion={#AppVersion}
-AppVerName=QingToolbox {#AppVersion} Preview
+AppVerName=QingToolbox {#AppVersion} {#ReleaseDisplayName}
 AppPublisherURL=https://github.com/QingMo-A/QingToolbox
 AppSupportURL=https://github.com/QingMo-A/QingToolbox/issues
 AppUpdatesURL=https://github.com/QingMo-A/QingToolbox/releases
@@ -31,6 +37,7 @@ VersionInfoProductName=QingToolbox
 VersionInfoDescription=QingToolbox Preview Installer
 VersionInfoVersion={#FileVersion}
 DefaultDirName={userpf}\QingToolbox
+UsePreviousAppDir=yes
 DefaultGroupName=QingToolbox
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
@@ -83,3 +90,88 @@ Filename: "{app}\QingToolbox.StartupMaintenance.exe"; Parameters: "--remove-owne
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "QingToolbox"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox"; ValueType: string; ValueName: "InstalledVersion"; ValueData: "{#AppVersion}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox"; ValueType: string; ValueName: "InstalledFileVersion"; ValueData: "{#FileVersion}"
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox"; ValueType: string; ValueName: "InstallLocation"; ValueData: "{app}"
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox"; ValueType: dword; ValueName: "InstallerSchemaVersion"; ValueData: "2"
+
+#include ObsoleteIncludePath
+
+[Code]
+function TryParseCore(const Value: String; var Major, Minor, Patch: Integer; var Pre: String): Boolean;
+var
+  Core: String;
+  Dash, FirstDot, SecondDot: Integer;
+  Rest: String;
+begin
+  Result := False;
+  Core := Value;
+  Dash := Pos('-', Core);
+  if Dash > 0 then begin
+    Pre := Lowercase(Copy(Core, Dash + 1, Length(Core)));
+    Core := Copy(Core, 1, Dash - 1);
+    if Pre = '' then exit;
+  end else
+    Pre := '';
+  FirstDot := Pos('.', Core);
+  if FirstDot <= 1 then exit;
+  Rest := Copy(Core, FirstDot + 1, Length(Core));
+  SecondDot := Pos('.', Rest);
+  if (SecondDot <= 1) or (Pos('.', Copy(Rest, SecondDot + 1, Length(Rest))) > 0) then exit;
+  Major := StrToIntDef(Copy(Core, 1, FirstDot - 1), -1);
+  Minor := StrToIntDef(Copy(Rest, 1, SecondDot - 1), -1);
+  Patch := StrToIntDef(Copy(Rest, SecondDot + 1, Length(Rest)), -1);
+  Result := (Major >= 0) and (Minor >= 0) and (Patch >= 0);
+end;
+
+function PreRank(const Value: String): Integer;
+begin
+  if Value = 'alpha' then Result := 0
+  else if Value = 'beta' then Result := 1
+  else if Value = 'rc' then Result := 2
+  else Result := -1;
+end;
+
+function CompareSemVer(const Left, Right: String; var Valid: Boolean): Integer;
+var
+  LMajor, LMinor, LPatch, RMajor, RMinor, RPatch, LRank, RRank: Integer;
+  LPre, RPre: String;
+begin
+  Valid := TryParseCore(Left, LMajor, LMinor, LPatch, LPre) and TryParseCore(Right, RMajor, RMinor, RPatch, RPre);
+  Result := 0;
+  if not Valid then exit;
+  if LMajor <> RMajor then begin if LMajor < RMajor then Result := -1 else Result := 1; exit; end;
+  if LMinor <> RMinor then begin if LMinor < RMinor then Result := -1 else Result := 1; exit; end;
+  if LPatch <> RPatch then begin if LPatch < RPatch then Result := -1 else Result := 1; exit; end;
+  if LPre = RPre then exit;
+  if LPre = '' then begin Result := 1; exit; end;
+  if RPre = '' then begin Result := -1; exit; end;
+  LRank := PreRank(LPre); RRank := PreRank(RPre);
+  if (LRank < 0) or (RRank < 0) then begin Valid := False; exit; end;
+  if LRank < RRank then Result := -1 else Result := 1;
+end;
+
+function InitializeSetup(): Boolean;
+var
+  Installed, UninstallKey: String;
+  Valid: Boolean;
+  Comparison: Integer;
+begin
+  Result := True;
+  Installed := '';
+  if not RegQueryStringValue(HKCU, 'Software\QingMo-A\QingToolbox', 'InstalledVersion', Installed) then begin
+    UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}_is1';
+    RegQueryStringValue(HKCU, UninstallKey, 'DisplayVersion', Installed);
+  end;
+  if Installed = '' then exit;
+  Comparison := CompareSemVer(Installed, '{#AppVersion}', Valid);
+  if not Valid then begin
+    SuppressibleMsgBox('The installed QingToolbox version cannot be verified. Setup will not overwrite it.', mbError, MB_OK, IDOK);
+    Result := False;
+    exit;
+  end;
+  if Comparison > 0 then begin
+    SuppressibleMsgBox('A newer QingToolbox version (' + Installed + ') is already installed. Downgrade was blocked.', mbError, MB_OK, IDOK);
+    Result := False;
+  end;
+end;

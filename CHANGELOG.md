@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Prepared the unified 0.2.0-alpha Preview 2 product and installer metadata.
+- Added deterministic host payload ownership manifests and exact obsolete-file cleanup inputs.
+- Added in-place Preview upgrade, same-version repair, and SemVer downgrade-guard infrastructure.
+- Preserved settings, user modules, module data, caches, startup authorizations, and unknown install files across upgrades.
+
 - Serialized startup registration mutations and made rollback cancellation-safe.
 - Preserved exact owned Task Scheduler definitions during failed transactions.
 - Distinguished startup-test failures from timeouts and cleaned partial test tasks.

@@ -51,6 +51,11 @@ Do not change this AppId in future versions. Keeping it stable allows repair,
 reinstall, and upgrade to use the same per-user installation record and path.
 Future releases should update `Directory.Build.props` and reuse the same `.iss`.
 
+Preview 2 explicitly reuses the previous application directory and performs an
+in-place upgrade. Starting with 0.2.0-alpha, new installers reject overwriting a
+higher SemVer version. The already-published 0.1.0-alpha installer cannot be
+retroactively given this downgrade protection.
+
 ## Installer roundtrip test
 
 Run the generated installer through an isolated silent install/uninstall test:
@@ -60,7 +65,7 @@ $env:LOCALAPPDATA = Join-Path $env:TEMP "QingToolboxProfile\LocalAppData"
 $env:APPDATA = Join-Path $env:TEMP "QingToolboxProfile\AppData"
 ./scripts/test-installer-roundtrip.ps1 `
   -InstallerPath `
-    ".\artifacts\installer\output\QingToolbox-0.1.0-alpha-win-x64-setup.exe"
+    ".\artifacts\installer\output\QingToolbox-0.2.0-alpha-win-x64-setup.exe"
 ```
 
 The script installs under its own temporary root, validates the host-only

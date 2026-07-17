@@ -21,11 +21,16 @@ function Get-PreviewReleaseMetadata {
     [xml]$props = Get-Content -LiteralPath $resolvedPropsPath -Raw
     $version = [string]@($props.Project.PropertyGroup.Version)[0]
     $fileVersion = [string]@($props.Project.PropertyGroup.FileVersion)[0]
+    $previewNumber = [string]@($props.Project.PropertyGroup.PreviewNumber)[0]
+    $releaseDisplayName = [string]@($props.Project.PropertyGroup.ReleaseDisplayName)[0]
     if ([string]::IsNullOrWhiteSpace($version)) {
         throw "Version is missing from Directory.Build.props."
     }
     if ($fileVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') {
         throw "FileVersion must contain four numeric components: '$fileVersion'."
+    }
+    if ($previewNumber -notmatch '^\d+$' -or [string]::IsNullOrWhiteSpace($releaseDisplayName)) {
+        throw "PreviewNumber and ReleaseDisplayName are required release metadata."
     }
 
     $productName = "QingToolbox"
@@ -35,6 +40,10 @@ function Get-PreviewReleaseMetadata {
         ProductName = $productName
         Version = $version
         FileVersion = $fileVersion
+        PreviewNumber = [int]$previewNumber
+        ReleaseDisplayName = $releaseDisplayName
+        ProductDisplayName = "$productName $version $releaseDisplayName"
+        PortableKind = "framework-dependent"
         Runtime = $Runtime
         PortableBaseName = $portableBaseName
         PortableFileName = "$portableBaseName.zip"

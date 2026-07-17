@@ -101,6 +101,12 @@ jobs:
         shell: pwsh
         run: ./scripts/publish-preview.ps1
 
+      - name: Verify host payload and SemVer contracts
+        shell: pwsh
+        run: |
+          ./scripts/test-host-payload-contracts.ps1
+          ./scripts/test-installer-semver.ps1
+
       - name: Install Inno Setup 6
         shell: pwsh
         run: |
@@ -146,6 +152,27 @@ jobs:
             -TestRoot "${{ runner.temp }}\QingToolboxInstallerRoundtrip" `
             -KeepTestFiles
 
+      - name: Resolve verified Preview 1 installer
+        id: previous
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $resolved = ./scripts/resolve-previous-preview-installer.ps1 `
+            -Tag v0.1.0-alpha `
+            -OutputDirectory "${{ runner.temp }}\QingToolboxPreview1"
+          "installer=$($resolved.InstallerPath)" | Out-File $env:GITHUB_OUTPUT -Append
+          "sha256=$($resolved.Sha256)" | Out-File $env:GITHUB_OUTPUT -Append
+
+      - name: Test Preview 1 to Preview 2 in-place upgrade
+        shell: pwsh
+        run: |
+          ./scripts/test-preview-upgrade.ps1 `
+            -PreviousInstallerPath "${{ steps.previous.outputs.installer }}" `
+            -CurrentInstallerPath (Join-Path "./artifacts/installer/output" "${{ steps.release.outputs.installer_file }}") `
+            -TestRoot "${{ runner.temp }}\QingToolboxPreviewUpgrade" `
+            -KeepTestFiles
+
       - name: Validate clean Preview source
         shell: pwsh
         run: ./scripts/assert-preview-source.ps1
@@ -176,7 +203,9 @@ jobs:
         run: |
           $paths = @(
             "${{ runner.temp }}\QingToolboxInstallerRoundtrip",
-            "${{ runner.temp }}\QingToolboxProfile"
+            "${{ runner.temp }}\QingToolboxProfile",
+            "${{ runner.temp }}\QingToolboxPreviewUpgrade",
+            "${{ runner.temp }}\QingToolboxPreview1"
           )
           foreach ($path in $paths) {
             if (Test-Path -LiteralPath $path) {

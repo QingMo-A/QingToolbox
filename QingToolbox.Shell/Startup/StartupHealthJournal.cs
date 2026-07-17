@@ -63,13 +63,20 @@ public sealed class StartupHealthJournal : IAsyncDisposable
 
     public StartupHealthJournal(string path, TimeProvider timeProvider,
         DateTimeOffset? processStartedAt = null, long? monotonicOrigin = null,
-        DateTimeOffset? instanceReadyAt = null, long? instanceReadyTimestamp = null)
+        DateTimeOffset? instanceReadyAt = null, long? instanceReadyTimestamp = null,
+        Guid? attemptId = null, StartupLaunchSource source = default,
+        Guid? startupTestId = null)
     {
         _path = Path.GetFullPath(path);
         _timeProvider = timeProvider;
         _origin = monotonicOrigin ?? Stopwatch.GetTimestamp();
         _current = new StartupHealthRecord
         {
+            AttemptId = attemptId ?? Guid.NewGuid(),
+            Source = source,
+            StartupTestId = startupTestId,
+            StartupTestResult = startupTestId is null ? StartupRegistrationTestStatus.None : StartupRegistrationTestStatus.Started,
+            StartupTestExecutionResult = startupTestId is null ? StartupRegistrationTestStatus.None : StartupRegistrationTestStatus.Started,
             ProcessStartedAt = processStartedAt ?? timeProvider.GetUtcNow(),
             InstanceReadyAt = instanceReadyAt,
             ElapsedMilliseconds = instanceReadyTimestamp is { } readyTimestamp
@@ -293,8 +300,9 @@ public sealed class StartupHealthJournal : IAsyncDisposable
     {
         StartupRegistrationTestStatus.None => 0,
         StartupRegistrationTestStatus.Started => 1,
+        StartupRegistrationTestStatus.TimedOut => 2,
         StartupRegistrationTestStatus.PresentationReady or StartupRegistrationTestStatus.AlreadyRunning or
-            StartupRegistrationTestStatus.Failed or StartupRegistrationTestStatus.TimedOut => 2,
+            StartupRegistrationTestStatus.Failed => 3,
         _ => 0
     };
 

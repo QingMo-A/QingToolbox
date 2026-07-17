@@ -15,4 +15,4 @@ Status:
 - `dotnet new` 模板；
 - `qtool` 验证和打包 CLI。
 
-这些内容不属于 0.1.0-alpha Preview 的实现范围。
+这些内容不属于 0.2.0-alpha Preview 2 的实现范围。

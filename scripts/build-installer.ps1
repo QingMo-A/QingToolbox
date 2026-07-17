@@ -24,6 +24,8 @@ $shellProject = Join-Path $repoRoot "QingToolbox.Shell\QingToolbox.Shell.csproj"
 $maintenanceProject = Join-Path $repoRoot "QingToolbox.StartupMaintenance\QingToolbox.StartupMaintenance.csproj"
 $smokeProject = Join-Path $repoRoot "QingToolbox.DevTools.ModuleLoadSmokeTest\QingToolbox.DevTools.ModuleLoadSmokeTest.csproj"
 $installerScript = Join-Path $repoRoot "installer\QingToolbox.iss"
+$previousHostManifest = Join-Path $repoRoot "installer\baselines\0.1.0-alpha-host-payload.json"
+$obsoleteInclude = Join-Path $installerRoot "generated-obsolete-files.iss"
 $brandIconPath = Join-Path $repoRoot `
     "QingToolbox.Shell\Assets\Branding\QingToolbox.ico"
 $brandMarkPath = Join-Path $repoRoot `
@@ -219,6 +221,7 @@ try {
         "docs\releases\$($metadata.Version).md") `
         -Destination $releaseNotesDirectory -Force
 
+    & (Join-Path $PSScriptRoot "write-host-payload-manifest.ps1") -PayloadDirectory $payloadDirectory
     $requiredPayloadFiles = @(
         "LICENSE",
         "CHANGELOG.md",
@@ -227,7 +230,8 @@ try {
         "docs\sdk\README.md",
         "Resources\Localization\en-US.json",
         "Resources\Localization\zh-CN.json",
-        "QingToolbox.StartupMaintenance.exe"
+        "QingToolbox.StartupMaintenance.exe",
+        "host-payload.manifest.json"
     )
     foreach ($relativePath in $requiredPayloadFiles) {
         $requiredPath = Join-Path $payloadDirectory $relativePath
@@ -235,6 +239,13 @@ try {
             throw "Installer payload is missing required file: $relativePath"
         }
     }
+    if (-not (Test-Path -LiteralPath $previousHostManifest -PathType Leaf)) {
+        throw "Preview 1 host payload baseline is missing: $previousHostManifest"
+    }
+    & (Join-Path $PSScriptRoot "write-obsolete-host-files-include.ps1") `
+        -PreviousManifestPath $previousHostManifest `
+        -CurrentManifestPath (Join-Path $payloadDirectory "host-payload.manifest.json") `
+        -OutputPath $obsoleteInclude
 
     $resolvedIsccPath = Resolve-IsccPath -ExplicitPath $IsccPath
     $innoRoot = Split-Path -Parent $resolvedIsccPath
@@ -250,6 +261,8 @@ try {
     & $resolvedIsccPath `
         "/DAppVersion=$($metadata.Version)" `
         "/DFileVersion=$($metadata.FileVersion)" `
+        "/DReleaseDisplayName=$($metadata.ReleaseDisplayName)" `
+        "/DObsoleteIncludePath=$obsoleteInclude" `
         "/DSourceDir=$payloadDirectory" `
         "/DOutputDir=$outputDirectory" `
         "/DOutputBaseFilename=$outputBaseFilename" `

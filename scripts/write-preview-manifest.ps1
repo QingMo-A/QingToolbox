@@ -61,6 +61,8 @@ try {
         channel = "Preview"
         version = $metadata.Version
         fileVersion = $metadata.FileVersion
+        releaseDisplayName = $metadata.ReleaseDisplayName
+        portableKind = $metadata.PortableKind
         runtime = $metadata.Runtime
         sourceRepository = "QingMo-A/QingToolbox"
         sourceCommit = $sourceCommit.ToLowerInvariant()

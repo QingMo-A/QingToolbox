@@ -115,8 +115,15 @@ public interface IStartupRegistrationBackend
 
 public interface IStartupTestCoordinator
 {
-    Task<StartupRegistrationState> RunAsync(CancellationToken token = default);
+    Task<StartupRegistrationTestResult> RunAsync(CancellationToken token = default);
 }
+
+public enum StartupRegistrationTestOutcome { PresentationReady, AlreadyRunning, Failed, TimedOut }
+
+public sealed record StartupRegistrationTestResult(
+    Guid TestId, StartupRegistrationTestOutcome Status, string DiagnosticCode,
+    DateTimeOffset StartedAt, DateTimeOffset CompletedAt, string? TaskPath,
+    bool CleanupSucceeded);
 
 public interface IStartupRegistrationStore { string? Read(); void Write(string command); void Delete(); }
 
@@ -710,16 +717,18 @@ public sealed class WindowsStartupRegistrationService(
     WindowsRunStartupBackend registry,
     ApplicationExecutionEnvironment environment,
     IStartupTestCoordinator? startupTestCoordinator = null,
-    TimeSpan? rollbackBudget = null)
+    TimeSpan? rollbackBudget = null) : IAsyncDisposable
 {
     private readonly TimeSpan _rollbackBudget = rollbackBudget ?? TimeSpan.FromSeconds(10);
     private readonly SemaphoreSlim _mutationGate = new(1, 1);
+    private readonly object _recoverySync = new();
+    private Task? _recoveryTask;
     public bool IsAvailable => environment.AllowWindowsStartupRegistration;
 
     public async Task<WindowsStartupRegistrationSnapshot> GetSnapshotAsync(CancellationToken token = default)
     {
         await _mutationGate.WaitAsync(token);
-        try { return await GetSnapshotCoreAsync(token); }
+        try { await AwaitRecoveryAsync(token); return await GetSnapshotCoreAsync(token); }
         finally { _mutationGate.Release(); }
     }
 
@@ -772,7 +781,7 @@ public sealed class WindowsStartupRegistrationService(
     {
         if (!IsAvailable) throw new InvalidOperationException("Startup registration is unavailable in this environment.");
         await _mutationGate.WaitAsync(token);
-        try { await SetEnabledCoreAsync(enabled, token); }
+        try { await AwaitRecoveryAsync(token); await SetEnabledCoreAsync(enabled, token); }
         finally { _mutationGate.Release(); }
     }
 
@@ -806,7 +815,7 @@ public sealed class WindowsStartupRegistrationService(
                 var afterFailure = scheduler.Capture();
                 if (!WindowsTaskSchedulerStartupBackend.SnapshotsEquivalent(afterFailure, originalTask))
                 {
-                    await RestoreSchedulerSnapshotWithBudgetAsync(originalTask);
+                    await RestoreWithBudgetAsync(originalTask, originalRun, originalSettings);
                 }
                 token.ThrowIfCancellationRequested();
                 state = await registry.EnableAsync(token);
@@ -828,6 +837,8 @@ public sealed class WindowsStartupRegistrationService(
             {
                 try
                 {
+                    if (IsRecoveryActive())
+                        throw new TimeoutException("Startup registration recovery remains in progress.");
                     await RestoreWithBudgetAsync(
                         originalTask?.SchedulerState == OwnedTaskSchedulerState.Available ? originalTask : null,
                         originalRun, originalSettings);
@@ -859,7 +870,7 @@ public sealed class WindowsStartupRegistrationService(
     public async Task<StartupRegistrationState> RepairAsync(CancellationToken token = default)
     {
         await _mutationGate.WaitAsync(token);
-        try { return await RepairCoreAsync(token); }
+        try { await AwaitRecoveryAsync(token); return await RepairCoreAsync(token); }
         finally { _mutationGate.Release(); }
     }
 
@@ -875,28 +886,37 @@ public sealed class WindowsStartupRegistrationService(
         return StateFromSnapshot(await GetSnapshotCoreAsync(token));
     }
 
-    public async Task<StartupRegistrationState> RunTestAsync(CancellationToken token = default)
+    public async Task<StartupRegistrationTestResult> RunTestAsync(CancellationToken token = default)
     {
         await _mutationGate.WaitAsync(token);
         try
         {
+            await AwaitRecoveryAsync(token);
             var snapshot = await GetSnapshotCoreAsync(token);
             return snapshot.OverallHealth == StartupRegistrationHealth.Healthy &&
                    snapshot.EffectiveBackend == StartupRegistrationBackendKind.TaskScheduler
                 ? startupTestCoordinator is not null
                     ? await startupTestCoordinator.RunAsync(token)
-                    : await scheduler.RunTestAsync(token)
-                : new(false, snapshot.EffectiveBackend, StartupRegistrationHealth.PartialFailure,
-                    DiagnosticCode: "startup.testRequiresHealthyTask", Presence: StartupRegistrationPresence.Unknown);
+                    : ToTestResult(await scheduler.RunTestAsync(token))
+                : new(Guid.Empty, StartupRegistrationTestOutcome.Failed, "startup.testRequiresHealthyTask",
+                    DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, true);
         }
         finally { _mutationGate.Release(); }
+    }
+
+    private static StartupRegistrationTestResult ToTestResult(StartupRegistrationState state)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new(Guid.Empty, state.Health == StartupRegistrationHealth.Healthy
+            ? StartupRegistrationTestOutcome.PresentationReady : StartupRegistrationTestOutcome.Failed,
+            state.DiagnosticCode, now, now, null, true);
     }
 
     public async Task ReconcileAsync(UserSettings settings, CancellationToken token = default)
     {
         if (!IsAvailable) return;
         await _mutationGate.WaitAsync(token);
-        try { await ReconcileCoreAsync(settings, token); }
+        try { await AwaitRecoveryAsync(token); await ReconcileCoreAsync(settings, token); }
         finally { _mutationGate.Release(); }
     }
 
@@ -919,14 +939,49 @@ public sealed class WindowsStartupRegistrationService(
 
     private async Task RestoreWithBudgetAsync(OwnedStartupTaskSnapshot? task, string? run, UserSettings settings)
     {
+        Task recovery;
+        lock (_recoverySync)
+        {
+            recovery = RestoreAsync(task, run, settings, CancellationToken.None);
+            _recoveryTask = recovery;
+        }
         using var rollback = new CancellationTokenSource(_rollbackBudget);
-        await RestoreAsync(task, run, settings, rollback.Token);
+        try { await recovery.WaitAsync(rollback.Token); }
+        catch (OperationCanceledException) when (rollback.IsCancellationRequested)
+        {
+            await MarkCleanupPendingAsync();
+            throw new TimeoutException("Startup registration recovery is still running and remains tracked.");
+        }
+        catch
+        {
+            await MarkCleanupPendingAsync();
+            throw;
+        }
     }
 
-    private async Task RestoreSchedulerSnapshotWithBudgetAsync(OwnedStartupTaskSnapshot task)
+    private async Task AwaitRecoveryAsync(CancellationToken token)
     {
-        using var rollback = new CancellationTokenSource(_rollbackBudget);
-        await Task.Run(() => scheduler.Restore(task), rollback.Token).WaitAsync(rollback.Token);
+        Task? recovery;
+        lock (_recoverySync) recovery = _recoveryTask;
+        if (recovery is null) return;
+        try { await recovery.WaitAsync(token); }
+        finally
+        {
+            if (recovery.IsCompleted)
+                lock (_recoverySync) if (ReferenceEquals(_recoveryTask, recovery)) _recoveryTask = null;
+        }
+    }
+
+    private bool IsRecoveryActive()
+    {
+        lock (_recoverySync) return _recoveryTask is { IsCompleted: false };
+    }
+
+    private async Task MarkCleanupPendingAsync()
+    {
+        using var pendingBudget = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        try { await settingsService.UpdateAsync(value => value.StartupRegistrationCleanupPending = true, pendingBudget.Token); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or OperationCanceledException) { }
     }
 
     private async Task RestoreAsync(OwnedStartupTaskSnapshot? task, string? run, UserSettings settings, CancellationToken token)
@@ -945,7 +1000,27 @@ public sealed class WindowsStartupRegistrationService(
         try { await SaveSettingsAsync(settings.LaunchAtLogin, ParseBackend(settings.StartupRegistrationBackend),
             settings.StartupRegistrationCleanupPending, token); }
         catch (Exception e) { failure ??= e; }
+        try
+        {
+            var restoredRun = registry.Capture();
+            var restoredSettings = await settingsService.ReadAsync(token);
+            if (!string.Equals(restoredRun, run, StringComparison.Ordinal) ||
+                restoredSettings.LaunchAtLogin != settings.LaunchAtLogin ||
+                restoredSettings.StartupRegistrationBackend != settings.StartupRegistrationBackend ||
+                restoredSettings.StartupRegistrationCleanupPending != settings.StartupRegistrationCleanupPending)
+                throw new IOException("Startup registration recovery verification failed.");
+        }
+        catch (Exception e) { failure ??= e; }
         if (failure is not null) throw new IOException("Startup registration rollback was incomplete.", failure);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Task? recovery;
+        lock (_recoverySync) recovery = _recoveryTask;
+        if (recovery is null) return;
+        try { await recovery.WaitAsync(TimeSpan.FromSeconds(2)); }
+        catch (Exception exception) when (exception is TimeoutException or IOException or UnauthorizedAccessException) { }
     }
 
     private Task SaveSettingsAsync(bool enabled, StartupRegistrationBackendKind backend, bool cleanupPending, CancellationToken token) =>

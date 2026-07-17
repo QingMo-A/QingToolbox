@@ -118,6 +118,7 @@ try {
         "/VERYSILENT",
         "/SUPPRESSMSGBOXES",
         "/NORESTART",
+        "/NOCLOSEAPPLICATIONS",
         "/NOICONS",
         "/LANG=english",
         "/DIR=`"$installDirectory`"",

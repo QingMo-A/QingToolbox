@@ -77,6 +77,8 @@ try {
         $manifest.channel -ne "Preview" -or
         $manifest.version -ne $metadata.Version -or
         $manifest.fileVersion -ne $metadata.FileVersion -or
+        $manifest.releaseDisplayName -ne $metadata.ReleaseDisplayName -or
+        $manifest.portableKind -ne "framework-dependent" -or
         $manifest.runtime -ne $metadata.Runtime -or
         $manifest.sourceRepository -ne "QingMo-A/QingToolbox" -or
         $manifest.sourceTreeClean -ne $true) {

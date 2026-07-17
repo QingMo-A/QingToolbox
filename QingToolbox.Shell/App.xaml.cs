@@ -160,7 +160,9 @@ public partial class App : Application
             services.AddSingleton(provider => new StartupHealthJournal(
                 provider.GetRequiredService<ApplicationPaths>().StartupHealthPath,
                 provider.GetRequiredService<TimeProvider>(), processStartedAt, monotonicOrigin,
-                instanceReadyAt, instanceReadyTimestamp));
+                instanceReadyAt, instanceReadyTimestamp,
+                launchOptions.StartupTestId ?? Guid.NewGuid(), launchOptions.StartupSource,
+                launchOptions.StartupTestId));
             services.AddSingleton(provider => new UserSettingsService(
                 provider.GetRequiredService<ApplicationPaths>().SettingsPath));
             services.AddSingleton<ModulePackageImporter>();
@@ -204,9 +206,6 @@ public partial class App : Application
 
             _serviceProvider = services.BuildServiceProvider();
             var startupJournal = _serviceProvider.GetRequiredService<StartupHealthJournal>();
-            startupJournal.SetSource(launchOptions.StartupSource);
-            if (launchOptions.StartupTestId is { } startupTestId)
-                startupJournal.SetStartupTest(startupTestId, StartupRegistrationTestStatus.Started);
             startupJournal.Mark(StartupPhase.InstanceReady);
 
             var localizationDirectory = Path.Combine(

@@ -24,7 +24,7 @@ internal static class StartupTestTests
             };
             var coordinator = new StartupTestCoordinator(store, journal, ApplicationExecutionEnvironment.Production());
             var result = await coordinator.RunAsync();
-            AssertEx.True(result.Health == StartupRegistrationHealth.Healthy &&
+            AssertEx.True(result.Status == StartupRegistrationTestOutcome.AlreadyRunning &&
                 result.DiagnosticCode == "startup.testAlreadyRunning", "Correlated AlreadyRunning test did not succeed.");
             AssertEx.True(store.RunCount == 1 && store.FallbackDefinition is null,
                 "Temporary startup task was not run exactly once and cleaned up.");

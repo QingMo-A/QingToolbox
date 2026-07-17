@@ -52,6 +52,7 @@ public sealed partial class MainWindowViewModel(
     }
 
     private bool _initialized;
+    private long _appliedDiscoveryGeneration;
     private bool _suppressPresentationSave;
     private int _presentationSaveVersion;
     private readonly SemaphoreSlim _presentationSaveGate = new(1, 1);
@@ -146,7 +147,7 @@ public sealed partial class MainWindowViewModel(
     public string VersionDisplay =>
         typeof(MainWindowViewModel).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-            .InformationalVersion.Split('+')[0] ?? "0.1.0-alpha";
+            .InformationalVersion.Split('+')[0] ?? "0.2.0-alpha";
     public LocalizedText Strings { get; } = new(localization);
     public ObservableCollection<LanguageOptionViewModel> LanguageOptions { get; } =
     [
@@ -457,11 +458,6 @@ public sealed partial class MainWindowViewModel(
 
     private async Task RefreshModulesCoreAsync(CancellationToken cancellationToken = default)
     {
-        if (IsScanning)
-        {
-            return;
-        }
-
         try
         {
             IsScanning = true;
@@ -474,6 +470,8 @@ public sealed partial class MainWindowViewModel(
                 "status.scanningModules");
 
             var discovery = await discoveryCoordinator.DiscoverAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (discovery.Generation <= _appliedDiscoveryGeneration) return;
             var discoveredModules = discovery.Modules;
             localizationManager.ClearModuleLocalizations();
             var localizationDiagnosticsByModuleId =
@@ -544,6 +542,7 @@ public sealed partial class MainWindowViewModel(
             {
                 Modules.Add(module);
             }
+            _appliedDiscoveryGeneration = discovery.Generation;
 
             SelectedModule = Modules.FirstOrDefault(
                 module => module.Id == selectedModuleId) ?? Modules.FirstOrDefault();
@@ -567,7 +566,7 @@ public sealed partial class MainWindowViewModel(
         }
         finally
         {
-            IsScanning = false;
+            IsScanning = discoveryCoordinator.IsRunning;
         }
     }
 
@@ -877,7 +876,12 @@ public sealed partial class MainWindowViewModel(
     private async Task TestStartupAsync()
     {
         if(!CanConfigureWindowsStartup)return;IsStartupSettingsBusy=true;
-        try{var state=await startupRegistrationService.RunTestAsync();ApplyRegistrationHealth(state);StartupSettingsMessage=localization.GetString(state.DiagnosticCode);}
+        try
+        {
+            var result = await startupRegistrationService.RunTestAsync();
+            StartupSettingsMessage = localization.GetString(result.DiagnosticCode);
+            ApplyRegistrationSnapshot(await startupRegistrationService.GetSnapshotAsync());
+        }
         catch{StartupSettingsMessage=localization.GetString("startup.testFailed");}
         finally{IsStartupSettingsBusy=false;}
     }
@@ -1013,10 +1017,12 @@ public sealed partial class MainWindowViewModel(
                 bool matches;
                 try
                 {
-                    matches = await fingerprintService.MatchesAsync(
-                        module.Module,
-                        authorization,
-                        cancellationToken);
+                    var moduleSnapshot = module.Module;
+                    var authorizationSnapshot = authorization;
+                    matches = await Task.Run(() => fingerprintService.MatchesAsync(
+                        moduleSnapshot,
+                        authorizationSnapshot,
+                        cancellationToken), cancellationToken);
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception exception)
