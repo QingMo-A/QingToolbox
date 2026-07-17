@@ -10,6 +10,7 @@ public enum StartupPhase
     RegistrationHealthReady, ModuleDiscoveryComplete, AuthorizedModulesRestored, Ready, Failed, Exiting
 }
 public enum StartupPhaseOutcome { NotReached, Succeeded, Degraded, Failed }
+public enum StartupRegistrationTestStatus { None, Started, PresentationReady, AlreadyRunning, Failed, TimedOut, CleanupFailed }
 public enum StartupExitCode
 {
     Success = 0, InvalidArguments = 10, RegistrationFailure = 11,
@@ -31,6 +32,11 @@ public sealed record StartupHealthRecord
     public DateTimeOffset? AuthorizedModulesRestoredAt { get; init; }
     public DateTimeOffset? ReadyAt { get; init; }
     public DateTimeOffset? FailedAt { get; init; }
+    public DateTimeOffset? ExitingAt { get; init; }
+    public Guid? StartupTestId { get; init; }
+    public StartupRegistrationTestStatus StartupTestResult { get; init; }
+    public int NotificationRecoveryCount { get; init; }
+    public DateTimeOffset? NotificationRecoveredAt { get; init; }
     public StartupPhase? FailurePhase { get; init; }
     public string? FailureCode { get; init; }
     public int? ProcessExitCode { get; init; }
@@ -49,22 +55,60 @@ public sealed class StartupHealthJournal : IAsyncDisposable
     private readonly string _path;
     private readonly TimeProvider _timeProvider;
     private readonly object _sync = new();
-    private readonly long _origin = Stopwatch.GetTimestamp();
+    private readonly long _origin;
     private StartupHealthRecord _current;
     private Task _writeTail = Task.CompletedTask;
     private string? _lastPersistenceDiagnostic;
 
-    public StartupHealthJournal(string path, TimeProvider timeProvider)
+    public StartupHealthJournal(string path, TimeProvider timeProvider,
+        DateTimeOffset? processStartedAt = null, long? monotonicOrigin = null,
+        DateTimeOffset? instanceReadyAt = null, long? instanceReadyTimestamp = null)
     {
         _path = Path.GetFullPath(path);
         _timeProvider = timeProvider;
-        _current = new StartupHealthRecord { ProcessStartedAt = timeProvider.GetUtcNow() };
+        _origin = monotonicOrigin ?? Stopwatch.GetTimestamp();
+        _current = new StartupHealthRecord
+        {
+            ProcessStartedAt = processStartedAt ?? timeProvider.GetUtcNow(),
+            InstanceReadyAt = instanceReadyAt,
+            ElapsedMilliseconds = instanceReadyTimestamp is { } readyTimestamp
+                ? new Dictionary<string, long>
+                {
+                    [StartupPhase.InstanceReady.ToString()] =
+                        (long)Stopwatch.GetElapsedTime(_origin, readyTimestamp).TotalMilliseconds
+                }
+                : new Dictionary<string, long>()
+        };
     }
 
     public StartupHealthRecord Current { get { lock (_sync) return _current; } }
     public string? LastPersistenceDiagnostic { get { lock (_sync) return _lastPersistenceDiagnostic; } }
 
     public void SetSource(StartupLaunchSource source) => Mutate(record => record with { Source = source });
+    public void SetStartupTest(Guid? testId, StartupRegistrationTestStatus status) =>
+        Mutate(record => record with { StartupTestId = testId, StartupTestResult = status });
+    public void RecordNotificationRecovery() => Mutate(record => record with
+    {
+        NotificationRecoveryCount = record.NotificationRecoveryCount + 1,
+        NotificationRecoveredAt = _timeProvider.GetUtcNow()
+    });
+
+    public void RecordStartupTestResult(Guid testId, StartupRegistrationTestStatus status)
+    {
+        var now = _timeProvider.GetUtcNow();
+        var snapshot = new StartupHealthRecord
+        {
+            Source = StartupLaunchSource.StartupTest,
+            ProcessStartedAt = now,
+            StartupTestId = testId,
+            StartupTestResult = status,
+            ReadyAt = status is StartupRegistrationTestStatus.PresentationReady or
+                StartupRegistrationTestStatus.AlreadyRunning ? now : null
+        };
+        lock (_sync)
+            _writeTail = _writeTail.ContinueWith(_ => PersistSnapshotAsync(snapshot), CancellationToken.None,
+                TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+    }
 
     public void Mark(StartupPhase phase, string? diagnosticCode = null, int? exitCode = null) =>
         Mark(phase, diagnosticCode is null ? StartupPhaseOutcome.Succeeded : StartupPhaseOutcome.Degraded,
@@ -76,7 +120,9 @@ public sealed class StartupHealthJournal : IAsyncDisposable
         var elapsed = (long)Stopwatch.GetElapsedTime(_origin).TotalMilliseconds;
         Mutate(record =>
         {
-            var elapsedMap = new Dictionary<string, long>(record.ElapsedMilliseconds) { [phase.ToString()] = elapsed };
+            var elapsedMap = new Dictionary<string, long>(record.ElapsedMilliseconds);
+            if (phase != StartupPhase.InstanceReady || !elapsedMap.ContainsKey(phase.ToString()))
+                elapsedMap[phase.ToString()] = elapsed;
             var outcomes = new Dictionary<string, StartupPhaseOutcome>(record.PhaseOutcomes) { [phase.ToString()] = outcome };
             var diagnostics = record.DiagnosticCodes.ToList();
             if (!string.IsNullOrWhiteSpace(diagnosticCode) && !diagnostics.Contains(diagnosticCode, StringComparer.Ordinal))
@@ -92,7 +138,7 @@ public sealed class StartupHealthJournal : IAsyncDisposable
                 return updated with { FailedAt = now, FailurePhase = phase, FailureCode = diagnosticCode };
             return phase switch
             {
-                StartupPhase.InstanceReady => updated with { InstanceReadyAt = now },
+                StartupPhase.InstanceReady => updated with { InstanceReadyAt = updated.InstanceReadyAt ?? now },
                 StartupPhase.MinimalServicesReady => updated with { MinimalServicesReadyAt = now },
                 StartupPhase.NotificationAreaReady when outcome == StartupPhaseOutcome.Succeeded => updated with { NotificationAreaReadyAt = now },
                 StartupPhase.PresentationReady => updated with { PresentationReadyAt = now },
@@ -100,6 +146,7 @@ public sealed class StartupHealthJournal : IAsyncDisposable
                 StartupPhase.ModuleDiscoveryComplete => updated with { ModuleDiscoveryCompletedAt = now },
                 StartupPhase.AuthorizedModulesRestored => updated with { AuthorizedModulesRestoredAt = now },
                 StartupPhase.Ready => updated with { ReadyAt = now },
+                StartupPhase.Exiting => updated with { ExitingAt = now },
                 _ => updated
             };
         });
@@ -126,13 +173,34 @@ public sealed class StartupHealthJournal : IAsyncDisposable
         {
             var info = new FileInfo(_path);
             if (!info.Exists || info.Length is <= 0 or > MaximumFileBytes) return [];
-            await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
                 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
             return await JsonSerializer.DeserializeAsync<List<StartupHealthRecord>>(stream, JsonOptions, token) ?? [];
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         { return []; }
+    }
+
+    public async Task<StartupHealthRecord?> WaitForStartupTestAsync(
+        Guid testId, TimeSpan timeout, CancellationToken token = default)
+    {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
+        budget.CancelAfter(timeout);
+        try
+        {
+            while (!budget.IsCancellationRequested)
+            {
+                var match = (await ReadAsync(budget.Token)).Where(record => record.StartupTestId == testId)
+                    .OrderByDescending(record => record.ProcessStartedAt).FirstOrDefault(record =>
+                        record.StartupTestResult is StartupRegistrationTestStatus.PresentationReady or
+                            StartupRegistrationTestStatus.AlreadyRunning or StartupRegistrationTestStatus.Failed);
+                if (match is not null) return match;
+                await Task.Delay(TimeSpan.FromMilliseconds(200), _timeProvider, budget.Token);
+            }
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
+        return null;
     }
 
     public async Task FlushAsync(CancellationToken token = default)
@@ -160,8 +228,9 @@ public sealed class StartupHealthJournal : IAsyncDisposable
         try
         {
             Directory.CreateDirectory(directory);
+            await using var journalLock = await AcquireJournalLockAsync(directory);
             foreach (var stale in Directory.EnumerateFiles(directory, $"{Path.GetFileName(_path)}.tmp.*"))
-                try { if (File.GetLastWriteTimeUtc(stale) < DateTime.UtcNow.AddDays(-1)) File.Delete(stale); } catch (IOException) { }
+                try { if (File.GetLastWriteTimeUtc(stale) < _timeProvider.GetUtcNow().UtcDateTime.AddDays(-1)) File.Delete(stale); } catch (IOException) { }
             var records = (await ReadAsync()).Where(record => record.AttemptId != snapshot.AttemptId)
                 .Append(snapshot).TakeLast(MaximumRecords).ToArray();
             await using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
@@ -183,6 +252,23 @@ public sealed class StartupHealthJournal : IAsyncDisposable
         finally
         {
             try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); } catch (IOException) { }
+        }
+    }
+
+    private async Task<FileStream> AcquireJournalLockAsync(string directory)
+    {
+        var lockPath = Path.Combine(directory, $"{Path.GetFileName(_path)}.lock");
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite,
+                    FileShare.None, 1, FileOptions.Asynchronous | FileOptions.DeleteOnClose);
+            }
+            catch (IOException) when (attempt < 40)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(25), _timeProvider);
+            }
         }
     }
 

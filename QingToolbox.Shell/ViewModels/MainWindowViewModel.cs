@@ -21,7 +21,7 @@ using QingToolbox.Shell.Views;
 namespace QingToolbox.Shell.ViewModels;
 
 public sealed partial class MainWindowViewModel(
-    ModuleManifestScanner scanner,
+    ModuleDiscoveryCoordinator discoveryCoordinator,
     ModuleRegistry registry,
     ModuleRuntimeManager runtimeManager,
     ModuleWindowManager moduleWindowManager,
@@ -38,6 +38,13 @@ public sealed partial class MainWindowViewModel(
     TimeProvider timeProvider,
     StartupHealthJournal startupHealthJournal) : ObservableObject
 {
+    public void ApplyNotificationAvailability(NotificationAvailabilityChangedEventArgs change)
+    {
+        if (change.Available && change.RecoveredAfterExplorerRestart)
+            StartupSettingsMessage = localization.GetString("startup.notificationRecovered");
+        else if (!change.Available)
+            StartupSettingsMessage = localization.GetString("startup.notificationRetryExhausted");
+    }
     public async Task ReconcileStartupRegistrationAsync(UserSettings settings, CancellationToken cancellationToken)
     {
         await startupRegistrationService.ReconcileAsync(settings, cancellationToken);
@@ -455,13 +462,7 @@ public sealed partial class MainWindowViewModel(
             StatusMessage = localization.GetString(
                 "status.scanningModules");
 
-            var scans = new List<DiscoveredModule>();
-            foreach (var directory in applicationPaths.ModuleDiscoveryDirectories)
-                scans.AddRange(await scanner.ScanAsync(directory));
-            var discoveredModules = scans
-                .GroupBy(module => module.Manifest.Id, StringComparer.Ordinal)
-                .Select(group => group.First())
-                .ToArray();
+            var discoveredModules = await discoveryCoordinator.DiscoverAsync(cancellationToken);
             localizationManager.ClearModuleLocalizations();
             var localizationDiagnosticsByModuleId =
                 new Dictionary<string, IReadOnlyList<string>>(
@@ -906,9 +907,23 @@ public sealed partial class MainWindowViewModel(
         CanRepairStartup = state.Health is not StartupRegistrationHealth.Healthy and
             not StartupRegistrationHealth.Disabled && !IsStartupSettingsBusy;
     }
+    private void ApplyRegistrationSnapshot(WindowsStartupRegistrationSnapshot snapshot)
+    {
+        var state = snapshot.EffectiveBackend == StartupRegistrationBackendKind.RegistryRun
+            ? snapshot.RegistryRunState : snapshot.TaskSchedulerState;
+        state = state with
+        {
+            ConfiguredByUser = snapshot.ConfiguredBackend != StartupRegistrationBackendKind.None,
+            Health = snapshot.OverallHealth,
+            DiagnosticCode = snapshot.DiagnosticCode
+        };
+        ApplyRegistrationHealth(state);
+        LaunchAtLogin = state.ConfiguredByUser && state.MatchesCurrentExecutable;
+        StartupSettingsMessage = localization.GetString(snapshot.DiagnosticCode);
+    }
     private async Task RefreshStartupJournalAsync(CancellationToken token=default)
     {
-        var last=(await startupHealthJournal.ReadAsync(token)).Where(x=>x.Source!=StartupLaunchSource.Manual).OrderByDescending(x=>x.ProcessStartedAt).FirstOrDefault();
+        var last=(await startupHealthJournal.ReadAsync(token)).Where(x=>x.Source is StartupLaunchSource.TaskScheduler or StartupLaunchSource.RegistryRun).OrderByDescending(x=>x.ProcessStartedAt).FirstOrDefault();
         StartupLastAttemptDisplay=last?.ProcessStartedAt.ToLocalTime().ToString("g")??"—";
         StartupVisibleDurationDisplay=Duration(last,StartupPhase.PresentationReady);
         StartupReadyDurationDisplay=Duration(last,StartupPhase.Ready);
@@ -1095,15 +1110,15 @@ public sealed partial class MainWindowViewModel(
         try
         {
             await startupRegistrationService.SetEnabledAsync(desired);
-            var state = await startupRegistrationService.GetStateAsync();
-            LaunchAtLogin = state.MatchesCurrentExecutable;
+            ApplyRegistrationSnapshot(await startupRegistrationService.GetSnapshotAsync());
             StartupSettingsMessage = localization.GetString(LaunchAtLogin ? "startup.registrationEnabled" : "startup.registrationDisabled");
         }
         catch (Exception exception)
         {
             Debug.WriteLine($"Startup registration update failed: {exception.GetType().Name}");
-            LaunchAtLogin = (await startupRegistrationService.GetStateAsync()).MatchesCurrentExecutable;
-            StartupSettingsMessage = localization.GetString("startup.registrationFailed");
+            ApplyRegistrationSnapshot(await startupRegistrationService.GetSnapshotAsync());
+            if (_lastStartupRegistrationState?.Health != StartupRegistrationHealth.PartialFailure)
+                StartupSettingsMessage = localization.GetString("startup.registrationFailed");
         }
         finally { IsStartupSettingsBusy = false; }
     }

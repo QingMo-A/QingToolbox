@@ -16,6 +16,7 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using System.Net.Http;
 using System.Net;
+using System.Diagnostics;
 
 namespace QingToolbox.Shell;
 
@@ -24,11 +25,15 @@ public partial class App : Application
     private ServiceProvider? _serviceProvider;
     private SingleInstanceCoordinator? _singleInstance;
     private StartupSessionCoordinator? _startupSession;
-    private Func<InstanceActivationMessage, Task>? _activationHandler;
+    private Func<InstanceActivationRequest, Task>? _activationHandler;
     private int _activationDispatchPending;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
+        var processStartedAt = TimeProvider.System.GetUtcNow();
+        var monotonicOrigin = Stopwatch.GetTimestamp();
+        DateTimeOffset? instanceReadyAt = null;
+        long? instanceReadyTimestamp = null;
         base.OnStartup(e);
 
         ApplicationLaunchOptions launchOptions;
@@ -63,8 +68,8 @@ public partial class App : Application
             try
             {
                 delivered = await _singleInstance.SendAsync(launchOptions.IsStartupLaunch
-                    ? InstanceActivationMessage.StartupProbe
-                    : InstanceActivationMessage.Activate);
+                    ? new InstanceActivationRequest(InstanceActivationMessage.StartupProbe, launchOptions.StartupTestId)
+                    : new InstanceActivationRequest(InstanceActivationMessage.Activate));
             }
             catch (Exception exception)
             {
@@ -90,15 +95,17 @@ public partial class App : Application
 
         try
         {
-            var applicationPaths = new ApplicationPaths(environment);
-            applicationPaths.EnsureDirectories();
-            var startupPreferenceReader = new StartupPreferenceReader();
-            var startupPreferences = await startupPreferenceReader.ReadAsync(
-                applicationPaths.SettingsPath, launchOptions.IsStartupLaunch);
             _startupSession = new StartupSessionCoordinator(launchOptions);
-            _activationHandler = message =>
+            _activationHandler = request =>
             {
-                if (message != InstanceActivationMessage.Activate) return Task.CompletedTask;
+                if (request.Message == InstanceActivationMessage.StartupProbe)
+                {
+                    if (request.StartupTestId is { } id && _serviceProvider?.GetService<StartupHealthJournal>() is { } journal)
+                        journal.RecordStartupTestResult(id, StartupRegistrationTestStatus.AlreadyRunning);
+                    else
+                        _startupSession.RecordStartupProbe(request.StartupTestId);
+                    return Task.CompletedTask;
+                }
                 if (!_startupSession.TryRequestManualActivation() || _serviceProvider is null)
                     return Task.CompletedTask;
                 if (Interlocked.Exchange(ref _activationDispatchPending, 1) != 0)
@@ -109,24 +116,35 @@ public partial class App : Application
                     finally { Interlocked.Exchange(ref _activationDispatchPending, 0); }
                 }).Task.Unwrap();
             };
-            _singleInstance.MessageReceived += _activationHandler;
+            _singleInstance.RequestReceived += _activationHandler;
             _singleInstance.StartServer();
+            instanceReadyAt = TimeProvider.System.GetUtcNow();
+            instanceReadyTimestamp = Stopwatch.GetTimestamp();
 
+            var applicationPaths = new ApplicationPaths(environment);
+            applicationPaths.EnsureDirectories();
+            var startupPreferenceReader = new StartupPreferenceReader();
+            var startupPreferences = await startupPreferenceReader.ReadAsync(
+                applicationPaths.SettingsPath, launchOptions.IsStartupLaunch);
             var services = new ServiceCollection();
             services.AddSingleton<ModuleRegistry>();
             services.AddSingleton<ModuleManifestReader>();
             services.AddSingleton<ModuleManifestValidator>();
             services.AddSingleton<ModuleManifestScanner>();
+            services.AddSingleton<ModuleDiscoveryCoordinator>();
             services.AddSingleton<InProcessModuleLoader>();
             services.AddSingleton<ModuleRuntimeManager>();
             services.AddSingleton(launchOptions);
             services.AddSingleton(environment);
             services.AddSingleton(_startupSession);
+            services.AddSingleton<StartupPipelineCoordinator>();
             services.AddSingleton<IStartupRegistrationStore, WindowsRunRegistrationStore>();
             services.AddSingleton<WindowsRunStartupBackend>();
             services.AddSingleton<ITaskSchedulerStore, WindowsTaskSchedulerStore>();
             services.AddSingleton<WindowsTaskSchedulerStartupBackend>();
             services.AddSingleton<WindowsStartupRegistrationService>();
+            services.AddSingleton<StartupTestCoordinator>();
+            services.AddSingleton<IStartupTestCoordinator>(provider => provider.GetRequiredService<StartupTestCoordinator>());
             services.AddSingleton(startupPreferenceReader);
             services.AddSingleton(startupPreferences);
             services.AddSingleton<ModuleStartupFingerprintService>();
@@ -141,7 +159,8 @@ public partial class App : Application
             services.AddSingleton(applicationPaths);
             services.AddSingleton(provider => new StartupHealthJournal(
                 provider.GetRequiredService<ApplicationPaths>().StartupHealthPath,
-                provider.GetRequiredService<TimeProvider>()));
+                provider.GetRequiredService<TimeProvider>(), processStartedAt, monotonicOrigin,
+                instanceReadyAt, instanceReadyTimestamp));
             services.AddSingleton(provider => new UserSettingsService(
                 provider.GetRequiredService<ApplicationPaths>().SettingsPath));
             services.AddSingleton<ModulePackageImporter>();
@@ -186,6 +205,8 @@ public partial class App : Application
             _serviceProvider = services.BuildServiceProvider();
             var startupJournal = _serviceProvider.GetRequiredService<StartupHealthJournal>();
             startupJournal.SetSource(launchOptions.StartupSource);
+            if (launchOptions.StartupTestId is { } startupTestId)
+                startupJournal.SetStartupTest(startupTestId, StartupRegistrationTestStatus.Started);
             startupJournal.Mark(StartupPhase.InstanceReady);
 
             var localizationDirectory = Path.Combine(
@@ -212,6 +233,14 @@ public partial class App : Application
             };
             notificationArea.FloatingBadgeRequested = mainWindow.SwitchToFloatingBadgeFromNotificationAreaAsync;
             notificationArea.ExitRequested = () => exitCoordinator.RequestExitAsync(ApplicationExitReason.NotificationAreaMenu);
+            notificationArea.AvailabilityChanged += (_, change) =>
+            {
+                if (change.RecoveredAfterExplorerRestart) startupJournal.RecordNotificationRecovery();
+                else if (!change.Available)
+                    startupJournal.Mark(StartupPhase.NotificationAreaReady, StartupPhaseOutcome.Degraded,
+                        change.FailureDiagnostic ?? "startup.notificationRecoveryFailed");
+                viewModel.ApplyNotificationAvailability(change);
+            };
             var notificationReady = notificationArea.Initialize();
             startupJournal.Mark(StartupPhase.NotificationAreaReady,
                 notificationReady ? StartupPhaseOutcome.Succeeded : StartupPhaseOutcome.Degraded,
@@ -244,7 +273,7 @@ public partial class App : Application
             if (_singleInstance is not null)
             {
                 if (_activationHandler is not null)
-                    _singleInstance.MessageReceived -= _activationHandler;
+                    _singleInstance.RequestReceived -= _activationHandler;
                 _singleInstance.DisposeAsync().AsTask().GetAwaiter().GetResult();
                 _singleInstance = null;
             }
@@ -263,6 +292,7 @@ public partial class App : Application
         catch (Exception exception) { System.Diagnostics.Debug.WriteLine($"Final runtime cleanup failed: {exception.GetType().Name}"); }
         try
         {
+            _serviceProvider?.GetService<StartupHealthJournal>()?.Mark(StartupPhase.Exiting);
             _serviceProvider?.GetService<StartupHealthJournal>()?.FlushAsync()
                 .WaitAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
             _serviceProvider?.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -284,7 +314,7 @@ public partial class App : Application
     {
         if (_singleInstance is null) return;
         if (_activationHandler is not null)
-            _singleInstance.MessageReceived -= _activationHandler;
+            _singleInstance.RequestReceived -= _activationHandler;
         await _singleInstance.DisposeAsync();
         _singleInstance = null;
     }

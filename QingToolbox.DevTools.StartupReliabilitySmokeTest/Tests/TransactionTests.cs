@@ -22,9 +22,24 @@ internal static class TransactionTests
             run.FailDelete = false; task.Unavailable = true;
             var fallbackSettingsPath = Path.Combine(root, "fallback.json"); using var fallbackSettings = new UserSettingsService(fallbackSettingsPath);
             var fallback = new WindowsStartupRegistrationService(fallbackSettings, new(task, ApplicationExecutionEnvironment.Production()), new(run, ApplicationExecutionEnvironment.Production()), ApplicationExecutionEnvironment.Production());
-            await fallback.SetEnabledAsync(true);
-            AssertEx.True((await fallback.GetSnapshotAsync()).OverallHealth == StartupRegistrationHealth.RegistryFallbackWithTaskStateUnknown,
-                "Registry fallback concealed unknown Scheduler state.");
+            await AssertEx.ThrowsAsync(() => fallback.SetEnabledAsync(true),
+                "Unknown Scheduler state allowed an unsafe Registry fallback.");
+            AssertEx.True(run.Value == "legacy-command" && !(await fallbackSettings.ReadAsync()).LaunchAtLogin,
+                "Unknown Scheduler state changed Registry or settings.");
+
+            var partialSettingsPath = Path.Combine(root, "partial.json");
+            using var partialSettings = new UserSettingsService(partialSettingsPath);
+            var partialTask = new FakeTaskStore { FailAfterRegister = true };
+            var partialRun = new FakeRunStore();
+            var partial = new WindowsStartupRegistrationService(partialSettings,
+                new(partialTask, ApplicationExecutionEnvironment.Production()),
+                new(partialRun, ApplicationExecutionEnvironment.Production()),
+                ApplicationExecutionEnvironment.Production());
+            await partial.SetEnabledAsync(true);
+            AssertEx.True(partialTask.Definition is null && partialRun.Value is not null,
+                "Registry fallback began before Scheduler partial success was exactly rolled back.");
+            AssertEx.True((await partial.GetSnapshotAsync()).OverallHealth == StartupRegistrationHealth.HealthyRegistryFallback,
+                "Safe Registry fallback was not reported after exact Scheduler rollback.");
         }
         finally { Directory.Delete(root, true); }
     }

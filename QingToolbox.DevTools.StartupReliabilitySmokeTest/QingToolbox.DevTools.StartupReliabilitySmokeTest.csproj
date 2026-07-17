@@ -7,5 +7,7 @@
     <Compile Include="..\QingToolbox.Shell\Startup\ApplicationLaunchOptions.cs" Link="Startup\ApplicationLaunchOptions.cs" />
     <Compile Include="..\QingToolbox.Shell\Startup\StartupPreferenceSnapshot.cs" Link="Startup\StartupPreferenceSnapshot.cs" />
     <Compile Include="..\QingToolbox.Shell\Startup\StartupHealthJournal.cs" Link="Startup\StartupHealthJournal.cs" />
+    <Compile Include="..\QingToolbox.Shell\Startup\StartupPipelineCoordinator.cs" Link="Startup\StartupPipelineCoordinator.cs" />
+    <Compile Include="..\QingToolbox.Shell\Services\StartupTestCoordinator.cs" Link="Services\StartupTestCoordinator.cs" />
   </ItemGroup>
 </Project>

@@ -31,6 +31,7 @@ public sealed class SingleInstanceCoordinator : IAsyncDisposable
 
     public bool IsPrimary { get; }
     public event Func<InstanceActivationMessage, Task>? MessageReceived;
+    public event Func<InstanceActivationRequest, Task>? RequestReceived;
 
     public static SingleInstanceCoordinator Create()
     {
@@ -54,10 +55,16 @@ public sealed class SingleInstanceCoordinator : IAsyncDisposable
     public void StartServer()
     {
         if (!IsPrimary || _serverTask is not null) return;
-        _serverTask = RunServerAsync(_stopping.Token);
+        // Construct the first server synchronously so ACL/name/handle failures are
+        // reported before startup proceeds to settings and service initialization.
+        var initialServer = CreateServer();
+        _serverTask = RunServerAsync(initialServer, _stopping.Token);
     }
 
     public async Task<bool> SendAsync(InstanceActivationMessage message, CancellationToken cancellationToken = default)
+        => await SendAsync(new InstanceActivationRequest(message), cancellationToken);
+
+    public async Task<bool> SendAsync(InstanceActivationRequest request, CancellationToken cancellationToken = default)
     {
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         budget.CancelAfter(TimeSpan.FromSeconds(5));
@@ -72,7 +79,8 @@ public sealed class SingleInstanceCoordinator : IAsyncDisposable
                 using var reader = new StreamReader(client, Encoding.UTF8, false, 128, leaveOpen: true);
                 await using var writer = new StreamWriter(client, new UTF8Encoding(false), 128, leaveOpen: true)
                     { AutoFlush = true, NewLine = "\n" };
-                await writer.WriteLineAsync(message.ToString().AsMemory(), budget.Token);
+                var payload = InstanceActivationProtocol.Serialize(request);
+                await writer.WriteLineAsync(payload.AsMemory(), budget.Token);
                 var acknowledgment = await reader.ReadLineAsync(budget.Token);
                 return string.Equals(acknowledgment, SuccessAcknowledgment, StringComparison.Ordinal);
             }
@@ -86,14 +94,18 @@ public sealed class SingleInstanceCoordinator : IAsyncDisposable
         return false;
     }
 
-    private async Task RunServerAsync(CancellationToken cancellationToken)
+    private NamedPipeServerStream CreateServer() => new(_pipeName, PipeDirection.InOut, 1,
+        PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+
+    private async Task RunServerAsync(NamedPipeServerStream initialServer, CancellationToken cancellationToken)
     {
+        NamedPipeServerStream? nextServer = initialServer;
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await using var server = new NamedPipeServerStream(_pipeName, PipeDirection.InOut, 1,
-                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+                await using var server = nextServer ?? CreateServer();
+                nextServer = null;
                 await server.WaitForConnectionAsync(cancellationToken);
                 using var reader = new StreamReader(server, Encoding.UTF8, false, 128, leaveOpen: true);
                 await using var writer = new StreamWriter(server, new UTF8Encoding(false), 128, leaveOpen: true)
@@ -114,18 +126,19 @@ public sealed class SingleInstanceCoordinator : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         var line = await ReadBoundedMessageAsync(reader, cancellationToken);
-        if (!InstanceActivationProtocol.TryParse(line, out var message))
+        if (!InstanceActivationProtocol.TryParseRequest(line, out var request))
         {
             await TryWriteAcknowledgmentAsync(writer, ErrorAcknowledgment, cancellationToken);
             return;
         }
 
+        var requestHandler = RequestReceived;
         var handler = MessageReceived;
-        if (handler is null)
+        if (handler is null && requestHandler is null)
         {
             await TryWriteAcknowledgmentAsync(
                 writer,
-                message == InstanceActivationMessage.StartupProbe
+                request.Message == InstanceActivationMessage.StartupProbe
                     ? SuccessAcknowledgment
                     : ErrorAcknowledgment,
                 cancellationToken);
@@ -134,8 +147,12 @@ public sealed class SingleInstanceCoordinator : IAsyncDisposable
 
         // Queue the accepted dispatch before acknowledging it. UI work and handler
         // failures are intentionally decoupled from the pipe connection lifetime.
-        foreach (Func<InstanceActivationMessage, Task> subscriber in handler.GetInvocationList())
-            ObserveDispatchTask(Task.Run(async () => await subscriber(message)));
+        if (requestHandler is not null)
+            foreach (Func<InstanceActivationRequest, Task> subscriber in requestHandler.GetInvocationList())
+                ObserveDispatchTask(Task.Run(async () => await subscriber(request)));
+        if (handler is not null)
+            foreach (Func<InstanceActivationMessage, Task> subscriber in handler.GetInvocationList())
+                ObserveDispatchTask(Task.Run(async () => await subscriber(request.Message)));
         await TryWriteAcknowledgmentAsync(writer, SuccessAcknowledgment, cancellationToken);
     }
 

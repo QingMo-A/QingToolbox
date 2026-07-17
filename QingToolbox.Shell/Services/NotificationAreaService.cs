@@ -7,10 +7,16 @@ using Forms = System.Windows.Forms;
 
 namespace QingToolbox.Shell.Services;
 
+public sealed record NotificationAvailabilityChangedEventArgs(
+    bool Available,
+    bool RecoveredAfterExplorerRestart,
+    string? FailureDiagnostic);
+
 public interface INotificationAreaIcon : IDisposable
 {
     bool IsAvailable { get; }
     bool IsExiting { get; }
+    event EventHandler<NotificationAvailabilityChangedEventArgs>? AvailabilityChanged;
     Func<Task>? OpenRequested { get; set; }
     Func<Task>? OpenSettingsRequested { get; set; }
     Func<Task>? FloatingBadgeRequested { get; set; }
@@ -40,6 +46,7 @@ public sealed class NotificationAreaService : INotificationAreaIcon, IDisposable
     public Func<Task>? ExitRequested { get; set; }
     public bool IsAvailable => !_disposed && _notifyIcon is { Visible: true };
     public bool IsExiting { get; private set; }
+    public event EventHandler<NotificationAvailabilityChangedEventArgs>? AvailabilityChanged;
 
     public bool Initialize()
     {
@@ -189,7 +196,9 @@ public sealed class NotificationAreaService : INotificationAreaIcon, IDisposable
             {
                 if (_disposed || IsExiting) return;
                 DisposeResources();
-                Initialize();
+                var recovered = Initialize();
+                AvailabilityChanged?.Invoke(this, new(recovered, recovered,
+                    recovered ? null : "startup.notificationRecoveryFailed"));
             }).Task, "Explorer recovery", resetDispatch: false);
         }
         catch (Exception exception)

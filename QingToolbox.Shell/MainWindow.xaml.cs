@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Animation;
@@ -24,6 +25,7 @@ public partial class MainWindow : Window
     private readonly ModuleWindowManager _moduleWindowManager;
     private readonly StartupPreferenceSnapshot _startupPreferences;
     private readonly StartupHealthJournal _startupJournal;
+    private readonly StartupPipelineCoordinator _startupPipeline;
     private Task? _backgroundStartupTask;
     private int _closeRequestPending;
     private WindowState _notificationAreaRestoreState = WindowState.Normal;
@@ -38,7 +40,8 @@ public partial class MainWindow : Window
         ApplicationExitCoordinator exitCoordinator,
         ModuleWindowManager moduleWindowManager,
         StartupPreferenceSnapshot startupPreferences,
-        StartupHealthJournal startupJournal)
+        StartupHealthJournal startupJournal,
+        StartupPipelineCoordinator startupPipeline)
     {
         InitializeComponent();
 
@@ -52,6 +55,7 @@ public partial class MainWindow : Window
         _moduleWindowManager = moduleWindowManager;
         _startupPreferences = startupPreferences;
         _startupJournal = startupJournal;
+        _startupPipeline = startupPipeline;
         _startupSession.Attach(this, floatingBadgeManager);
         _floatingBadgeManager.Attach(this);
         DataContext = viewModel;
@@ -112,28 +116,67 @@ public partial class MainWindow : Window
         _viewModel.ApplyStartupPreferences(_startupPreferences);
         await _startupSession.PresentAsync(_startupPreferences.PresentationMode);
         _startupJournal.Mark(StartupPhase.PresentationReady);
+        if (_startupSession.StartupTestId is { } testId)
+            _startupJournal.SetStartupTest(testId, StartupRegistrationTestStatus.PresentationReady);
+        foreach (var pendingTestId in _startupSession.DrainStartupProbes())
+            _startupJournal.RecordStartupTestResult(pendingTestId, StartupRegistrationTestStatus.AlreadyRunning);
     }
 
     private async Task InitializeApplicationInBackgroundAsync()
     {
         try
         {
-        var settings = await _settingsService.ReadAsync(_startupSession.LifetimeToken);
-        await _viewModel.ReconcileStartupRegistrationAsync(settings, _startupSession.LifetimeToken);
-        _startupJournal.Mark(StartupPhase.RegistrationHealthReady);
-        _startupSession.BeginDiscovery();
-        await _viewModel.InitializeDiscoveryAsync(_startupSession.LifetimeToken);
-        _startupJournal.Mark(StartupPhase.ModuleDiscoveryComplete);
-        _startupSession.BeginModuleRestore();
-        await _viewModel.RestoreAuthorizedStartupModulesAsync(_startupSession.LifetimeToken);
-        _startupJournal.Mark(StartupPhase.AuthorizedModulesRestored);
-        if (_startupSession.State != StartupSessionState.Exiting) { _startupSession.Complete(); _startupJournal.Mark(StartupPhase.Ready); }
+            var token = _startupSession.LifetimeToken;
+            UserSettings? settings = null;
+            try { settings = await _settingsService.ReadAsync(token); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            { System.Diagnostics.Debug.WriteLine($"Startup settings read degraded: {exception.GetType().Name}"); }
+
+            var startupSettings = settings;
+            var results = await _startupPipeline.RunAsync(
+            [
+                new("Registration", async ct =>
+                {
+                    if (startupSettings is null) throw new IOException("Startup settings unavailable.");
+                    await _viewModel.ReconcileStartupRegistrationAsync(startupSettings, ct);
+                }),
+                new("Discovery", async ct =>
+                {
+                    _startupSession.BeginDiscovery();
+                    await _viewModel.InitializeDiscoveryAsync(ct);
+                }),
+                new("Restore", async ct =>
+                {
+                    _startupSession.BeginModuleRestore();
+                    await _viewModel.RestoreAuthorizedStartupModulesAsync(ct);
+                })
+            ], token);
+            ApplyPipelineResult(results[0], StartupPhase.RegistrationHealthReady, "startup.registrationHealthDegraded");
+            ApplyPipelineResult(results[1], StartupPhase.ModuleDiscoveryComplete, "startup.discoveryDegraded");
+            ApplyPipelineResult(results[2], StartupPhase.AuthorizedModulesRestored, "startup.restoreDegraded");
+
+            if (_startupSession.State != StartupSessionState.Exiting)
+            {
+                _startupSession.Complete();
+                _startupJournal.Mark(StartupPhase.Ready);
+            }
         }
         catch(OperationCanceledException) when(_startupSession.State==StartupSessionState.Exiting){}
         catch(Exception exception)
         {
             System.Diagnostics.Debug.WriteLine($"Background startup failed: {exception.GetType().Name}");
             _viewModel.StatusMessage = _viewModel.Strings["status.startupFailed"];
+        }
+    }
+
+    private void ApplyPipelineResult(StartupPipelineStageResult result, StartupPhase phase, string diagnostic)
+    {
+        if (result.Outcome == StartupPhaseOutcome.Succeeded) _startupJournal.Mark(phase);
+        else
+        {
+            System.Diagnostics.Debug.WriteLine($"Startup stage {phase} degraded: {result.Error?.GetType().Name}");
+            _startupJournal.Mark(phase, StartupPhaseOutcome.Degraded, diagnostic);
+            _viewModel.StatusMessage = _viewModel.Strings[diagnostic];
         }
     }
 

@@ -16,7 +16,7 @@ public enum StartupRegistrationHealth
     Healthy, HealthyRegistryFallback, Disabled, DisabledExternally, Missing,
     ExecutableMoved, DefinitionChanged, ConfigurationDrift, SchedulerUnavailable,
     RegistryUnavailable, RegistryFallbackWithTaskStateUnknown, AccessDenied,
-    MultipleRegistrations, PartialFailure, UnknownFailure
+    MultipleRegistrations, MultipleTaskSchedulerRegistrations, PartialFailure, UnknownFailure
 }
 
 public sealed record StartupRegistrationState(
@@ -70,6 +70,21 @@ public sealed record OwnedStartupTaskIdentity(
     }
 
     public IEnumerable<string> OwnedPaths => [PreferredTaskPath, FallbackTaskPath];
+    public string PreferredTestPath(Guid testId) => $"{PreferredFolderPath}\\Test-{testId:D}";
+    public string FallbackTestPath(Guid testId) => $"\\QingToolbox-Test-{testId:D}";
+
+    public bool IsOwnedTestPath(string taskPath)
+    {
+        try
+        {
+            var (folder, name) = SplitTaskPath(taskPath);
+            var prefix = folder.Equals(PreferredFolderPath, StringComparison.OrdinalIgnoreCase)
+                ? "Test-" : folder == "\\" ? "QingToolbox-Test-" : string.Empty;
+            return prefix.Length > 0 && name.StartsWith(prefix, StringComparison.Ordinal) &&
+                Guid.TryParseExact(name[prefix.Length..], "D", out _);
+        }
+        catch (ArgumentException) { return false; }
+    }
 
     public static (string Folder, string Name) SplitTaskPath(string taskPath)
     {
@@ -95,6 +110,11 @@ public interface IStartupRegistrationBackend
     Task DisableAsync(CancellationToken token = default);
     Task<StartupRegistrationState> RepairAsync(CancellationToken token = default);
     Task<StartupRegistrationState> RunTestAsync(CancellationToken token = default);
+}
+
+public interface IStartupTestCoordinator
+{
+    Task<StartupRegistrationState> RunAsync(CancellationToken token = default);
 }
 
 public interface IStartupRegistrationStore { string? Read(); void Write(string command); void Delete(); }
@@ -174,12 +194,28 @@ public sealed record ScheduledStartupDefinition(
     string TaskName = "", int TriggerCount = 1, int ActionCount = 1, int ActionType = 0,
     bool TriggerEnabled = true, string TriggerUserId = "", bool TaskSettingsEnabled = true);
 
+public enum OwnedTaskSchedulerState { Available, Unavailable, PartialFailure }
+
+public sealed record OwnedStartupTaskSnapshot(
+    ScheduledStartupDefinition? PreferredDefinition,
+    ScheduledStartupDefinition? FallbackDefinition,
+    OwnedTaskSchedulerState SchedulerState,
+    IReadOnlyList<string>? FailedPaths = null)
+{
+    public bool HasBoth => PreferredDefinition is not null && FallbackDefinition is not null;
+    public bool HasAny => PreferredDefinition is not null || FallbackDefinition is not null;
+    public IReadOnlyList<string> ReadFailures => FailedPaths ?? Array.Empty<string>();
+}
+
 public interface ITaskSchedulerStore
 {
-    ScheduledStartupDefinition? Read();
+    OwnedStartupTaskSnapshot CaptureOwned();
     void Register(ScheduledStartupDefinition definition);
+    void RegisterAtPath(string taskPath, ScheduledStartupDefinition definition);
     void Delete();
-    void Run();
+    void DeleteAtPath(string taskPath);
+    void RunAtPath(string taskPath);
+    void DeleteOwnedStartupTests();
 }
 
 public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
@@ -188,21 +224,37 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
     public WindowsTaskSchedulerStore(OwnedStartupTaskIdentity identity) => Identity = identity;
     public OwnedStartupTaskIdentity Identity { get; }
 
-    public ScheduledStartupDefinition? Read()
+    public OwnedStartupTaskSnapshot CaptureOwned()
     {
         object? service = null;
         try
         {
             service = Connect();
+            ScheduledStartupDefinition? preferred = null, fallback = null;
+            var failures = new List<string>();
             foreach (var path in Identity.OwnedPaths)
             {
-                var task = TryGet(service, path);
-                if (task is null) continue;
-                try { return ReadDefinition(task); }
+                object? task = null;
+                try
+                {
+                    task = TryGet(service, path);
+                    if (task is null) continue;
+                    var definition = ReadDefinition(task);
+                    if (string.Equals(path, Identity.PreferredTaskPath, StringComparison.OrdinalIgnoreCase))
+                        preferred = definition;
+                    else
+                        fallback = definition;
+                }
+                catch (Exception exception) when (exception is COMException or IOException or UnauthorizedAccessException)
+                { failures.Add(path); }
                 finally { Release(task); }
             }
-            return null;
+            return new(preferred, fallback,
+                failures.Count == 0 ? OwnedTaskSchedulerState.Available : OwnedTaskSchedulerState.PartialFailure,
+                failures);
         }
+        catch (Exception exception) when (exception is COMException or IOException or UnauthorizedAccessException)
+        { return new(null, null, OwnedTaskSchedulerState.Unavailable, Identity.OwnedPaths.ToArray()); }
         finally { Release(service); }
     }
 
@@ -238,6 +290,51 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
             Set(settings, "ExecutionTimeLimit", "PT0S"); Set(settings, "RestartCount", 3); Set(settings, "RestartInterval", "PT1M");
             var taskName = useFallback ? Identity.FallbackTaskName : Identity.PreferredTaskName;
             registeredTask = Invoke(folder, "RegisterTaskDefinition", taskName, definition, 6, null!, null!, 3, null!);
+            Set(registeredTask, "Enabled", value.Enabled);
+        }
+        finally
+        {
+            Release(registeredTask); Release(settings); Release(action); Release(actions); Release(trigger); Release(triggers);
+            Release(principal); Release(registrationInfo); Release(definition); Release(folder); Release(root); Release(service);
+        }
+    }
+
+    public void RegisterAtPath(string taskPath, ScheduledStartupDefinition value)
+    {
+        if (!Identity.OwnedPaths.Contains(taskPath, StringComparer.OrdinalIgnoreCase) && !Identity.IsOwnedTestPath(taskPath))
+            throw new ArgumentException("Only exact owned startup task paths may be registered.", nameof(taskPath));
+        RegisterExact(taskPath, value);
+    }
+
+    private static void RegisterExact(string taskPath, ScheduledStartupDefinition value)
+    {
+        object? service = null; object? root = null; object? folder = null; object? definition = null;
+        object? registrationInfo = null; object? principal = null; object? triggers = null; object? trigger = null;
+        object? actions = null; object? action = null; object? settings = null; object? registeredTask = null;
+        try
+        {
+            service = Connect();
+            var (folderPath, taskName) = OwnedStartupTaskIdentity.SplitTaskPath(taskPath);
+            root = Invoke(service, "GetFolder", "\\");
+            if (folderPath == "\\") { folder = root; root = null; }
+            else
+            {
+                try { folder = Invoke(service, "GetFolder", folderPath); }
+                catch (COMException exception) when (IsMissing(exception))
+                { folder = Invoke(root, "CreateFolder", folderPath.TrimStart('\\')); }
+            }
+            definition = Invoke(service, "NewTask", 0);
+            registrationInfo = Get(definition, "RegistrationInfo"); Set(registrationInfo, "Description", "Starts QingToolbox for the current user at sign-in.");
+            principal = Get(definition, "Principal"); Set(principal, "UserId", value.UserId); Set(principal, "LogonType", 3); Set(principal, "RunLevel", 0);
+            triggers = Get(definition, "Triggers");
+            if (value.LogonTrigger) { trigger = Invoke(triggers, "Create", 9); Set(trigger, "UserId", value.TriggerUserId); Set(trigger, "Enabled", value.TriggerEnabled); }
+            actions = Get(definition, "Actions"); action = Invoke(actions, "Create", 0); Set(action, "Path", value.ExecutablePath); Set(action, "Arguments", value.Arguments); Set(action, "WorkingDirectory", value.WorkingDirectory);
+            settings = Get(definition, "Settings"); Set(settings, "Enabled", value.TaskSettingsEnabled); Set(settings, "MultipleInstances", 2);
+            Set(settings, "DisallowStartIfOnBatteries", !value.AllowOnBatteries); Set(settings, "StopIfGoingOnBatteries", !value.AllowOnBatteries);
+            Set(settings, "RunOnlyIfIdle", value.RunOnlyIfIdle); Set(settings, "RunOnlyIfNetworkAvailable", value.RunOnlyIfNetworkAvailable);
+            Set(settings, "WakeToRun", value.WakeToRun); Set(settings, "AllowDemandStart", value.AllowStartOnDemand);
+            Set(settings, "ExecutionTimeLimit", value.ExecutionTimeLimit); Set(settings, "RestartCount", value.RestartCount); Set(settings, "RestartInterval", value.RestartInterval);
+            registeredTask = Invoke(folder, "RegisterTaskDefinition", taskName, definition, 6, null!, null!, 3, null!);
         }
         finally
         {
@@ -260,26 +357,86 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
                 catch (COMException exception) when (IsMissing(exception)) { }
                 finally { Release(folder); }
             }
+            TryDeletePreferredFolder(service);
         }
         finally { Release(service); }
     }
 
-    public void Run()
+    public void DeleteAtPath(string taskPath)
+    {
+        if (!Identity.OwnedPaths.Contains(taskPath, StringComparer.OrdinalIgnoreCase) && !Identity.IsOwnedTestPath(taskPath))
+            throw new ArgumentException("Only exact owned startup task paths may be deleted.", nameof(taskPath));
+        object? service = null; object? folder = null;
+        try
+        {
+            service = Connect();
+            var (folderPath, name) = OwnedStartupTaskIdentity.SplitTaskPath(taskPath);
+            try { folder = Invoke(service, "GetFolder", folderPath); _ = Invoke(folder, "DeleteTask", name, 0); }
+            catch (COMException exception) when (IsMissing(exception)) { }
+        }
+        finally { Release(folder); Release(service); }
+    }
+
+    public void RunAtPath(string taskPath)
     {
         object? service = null; object? task = null; object? running = null;
         try
         {
             service = Connect();
-            foreach (var path in Identity.OwnedPaths)
-            {
-                task = TryGet(service, path);
-                if (task is null) continue;
-                running = Invoke(task, "Run", null!);
-                return;
-            }
-            throw new FileNotFoundException("Owned startup task is missing.");
+            task = TryGet(service, taskPath) ?? throw new FileNotFoundException("Owned startup task is missing.");
+            running = Invoke(task, "Run", null!);
         }
         finally { Release(running); Release(task); Release(service); }
+    }
+
+    public void DeleteOwnedStartupTests()
+    {
+        object? service = null;
+        try
+        {
+            service = Connect();
+            DeleteTestsInFolder(service, Identity.PreferredFolderPath);
+            DeleteTestsInFolder(service, "\\");
+            TryDeletePreferredFolder(service);
+        }
+        finally { Release(service); }
+    }
+
+    private void TryDeletePreferredFolder(object service)
+    {
+        object? root = null;
+        try
+        {
+            root = Invoke(service, "GetFolder", "\\");
+            _ = Invoke(root, "DeleteFolder", Identity.PreferredFolderPath.TrimStart('\\'), 0);
+        }
+        catch (COMException exception) when (IsMissing(exception) || (uint)exception.HResult == 0x80070091u) { }
+        finally { Release(root); }
+    }
+
+    private void DeleteTestsInFolder(object service, string folderPath)
+    {
+        object? folder = null; object? tasks = null;
+        try
+        {
+            try { folder = Invoke(service, "GetFolder", folderPath); }
+            catch (COMException exception) when (IsMissing(exception)) { return; }
+            tasks = Invoke(folder, "GetTasks", 1);
+            var paths = new List<string>();
+            for (var index = 1; index <= ToInt(Get(tasks, "Count")); index++)
+            {
+                object? task = null;
+                try
+                {
+                    task = Invoke(tasks, "Item", index);
+                    var path = Text(Get(task, "Path"));
+                    if (Identity.IsOwnedTestPath(path)) paths.Add(path);
+                }
+                finally { Release(task); }
+            }
+            foreach (var path in paths) DeleteAtPath(path);
+        }
+        finally { Release(tasks); Release(folder); }
     }
 
     private static ScheduledStartupDefinition ReadDefinition(object task)
@@ -359,7 +516,15 @@ public sealed class WindowsTaskSchedulerStartupBackend(
             return State(StartupRegistrationHealth.SchedulerUnavailable, "startup.environmentDisabled");
         try
         {
-            var actual = store.Read();
+            var owned = store.CaptureOwned();
+            if (owned.SchedulerState == OwnedTaskSchedulerState.Unavailable)
+                return State(StartupRegistrationHealth.SchedulerUnavailable, "startup.schedulerUnavailable");
+            if (owned.SchedulerState == OwnedTaskSchedulerState.PartialFailure)
+                return State(StartupRegistrationHealth.UnknownFailure, "startup.taskUnknown");
+            if (owned.HasBoth)
+                return new(true, Kind, StartupRegistrationHealth.MultipleTaskSchedulerRegistrations,
+                    DiagnosticCode: "startup.multipleTaskSchedulerRegistrations", Presence: StartupRegistrationPresence.Present);
+            var actual = owned.PreferredDefinition ?? owned.FallbackDefinition;
             if (actual is null) return State(StartupRegistrationHealth.Missing, "startup.taskMissing");
             var desired = Desired;
             var ownedPath = Identity.OwnedPaths.Any(path => string.Equals(path, actual.TaskPath, StringComparison.OrdinalIgnoreCase));
@@ -398,22 +563,49 @@ public sealed class WindowsTaskSchedulerStartupBackend(
         if (!info.Exists || (info.Attributes & FileAttributes.ReparsePoint) != 0)
             throw new InvalidOperationException("Executable must exist and cannot be a reparse point.");
         await Task.Run(() => store.Register(Desired), token);
+        var created = store.CaptureOwned();
+        if (created.PreferredDefinition is not null && created.FallbackDefinition is not null)
+            await Task.Run(() => store.DeleteAtPath(Identity.FallbackTaskPath), token);
         return await GetStateAsync(token);
     }
     public Task DisableAsync(CancellationToken token = default) => Task.Run(store.Delete, token);
-    public ScheduledStartupDefinition? Capture() => store.Read();
-    public void Restore(ScheduledStartupDefinition? definition)
+    public OwnedStartupTaskSnapshot Capture() => store.CaptureOwned();
+    public void Restore(OwnedStartupTaskSnapshot snapshot)
     {
-        if (definition is null) store.Delete(); else store.Register(definition);
+        if (snapshot.SchedulerState != OwnedTaskSchedulerState.Available)
+            throw new IOException("An unavailable Scheduler snapshot cannot be restored exactly.");
+        RestorePath(Identity.PreferredTaskPath, snapshot.PreferredDefinition);
+        RestorePath(Identity.FallbackTaskPath, snapshot.FallbackDefinition);
+        var verified = store.CaptureOwned();
+        if (!SnapshotsEquivalent(verified, snapshot))
+            throw new IOException("Owned Task Scheduler snapshot rollback verification failed.");
+    }
+    private void RestorePath(string path, ScheduledStartupDefinition? definition)
+    { if (definition is null) store.DeleteAtPath(path); else store.RegisterAtPath(path, definition); }
+    public static bool SnapshotsEquivalent(OwnedStartupTaskSnapshot left, OwnedStartupTaskSnapshot right) =>
+        left.SchedulerState == OwnedTaskSchedulerState.Available &&
+        right.SchedulerState == OwnedTaskSchedulerState.Available &&
+        DefinitionsEquivalent(left.PreferredDefinition, right.PreferredDefinition) &&
+        DefinitionsEquivalent(left.FallbackDefinition, right.FallbackDefinition);
+    private static bool DefinitionsEquivalent(ScheduledStartupDefinition? left, ScheduledStartupDefinition? right)
+    {
+        if (left is null || right is null) return left is null && right is null;
+        return left with { LastRunTime = null, LastTaskResult = null } ==
+               right with { LastRunTime = null, LastTaskResult = null };
     }
     public Task<StartupRegistrationState> RepairAsync(CancellationToken token = default) => EnableAsync(token);
     public async Task<StartupRegistrationState> RunTestAsync(CancellationToken token = default)
     {
-        var before = store.Read(); await Task.Run(store.Run, token);
+        var before = store.CaptureOwned();
+        var path = before.PreferredDefinition?.TaskPath ?? before.FallbackDefinition?.TaskPath ??
+            throw new FileNotFoundException("Owned startup task is missing.");
+        await Task.Run(() => store.RunAtPath(path), token);
         for (var attempt = 0; attempt < 25; attempt++)
         {
-            await Task.Delay(200, token); var current = store.Read();
-            if (current?.LastRunTime != before?.LastRunTime || current?.LastTaskResult != before?.LastTaskResult)
+            await Task.Delay(200, token); var current = store.CaptureOwned();
+            var beforeTask = before.PreferredDefinition ?? before.FallbackDefinition;
+            var currentTask = current.PreferredDefinition ?? current.FallbackDefinition;
+            if (currentTask?.LastRunTime != beforeTask?.LastRunTime || currentTask?.LastTaskResult != beforeTask?.LastTaskResult)
                 return await GetStateAsync(token);
         }
         return (await GetStateAsync(token)) with { Health = StartupRegistrationHealth.PartialFailure, DiagnosticCode = "startup.testTimedOut" };
@@ -452,7 +644,8 @@ public sealed class WindowsStartupRegistrationService(
     UserSettingsService settingsService,
     WindowsTaskSchedulerStartupBackend scheduler,
     WindowsRunStartupBackend registry,
-    ApplicationExecutionEnvironment environment)
+    ApplicationExecutionEnvironment environment,
+    IStartupTestCoordinator? startupTestCoordinator = null)
 {
     public bool IsAvailable => environment.AllowWindowsStartupRegistration;
 
@@ -505,7 +698,7 @@ public sealed class WindowsStartupRegistrationService(
     {
         if (!IsAvailable) throw new InvalidOperationException("Startup registration is unavailable in this environment.");
         var originalSettings = await settingsService.ReadAsync(token);
-        ScheduledStartupDefinition? originalTask = null;
+        OwnedStartupTaskSnapshot? originalTask = null;
         try { originalTask = scheduler.Capture(); }
         catch (COMException) { }
         var originalRun = registry.Capture();
@@ -521,6 +714,15 @@ public sealed class WindowsStartupRegistrationService(
             try { state = await scheduler.EnableAsync(token); }
             catch (Exception exception) when (exception is COMException or UnauthorizedAccessException or IOException)
             {
+                if (originalTask is null || originalTask.SchedulerState != OwnedTaskSchedulerState.Available)
+                    throw new IOException("Task Scheduler state is unknown; Registry fallback was not created.", exception);
+                var afterFailure = scheduler.Capture();
+                if (!WindowsTaskSchedulerStartupBackend.SnapshotsEquivalent(afterFailure, originalTask))
+                {
+                    scheduler.Restore(originalTask);
+                    if (!WindowsTaskSchedulerStartupBackend.SnapshotsEquivalent(scheduler.Capture(), originalTask))
+                        throw new IOException("Task Scheduler partial success could not be rolled back safely.", exception);
+                }
                 state = await registry.EnableAsync(token);
                 if (state.Health != StartupRegistrationHealth.HealthyRegistryFallback)
                     throw new IOException("Registry fallback verification failed.");
@@ -536,7 +738,8 @@ public sealed class WindowsStartupRegistrationService(
         }
         catch
         {
-            await RestoreAsync(originalTask, originalRun, originalSettings, token);
+            await RestoreAsync(originalTask?.SchedulerState == OwnedTaskSchedulerState.Available ? originalTask : null,
+                originalRun, originalSettings, token);
             throw;
         }
     }
@@ -571,7 +774,9 @@ public sealed class WindowsStartupRegistrationService(
         var snapshot = await GetSnapshotAsync(token);
         return snapshot.OverallHealth == StartupRegistrationHealth.Healthy &&
                snapshot.EffectiveBackend == StartupRegistrationBackendKind.TaskScheduler
-            ? await scheduler.RunTestAsync(token)
+            ? startupTestCoordinator is not null
+                ? await startupTestCoordinator.RunAsync(token)
+                : await scheduler.RunTestAsync(token)
             : new(false, snapshot.EffectiveBackend, StartupRegistrationHealth.PartialFailure,
                 DiagnosticCode: "startup.testRequiresHealthyTask", Presence: StartupRegistrationPresence.Unknown);
     }
@@ -594,12 +799,12 @@ public sealed class WindowsStartupRegistrationService(
             await SetEnabledAsync(true, token);
     }
 
-    private async Task RestoreAsync(ScheduledStartupDefinition? task, string? run, UserSettings settings, CancellationToken token)
+    private async Task RestoreAsync(OwnedStartupTaskSnapshot? task, string? run, UserSettings settings, CancellationToken token)
     {
         Exception? failure = null;
         try
         {
-            await Task.Run(() => scheduler.Restore(task), token);
+            if (task is not null) await Task.Run(() => scheduler.Restore(task), token);
         }
         catch (Exception e) { failure = e; }
         try

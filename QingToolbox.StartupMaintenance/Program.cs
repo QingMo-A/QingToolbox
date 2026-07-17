@@ -7,7 +7,12 @@ if (args.Length != 1 || !args[0].Equals("--remove-owned-startup", StringComparis
 }
 
 var failed = false;
-try { new WindowsTaskSchedulerStore().Delete(); }
+try
+{
+    var scheduler = new WindowsTaskSchedulerStore();
+    scheduler.Delete();
+    scheduler.DeleteOwnedStartupTests();
+}
 catch (Exception exception)
 {
     failed = true;

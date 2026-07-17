@@ -498,9 +498,11 @@ internal static class Program
                 new WindowsTaskSchedulerStartupBackend(new FakeTaskSchedulerStore { Unavailable = true }, ApplicationExecutionEnvironment.Production()),
                 new WindowsRunStartupBackend(fakeStore, ApplicationExecutionEnvironment.Production()),
                 ApplicationExecutionEnvironment.Production());
-            await registration.SetEnabledAsync(true);
-            Require(fakeStore.Value?.EndsWith(" --startup --startup-source RegistryRun", StringComparison.Ordinal) == true,
-                "Enabling startup did not write the owned registration value.");
+            var unsafeFallbackBlocked = false;
+            try { await registration.SetEnabledAsync(true); }
+            catch (IOException) { unsafeFallbackBlocked = true; }
+            Require(unsafeFallbackBlocked && fakeStore.Value is null,
+                "Unknown Task Scheduler state created an unsafe Registry fallback.");
             var partialDisableReported = false;
             try { await registration.SetEnabledAsync(false); }
             catch (IOException) { partialDisableReported = true; }
@@ -625,7 +627,7 @@ internal static class Program
 
         Require(await SendRawPipeMessageAsync(scope, "unsupported\n") == SingleInstanceCoordinator.ErrorAcknowledgment,
             "Invalid pipe input did not return ERROR.");
-        Require(await SendRawPipeMessageAsync(scope, new string('X', 64)) == SingleInstanceCoordinator.ErrorAcknowledgment,
+        Require(await SendRawPipeMessageAsync(scope, new string('X', InstanceActivationProtocol.MaximumMessageLength + 1)) == SingleInstanceCoordinator.ErrorAcknowledgment,
             "Overlong non-terminated pipe input was not bounded and rejected.");
         Require(await SendRawPipeMessageAsync(scope, "Activate\r\n") == SingleInstanceCoordinator.ErrorAcknowledgment,
             "Embedded carriage return was accepted by the pipe protocol.");
@@ -690,18 +692,22 @@ internal static class Program
     {
         public bool Unavailable { get; init; }
         public ScheduledStartupDefinition? Definition { get; private set; }
-        public ScheduledStartupDefinition? Read()
+        public OwnedStartupTaskSnapshot CaptureOwned()
         {
-            if (Unavailable) throw new System.Runtime.InteropServices.COMException("Unavailable");
-            return Definition;
+            if (Unavailable) return new(null, null, OwnedTaskSchedulerState.Unavailable);
+            return new(Definition, null, OwnedTaskSchedulerState.Available);
         }
         public void Register(ScheduledStartupDefinition definition)
         {
             if (Unavailable) throw new System.Runtime.InteropServices.COMException("Unavailable");
             Definition = definition;
         }
+        public void RegisterAtPath(string taskPath, ScheduledStartupDefinition definition) =>
+            Register(definition with { TaskPath = taskPath });
         public void Delete() { if (!Unavailable) Definition = null; }
-        public void Run() { if (Definition is null) throw new FileNotFoundException(); }
+        public void DeleteAtPath(string taskPath) => Delete();
+        public void RunAtPath(string taskPath) { if (Definition is null) throw new FileNotFoundException(); }
+        public void DeleteOwnedStartupTests() { }
     }
 
     private static void RunQmodImportScenario(string repositoryRoot)
@@ -1135,6 +1141,7 @@ internal static class Program
 
     private sealed class FakeNotificationAreaService : INotificationAreaIcon
     {
+        public event EventHandler<NotificationAvailabilityChangedEventArgs>? AvailabilityChanged { add { } remove { } }
         private bool _disposed;
         public bool IsAvailable { get; private set; }
         public bool IsExiting { get; private set; }

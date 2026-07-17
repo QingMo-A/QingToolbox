@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Moved activation IPC ahead of settings and service initialization.
+- Prevented duplicate preferred and fallback login tasks.
+- Added correlated on-demand startup tests based on visible readiness.
+- Isolated module discovery from the WPF dispatcher and auxiliary startup failures.
+
 - Fixed root-folder Task Scheduler fallback discovery and execution.
 - Made startup registration changes transactional across Task Scheduler, Registry Run and settings.
 - Added truthful phase outcomes and durable startup journal flushing.

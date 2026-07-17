@@ -7,6 +7,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Transactions", TransactionTests.RunAsync),
     ("Reconcile", ReconcileTests.RunAsync),
     ("Journal", JournalTests.RunAsync),
+    ("Correlated startup test", StartupTestTests.RunAsync),
     ("Pipeline", PipelineTests.RunAsync),
     ("Notification", NotificationTests.RunAsync),
     ("Installer", InstallerContractTests.RunAsync)

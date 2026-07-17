@@ -12,11 +12,13 @@ public sealed class StartupSessionCoordinator(ApplicationLaunchOptions launchOpt
     private readonly object _stateLock = new();
     private int _manualActivationRequested;
     private int _disposed;
+    private readonly Queue<Guid> _pendingStartupTests = new();
     private MainWindow? _mainWindow;
     private FloatingBadgeManager? _badgeManager;
 
     public StartupSessionState State { get; private set; } = StartupSessionState.Starting;
     public bool ManualActivationRequested => Volatile.Read(ref _manualActivationRequested) != 0;
+    public Guid? StartupTestId => launchOptions.StartupTestId;
     public CancellationToken LifetimeToken => _lifetime.Token;
 
     public void Attach(MainWindow mainWindow, FloatingBadgeManager badgeManager)
@@ -32,6 +34,26 @@ public sealed class StartupSessionCoordinator(ApplicationLaunchOptions launchOpt
             if (State == StartupSessionState.Exiting || _lifetime.IsCancellationRequested) return false;
             Interlocked.Exchange(ref _manualActivationRequested, 1);
             return true;
+        }
+    }
+    public void RecordStartupProbe(Guid? testId)
+    {
+        if (testId is null) return;
+        lock (_stateLock)
+        {
+            if (State == StartupSessionState.Exiting) return;
+            while (_pendingStartupTests.Count >= 16) _pendingStartupTests.Dequeue();
+            _pendingStartupTests.Enqueue(testId.Value);
+        }
+    }
+
+    public IReadOnlyList<Guid> DrainStartupProbes()
+    {
+        lock (_stateLock)
+        {
+            var values = _pendingStartupTests.ToArray();
+            _pendingStartupTests.Clear();
+            return values;
         }
     }
     public StartupPresentationMode GetEffectivePresentation(StartupPresentationMode configuredMode) =>
