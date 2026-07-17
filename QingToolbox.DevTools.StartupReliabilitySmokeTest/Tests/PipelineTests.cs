@@ -29,6 +29,10 @@ internal static class PipelineTests
             "Auxiliary failure stopped or misreported the executable startup pipeline.");
         AssertEx.True(discoveryThread != uiThread, "Discovery work did not leave the captured UI thread.");
 
+        await AssertEx.ThrowsAsync(() => coordinator.RunAsync(
+            [new("ProgrammingError", _ => throw new InvalidOperationException("must propagate"))]),
+            "Unexpected programming error was degraded.");
+
         // Static checks remain supplemental guards for the composition root only.
         var root = FindRepo(); var app = File.ReadAllText(Path.Combine(root, "QingToolbox.Shell", "App.xaml.cs"));
         var window = File.ReadAllText(Path.Combine(root, "QingToolbox.Shell", "MainWindow.xaml.cs"));
@@ -39,6 +43,19 @@ internal static class PipelineTests
         AssertEx.True(xaml.Contains("HasIcon, Converter={StaticResource BooleanToVisibilityConverter}", StringComparison.Ordinal) &&
             xaml.Contains("<WrapPanel", StringComparison.Ordinal) && xaml.Contains("Margin=\"0,0,8,8\"", StringComparison.Ordinal),
             "User module-card icon or responsive action layout regressed.");
+        var theme = File.ReadAllText(Path.Combine(root, "QingToolbox.Shell", "Resources", "ShellTheme.xaml"));
+        var viewModel = File.ReadAllText(Path.Combine(root, "QingToolbox.Shell", "ViewModels", "MainWindowViewModel.cs"));
+        var discovery = File.ReadAllText(Path.Combine(root, "QingToolbox.Shell", "Services", "ModuleDiscoveryCoordinator.cs"));
+        AssertEx.True(xaml.Contains("ModuleDirectoryLinkStyle", StringComparison.Ordinal) &&
+            theme.Contains("x:Key=\"ModuleDirectoryLinkStyle\"", StringComparison.Ordinal) &&
+            viewModel.Contains("OpenModuleDirectory", StringComparison.Ordinal) &&
+            viewModel.Contains("UseShellExecute = true", StringComparison.Ordinal),
+            "Open-module-directory interaction contract regressed.");
+        var initializeDiscovery = viewModel[viewModel.IndexOf("public async Task InitializeDiscoveryAsync", StringComparison.Ordinal)..
+            viewModel.IndexOf("public async Task InitializeStartupSettingsUiAsync", StringComparison.Ordinal)];
+        AssertEx.True(!initializeDiscovery.Contains("startupRegistrationService.GetStateAsync", StringComparison.Ordinal) &&
+            discovery.Contains("fingerprintService.MatchesAsync", StringComparison.Ordinal),
+            "Discovery queried startup registration or moved fingerprint work back to UI application.");
         var launcher = File.ReadAllText(Path.Combine(root, "run-latest.bat"));
         foreach (var argument in new[] { "--environment Development", "--profile Shell", "--repo-root" })
             AssertEx.True(launcher.Contains(argument, StringComparison.OrdinalIgnoreCase),

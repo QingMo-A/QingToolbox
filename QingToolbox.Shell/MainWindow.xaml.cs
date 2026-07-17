@@ -139,6 +139,7 @@ public partial class MainWindow : Window
                 {
                     if (startupSettings is null) throw new IOException("Startup settings unavailable.");
                     await _viewModel.ReconcileStartupRegistrationAsync(startupSettings, ct);
+                    await _viewModel.InitializeStartupSettingsUiAsync(startupSettings, ct);
                 }),
                 new("Discovery", async ct =>
                 {

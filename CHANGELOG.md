@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Serialized startup registration mutations and made rollback cancellation-safe.
+- Preserved exact owned Task Scheduler definitions during failed transactions.
+- Distinguished startup-test failures from timeouts and cleaned partial test tasks.
+- Reported module discovery degradation truthfully and moved authorization hashing off the UI thread.
+
 - Moved activation IPC ahead of settings and service initialization.
 - Prevented duplicate preferred and fallback login tasks.
 - Added correlated on-demand startup tests based on visible readiness.

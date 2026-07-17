@@ -35,6 +35,7 @@ public sealed record StartupHealthRecord
     public DateTimeOffset? ExitingAt { get; init; }
     public Guid? StartupTestId { get; init; }
     public StartupRegistrationTestStatus StartupTestResult { get; init; }
+    public StartupRegistrationTestStatus StartupTestExecutionResult { get; init; }
     public int NotificationRecoveryCount { get; init; }
     public DateTimeOffset? NotificationRecoveredAt { get; init; }
     public StartupPhase? FailurePhase { get; init; }
@@ -98,10 +99,13 @@ public sealed class StartupHealthJournal : IAsyncDisposable
         var now = _timeProvider.GetUtcNow();
         var snapshot = new StartupHealthRecord
         {
+            AttemptId = testId,
             Source = StartupLaunchSource.StartupTest,
             ProcessStartedAt = now,
             StartupTestId = testId,
             StartupTestResult = status,
+            StartupTestExecutionResult = status is StartupRegistrationTestStatus.CleanupFailed
+                ? StartupRegistrationTestStatus.None : status,
             ReadyAt = status is StartupRegistrationTestStatus.PresentationReady or
                 StartupRegistrationTestStatus.AlreadyRunning ? now : null
         };
@@ -194,7 +198,8 @@ public sealed class StartupHealthJournal : IAsyncDisposable
                 var match = (await ReadAsync(budget.Token)).Where(record => record.StartupTestId == testId)
                     .OrderByDescending(record => record.ProcessStartedAt).FirstOrDefault(record =>
                         record.StartupTestResult is StartupRegistrationTestStatus.PresentationReady or
-                            StartupRegistrationTestStatus.AlreadyRunning or StartupRegistrationTestStatus.Failed);
+                            StartupRegistrationTestStatus.AlreadyRunning or StartupRegistrationTestStatus.Failed or
+                            StartupRegistrationTestStatus.TimedOut or StartupRegistrationTestStatus.CleanupFailed);
                 if (match is not null) return match;
                 await Task.Delay(TimeSpan.FromMilliseconds(200), _timeProvider, budget.Token);
             }
@@ -231,8 +236,15 @@ public sealed class StartupHealthJournal : IAsyncDisposable
             await using var journalLock = await AcquireJournalLockAsync(directory);
             foreach (var stale in Directory.EnumerateFiles(directory, $"{Path.GetFileName(_path)}.tmp.*"))
                 try { if (File.GetLastWriteTimeUtc(stale) < _timeProvider.GetUtcNow().UtcDateTime.AddDays(-1)) File.Delete(stale); } catch (IOException) { }
-            var records = (await ReadAsync()).Where(record => record.AttemptId != snapshot.AttemptId)
-                .Append(snapshot).TakeLast(MaximumRecords).ToArray();
+            var existing = (await ReadAsync()).FirstOrDefault(record => record.AttemptId == snapshot.AttemptId);
+            if (existing is not null && snapshot.Source == StartupLaunchSource.StartupTest)
+                snapshot = MergeStartupTest(existing, snapshot);
+            var all = (await ReadAsync()).Where(record => record.AttemptId != snapshot.AttemptId).Append(snapshot).ToArray();
+            var normal = all.Where(record => record.Source != StartupLaunchSource.StartupTest)
+                .OrderBy(record => record.ProcessStartedAt).TakeLast(MaximumRecords - 3);
+            var tests = all.Where(record => record.Source == StartupLaunchSource.StartupTest)
+                .OrderBy(record => record.ProcessStartedAt).TakeLast(3);
+            var records = normal.Concat(tests).OrderBy(record => record.ProcessStartedAt).ToArray();
             await using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
                 4096, FileOptions.Asynchronous | FileOptions.WriteThrough))
             {
@@ -254,6 +266,37 @@ public sealed class StartupHealthJournal : IAsyncDisposable
             try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); } catch (IOException) { }
         }
     }
+
+    private static StartupHealthRecord MergeStartupTest(StartupHealthRecord current, StartupHealthRecord incoming)
+    {
+        var currentExecution = current.StartupTestExecutionResult != StartupRegistrationTestStatus.None
+            ? current.StartupTestExecutionResult
+            : current.StartupTestResult is StartupRegistrationTestStatus.CleanupFailed
+                ? StartupRegistrationTestStatus.None : current.StartupTestResult;
+        var incomingExecution = incoming.StartupTestExecutionResult;
+        var execution = TestStatusRank(incomingExecution) >= TestStatusRank(currentExecution)
+            ? incomingExecution : currentExecution;
+        var cleanupFailed = current.StartupTestResult == StartupRegistrationTestStatus.CleanupFailed ||
+            incoming.StartupTestResult == StartupRegistrationTestStatus.CleanupFailed;
+        return incoming with
+        {
+            AttemptId = current.AttemptId,
+            ProcessStartedAt = current.ProcessStartedAt <= incoming.ProcessStartedAt
+                ? current.ProcessStartedAt : incoming.ProcessStartedAt,
+            StartupTestResult = cleanupFailed ? StartupRegistrationTestStatus.CleanupFailed : execution,
+            StartupTestExecutionResult = execution,
+            ReadyAt = current.ReadyAt ?? incoming.ReadyAt
+        };
+    }
+
+    private static int TestStatusRank(StartupRegistrationTestStatus status) => status switch
+    {
+        StartupRegistrationTestStatus.None => 0,
+        StartupRegistrationTestStatus.Started => 1,
+        StartupRegistrationTestStatus.PresentationReady or StartupRegistrationTestStatus.AlreadyRunning or
+            StartupRegistrationTestStatus.Failed or StartupRegistrationTestStatus.TimedOut => 2,
+        _ => 0
+    };
 
     private async Task<FileStream> AcquireJournalLockAsync(string directory)
     {

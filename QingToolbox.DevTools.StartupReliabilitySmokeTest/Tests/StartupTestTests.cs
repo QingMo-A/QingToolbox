@@ -48,6 +48,26 @@ internal static class StartupTestTests
             var cleanup = await cleanupCoordinator.RunAsync();
             AssertEx.True(cleanup.DiagnosticCode == "startup.testCleanupFailed",
                 "Temporary startup task cleanup failure was concealed.");
+
+            var partialStore = new FakeTaskStore { FailAfterRegister = true };
+            partialStore.OnRun = store.OnRun;
+            var partial = await new StartupTestCoordinator(partialStore, journal,
+                ApplicationExecutionEnvironment.Production(), TimeSpan.FromSeconds(1)).RunAsync();
+            AssertEx.True(partial.DiagnosticCode == "startup.testAlreadyRunning" &&
+                partialStore.RegisterCount == 1 && partialStore.TaskCount == 0,
+                "Preferred partial success created a fallback or left a test task.");
+
+            var failedStore = new FakeTaskStore();
+            failedStore.OnRun = path =>
+            {
+                var name = OwnedStartupTaskIdentity.SplitTaskPath(path).Name;
+                var prefix = name.StartsWith("QingToolbox-Test-", StringComparison.Ordinal) ? "QingToolbox-Test-" : "Test-";
+                journal.RecordStartupTestResult(Guid.ParseExact(name[prefix.Length..], "D"), StartupRegistrationTestStatus.Failed);
+            };
+            var failed = await new StartupTestCoordinator(failedStore, journal,
+                ApplicationExecutionEnvironment.Production(), TimeSpan.FromSeconds(1)).RunAsync();
+            AssertEx.True(failed.DiagnosticCode == "startup.testFailed",
+                "A failed startup test was incorrectly reported as timed out.");
         }
         finally { Directory.Delete(root, true); }
     }

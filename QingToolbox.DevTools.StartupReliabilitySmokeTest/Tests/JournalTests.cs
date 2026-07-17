@@ -41,6 +41,14 @@ internal static class JournalTests
             await Task.WhenAll(concurrent.FlushAsync(), journal.FlushAsync());
             AssertEx.True((await journal.ReadAsync()).Any(item => item.StartupTestId == testId),
                 "Concurrent journal read/persist lost the correlated startup-test record.");
+            journal.RecordStartupTestResult(testId, StartupRegistrationTestStatus.Started);
+            journal.RecordStartupTestResult(testId, StartupRegistrationTestStatus.CleanupFailed);
+            await journal.FlushAsync();
+            var logical = (await journal.ReadAsync()).Where(item => item.StartupTestId == testId).ToArray();
+            AssertEx.True(logical.Length == 1 && logical[0].AttemptId == testId &&
+                logical[0].StartupTestResult == StartupRegistrationTestStatus.CleanupFailed &&
+                logical[0].StartupTestExecutionResult == StartupRegistrationTestStatus.AlreadyRunning,
+                "Startup test upsert regressed its terminal execution result or consumed multiple records.");
         }
         finally { Directory.Delete(root, true); }
     }

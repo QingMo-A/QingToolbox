@@ -446,6 +446,17 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand]
     private async Task RefreshModulesAsync(CancellationToken cancellationToken = default)
     {
+        try { await RefreshModulesCoreAsync(cancellationToken); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ModuleDiscoveryException)
+        {
+            UpdateStatistics();
+            StatusMessage = localization.GetString("status.scanFailed", exception.Message);
+        }
+    }
+
+    private async Task RefreshModulesCoreAsync(CancellationToken cancellationToken = default)
+    {
         if (IsScanning)
         {
             return;
@@ -462,7 +473,8 @@ public sealed partial class MainWindowViewModel(
             StatusMessage = localization.GetString(
                 "status.scanningModules");
 
-            var discoveredModules = await discoveryCoordinator.DiscoverAsync(cancellationToken);
+            var discovery = await discoveryCoordinator.DiscoverAsync(cancellationToken);
+            var discoveredModules = discovery.Modules;
             localizationManager.ClearModuleLocalizations();
             var localizationDiagnosticsByModuleId =
                 new Dictionary<string, IReadOnlyList<string>>(
@@ -482,7 +494,7 @@ public sealed partial class MainWindowViewModel(
             registry.ReplaceAll(discoveredModules);
 
             cancellationToken.ThrowIfCancellationRequested();
-            var settings = await settingsService.ReadAsync(cancellationToken);
+            var settings = discovery.Settings;
             var authorizations = settings.StartupModules.ToDictionary(item => item.ModuleId, StringComparer.Ordinal);
             var refreshedModules = new List<DiscoveredModuleViewModel>();
             foreach (var module in discoveredModules)
@@ -510,23 +522,18 @@ public sealed partial class MainWindowViewModel(
                     _downloadResults.Remove(module.Manifest.Id);
                 moduleViewModel.UpdateRuntimeState(
                     runtimeManager.GetRecord(module.Manifest.Id));
-                if (authorizations.TryGetValue(module.Manifest.Id, out var authorization))
+                if (authorizations.ContainsKey(module.Manifest.Id) &&
+                    discovery.Authorizations.TryGetValue(module.Manifest.Id, out var evaluation))
                 {
-                    try
-                    {
-                        moduleViewModel.IsStartupEnabled = await fingerprintService.MatchesAsync(module, authorization);
-                        moduleViewModel.StartupAuthorizationState = moduleViewModel.IsStartupEnabled
-                            ? StartupAuthorizationState.Enabled
-                            : StartupAuthorizationState.ChangedNeedsConfirmation;
-                        moduleViewModel.StartupAuthorizationMessage = localization.GetString(
-                            moduleViewModel.IsStartupEnabled ? "startup.moduleEnabled" : "startup.moduleChanged");
-                    }
-                    catch (OperationCanceledException) { throw; }
-                    catch
-                    {
-                        moduleViewModel.StartupAuthorizationState = StartupAuthorizationState.Unavailable;
-                        moduleViewModel.StartupAuthorizationMessage = localization.GetString("startup.moduleUnavailable");
-                    }
+                    moduleViewModel.IsStartupEnabled = evaluation.FingerprintMatches;
+                    var unavailable = evaluation.FailureDiagnostic?.StartsWith("startup.moduleUnavailable", StringComparison.Ordinal) == true;
+                    moduleViewModel.StartupAuthorizationState = unavailable
+                        ? StartupAuthorizationState.Unavailable
+                        : moduleViewModel.IsStartupEnabled ? StartupAuthorizationState.Enabled
+                        : StartupAuthorizationState.ChangedNeedsConfirmation;
+                    moduleViewModel.StartupAuthorizationMessage = localization.GetString(unavailable
+                        ? "startup.moduleUnavailable"
+                        : moduleViewModel.IsStartupEnabled ? "startup.moduleEnabled" : "startup.moduleChanged");
                 }
                 refreshedModules.Add(moduleViewModel);
             }
@@ -557,13 +564,6 @@ public sealed partial class MainWindowViewModel(
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
-        }
-        catch (Exception exception)
-        {
-            UpdateStatistics();
-            StatusMessage = localization.GetString(
-                "status.scanFailed",
-                exception.Message);
         }
         finally
         {
@@ -831,8 +831,13 @@ public sealed partial class MainWindowViewModel(
     public async Task InitializeDiscoveryAsync(CancellationToken cancellationToken = default)
     {
         if (_initialized) return;
+        await RefreshModulesCoreAsync(cancellationToken);
         _initialized = true;
-        var settings = await settingsService.ReadAsync(cancellationToken);
+        if (executionEnvironment.IsProduction) _ = RunAutomaticUpdateCheckObservedAsync();
+    }
+
+    public async Task InitializeStartupSettingsUiAsync(UserSettings settings, CancellationToken cancellationToken = default)
+    {
         var registration = await startupRegistrationService.GetStateAsync(cancellationToken);
         LaunchAtLogin = registration.ConfiguredByUser && registration.MatchesCurrentExecutable;
         StartupSettingsMessage = localization.GetString(registration.DiagnosticCode);
@@ -848,8 +853,6 @@ public sealed partial class MainWindowViewModel(
         SelectedMainWindowCloseBehavior = settings.MainWindowCloseBehavior;
         _persistedCloseBehavior = settings.MainWindowCloseBehavior;
         _suppressCloseBehaviorSave = false;
-        await RefreshModulesAsync(cancellationToken);
-        if (executionEnvironment.IsProduction) _ = RunAutomaticUpdateCheckObservedAsync();
     }
 
     [RelayCommand]

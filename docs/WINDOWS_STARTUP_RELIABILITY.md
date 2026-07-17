@@ -50,6 +50,16 @@ The uninstall maintenance tool removes the preferred/fallback logon tasks, stric
 
 ## Environments and troubleshooting
 
+## Preview 2 transaction and degradation boundaries
+
+All startup-registration mutations, repair, mutating reconciliation, pending cleanup, and temporary startup tests share one asynchronous mutation gate. Caller cancellation is accepted before the first system mutation. After the transaction becomes active, cancellation or failure first runs rollback with an independent bounded ten-second budget, then propagates the original cancellation or operation failure. Cancellation after a verified commit does not undo the committed setting.
+
+Task Scheduler rollback snapshots retain the original task path, raw definition XML, enabled state, last-run time, and last result. Path, normalized XML, and enabled state are authoritative for restoration; historical run data is diagnostic only. Preferred and fallback tasks are restored independently to their original paths, including externally disabled definitions and custom actions or triggers.
+
+Startup Test checks both temporary paths before registration. A preferred registration error is re-read to distinguish no mutation from partial success; a matching partial task is reused, while unknown or conflicting state blocks fallback creation. Both paths belonging to the current test ID are cleaned and verified. `Failed` remains distinct from a real timeout, and journal updates for one test ID are merged into one logical record with any cleanup warning layered over its execution result.
+
+Registration UI initialization now belongs only to the Registration stage. Discovery reads a display-settings snapshot, scans manifests, and evaluates authorization fingerprints on a worker thread; Dispatcher application performs no payload hashing. Root enumeration failures raise a controlled discovery error so the startup journal records `Degraded`, while a malformed individual manifest remains an individual failed module. Only declared infrastructure failures (I/O, access, COM, HTTP, and controlled discovery failures) may degrade a post-presentation stage; unexpected programming errors propagate.
+
 Production may register the real task. Development and ModuleTest are isolated and cannot touch Task Scheduler, HKCU Run, production AppData, network update sources, or production modules. The Startup Reliability Smoke Test uses fake stores only.
 
 To investigate “did not start,” open Settings → Startup health, refresh status, copy diagnostics, and open Task Scheduler. Check the current-user QingToolbox task, its enabled state, last run time/result, action path, working directory, and Windows Settings → Apps → Startup. Use **Test startup** for a run-on-demand probe and **Repair startup** only when you intend to restore the registration. Explorer restart, sign-out/login timing, battery behavior, external disable, moved executable paths, and repeated cold-start performance remain manual Windows acceptance tests; no startup telemetry is uploaded.

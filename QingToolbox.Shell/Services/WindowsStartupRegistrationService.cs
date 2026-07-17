@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Principal;
+using System.Xml.Linq;
 using Microsoft.Win32;
 using QingToolbox.Core.Settings;
 using QingToolbox.Shell.Startup;
@@ -196,14 +197,24 @@ public sealed record ScheduledStartupDefinition(
 
 public enum OwnedTaskSchedulerState { Available, Unavailable, PartialFailure }
 
+public sealed record OwnedTaskDefinitionSnapshot(
+    string TaskPath,
+    string DefinitionXml,
+    bool Enabled,
+    DateTimeOffset? LastRunTime,
+    int? LastTaskResult,
+    ScheduledStartupDefinition HealthDefinition);
+
 public sealed record OwnedStartupTaskSnapshot(
-    ScheduledStartupDefinition? PreferredDefinition,
-    ScheduledStartupDefinition? FallbackDefinition,
+    OwnedTaskDefinitionSnapshot? PreferredTask,
+    OwnedTaskDefinitionSnapshot? FallbackTask,
     OwnedTaskSchedulerState SchedulerState,
     IReadOnlyList<string>? FailedPaths = null)
 {
-    public bool HasBoth => PreferredDefinition is not null && FallbackDefinition is not null;
-    public bool HasAny => PreferredDefinition is not null || FallbackDefinition is not null;
+    public ScheduledStartupDefinition? PreferredDefinition => PreferredTask?.HealthDefinition;
+    public ScheduledStartupDefinition? FallbackDefinition => FallbackTask?.HealthDefinition;
+    public bool HasBoth => PreferredTask is not null && FallbackTask is not null;
+    public bool HasAny => PreferredTask is not null || FallbackTask is not null;
     public IReadOnlyList<string> ReadFailures => FailedPaths ?? Array.Empty<string>();
 }
 
@@ -212,6 +223,8 @@ public interface ITaskSchedulerStore
     OwnedStartupTaskSnapshot CaptureOwned();
     void Register(ScheduledStartupDefinition definition);
     void RegisterAtPath(string taskPath, ScheduledStartupDefinition definition);
+    void RestoreAtPath(string taskPath, OwnedTaskDefinitionSnapshot snapshot);
+    OwnedTaskDefinitionSnapshot? CaptureAtPath(string taskPath);
     void Delete();
     void DeleteAtPath(string taskPath);
     void RunAtPath(string taskPath);
@@ -230,7 +243,7 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
         try
         {
             service = Connect();
-            ScheduledStartupDefinition? preferred = null, fallback = null;
+            OwnedTaskDefinitionSnapshot? preferred = null, fallback = null;
             var failures = new List<string>();
             foreach (var path in Identity.OwnedPaths)
             {
@@ -239,7 +252,7 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
                 {
                     task = TryGet(service, path);
                     if (task is null) continue;
-                    var definition = ReadDefinition(task);
+                    var definition = ReadSnapshot(task);
                     if (string.Equals(path, Identity.PreferredTaskPath, StringComparison.OrdinalIgnoreCase))
                         preferred = definition;
                     else
@@ -304,6 +317,45 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
         if (!Identity.OwnedPaths.Contains(taskPath, StringComparer.OrdinalIgnoreCase) && !Identity.IsOwnedTestPath(taskPath))
             throw new ArgumentException("Only exact owned startup task paths may be registered.", nameof(taskPath));
         RegisterExact(taskPath, value);
+    }
+
+    public OwnedTaskDefinitionSnapshot? CaptureAtPath(string taskPath)
+    {
+        if (!Identity.OwnedPaths.Contains(taskPath, StringComparer.OrdinalIgnoreCase) && !Identity.IsOwnedTestPath(taskPath))
+            throw new ArgumentException("Only exact owned task paths may be read.", nameof(taskPath));
+        object? service = null; object? task = null;
+        try
+        {
+            service = Connect();
+            task = TryGet(service, taskPath);
+            return task is null ? null : ReadSnapshot(task);
+        }
+        finally { Release(task); Release(service); }
+    }
+
+    public void RestoreAtPath(string taskPath, OwnedTaskDefinitionSnapshot snapshot)
+    {
+        if (!string.Equals(taskPath, snapshot.TaskPath, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Task snapshot path does not match the requested restore path.");
+        if (!Identity.OwnedPaths.Contains(taskPath, StringComparer.OrdinalIgnoreCase) && !Identity.IsOwnedTestPath(taskPath))
+            throw new ArgumentException("Only exact owned task paths may be restored.", nameof(taskPath));
+        object? service = null; object? root = null; object? folder = null; object? registered = null;
+        try
+        {
+            service = Connect();
+            var (folderPath, taskName) = OwnedStartupTaskIdentity.SplitTaskPath(taskPath);
+            root = Invoke(service, "GetFolder", "\\");
+            if (folderPath == "\\") { folder = root; root = null; }
+            else
+            {
+                try { folder = Invoke(service, "GetFolder", folderPath); }
+                catch (COMException exception) when (IsMissing(exception))
+                { folder = Invoke(root, "CreateFolder", folderPath.TrimStart('\\')); }
+            }
+            registered = Invoke(folder, "RegisterTask", taskName, snapshot.DefinitionXml, 6, null!, null!, 3, null!);
+            Set(registered, "Enabled", snapshot.Enabled);
+        }
+        finally { Release(registered); Release(folder); Release(root); Release(service); }
     }
 
     private static void RegisterExact(string taskPath, ScheduledStartupDefinition value)
@@ -467,6 +519,13 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
         { Release(principal); Release(settings); Release(action); Release(actions); Release(trigger); Release(triggers); Release(definition); }
     }
 
+    private static OwnedTaskDefinitionSnapshot ReadSnapshot(object task)
+    {
+        var health = ReadDefinition(task);
+        return new(health.TaskPath, Text(Get(task, "Xml")), health.Enabled,
+            health.LastRunTime, health.LastTaskResult, health);
+    }
+
     private static object Connect()
     {
         var type = Type.GetTypeFromProgID("Schedule.Service") ?? throw new COMException("Task Scheduler COM is unavailable.");
@@ -574,25 +633,27 @@ public sealed class WindowsTaskSchedulerStartupBackend(
     {
         if (snapshot.SchedulerState != OwnedTaskSchedulerState.Available)
             throw new IOException("An unavailable Scheduler snapshot cannot be restored exactly.");
-        RestorePath(Identity.PreferredTaskPath, snapshot.PreferredDefinition);
-        RestorePath(Identity.FallbackTaskPath, snapshot.FallbackDefinition);
+        RestorePath(Identity.PreferredTaskPath, snapshot.PreferredTask);
+        RestorePath(Identity.FallbackTaskPath, snapshot.FallbackTask);
         var verified = store.CaptureOwned();
         if (!SnapshotsEquivalent(verified, snapshot))
             throw new IOException("Owned Task Scheduler snapshot rollback verification failed.");
     }
-    private void RestorePath(string path, ScheduledStartupDefinition? definition)
-    { if (definition is null) store.DeleteAtPath(path); else store.RegisterAtPath(path, definition); }
+    private void RestorePath(string path, OwnedTaskDefinitionSnapshot? definition)
+    { if (definition is null) store.DeleteAtPath(path); else store.RestoreAtPath(path, definition); }
     public static bool SnapshotsEquivalent(OwnedStartupTaskSnapshot left, OwnedStartupTaskSnapshot right) =>
         left.SchedulerState == OwnedTaskSchedulerState.Available &&
         right.SchedulerState == OwnedTaskSchedulerState.Available &&
-        DefinitionsEquivalent(left.PreferredDefinition, right.PreferredDefinition) &&
-        DefinitionsEquivalent(left.FallbackDefinition, right.FallbackDefinition);
-    private static bool DefinitionsEquivalent(ScheduledStartupDefinition? left, ScheduledStartupDefinition? right)
+        DefinitionsEquivalent(left.PreferredTask, right.PreferredTask) &&
+        DefinitionsEquivalent(left.FallbackTask, right.FallbackTask);
+    private static bool DefinitionsEquivalent(OwnedTaskDefinitionSnapshot? left, OwnedTaskDefinitionSnapshot? right)
     {
         if (left is null || right is null) return left is null && right is null;
-        return left with { LastRunTime = null, LastTaskResult = null } ==
-               right with { LastRunTime = null, LastTaskResult = null };
+        return string.Equals(left.TaskPath, right.TaskPath, StringComparison.OrdinalIgnoreCase) &&
+               left.Enabled == right.Enabled && NormalizeXml(left.DefinitionXml) == NormalizeXml(right.DefinitionXml);
     }
+    private static string NormalizeXml(string xml) =>
+        XDocument.Parse(xml, LoadOptions.None).ToString(SaveOptions.DisableFormatting);
     public Task<StartupRegistrationState> RepairAsync(CancellationToken token = default) => EnableAsync(token);
     public async Task<StartupRegistrationState> RunTestAsync(CancellationToken token = default)
     {
@@ -640,16 +701,29 @@ public sealed record WindowsStartupRegistrationSnapshot(
     bool CleanupPending,
     string DiagnosticCode);
 
+public sealed class StartupRegistrationTransactionException(string message, Exception operationFailure, Exception rollbackFailure)
+    : IOException(message, new AggregateException(operationFailure, rollbackFailure));
+
 public sealed class WindowsStartupRegistrationService(
     UserSettingsService settingsService,
     WindowsTaskSchedulerStartupBackend scheduler,
     WindowsRunStartupBackend registry,
     ApplicationExecutionEnvironment environment,
-    IStartupTestCoordinator? startupTestCoordinator = null)
+    IStartupTestCoordinator? startupTestCoordinator = null,
+    TimeSpan? rollbackBudget = null)
 {
+    private readonly TimeSpan _rollbackBudget = rollbackBudget ?? TimeSpan.FromSeconds(10);
+    private readonly SemaphoreSlim _mutationGate = new(1, 1);
     public bool IsAvailable => environment.AllowWindowsStartupRegistration;
 
     public async Task<WindowsStartupRegistrationSnapshot> GetSnapshotAsync(CancellationToken token = default)
+    {
+        await _mutationGate.WaitAsync(token);
+        try { return await GetSnapshotCoreAsync(token); }
+        finally { _mutationGate.Release(); }
+    }
+
+    private async Task<WindowsStartupRegistrationSnapshot> GetSnapshotCoreAsync(CancellationToken token)
     {
         if (!IsAvailable)
         {
@@ -697,20 +771,33 @@ public sealed class WindowsStartupRegistrationService(
     public async Task SetEnabledAsync(bool enabled, CancellationToken token = default)
     {
         if (!IsAvailable) throw new InvalidOperationException("Startup registration is unavailable in this environment.");
+        await _mutationGate.WaitAsync(token);
+        try { await SetEnabledCoreAsync(enabled, token); }
+        finally { _mutationGate.Release(); }
+    }
+
+    private async Task SetEnabledCoreAsync(bool enabled, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
         var originalSettings = await settingsService.ReadAsync(token);
         OwnedStartupTaskSnapshot? originalTask = null;
         try { originalTask = scheduler.Capture(); }
         catch (COMException) { }
         var originalRun = registry.Capture();
-        if (!enabled)
-        {
-            await DisableTransactionalAsync(originalSettings, token);
-            return;
-        }
-
+        var transactionActive = false;
         try
         {
+            if (!enabled)
+            {
+                token.ThrowIfCancellationRequested();
+                transactionActive = true;
+                await DisableTransactionalCoreAsync(token);
+                return;
+            }
+
             StartupRegistrationState state;
+            token.ThrowIfCancellationRequested();
+            transactionActive = true;
             try { state = await scheduler.EnableAsync(token); }
             catch (Exception exception) when (exception is COMException or UnauthorizedAccessException or IOException)
             {
@@ -719,10 +806,9 @@ public sealed class WindowsStartupRegistrationService(
                 var afterFailure = scheduler.Capture();
                 if (!WindowsTaskSchedulerStartupBackend.SnapshotsEquivalent(afterFailure, originalTask))
                 {
-                    scheduler.Restore(originalTask);
-                    if (!WindowsTaskSchedulerStartupBackend.SnapshotsEquivalent(scheduler.Capture(), originalTask))
-                        throw new IOException("Task Scheduler partial success could not be rolled back safely.", exception);
+                    await RestoreSchedulerSnapshotWithBudgetAsync(originalTask);
                 }
+                token.ThrowIfCancellationRequested();
                 state = await registry.EnableAsync(token);
                 if (state.Health != StartupRegistrationHealth.HealthyRegistryFallback)
                     throw new IOException("Registry fallback verification failed.");
@@ -736,15 +822,28 @@ public sealed class WindowsStartupRegistrationService(
                 throw new IOException("Registry Run migration cleanup could not be verified.");
             await SaveSettingsAsync(true, StartupRegistrationBackendKind.TaskScheduler, false, token);
         }
-        catch
+        catch (Exception operationFailure)
         {
-            await RestoreAsync(originalTask?.SchedulerState == OwnedTaskSchedulerState.Available ? originalTask : null,
-                originalRun, originalSettings, token);
+            if (transactionActive)
+            {
+                try
+                {
+                    await RestoreWithBudgetAsync(
+                        originalTask?.SchedulerState == OwnedTaskSchedulerState.Available ? originalTask : null,
+                        originalRun, originalSettings);
+                }
+                catch (Exception rollbackFailure)
+                {
+                    throw new StartupRegistrationTransactionException(
+                        "Startup registration rollback was incomplete.", operationFailure, rollbackFailure);
+                }
+            }
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(operationFailure).Throw();
             throw;
         }
     }
 
-    private async Task DisableTransactionalAsync(UserSettings originalSettings, CancellationToken token)
+    private async Task DisableTransactionalCoreAsync(CancellationToken token)
     {
         Exception? failure = null;
         try { await scheduler.DisableAsync(token); } catch (Exception e) { failure = e; }
@@ -759,44 +858,75 @@ public sealed class WindowsStartupRegistrationService(
 
     public async Task<StartupRegistrationState> RepairAsync(CancellationToken token = default)
     {
-        var snapshot = await GetSnapshotAsync(token);
+        await _mutationGate.WaitAsync(token);
+        try { return await RepairCoreAsync(token); }
+        finally { _mutationGate.Release(); }
+    }
+
+    private async Task<StartupRegistrationState> RepairCoreAsync(CancellationToken token)
+    {
+        var snapshot = await GetSnapshotCoreAsync(token);
         if (snapshot.CleanupPending)
         {
-            await SetEnabledAsync(false, token);
-            return await GetStateAsync(token);
+            await SetEnabledCoreAsync(false, token);
+            return StateFromSnapshot(await GetSnapshotCoreAsync(token));
         }
-        await SetEnabledAsync(true, token);
-        return await GetStateAsync(token);
+        await SetEnabledCoreAsync(true, token);
+        return StateFromSnapshot(await GetSnapshotCoreAsync(token));
     }
 
     public async Task<StartupRegistrationState> RunTestAsync(CancellationToken token = default)
     {
-        var snapshot = await GetSnapshotAsync(token);
-        return snapshot.OverallHealth == StartupRegistrationHealth.Healthy &&
-               snapshot.EffectiveBackend == StartupRegistrationBackendKind.TaskScheduler
-            ? startupTestCoordinator is not null
-                ? await startupTestCoordinator.RunAsync(token)
-                : await scheduler.RunTestAsync(token)
-            : new(false, snapshot.EffectiveBackend, StartupRegistrationHealth.PartialFailure,
-                DiagnosticCode: "startup.testRequiresHealthyTask", Presence: StartupRegistrationPresence.Unknown);
+        await _mutationGate.WaitAsync(token);
+        try
+        {
+            var snapshot = await GetSnapshotCoreAsync(token);
+            return snapshot.OverallHealth == StartupRegistrationHealth.Healthy &&
+                   snapshot.EffectiveBackend == StartupRegistrationBackendKind.TaskScheduler
+                ? startupTestCoordinator is not null
+                    ? await startupTestCoordinator.RunAsync(token)
+                    : await scheduler.RunTestAsync(token)
+                : new(false, snapshot.EffectiveBackend, StartupRegistrationHealth.PartialFailure,
+                    DiagnosticCode: "startup.testRequiresHealthyTask", Presence: StartupRegistrationPresence.Unknown);
+        }
+        finally { _mutationGate.Release(); }
     }
 
     public async Task ReconcileAsync(UserSettings settings, CancellationToken token = default)
     {
         if (!IsAvailable) return;
+        await _mutationGate.WaitAsync(token);
+        try { await ReconcileCoreAsync(settings, token); }
+        finally { _mutationGate.Release(); }
+    }
+
+    private async Task ReconcileCoreAsync(UserSettings settings, CancellationToken token)
+    {
         if (settings.StartupRegistrationCleanupPending)
         {
-            try { await SetEnabledAsync(false, token); } catch (IOException) { }
+            try { await SetEnabledCoreAsync(false, token); } catch (IOException) { }
             return;
         }
         if (!settings.LaunchAtLogin) return;
-        var snapshot = await GetSnapshotAsync(token);
+        var snapshot = await GetSnapshotCoreAsync(token);
         if (snapshot.TaskSchedulerState.Health == StartupRegistrationHealth.DisabledExternally) return;
         if (snapshot.EffectiveBackend == StartupRegistrationBackendKind.TaskScheduler &&
             snapshot.TaskSchedulerState.Health == StartupRegistrationHealth.ExecutableMoved &&
             snapshot.TaskSchedulerState.ArgumentsMatch && snapshot.TaskSchedulerState.TriggerMatches &&
             snapshot.TaskSchedulerState.PrincipalMatches && snapshot.TaskSchedulerState.SettingsMatch)
-            await SetEnabledAsync(true, token);
+            await SetEnabledCoreAsync(true, token);
+    }
+
+    private async Task RestoreWithBudgetAsync(OwnedStartupTaskSnapshot? task, string? run, UserSettings settings)
+    {
+        using var rollback = new CancellationTokenSource(_rollbackBudget);
+        await RestoreAsync(task, run, settings, rollback.Token);
+    }
+
+    private async Task RestoreSchedulerSnapshotWithBudgetAsync(OwnedStartupTaskSnapshot task)
+    {
+        using var rollback = new CancellationTokenSource(_rollbackBudget);
+        await Task.Run(() => scheduler.Restore(task), rollback.Token).WaitAsync(rollback.Token);
     }
 
     private async Task RestoreAsync(OwnedStartupTaskSnapshot? task, string? run, UserSettings settings, CancellationToken token)
@@ -804,12 +934,12 @@ public sealed class WindowsStartupRegistrationService(
         Exception? failure = null;
         try
         {
-            if (task is not null) await Task.Run(() => scheduler.Restore(task), token);
+            if (task is not null) await Task.Run(() => scheduler.Restore(task), token).WaitAsync(token);
         }
         catch (Exception e) { failure = e; }
         try
         {
-            await Task.Run(() => registry.Restore(run), token);
+            await Task.Run(() => registry.Restore(run), token).WaitAsync(token);
         }
         catch (Exception e) { failure ??= e; }
         try { await SaveSettingsAsync(settings.LaunchAtLogin, ParseBackend(settings.StartupRegistrationBackend),
@@ -828,4 +958,12 @@ public sealed class WindowsStartupRegistrationService(
 
     private static StartupRegistrationBackendKind ParseBackend(string value) =>
         Enum.TryParse<StartupRegistrationBackendKind>(value, out var backend) ? backend : StartupRegistrationBackendKind.None;
+
+    private static StartupRegistrationState StateFromSnapshot(WindowsStartupRegistrationSnapshot snapshot)
+    {
+        var state = snapshot.EffectiveBackend == StartupRegistrationBackendKind.RegistryRun
+            ? snapshot.RegistryRunState : snapshot.TaskSchedulerState;
+        return state with { ConfiguredByUser = snapshot.ConfiguredBackend != StartupRegistrationBackendKind.None,
+            Health = snapshot.OverallHealth, DiagnosticCode = snapshot.DiagnosticCode };
+    }
 }

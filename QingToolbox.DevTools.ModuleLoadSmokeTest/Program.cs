@@ -695,8 +695,10 @@ internal static class Program
         public OwnedStartupTaskSnapshot CaptureOwned()
         {
             if (Unavailable) return new(null, null, OwnedTaskSchedulerState.Unavailable);
-            return new(Definition, null, OwnedTaskSchedulerState.Available);
+            return new(CaptureAtPath(Definition?.TaskPath ?? OwnedStartupTaskIdentity.Create().PreferredTaskPath), null, OwnedTaskSchedulerState.Available);
         }
+        public OwnedTaskDefinitionSnapshot? CaptureAtPath(string taskPath) => Definition is null ? null :
+            new(taskPath, "<Task />", Definition.Enabled, Definition.LastRunTime, Definition.LastTaskResult, Definition);
         public void Register(ScheduledStartupDefinition definition)
         {
             if (Unavailable) throw new System.Runtime.InteropServices.COMException("Unavailable");
@@ -704,6 +706,8 @@ internal static class Program
         }
         public void RegisterAtPath(string taskPath, ScheduledStartupDefinition definition) =>
             Register(definition with { TaskPath = taskPath });
+        public void RestoreAtPath(string taskPath, OwnedTaskDefinitionSnapshot snapshot) =>
+            Definition = snapshot.HealthDefinition with { TaskPath = taskPath, Enabled = snapshot.Enabled };
         public void Delete() { if (!Unavailable) Definition = null; }
         public void DeleteAtPath(string taskPath) => Delete();
         public void RunAtPath(string taskPath) { if (Definition is null) throw new FileNotFoundException(); }

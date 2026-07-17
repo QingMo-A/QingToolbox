@@ -1,4 +1,11 @@
+using System.Runtime.InteropServices;
+using System.IO;
+using System.Net.Http;
+
 namespace QingToolbox.Shell.Startup;
+
+public sealed class ModuleDiscoveryException(string message, Exception? innerException = null)
+    : IOException(message, innerException);
 
 public sealed record StartupPipelineStage(string Name, Func<CancellationToken, Task> Execute);
 public sealed record StartupPipelineStageResult(string Name, StartupPhaseOutcome Outcome, Exception? Error = null);
@@ -20,11 +27,14 @@ public sealed class StartupPipelineCoordinator
                 results.Add(new(stage.Name, StartupPhaseOutcome.Succeeded));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch (Exception exception)
+            catch (Exception exception) when (IsAllowedDegradation(exception))
             {
                 results.Add(new(stage.Name, StartupPhaseOutcome.Degraded, exception));
             }
         }
         return results;
     }
+
+    private static bool IsAllowedDegradation(Exception exception) => exception is
+        IOException or UnauthorizedAccessException or COMException or HttpRequestException;
 }
