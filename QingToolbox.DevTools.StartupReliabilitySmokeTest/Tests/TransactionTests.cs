@@ -71,7 +71,9 @@ internal static class TransactionTests
             AssertEx.True(cancellationTask.TaskCount == 0 && !(await cancellationSettings.ReadAsync()).LaunchAtLogin,
                 "Caller cancellation interrupted rollback after the commit point.");
 
-            var timeoutTask = new FakeTaskStore { RestoreDelay = TimeSpan.FromMilliseconds(250) };
+            using var restoreStarted = new ManualResetEventSlim();
+            using var releaseRestore = new ManualResetEventSlim();
+            var timeoutTask = new FakeTaskStore { RestoreStarted = restoreStarted, ReleaseRestore = releaseRestore };
             timeoutTask.Definition = exactDefinition;
             var timeoutRun = new FakeRunStore { Value = "legacy", FailDelete = true };
             using var timeoutSettings = new UserSettingsService(Path.Combine(root, "rollback-timeout.json"));
@@ -83,11 +85,16 @@ internal static class TransactionTests
             try { await timeoutService.SetEnabledAsync(true); } catch (Exception exception) { timeoutFailure = exception; }
             AssertEx.True(timeoutFailure is StartupRegistrationTransactionException,
                 "Bounded rollback timeout was not reported as a partial transaction failure.");
-            var recoveryWait = System.Diagnostics.Stopwatch.StartNew();
-            await timeoutService.GetSnapshotAsync();
-            recoveryWait.Stop();
-            AssertEx.True(recoveryWait.Elapsed >= TimeSpan.FromMilliseconds(150),
-                "A second operation did not wait for the tracked recovery task.");
+            AssertEx.True(restoreStarted.Wait(TimeSpan.FromSeconds(1)), "Tracked recovery did not start.");
+            var operationDuringRecovery = timeoutService.GetSnapshotAsync();
+            try
+            {
+                await Task.Delay(50);
+                AssertEx.True(!operationDuringRecovery.IsCompleted,
+                    "A second operation did not wait for the tracked recovery task.");
+            }
+            finally { releaseRestore.Set(); }
+            await operationDuringRecovery;
 
             var gateTask = new FakeTaskStore();
             var gateRun = new FakeRunStore();

@@ -39,6 +39,8 @@ internal sealed class FakeTaskStore : ITaskSchedulerStore
     public bool FailAfterRegisterWithCom { get; set; }
     public bool FailRestore { get; set; }
     public TimeSpan RestoreDelay { get; set; }
+    public ManualResetEventSlim? RestoreStarted { get; set; }
+    public ManualResetEventSlim? ReleaseRestore { get; set; }
     public Action? OnRegistered { get; set; }
     public string? PreferredXml { get => GetXml(Identity.PreferredTaskPath); set => SetXml(Identity.PreferredTaskPath, value); }
     public string? FallbackXml { get => GetXml(Identity.FallbackTaskPath); set => SetXml(Identity.FallbackTaskPath, value); }
@@ -82,6 +84,8 @@ internal sealed class FakeTaskStore : ITaskSchedulerStore
     }
     public void RestoreAtPath(string taskPath, OwnedTaskDefinitionSnapshot snapshot)
     {
+        RestoreStarted?.Set();
+        ReleaseRestore?.Wait();
         if (RestoreDelay > TimeSpan.Zero) Thread.Sleep(RestoreDelay);
         if (FailRestore) throw new IOException("restore");
         _tasks[taskPath] = (snapshot.HealthDefinition with { TaskPath = taskPath, Enabled = snapshot.Enabled }, snapshot.DefinitionXml);
