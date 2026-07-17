@@ -38,6 +38,12 @@ public sealed partial class MainWindowViewModel(
     TimeProvider timeProvider,
     StartupHealthJournal startupHealthJournal) : ObservableObject
 {
+    public async Task ReconcileStartupRegistrationAsync(UserSettings settings, CancellationToken cancellationToken)
+    {
+        await startupRegistrationService.ReconcileAsync(settings, cancellationToken);
+        ApplyRegistrationHealth(await startupRegistrationService.GetStateAsync(cancellationToken));
+    }
+
     private bool _initialized;
     private bool _suppressPresentationSave;
     private int _presentationSaveVersion;
@@ -48,6 +54,7 @@ public sealed partial class MainWindowViewModel(
     private readonly Dictionary<string, (string Version, ModuleUpdateResult Result)> _updateResults = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (ModulePackageDownloadIdentity Identity, ModulePackageDownloadStatus Status)> _downloadResults = new(StringComparer.Ordinal);
     private bool _moduleUpdateUsedStaleCache;
+    private StartupRegistrationState? _lastStartupRegistrationState;
     private DateTimeOffset? _moduleUpdateLastCheckedAt;
     private StartupPresentationMode _persistedStartupPresentationMode;
     private bool _suppressCloseBehaviorSave;
@@ -119,6 +126,9 @@ public sealed partial class MainWindowViewModel(
     [ObservableProperty] private string _startupVisibleDurationDisplay = "—";
     [ObservableProperty] private string _startupReadyDurationDisplay = "—";
     [ObservableProperty] private string _startupFailureDisplay = "—";
+
+    [ObservableProperty] private bool _canTestStartup;
+    [ObservableProperty] private bool _canRepairStartup;
 
     public IReadOnlyList<StartupPresentationMode> StartupPresentationModes { get; } = Enum.GetValues<StartupPresentationMode>();
     public string StartupAuthorizationSummary => localization.GetString("startup.authorizationSummary", StartupAuthorizationCount);
@@ -841,7 +851,7 @@ public sealed partial class MainWindowViewModel(
     private async Task TestStartupAsync()
     {
         if(!CanConfigureWindowsStartup)return;IsStartupSettingsBusy=true;
-        try{var state=await startupRegistrationService.RunTestAsync();ApplyRegistrationHealth(state);StartupSettingsMessage=localization.GetString("startup.testRequested");}
+        try{var state=await startupRegistrationService.RunTestAsync();ApplyRegistrationHealth(state);StartupSettingsMessage=localization.GetString(state.DiagnosticCode);}
         catch{StartupSettingsMessage=localization.GetString("startup.testFailed");}
         finally{IsStartupSettingsBusy=false;}
     }
@@ -860,7 +870,20 @@ public sealed partial class MainWindowViewModel(
     }
 
     private void ApplyRegistrationHealth(StartupRegistrationState state)
-    {StartupBackendDisplay=state.Backend.ToString();StartupHealthDisplay=localization.GetString(state.DiagnosticCode);}
+    {
+        _lastStartupRegistrationState = state;
+        StartupBackendDisplay = localization.GetString(state.Backend switch
+        {
+            StartupRegistrationBackendKind.TaskScheduler => "startup.backendTaskScheduler",
+            StartupRegistrationBackendKind.RegistryRun => "startup.backendRegistryRun",
+            _ => "startup.backendNone"
+        });
+        StartupHealthDisplay = localization.GetString(state.DiagnosticCode);
+        CanTestStartup = state.Backend == StartupRegistrationBackendKind.TaskScheduler &&
+                         state.Health == StartupRegistrationHealth.Healthy && !IsStartupSettingsBusy;
+        CanRepairStartup = state.Health is not StartupRegistrationHealth.Healthy and
+            not StartupRegistrationHealth.Disabled && !IsStartupSettingsBusy;
+    }
     private async Task RefreshStartupJournalAsync(CancellationToken token=default)
     {
         var last=(await startupHealthJournal.ReadAsync(token)).Where(x=>x.Source!=StartupLaunchSource.Manual).OrderByDescending(x=>x.ProcessStartedAt).FirstOrDefault();
@@ -1063,8 +1086,11 @@ public sealed partial class MainWindowViewModel(
         finally { IsStartupSettingsBusy = false; }
     }
 
-    partial void OnIsStartupSettingsBusyChanged(bool value) =>
+    partial void OnIsStartupSettingsBusyChanged(bool value)
+    {
         OnPropertyChanged(nameof(CanConfigureWindowsStartup));
+        if (_lastStartupRegistrationState is not null) ApplyRegistrationHealth(_lastStartupRegistrationState);
+    }
 
     partial void OnSelectedStartupPresentationModeChanged(StartupPresentationMode value)
     {

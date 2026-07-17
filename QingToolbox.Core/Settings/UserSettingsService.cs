@@ -6,6 +6,7 @@ namespace QingToolbox.Core.Settings;
 public sealed class UserSettingsService : IDisposable
 {
     private const int MaximumCorruptBackups = 3;
+    public const int MaximumSettingsBytes = 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -48,6 +49,8 @@ public sealed class UserSettingsService : IDisposable
     private async Task<UserSettings> ReadCoreAsync(CancellationToken cancellationToken)
     {
         if (!File.Exists(SettingsPath)) return new UserSettings();
+        var fileInfo = new FileInfo(SettingsPath);
+        if (fileInfo.Length is <= 0 or > MaximumSettingsBytes) return new UserSettings();
 
         try
         {

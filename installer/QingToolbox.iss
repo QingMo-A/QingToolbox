@@ -78,5 +78,8 @@ Name: "{autodesktop}\QingToolbox"; Filename: "{app}\QingToolbox.Shell.exe"; Work
 [Run]
 Filename: "{app}\QingToolbox.Shell.exe"; WorkingDir: "{app}"; Description: "{cm:RunQingToolbox}"; Flags: nowait postinstall skipifsilent
 
+[UninstallRun]
+Filename: "{app}\QingToolbox.StartupMaintenance.exe"; Parameters: "--remove-owned-startup"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveOwnedStartup"
+
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "QingToolbox"; Flags: uninsdeletevalue

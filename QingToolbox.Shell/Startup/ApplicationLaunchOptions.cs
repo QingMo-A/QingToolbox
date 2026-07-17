@@ -4,7 +4,8 @@ public sealed record ApplicationLaunchOptions(
     bool IsStartupLaunch,
     ApplicationExecutionEnvironment Environment,
     bool EnvironmentWasExplicit,
-    StartupLaunchSource StartupSource = StartupLaunchSource.Manual)
+    StartupLaunchSource StartupSource = StartupLaunchSource.Manual,
+    Guid? StartupTestId = null)
 {
     public ApplicationLaunchOptions(bool isStartupLaunch) : this(
         isStartupLaunch, ApplicationExecutionEnvironment.Production(), false) { }
@@ -12,8 +13,9 @@ public sealed record ApplicationLaunchOptions(
     public static ApplicationLaunchOptions Parse(IEnumerable<string> arguments, bool requireExplicitEnvironment = false)
     {
         var args = arguments.ToArray();
-        bool startup = false, environmentSeen = false, profileSeen = false, repositoryRootSeen = false, sourceSeen = false;
+        bool startup = false, environmentSeen = false, profileSeen = false, repositoryRootSeen = false, sourceSeen = false, testIdSeen = false;
         var startupSource = StartupLaunchSource.Manual;
+        Guid? startupTestId = null;
         string? profile = null, repositoryRoot = null;
         var kind = ApplicationEnvironmentKind.Production;
         for (var index = 0; index < args.Length; index++)
@@ -37,6 +39,14 @@ public sealed record ApplicationLaunchOptions(
                 sourceSeen = true;
                 if (!Enum.TryParse<StartupLaunchSource>(ReadValue(), true, out startupSource) || startupSource == StartupLaunchSource.Manual)
                     throw new ArgumentException("Startup source must be TaskScheduler, RegistryRun or StartupTest.");
+            }
+            else if (argument.Equals("--startup-test-id", StringComparison.OrdinalIgnoreCase))
+            {
+                if (testIdSeen) throw new ArgumentException("Duplicate argument: --startup-test-id");
+                testIdSeen = true;
+                if (!Guid.TryParse(ReadValue(), out var parsedTestId))
+                    throw new ArgumentException("Startup test id must be a GUID.");
+                startupTestId = parsedTestId;
             }
             else if (argument.Equals("--environment", StringComparison.OrdinalIgnoreCase))
             {
@@ -68,13 +78,18 @@ public sealed record ApplicationLaunchOptions(
         if (requireExplicitEnvironment && !environmentSeen)
             throw new ArgumentException("Debug builds require --environment. Use scripts/start-dev-host.ps1.");
         if (sourceSeen && !startup) throw new ArgumentException("--startup-source requires --startup.");
+        if (testIdSeen && (!startup || startupSource != StartupLaunchSource.StartupTest))
+            throw new ArgumentException("--startup-test-id requires --startup-source StartupTest.");
+        if (startupSource == StartupLaunchSource.StartupTest && !testIdSeen)
+            throw new ArgumentException("StartupTest requires --startup-test-id.");
         if (startup && !sourceSeen) startupSource = StartupLaunchSource.RegistryRun;
         if (kind == ApplicationEnvironmentKind.Production)
         {
             if (repositoryRootSeen) throw new ArgumentException("Production does not accept --repo-root.");
             if (profileSeen && !string.Equals(profile, "Default", StringComparison.Ordinal))
                 throw new ArgumentException("Production only supports profile Default.");
-            return new(startup, ApplicationExecutionEnvironment.Production(), environmentSeen, startup ? startupSource : StartupLaunchSource.Manual);
+            return new(startup, ApplicationExecutionEnvironment.Production(), environmentSeen,
+                startup ? startupSource : StartupLaunchSource.Manual, startupTestId);
         }
         if (startup) throw new ArgumentException("--startup cannot be combined with a non-production environment.");
         if (!profileSeen) throw new ArgumentException("Development and ModuleTest require --profile.");

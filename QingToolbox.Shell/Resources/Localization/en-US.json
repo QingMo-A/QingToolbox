@@ -236,7 +236,17 @@
   "closeBehavior.ask": "Ask again next time",
   "closeBehavior.saved": "Window close behavior saved.",
   "closeBehavior.saveFailed": "Window close behavior could not be saved. The main window remains open.",
-  "startup.unavailableInSandbox": "Windows login startup is unavailable in development and module test environments."
+  "startup.unavailableInSandbox": "Windows login startup is unavailable in development and module test environments.",
+  "startup.backendTaskScheduler": "Windows Task Scheduler",
+  "startup.backendRegistryRun": "Registry compatibility mode",
+  "startup.backendNone": "Not registered",
+  "startup.registryFallbackTaskUnknown": "Registry startup is available, but Task Scheduler health cannot currently be verified.",
+  "startup.configurationDrift": "The saved startup backend differs from the registration currently present.",
+  "startup.testTimedOut": "The startup test timed out before a conclusive task result was available.",
+  "startup.testRequiresHealthyTask": "Startup can only be tested when the Task Scheduler registration is healthy.",
+  "startup.notificationRecovered": "The notification area icon recovered after Explorer became available.",
+  "startup.notificationRetryExhausted": "The notification area is unavailable; the main window remains available.",
+  "startup.durationMilliseconds": "{0} ms"
   ,"moduleUpdate.check": "Check for updates",
   "moduleUpdate.lastChecked": "Last checked: {0}",
   "moduleUpdate.checking": "Checking official module updates…",

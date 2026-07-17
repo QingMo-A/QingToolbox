@@ -29,6 +29,7 @@ public sealed class NotificationAreaService : INotificationAreaIcon, IDisposable
     private bool _disposed;
     private bool _cultureSubscribed;
     private int _dispatchPending;
+    private TaskbarCreatedWindow? _taskbarCreatedWindow;
 
     public NotificationAreaService(ILocalizationService localization, ApplicationExecutionEnvironment environment)
     { _localization = localization; _environment = environment; }
@@ -72,8 +73,12 @@ public sealed class NotificationAreaService : INotificationAreaIcon, IDisposable
             icon = null;
             menu = null;
             notifyIcon = null;
-            _localization.CultureChanged += OnCultureChanged;
-            _cultureSubscribed = true;
+            if (!_cultureSubscribed)
+            {
+                _localization.CultureChanged += OnCultureChanged;
+                _cultureSubscribed = true;
+            }
+            _taskbarCreatedWindow ??= new TaskbarCreatedWindow(OnTaskbarCreated);
             return true;
         }
         catch (Exception exception)
@@ -173,6 +178,24 @@ public sealed class NotificationAreaService : INotificationAreaIcon, IDisposable
         catch (Exception exception) { Debug.WriteLine($"Notification area menu refresh failed: {exception.GetType().Name}"); }
     }
 
+    private void OnTaskbarCreated()
+    {
+        if (_disposed || IsExiting) return;
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished) return;
+        try
+        {
+            ObserveDispatcherTask(dispatcher.InvokeAsync(() =>
+            {
+                if (_disposed || IsExiting) return;
+                DisposeResources();
+                Initialize();
+            }).Task, "Explorer recovery", resetDispatch: false);
+        }
+        catch (Exception exception)
+        { Debug.WriteLine($"Notification area Explorer recovery failed: {exception.GetType().Name}"); }
+    }
+
     private void ObserveDispatcherTask(Task task, string operation, bool resetDispatch)
     {
         _ = task.ContinueWith(completed =>
@@ -212,5 +235,37 @@ public sealed class NotificationAreaService : INotificationAreaIcon, IDisposable
             _cultureSubscribed = false;
         }
         DisposeResources();
+        _taskbarCreatedWindow?.Dispose();
+        _taskbarCreatedWindow = null;
+    }
+
+    private sealed class TaskbarCreatedWindow : Forms.NativeWindow, IDisposable
+    {
+        private readonly Action _callback;
+        private readonly int _message;
+        private bool _disposed;
+
+        public TaskbarCreatedWindow(Action callback)
+        {
+            _callback = callback;
+            _message = RegisterWindowMessage("TaskbarCreated");
+            CreateHandle(new Forms.CreateParams { Caption = "QingToolbox.NotificationAreaMonitor" });
+        }
+
+        protected override void WndProc(ref Forms.Message message)
+        {
+            if (!_disposed && message.Msg == _message) _callback();
+            base.WndProc(ref message);
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            DestroyHandle();
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int RegisterWindowMessage(string message);
     }
 }

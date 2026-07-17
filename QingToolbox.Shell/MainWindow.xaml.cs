@@ -22,10 +22,9 @@ public partial class MainWindow : Window
     private readonly INotificationAreaIcon _notificationArea;
     private readonly ApplicationExitCoordinator _exitCoordinator;
     private readonly ModuleWindowManager _moduleWindowManager;
-    private readonly StartupPreferenceReader _startupPreferenceReader;
-    private readonly ApplicationPaths _applicationPaths;
-    private readonly ApplicationLaunchOptions _launchOptions;
+    private readonly StartupPreferenceSnapshot _startupPreferences;
     private readonly StartupHealthJournal _startupJournal;
+    private Task? _backgroundStartupTask;
     private int _closeRequestPending;
     private WindowState _notificationAreaRestoreState = WindowState.Normal;
 
@@ -38,9 +37,7 @@ public partial class MainWindow : Window
         INotificationAreaIcon notificationArea,
         ApplicationExitCoordinator exitCoordinator,
         ModuleWindowManager moduleWindowManager,
-        StartupPreferenceReader startupPreferenceReader,
-        ApplicationPaths applicationPaths,
-        ApplicationLaunchOptions launchOptions,
+        StartupPreferenceSnapshot startupPreferences,
         StartupHealthJournal startupJournal)
     {
         InitializeComponent();
@@ -53,9 +50,7 @@ public partial class MainWindow : Window
         _notificationArea = notificationArea;
         _exitCoordinator = exitCoordinator;
         _moduleWindowManager = moduleWindowManager;
-        _startupPreferenceReader = startupPreferenceReader;
-        _applicationPaths = applicationPaths;
-        _launchOptions = launchOptions;
+        _startupPreferences = startupPreferences;
         _startupJournal = startupJournal;
         _startupSession.Attach(this, floatingBadgeManager);
         _floatingBadgeManager.Attach(this);
@@ -87,7 +82,11 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
-        try { await PresentCriticalStartupAsync(); _ = InitializeApplicationInBackgroundAsync(); }
+        try
+        {
+            await PresentCriticalStartupAsync();
+            _backgroundStartupTask = InitializeApplicationInBackgroundAsync();
+        }
         catch (OperationCanceledException) when (_startupSession.State == StartupSessionState.Exiting)
         {
             // Application shutdown cancellation is an expected lifecycle outcome.
@@ -110,10 +109,8 @@ public partial class MainWindow : Window
 
     private async Task PresentCriticalStartupAsync()
     {
-        var preferences = await _startupPreferenceReader.ReadAsync(
-            _applicationPaths.SettingsPath, _launchOptions.IsStartupLaunch, _startupSession.LifetimeToken);
-        _viewModel.ApplyStartupPreferences(preferences);
-        await _startupSession.PresentAsync(preferences.PresentationMode);
+        _viewModel.ApplyStartupPreferences(_startupPreferences);
+        await _startupSession.PresentAsync(_startupPreferences.PresentationMode);
         _startupJournal.Mark(StartupPhase.PresentationReady);
     }
 
@@ -121,6 +118,9 @@ public partial class MainWindow : Window
     {
         try
         {
+        var settings = await _settingsService.ReadAsync(_startupSession.LifetimeToken);
+        await _viewModel.ReconcileStartupRegistrationAsync(settings, _startupSession.LifetimeToken);
+        _startupJournal.Mark(StartupPhase.RegistrationHealthReady);
         _startupSession.BeginDiscovery();
         await _viewModel.InitializeDiscoveryAsync(_startupSession.LifetimeToken);
         _startupJournal.Mark(StartupPhase.ModuleDiscoveryComplete);
@@ -135,6 +135,15 @@ public partial class MainWindow : Window
             System.Diagnostics.Debug.WriteLine($"Background startup failed: {exception.GetType().Name}");
             _viewModel.StatusMessage = _viewModel.Strings["status.startupFailed"];
         }
+    }
+
+    internal async Task StopBackgroundStartupAsync()
+    {
+        var task = _backgroundStartupTask;
+        if (task is null) return;
+        try { await task.WaitAsync(TimeSpan.FromSeconds(2)); }
+        catch (OperationCanceledException) { }
+        catch (TimeoutException) { }
     }
 
     private void OnSidebarMouseEnter(object sender, MouseEventArgs e)

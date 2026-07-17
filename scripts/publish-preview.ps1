@@ -19,6 +19,7 @@ $publishDirectory = Join-Path $artifactsRoot "publish\$Runtime"
 $archivePath = Join-Path $artifactsRoot $metadata.PortableFileName
 $checksumPath = "$archivePath.sha256"
 $shellProject = Join-Path $repoRoot "QingToolbox.Shell\QingToolbox.Shell.csproj"
+$maintenanceProject = Join-Path $repoRoot "QingToolbox.StartupMaintenance\QingToolbox.StartupMaintenance.csproj"
 
 function Assert-PathUnderArtifacts {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -52,6 +53,14 @@ try {
         --output $publishDirectory
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE."
+    }
+    dotnet publish $maintenanceProject `
+        --configuration Release `
+        --runtime $Runtime `
+        --self-contained $selfContainedValue `
+        --output $publishDirectory
+    if ($LASTEXITCODE -ne 0) {
+        throw "Startup maintenance publish failed with exit code $LASTEXITCODE."
     }
 
     Get-ChildItem -LiteralPath $publishDirectory -Filter "*.pdb" -File -Recurse |
@@ -101,6 +110,7 @@ try {
     }
     $requiredFiles = @(
         'QingToolbox.Shell.exe',
+        'QingToolbox.StartupMaintenance.exe',
         'Resources\Localization\en-US.json',
         'Resources\Localization\zh-CN.json',
         'LICENSE',

@@ -90,7 +90,11 @@ public partial class App : Application
 
         try
         {
-
+            var applicationPaths = new ApplicationPaths(environment);
+            applicationPaths.EnsureDirectories();
+            var startupPreferenceReader = new StartupPreferenceReader();
+            var startupPreferences = await startupPreferenceReader.ReadAsync(
+                applicationPaths.SettingsPath, launchOptions.IsStartupLaunch);
             _startupSession = new StartupSessionCoordinator(launchOptions);
             _activationHandler = message =>
             {
@@ -123,7 +127,8 @@ public partial class App : Application
             services.AddSingleton<ITaskSchedulerStore, WindowsTaskSchedulerStore>();
             services.AddSingleton<WindowsTaskSchedulerStartupBackend>();
             services.AddSingleton<WindowsStartupRegistrationService>();
-            services.AddSingleton<StartupPreferenceReader>();
+            services.AddSingleton(startupPreferenceReader);
+            services.AddSingleton(startupPreferences);
             services.AddSingleton<ModuleStartupFingerprintService>();
             services.AddSingleton<LocalizationManager>();
             services.AddSingleton<ILocalizationService>(
@@ -133,7 +138,7 @@ public partial class App : Application
             services.AddSingleton<NotificationAreaService>();
             services.AddSingleton<INotificationAreaIcon>(provider => provider.GetRequiredService<NotificationAreaService>());
             services.AddSingleton<ApplicationExitCoordinator>();
-            services.AddSingleton<ApplicationPaths>();
+            services.AddSingleton(applicationPaths);
             services.AddSingleton(provider => new StartupHealthJournal(
                 provider.GetRequiredService<ApplicationPaths>().StartupHealthPath,
                 provider.GetRequiredService<TimeProvider>()));
@@ -179,7 +184,6 @@ public partial class App : Application
             services.AddSingleton<MainWindow>();
 
             _serviceProvider = services.BuildServiceProvider();
-            _serviceProvider.GetRequiredService<ApplicationPaths>().EnsureDirectories();
             var startupJournal = _serviceProvider.GetRequiredService<StartupHealthJournal>();
             startupJournal.SetSource(launchOptions.StartupSource);
             startupJournal.Mark(StartupPhase.InstanceReady);
@@ -190,7 +194,8 @@ public partial class App : Application
                 "Localization");
             await _serviceProvider
                 .GetRequiredService<LocalizationManager>()
-                .InitializeAsync(localizationDirectory);
+                .InitializeAsync(localizationDirectory, startupPreferences.Language, _startupSession.LifetimeToken);
+            startupJournal.Mark(StartupPhase.MinimalServicesReady);
 
             var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
             var notificationArea = _serviceProvider.GetRequiredService<INotificationAreaIcon>();
@@ -209,10 +214,12 @@ public partial class App : Application
             notificationArea.ExitRequested = () => exitCoordinator.RequestExitAsync(ApplicationExitReason.NotificationAreaMenu);
             var notificationReady = notificationArea.Initialize();
             startupJournal.Mark(StartupPhase.NotificationAreaReady,
+                notificationReady ? StartupPhaseOutcome.Succeeded : StartupPhaseOutcome.Degraded,
                 notificationReady ? null : "startup.notificationUnavailable");
             if (launchOptions.IsStartupLaunch) { mainWindow.Opacity = 0; mainWindow.ShowActivated = false; }
             mainWindow.Show();
-            if (!notificationReady) _ = RetryNotificationAreaObservedAsync(notificationArea, _startupSession.LifetimeToken);
+            if (!notificationReady)
+                _ = RetryNotificationAreaObservedAsync(notificationArea, startupJournal, _startupSession.LifetimeToken);
             if (_startupSession.ManualActivationRequested) await _startupSession.ActivateMainWindowAsync();
         }
         catch (Exception exception)
@@ -230,6 +237,8 @@ public partial class App : Application
         try { _serviceProvider?.GetService<MainWindowViewModel>()?.StopUpdateChecks(); } catch { }
         try { _startupSession?.PrepareForExit(); }
         catch (Exception exception) { System.Diagnostics.Debug.WriteLine($"Final startup cleanup failed: {exception.GetType().Name}"); }
+        try { _serviceProvider?.GetService<MainWindow>()?.StopBackgroundStartupAsync().Wait(TimeSpan.FromSeconds(2)); }
+        catch (Exception exception) { System.Diagnostics.Debug.WriteLine($"Background startup cleanup failed: {exception.GetType().Name}"); }
         try
         {
             if (_singleInstance is not null)
@@ -254,6 +263,8 @@ public partial class App : Application
         catch (Exception exception) { System.Diagnostics.Debug.WriteLine($"Final runtime cleanup failed: {exception.GetType().Name}"); }
         try
         {
+            _serviceProvider?.GetService<StartupHealthJournal>()?.FlushAsync()
+                .WaitAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
             _serviceProvider?.DisposeAsync().AsTask().GetAwaiter().GetResult();
             _startupSession?.Dispose();
         }
@@ -278,13 +289,25 @@ public partial class App : Application
         _singleInstance = null;
     }
 
-    private static async Task RetryNotificationAreaObservedAsync(INotificationAreaIcon notificationArea,CancellationToken token)
+    private static async Task RetryNotificationAreaObservedAsync(
+        INotificationAreaIcon notificationArea, StartupHealthJournal journal, CancellationToken token)
     {
         for(var attempt=1;attempt<5&&!token.IsCancellationRequested&&!notificationArea.IsAvailable;attempt++)
         {
-            try{await Task.Delay(TimeSpan.FromMilliseconds(200*attempt),token);notificationArea.Initialize();}
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt), token);
+                if (notificationArea.Initialize())
+                {
+                    journal.Mark(StartupPhase.NotificationAreaReady, StartupPhaseOutcome.Succeeded,
+                        "startup.notificationRecovered");
+                    return;
+                }
+            }
             catch(OperationCanceledException)when(token.IsCancellationRequested){return;}
             catch(Exception exception){System.Diagnostics.Debug.WriteLine($"Notification retry failed: {exception.GetType().Name}");}
         }
+        journal.Mark(StartupPhase.NotificationAreaReady, StartupPhaseOutcome.Degraded,
+            "startup.notificationRetryExhausted");
     }
 }

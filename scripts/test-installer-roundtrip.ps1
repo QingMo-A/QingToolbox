@@ -19,6 +19,8 @@ $uninstallerProcess = $null
 $moduleSentinel = $null
 $dataSentinel = $null
 $settingsSentinel = $null
+$settingsSentinelCreated = $false
+$existingSettingsHash = $null
 $resolvedTestRoot = $null
 $installDirectory = $null
 $installLog = $null
@@ -133,6 +135,7 @@ try {
     $shellExe = Join-Path $installDirectory "QingToolbox.Shell.exe"
     $requiredFiles = @(
         $shellExe,
+        (Join-Path $installDirectory "QingToolbox.StartupMaintenance.exe"),
         (Join-Path $installDirectory "LICENSE"),
         (Join-Path $installDirectory "CHANGELOG.md"),
         (Join-Path $installDirectory "docs\QMOD_FORMAT.md"),
@@ -218,10 +221,14 @@ try {
     $dataSentinel = Join-Path $dataDirectory `
         "installer-test-data-$sentinelId.txt"
 
-    foreach ($sentinel in @($moduleSentinel, $dataSentinel, $settingsSentinel)) {
+    foreach ($sentinel in @($moduleSentinel, $dataSentinel)) {
         if (Test-Path -LiteralPath $sentinel) {
             throw "Refusing to overwrite an existing user file: $sentinel"
         }
+    }
+    if (Test-Path -LiteralPath $settingsSentinel -PathType Leaf) {
+        $existingSettingsHash = (Get-FileHash -LiteralPath $settingsSentinel -Algorithm SHA256).Hash
+        Write-Host "Existing settings will be verified in place and never modified."
     }
 
     New-TrackedDirectory -Path $localUserRoot
@@ -232,10 +239,13 @@ try {
         -Encoding UTF8
     Set-Content -LiteralPath $dataSentinel -Value "QingToolbox installer roundtrip" `
         -Encoding UTF8
-    @{
-        language = "en-US"
-        installerRoundtripSentinel = $true
-    } | ConvertTo-Json | Set-Content -LiteralPath $settingsSentinel -Encoding UTF8
+    if ($null -eq $existingSettingsHash) {
+        @{
+            language = "en-US"
+            installerRoundtripSentinel = $true
+        } | ConvertTo-Json | Set-Content -LiteralPath $settingsSentinel -Encoding UTF8
+        $settingsSentinelCreated = $true
+    }
 
     Write-Stage "Uninstall QingToolbox silently"
     $uninstallerProcess = Invoke-Uninstaller -Path $uninstaller.FullName `
@@ -271,6 +281,10 @@ try {
             throw "Uninstall removed user-data sentinel: $sentinel"
         }
     }
+    if ($null -ne $existingSettingsHash -and
+        (Get-FileHash -LiteralPath $settingsSentinel -Algorithm SHA256).Hash -ne $existingSettingsHash) {
+        throw "Uninstall modified the existing user settings file."
+    }
 
     Write-Host "Module sentinel retained:   $moduleSentinel"
     Write-Host "Data sentinel retained:     $dataSentinel"
@@ -291,7 +305,9 @@ catch {
     }
 }
 finally {
-    foreach ($sentinel in @($moduleSentinel, $dataSentinel, $settingsSentinel)) {
+    $createdSentinels = @($moduleSentinel, $dataSentinel)
+    if ($settingsSentinelCreated) { $createdSentinels += $settingsSentinel }
+    foreach ($sentinel in $createdSentinels) {
         if ($null -ne $sentinel -and (Test-Path -LiteralPath $sentinel -PathType Leaf)) {
             Remove-Item -LiteralPath $sentinel -Force
         }

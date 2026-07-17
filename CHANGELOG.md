@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fixed root-folder Task Scheduler fallback discovery and execution.
+- Made startup registration changes transactional across Task Scheduler, Registry Run and settings.
+- Added truthful phase outcomes and durable startup journal flushing.
+- Removed owned startup tasks during uninstall and repaired safe path drift after upgrades.
+
 - Added resilient per-user Task Scheduler login startup with registry fallback.
 - Moved visible startup presentation ahead of module discovery and restoration.
 - Added startup health journaling, repair and test diagnostics.

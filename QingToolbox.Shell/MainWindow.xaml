@@ -1487,8 +1487,8 @@
                                     <TextBlock Text="{Binding Strings[startup.lastFailure]}" Foreground="{StaticResource SecondaryTextBrush}"/><TextBlock Grid.Column="1" Text="{Binding StartupFailureDisplay}" TextWrapping="Wrap"/>
                                 </Grid>
                                 <WrapPanel Margin="0,14,0,0">
-                                    <Button Content="{Binding Strings[startup.test]}" Command="{Binding TestStartupCommand}" Style="{StaticResource SecondaryActionButtonStyle}"/>
-                                    <Button Content="{Binding Strings[startup.repair]}" Command="{Binding RepairStartupCommand}" Style="{StaticResource SecondaryActionButtonStyle}"/>
+                                    <Button Content="{Binding Strings[startup.test]}" Command="{Binding TestStartupCommand}" IsEnabled="{Binding CanTestStartup}" Style="{StaticResource SecondaryActionButtonStyle}"/>
+                                    <Button Content="{Binding Strings[startup.repair]}" Command="{Binding RepairStartupCommand}" IsEnabled="{Binding CanRepairStartup}" Style="{StaticResource SecondaryActionButtonStyle}"/>
                                     <Button Content="{Binding Strings[startup.refreshHealth]}" Command="{Binding RefreshStartupHealthCommand}" Style="{StaticResource SecondaryActionButtonStyle}"/>
                                     <Button Content="{Binding Strings[startup.openScheduler]}" Command="{Binding OpenTaskSchedulerCommand}" Style="{StaticResource SecondaryActionButtonStyle}"/>
                                     <Button Content="{Binding Strings[startup.copyDiagnostics]}" Command="{Binding CopyStartupDiagnosticsCommand}" Style="{StaticResource SecondaryActionButtonStyle}"/>

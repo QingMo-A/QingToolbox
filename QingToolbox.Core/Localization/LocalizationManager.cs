@@ -31,7 +31,13 @@ public sealed class LocalizationManager(UserSettingsService settingsService)
     public string ConfiguredLanguageCode { get; private set; } = "system";
     public event EventHandler? CultureChanged;
 
-    public async Task InitializeAsync(string resourcesDirectory)
+    public Task InitializeAsync(string resourcesDirectory) =>
+        InitializeAsync(resourcesDirectory, configuredLanguageCode: null, CancellationToken.None);
+
+    public async Task InitializeAsync(
+        string resourcesDirectory,
+        string? configuredLanguageCode,
+        CancellationToken cancellationToken = default)
     {
         foreach (var code in new[] { "en-US", "zh-CN" })
         {
@@ -43,9 +49,9 @@ public sealed class LocalizationManager(UserSettingsService settingsService)
             }
         }
 
-        var settings = await settingsService.ReadAsync();
-        ConfiguredLanguageCode = SupportedCodes.Contains(settings.Language)
-            ? settings.Language
+        configuredLanguageCode ??= (await settingsService.ReadAsync(cancellationToken)).Language;
+        ConfiguredLanguageCode = SupportedCodes.Contains(configuredLanguageCode)
+            ? configuredLanguageCode
             : "system";
         ApplyCulture(ResolveCulture(ConfiguredLanguageCode), raiseEvent: false);
     }

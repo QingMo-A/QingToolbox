@@ -21,6 +21,7 @@ $installerRoot = Join-Path $repoRoot "artifacts\installer"
 $payloadDirectory = Join-Path $installerRoot "payload"
 $outputDirectory = Join-Path $installerRoot "output"
 $shellProject = Join-Path $repoRoot "QingToolbox.Shell\QingToolbox.Shell.csproj"
+$maintenanceProject = Join-Path $repoRoot "QingToolbox.StartupMaintenance\QingToolbox.StartupMaintenance.csproj"
 $smokeProject = Join-Path $repoRoot "QingToolbox.DevTools.ModuleLoadSmokeTest\QingToolbox.DevTools.ModuleLoadSmokeTest.csproj"
 $installerScript = Join-Path $repoRoot "installer\QingToolbox.iss"
 $brandIconPath = Join-Path $repoRoot `
@@ -123,9 +124,22 @@ try {
         "-o", $payloadDirectory
     ) -FailureMessage "Shell publish failed."
 
+    Invoke-DotNet -Arguments @(
+        "publish", $maintenanceProject,
+        "-c", $Configuration,
+        "-r", $Runtime,
+        "--self-contained", "true",
+        "-p:DebugSymbols=false",
+        "-p:DebugType=None",
+        "-o", $payloadDirectory
+    ) -FailureMessage "Startup maintenance publish failed."
+
     $shellExecutable = Join-Path $payloadDirectory "QingToolbox.Shell.exe"
     if (-not (Test-Path -LiteralPath $shellExecutable -PathType Leaf)) {
         throw "Installer payload is missing QingToolbox.Shell.exe."
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $payloadDirectory "QingToolbox.StartupMaintenance.exe") -PathType Leaf)) {
+        throw "Installer payload is missing QingToolbox.StartupMaintenance.exe."
     }
 
     Add-Type -AssemblyName System.Drawing
@@ -212,7 +226,8 @@ try {
         "docs\releases\$($metadata.Version).md",
         "docs\sdk\README.md",
         "Resources\Localization\en-US.json",
-        "Resources\Localization\zh-CN.json"
+        "Resources\Localization\zh-CN.json",
+        "QingToolbox.StartupMaintenance.exe"
     )
     foreach ($relativePath in $requiredPayloadFiles) {
         $requiredPath = Join-Path $payloadDirectory $relativePath
