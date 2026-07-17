@@ -17,10 +17,18 @@ if ([string]::IsNullOrWhiteSpace($PreviousHostManifestPath)) {
 }
 if ([string]::IsNullOrWhiteSpace($TestRoot)) { $TestRoot = Join-Path $env:TEMP ("QingToolbox-upgrade-" + [guid]::NewGuid().ToString('N')) }
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
-$tempPrefix = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
 $isCi = $env:GITHUB_ACTIONS -eq 'true'
 if (-not $isCi -and -not $AllowIsolatedLocalRun) { throw 'Local upgrade testing requires -AllowIsolatedLocalRun after safety review.' }
-if (-not $TestRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Upgrade TestRoot must be under the current temporary directory.' }
+$allowedTempRoots = @([IO.Path]::GetFullPath($env:TEMP))
+if ($isCi -and -not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+    $allowedTempRoots += [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+}
+$isUnderAllowedTemp = $false
+foreach ($root in $allowedTempRoots) {
+    $prefix = $root.TrimEnd('\') + '\'
+    if ($TestRoot.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { $isUnderAllowedTemp = $true; break }
+}
+if (-not $isUnderAllowedTemp) { throw 'Upgrade TestRoot must be under a trusted temporary directory.' }
 if (Test-Path $uninstallKey) { throw 'A real QingToolbox uninstall entry exists; refusing isolated upgrade test.' }
 if (Get-Process QingToolbox.Shell -ErrorAction SilentlyContinue) { throw 'A QingToolbox.Shell process is running; refusing isolated upgrade test.' }
 $previous = [IO.Path]::GetFullPath($PreviousInstallerPath); $current = [IO.Path]::GetFullPath($CurrentInstallerPath)
