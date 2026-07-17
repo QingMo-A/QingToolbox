@@ -992,7 +992,18 @@
                                         <svgc:SvgViewbox Style="{StaticResource ModuleIconStyle}"
                                                          Visibility="{Binding HasIcon, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                          Source="{Binding IconPath, Converter={StaticResource ModuleIconSourceConverter}}"/>
-                                        <TextBlock Style="{StaticResource DefaultModuleFluentIconStyle}"/>
+                                        <TextBlock>
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock"
+                                                       BasedOn="{StaticResource DefaultModuleFluentIconStyle}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding HasIcon}" Value="True">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
                                     </Grid>
                                 </Border>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
@@ -1230,7 +1241,17 @@
                                                         <svgc:SvgViewbox Visibility="{Binding HasIcon, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                                          Source="{Binding IconPath, Converter={StaticResource ModuleIconSourceConverter}}"/>
                                                         <TextBlock Text="&#xE71D;" FontFamily="Segoe Fluent Icons"
-                                                                   Foreground="#2563EB" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                                   Foreground="#2563EB" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding HasIcon}" Value="True">
+                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
                                                     </Grid>
                                                 </Border>
                                                 <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center">

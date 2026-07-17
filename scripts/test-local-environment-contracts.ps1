@@ -7,6 +7,7 @@ $shell = (Get-Process -Id $PID).Path
 $reset = Join-Path $PSScriptRoot 'reset-local-profile.ps1'
 $dev = Join-Path $PSScriptRoot 'start-dev-host.ps1'
 $moduleTest = Join-Path $PSScriptRoot 'start-module-test-host.ps1'
+$runLatest = Join-Path (Split-Path $PSScriptRoot -Parent) 'run-latest.bat'
 $suffix = [Guid]::NewGuid().ToString('N')
 $developmentProfile = "Contract-$suffix"
 $junctionProfile = "Junction-$suffix"
@@ -57,6 +58,13 @@ $fakeRejected = $false
 try { Assert-LocalRepositoryRoot -RepositoryRoot $fakeRepositoryRoot > $null }
 catch { $fakeRejected = $true }
 if (-not $fakeRejected) { throw 'Repository root without required markers was accepted.' }
+
+$runLatestContent = [IO.File]::ReadAllText($runLatest)
+foreach ($requiredArgument in @('--environment Development', '--profile Shell', '--repo-root')) {
+    if ($runLatestContent.IndexOf($requiredArgument, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw "run-latest.bat does not pass the required development launch argument: $requiredArgument"
+    }
+}
 
 foreach ($launch in @(
     @{ Script = $dev; Arguments = @('-Profile', $developmentProfile, '-NoBuild', '-ValidateOnly') },

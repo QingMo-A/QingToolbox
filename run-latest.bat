@@ -23,12 +23,14 @@ if errorlevel 1 goto :failed
 
 echo [4/4] Starting QingToolbox...
 set "SHELL_EXE=%~dp0QingToolbox.Shell\bin\Debug\net10.0-windows\QingToolbox.Shell.exe"
+set "REPOSITORY_ROOT=%~dp0"
+if "%REPOSITORY_ROOT:~-1%"=="\" set "REPOSITORY_ROOT=%REPOSITORY_ROOT:~0,-1%"
 if not exist "%SHELL_EXE%" (
     echo ERROR: Shell executable was not produced: "%SHELL_EXE%"
     goto :failed
 )
 
-start "" "%SHELL_EXE%"
+start "" "%SHELL_EXE%" --environment Development --profile Shell --repo-root "%REPOSITORY_ROOT%"
 exit /b 0
 
 :failed
