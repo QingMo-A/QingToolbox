@@ -33,7 +33,7 @@ $sidecar = Join-Path $output $sidecarName
 if (-not (Test-Path -LiteralPath $sidecar)) { $sidecar = "$InstallerPath.sha256" }
 $text = (Get-Content -LiteralPath $sidecar -Raw).Trim()
 $match = [regex]::Match($text, '^(?<hash>[0-9A-Fa-f]{64})\s{2}(?<file>[^\r\n]+)$')
-if (-not $match.Success -or $match.Groups.file.Value -ne $asset.name) { throw "Official checksum sidecar format or filename is invalid." }
+if (-not $match.Success -or $match.Groups['file'].Value -ne $asset.name) { throw "Official checksum sidecar format or filename is invalid." }
 $actual = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash
-if ($actual -ne $match.Groups.hash.Value.ToUpperInvariant()) { throw "Official Preview installer SHA256 mismatch." }
+if ($actual -ne $match.Groups['hash'].Value.ToUpperInvariant()) { throw "Official Preview installer SHA256 mismatch." }
 [pscustomobject]@{ Tag = $Tag; InstallerPath = [IO.Path]::GetFullPath($InstallerPath); FileName = $asset.name; Sha256 = $actual; Size = (Get-Item $InstallerPath).Length }
