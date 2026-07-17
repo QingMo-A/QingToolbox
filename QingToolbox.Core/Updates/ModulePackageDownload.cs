@@ -11,7 +11,19 @@ public enum ModulePackageDownloadStatus
     NotDownloaded, ConfirmingMetadata, MetadataChanged, MetadataStale, Downloading,
     Verifying, Verified, AlreadyVerified, Cancelled, SizeMismatch, HashMismatch,
     SourceUnavailable, SourceInvalid, UntrustedRedirect, StorageUnavailable, Failed,
-    DisabledByEnvironment
+    DisabledByEnvironment, TransferTimedOut
+}
+public sealed record ModulePackageDownloadIdentity(string ModuleId, string LocalVersion, string TargetVersion,
+    string FileName, string OfficialUrl, long ExpectedSize, string Sha256)
+{
+    public static ModulePackageDownloadIdentity From(ModulePackageDownloadRequest request) => new(request.ModuleId,
+        request.LocalVersion, request.TargetVersion.ToString(), request.Package.FileName, request.Package.Url.AbsoluteUri,
+        request.Package.Size, request.Package.Sha256.ToLowerInvariant());
+}
+public static class ModulePackageUiBinding
+{
+    public static bool Matches(ModulePackageDownloadIdentity identity, string moduleId, string localVersion, ModuleUpdateResult? update) =>
+        update?.SelectedRelease is { } release && ModulePackageDownloadIdentity.From(new(moduleId, localVersion, release.Version, release.Package)) == identity;
 }
 
 public sealed record ModulePackageDownloadRequest(
@@ -22,7 +34,7 @@ public sealed record ModulePackageDownloadProgress(long BytesReceived, long Expe
 }
 public sealed record VerifiedModulePackage(
     string ModuleId, SemanticVersion Version, string FileName, string FilePath,
-    long Size, string Sha256, DateTimeOffset VerifiedAt);
+    long Size, string Sha256, DateTimeOffset VerifiedAt, bool RecordPersistenceFailed = false);
 public sealed record ModulePackageDownloadResult(
     ModulePackageDownloadStatus Status, VerifiedModulePackage? VerifiedPackage = null,
     ModuleUpdateResult? LatestUpdateResult = null);
@@ -46,8 +58,11 @@ public sealed class ModulePackageTransportException(ModulePackageDownloadStatus 
     public ModulePackageDownloadStatus Status { get; } = status;
 }
 
-public sealed class OfficialModulePackageTransport(HttpClient client) : IModulePackageTransport
+public sealed class OfficialModulePackageTransport : IModulePackageTransport, IDisposable
 {
+    private readonly HttpClient _client;
+    private readonly bool _ownsClient;
+    public OfficialModulePackageTransport(HttpClient client, bool ownsClient = false) => (_client, _ownsClient) = (client, ownsClient);
     private static readonly HashSet<string> AssetHosts = new(StringComparer.OrdinalIgnoreCase)
     { "release-assets.githubusercontent.com", "objects.githubusercontent.com" };
     private static readonly HashSet<HttpStatusCode> Redirects =
@@ -62,7 +77,7 @@ public sealed class OfficialModulePackageTransport(HttpClient client) : IModuleP
         for (var redirects = 0; ; redirects++)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, current);
-            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+            var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
             if (Redirects.Contains(response.StatusCode))
             {
                 var location = response.Headers.Location;
@@ -77,9 +92,13 @@ public sealed class OfficialModulePackageTransport(HttpClient client) : IModuleP
                 response.Dispose();
                 throw new ModulePackageTransportException(ModulePackageDownloadStatus.SourceUnavailable, "Package source did not return HTTP 200.");
             }
-            var stream = await response.Content.ReadAsStreamAsync(token);
-            return new ModulePackageTransportResponse(stream, response.Content.Headers.ContentLength,
-                response.Content.Headers.ContentEncoding.ToArray(), response);
+            try
+            {
+                var stream = await response.Content.ReadAsStreamAsync(token);
+                return new ModulePackageTransportResponse(stream, response.Content.Headers.ContentLength,
+                    response.Content.Headers.ContentEncoding.ToArray(), response);
+            }
+            catch { response.Dispose(); throw; }
         }
     }
 
@@ -93,6 +112,7 @@ public sealed class OfficialModulePackageTransport(HttpClient client) : IModuleP
         if (uri.Scheme != Uri.UriSchemeHttps || !uri.IsDefaultPort || !uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) ||
             uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0)
             throw new ModulePackageTransportException(ModulePackageDownloadStatus.SourceInvalid, "Untrusted package URL.");
+        if (uri.AbsolutePath.Contains('%')) throw new ModulePackageTransportException(ModulePackageDownloadStatus.SourceInvalid, "Encoded paths are not allowed.");
         var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (segments.Length != 6 || segments[0] != "QingMo-A" || segments[1] != "QingToolbox" ||
             segments[2] != "releases" || segments[3] != "download" ||
@@ -100,16 +120,20 @@ public sealed class OfficialModulePackageTransport(HttpClient client) : IModuleP
             segments.Any(x => Uri.UnescapeDataString(x) is "." or "..") ||
             Uri.UnescapeDataString(segments[^1]) != package.FileName)
             throw new ModulePackageTransportException(ModulePackageDownloadStatus.SourceInvalid, "Invalid official Release Asset URL.");
+        if (segments[4] is "." or ".." || segments[4].Any(ch => !char.IsAsciiLetterOrDigit(ch) && ch is not ('.' or '_' or '-')))
+            throw new ModulePackageTransportException(ModulePackageDownloadStatus.SourceInvalid, "Unsafe Release tag.");
         try { _ = Convert.FromHexString(package.Sha256); }
         catch (FormatException) { throw new ModulePackageTransportException(ModulePackageDownloadStatus.SourceInvalid, "Invalid SHA256."); }
         if (package.Sha256.Length != 64) throw new ModulePackageTransportException(ModulePackageDownloadStatus.SourceInvalid, "Invalid SHA256.");
     }
 
     private static bool IsTrustedAsset(Uri uri) => uri.Scheme == Uri.UriSchemeHttps && uri.IsDefaultPort &&
-        uri.UserInfo.Length == 0 && uri.Fragment.Length == 0 && AssetHosts.Contains(uri.Host);
+        uri.UserInfo.Length == 0 && uri.Fragment.Length == 0 && uri.AbsolutePath.Length > 1 &&
+        !uri.AbsolutePath.Contains("/../", StringComparison.Ordinal) && !uri.AbsolutePath.Any(char.IsControl) && AssetHosts.Contains(uri.Host);
     private static bool IsSafeFileName(string value) => value.Length > 5 && value == Path.GetFileName(value) &&
         !value.Any(ch => ch is '/' or '\\' or ':' || char.IsControl(ch)) &&
         !value.EndsWith(' ') && !value.EndsWith('.') && value.EndsWith(".qmod", StringComparison.Ordinal);
+    public void Dispose() { if (_ownsClient) _client.Dispose(); }
 }
 
 public sealed class ModulePackageDownloadCoordinator : IAsyncDisposable
@@ -121,40 +145,44 @@ public sealed class ModulePackageDownloadCoordinator : IAsyncDisposable
     private readonly string _verifiedRoot;
     private readonly TimeProvider _timeProvider;
     private readonly bool _disabled;
+    private readonly TimeSpan _inactivityTimeout;
     private readonly SemaphoreSlim _parallelism = new(2, 2);
-    private readonly ConcurrentDictionary<string, DownloadOperation> _inflight = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<ModulePackageDownloadIdentity, DownloadOperation> _inflight = new();
     private readonly CancellationTokenSource _lifetime = new();
 
     public ModulePackageDownloadCoordinator(IModuleUpdateChecker checker, IModulePackageTransport transport,
-        string cacheDirectory, TimeProvider timeProvider, bool disabledByEnvironment)
+        string cacheDirectory, TimeProvider timeProvider, bool disabledByEnvironment, TimeSpan? inactivityTimeout = null)
     {
+        if (!Path.IsPathFullyQualified(cacheDirectory)) throw new ArgumentException("Cache directory must be absolute.", nameof(cacheDirectory));
         _checker = checker; _transport = transport; _timeProvider = timeProvider; _disabled = disabledByEnvironment;
+        _inactivityTimeout = inactivityTimeout ?? TimeSpan.FromSeconds(30);
+        if (_inactivityTimeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(inactivityTimeout));
         _cacheRoot = Path.GetFullPath(cacheDirectory);
         _verifiedRoot = Path.GetFullPath(Path.Combine(_cacheRoot, "ModuleUpdates", "Packages", "Verified"));
         if (Path.GetPathRoot(_verifiedRoot) == _verifiedRoot) throw new ArgumentException("Verified root cannot be a volume root.", nameof(cacheDirectory));
     }
 
     public Task<ModulePackageDownloadResult> DownloadAsync(ModulePackageDownloadRequest request,
-        IProgress<ModulePackageDownloadProgress>? progress = null, CancellationToken token = default)
+        IProgress<ModulePackageDownloadProgress>? progress = null, CancellationToken callerToken = default)
     {
         if (_disabled) return Task.FromResult(new ModulePackageDownloadResult(ModulePackageDownloadStatus.DisabledByEnvironment));
-        var key = GetKey(request);
+        var key = ModulePackageDownloadIdentity.From(request);
         DownloadOperation? candidate = null;
         candidate = new DownloadOperation(CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token),
             () => RunAndRemoveAsync(key, request, progress, candidate!));
         var operation = _inflight.GetOrAdd(key, candidate);
         if (!ReferenceEquals(operation, candidate)) candidate.Dispose();
-        return operation.Task;
+        return callerToken.CanBeCanceled ? operation.Task.WaitAsync(callerToken) : operation.Task;
     }
 
     public void Cancel(ModulePackageDownloadRequest request)
-    { if (_inflight.TryGetValue(GetKey(request), out var operation)) operation.Cancellation.Cancel(); }
+    { if (_inflight.TryGetValue(ModulePackageDownloadIdentity.From(request), out var operation)) operation.Cancellation.Cancel(); }
 
-    private async Task<ModulePackageDownloadResult> RunAndRemoveAsync(string key, ModulePackageDownloadRequest request,
+    private async Task<ModulePackageDownloadResult> RunAndRemoveAsync(ModulePackageDownloadIdentity key, ModulePackageDownloadRequest request,
         IProgress<ModulePackageDownloadProgress>? progress, DownloadOperation operation)
     {
         try { return await RunAsync(request, progress, operation.Cancellation.Token); }
-        finally { _inflight.TryRemove(new KeyValuePair<string, DownloadOperation>(key, operation)); operation.Dispose(); }
+        finally { _inflight.TryRemove(new KeyValuePair<ModulePackageDownloadIdentity, DownloadOperation>(key, operation)); operation.Dispose(); }
     }
 
     private async Task<ModulePackageDownloadResult> RunAsync(ModulePackageDownloadRequest request,
@@ -193,7 +221,10 @@ public sealed class ModulePackageDownloadCoordinator : IAsyncDisposable
                         var buffer = new byte[65536];
                         while (true)
                         {
-                            var read = await response.Content.ReadAsync(buffer, token); if (read == 0) break;
+                            int read;
+                            try { read = await response.Content.ReadAsync(buffer, token).AsTask().WaitAsync(_inactivityTimeout, token); }
+                            catch (TimeoutException) { return new(ModulePackageDownloadStatus.TransferTimedOut, LatestUpdateResult: latest); }
+                            if (read == 0) break;
                             received += read; if (received > request.Package.Size) return new(ModulePackageDownloadStatus.SizeMismatch, LatestUpdateResult: latest);
                             hash.AppendData(buffer, 0, read); await output.WriteAsync(buffer.AsMemory(0, read), token);
                             var percent = received * 100 / request.Package.Size;
@@ -209,10 +240,12 @@ public sealed class ModulePackageDownloadCoordinator : IAsyncDisposable
                     if (received != request.Package.Size) return new(ModulePackageDownloadStatus.SizeMismatch, LatestUpdateResult: latest);
                     var expectedHash = Convert.FromHexString(request.Package.Sha256);
                     if (!CryptographicOperations.FixedTimeEquals(actualHash, expectedHash)) return new(ModulePackageDownloadStatus.HashMismatch, LatestUpdateResult: latest);
-                    EnsureSafeDirectory(paths.Directory); File.Move(temp, paths.Final, false); temp = string.Empty;
+                    EnsureSafeDirectory(paths.Directory); token.ThrowIfCancellationRequested(); File.Move(temp, paths.Final, false); temp = string.Empty;
                     var verified = new VerifiedModulePackage(request.ModuleId, request.TargetVersion, request.Package.FileName,
                         paths.Final, received, Convert.ToHexString(actualHash).ToLowerInvariant(), _timeProvider.GetUtcNow());
-                    await WriteRecordAsync(paths.Record, request, verified, token);
+                    try { await WriteRecordAsync(paths.Record, request, verified, CancellationToken.None); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    { verified = verified with { RecordPersistenceFailed = true }; }
                     return new(ModulePackageDownloadStatus.Verified, verified, latest);
                 }
                 finally { TryDelete(temp); }
@@ -224,16 +257,17 @@ public sealed class ModulePackageDownloadCoordinator : IAsyncDisposable
         catch (ModuleUpdateProtocolException) { return new(ModulePackageDownloadStatus.SourceInvalid); }
         catch (ModuleUpdateSourceUnavailableException) { return new(ModulePackageDownloadStatus.SourceUnavailable); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return new(ModulePackageDownloadStatus.StorageUnavailable); }
-        catch { return new(ModulePackageDownloadStatus.Failed); }
     }
 
     private (string Directory, string Final, string Record) PreparePaths(ModulePackageDownloadRequest request)
     {
-        if (!request.ModuleId.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '.' or '-' or '_'))
+        if (string.IsNullOrEmpty(request.ModuleId) || !request.ModuleId.All(ch => char.IsAsciiLetterOrDigit(ch) && !char.IsUpper(ch) || ch is '.' or '-' or '_'))
             throw new ModulePackageTransportException(ModulePackageDownloadStatus.SourceInvalid, "Unsafe module id.");
         var directory = Path.GetFullPath(Path.Combine(_verifiedRoot, request.ModuleId, request.TargetVersion.ToString(), request.Package.Sha256.ToLowerInvariant()));
         EnsureWithinRoot(directory); CreateSafeDirectoryChain(directory);
         var final = Path.GetFullPath(Path.Combine(directory, request.Package.FileName)); EnsureWithinRoot(final);
+        foreach (var partial in Directory.EnumerateFiles(directory, $".{request.Package.FileName}.partial-*", SearchOption.TopDirectoryOnly))
+            if (!IsReparse(partial) && _timeProvider.GetUtcNow() - File.GetLastWriteTimeUtc(partial) > TimeSpan.FromHours(24)) TryDelete(partial);
         if (File.Exists(final) && IsReparse(final)) throw new IOException("Reparse-point package file rejected.");
         return (directory, final, Path.Combine(directory, "package-record.json"));
     }
@@ -291,7 +325,6 @@ public sealed class ModulePackageDownloadCoordinator : IAsyncDisposable
     private static bool SamePackage(ModuleUpdatePackage a, ModuleUpdatePackage b) => a.FileName == b.FileName &&
         a.Url.AbsoluteUri.Equals(b.Url.AbsoluteUri, StringComparison.Ordinal) &&
         a.Size == b.Size && a.Sha256.Equals(b.Sha256, StringComparison.OrdinalIgnoreCase);
-    private static string GetKey(ModulePackageDownloadRequest request) => $"{request.ModuleId}\n{request.LocalVersion}\n{request.TargetVersion}\n{request.Package.Sha256}";
     private static void TryDelete(string? path) { if (string.IsNullOrEmpty(path)) return; try { File.Delete(path); } catch { } }
     public void Cancel() => _lifetime.Cancel();
     public async ValueTask DisposeAsync()

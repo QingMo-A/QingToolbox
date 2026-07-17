@@ -161,7 +161,7 @@ public partial class App : Application
                 var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
                 var version = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "unknown";
                 client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("QingToolbox", version));
-                return new OfficialModulePackageTransport(client);
+                return new OfficialModulePackageTransport(client, ownsClient: true);
             });
             services.AddSingleton(provider => new ModulePackageDownloadCoordinator(
                 provider.GetRequiredService<IModuleUpdateChecker>(), provider.GetRequiredService<IModulePackageTransport>(),

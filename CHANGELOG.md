@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Corrected shared-download cancellation semantics and complete package identity binding.
+- Preserved committed verified packages across auxiliary record failures.
+- Added transfer inactivity timeout and prevented stale results from attaching after refresh.
+
 - Added verified manual module package downloads with fresh metadata confirmation.
 - Added streaming size and SHA256 validation with environment-isolated verified package storage.
 - Kept downloaded packages staged only: no extraction, import, installation, or replacement occurs in this phase.

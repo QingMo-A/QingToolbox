@@ -18,4 +18,10 @@ Existing directories and files are checked for reparse points and every full pat
 
 An existing package is never trusted from `package-record.json` alone: its length and SHA256 are streamed and checked again. A matching file yields `AlreadyVerified` without a package request; a mismatching controlled file is isolated and removed before a fresh transfer. The record stores only official immutable metadata, never a signed redirect URL.
 
+Caller cancellation only stops that caller from awaiting a shared transfer; explicit package cancellation stops the underlying operation for every waiter, while application shutdown cancels all operations and awaits cleanup. Shared work is keyed by module ID, local and target versions, file name, canonical official URL, expected size, and normalized SHA256.
+
+The atomic move of the verified partial file to its final `.qmod` name is the commit point. `package-record.json` is auxiliary: failure to write it does not undo or downgrade a committed package, and an existing package is always rehashed. Reads have a 30-second inactivity timeout that resets whenever bytes arrive. Only partial files for the exact package that are older than 24 hours are cleaned from its SHA directory.
+
+UI results are reapplied only when the current module local version and complete package identity still match. A refreshed or replaced module cannot receive a stale completion, and a still-matching `Verified` or `AlreadyVerified` package does not show another download action.
+
 SHA256 proves that the bytes match the currently unsigned official metadata; it is not a publisher digital signature. A later phase may add `.qmod` structure validation, staging, transactional installation, rollback, and pending-update handling. None of those operations are implemented here, and startup authorization is not changed automatically.

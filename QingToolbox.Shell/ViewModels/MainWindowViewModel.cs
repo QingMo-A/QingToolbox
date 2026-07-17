@@ -44,7 +44,7 @@ public sealed partial class MainWindowViewModel(
     private readonly CancellationTokenSource _updateCancellation = new();
     private CancellationTokenSource? _automaticUpdateDelay;
     private readonly Dictionary<string, (string Version, ModuleUpdateResult Result)> _updateResults = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, (string LocalVersion, string TargetVersion, string Sha256, ModulePackageDownloadStatus Status)> _downloadResults = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (ModulePackageDownloadIdentity Identity, ModulePackageDownloadStatus Status)> _downloadResults = new(StringComparer.Ordinal);
     private bool _moduleUpdateUsedStaleCache;
     private DateTimeOffset? _moduleUpdateLastCheckedAt;
     private StartupPresentationMode _persistedStartupPresentationMode;
@@ -346,24 +346,32 @@ public sealed partial class MainWindowViewModel(
     {
         if (!module.CanDownloadUpdate || module.UpdateResult.SelectedRelease is not { } release) return;
         var request = new ModulePackageDownloadRequest(module.Id, module.Version, release.Version, release.Package);
+        var identity = ModulePackageDownloadIdentity.From(request);
         module.DownloadStatus = ModulePackageDownloadStatus.ConfirmingMetadata;
         module.DownloadBytesReceived = 0; module.DownloadExpectedBytes = release.Package.Size;
         var progress = new Progress<ModulePackageDownloadProgress>(value =>
         {
-            module.DownloadStatus = value.BytesReceived == value.ExpectedBytes
+            var current = Modules.FirstOrDefault(item => item.Id == identity.ModuleId);
+            if (current is null || !ModulePackageUiBinding.Matches(identity, current.Id, current.Version, current.UpdateResult)) return;
+            current.DownloadStatus = value.BytesReceived == value.ExpectedBytes
                 ? ModulePackageDownloadStatus.Verifying : ModulePackageDownloadStatus.Downloading;
-            module.DownloadBytesReceived = value.BytesReceived;
-            module.DownloadExpectedBytes = value.ExpectedBytes;
+            current.DownloadBytesReceived = value.BytesReceived;
+            current.DownloadExpectedBytes = value.ExpectedBytes;
         });
-        var result = await modulePackageDownloadCoordinator.DownloadAsync(request, progress);
+        ModulePackageDownloadResult result;
+        try { result = await modulePackageDownloadCoordinator.DownloadAsync(request, progress); }
+        catch (Exception exception) { Debug.WriteLine($"Module package download failed: {exception.GetType().Name}"); result = new(ModulePackageDownloadStatus.Failed); }
+        var currentModule = Modules.FirstOrDefault(item => item.Id == identity.ModuleId);
+        if (currentModule is null || currentModule.Version != identity.LocalVersion) return;
         if (result.LatestUpdateResult is { } latest &&
             result.Status is ModulePackageDownloadStatus.MetadataChanged or ModulePackageDownloadStatus.MetadataStale)
         {
-            module.UpdateResult = latest;
-            _updateResults[module.Id] = (module.Version, latest);
+            currentModule.UpdateResult = latest;
+            _updateResults[currentModule.Id] = (currentModule.Version, latest);
         }
-        module.DownloadStatus = result.Status;
-        _downloadResults[module.Id] = (module.Version, release.Version.ToString(), release.Package.Sha256, result.Status);
+        else if (!ModulePackageUiBinding.Matches(identity, currentModule.Id, currentModule.Version, currentModule.UpdateResult)) return;
+        currentModule.DownloadStatus = result.Status;
+        _downloadResults[currentModule.Id] = (identity, result.Status);
     }
 
     [RelayCommand]
@@ -450,10 +458,9 @@ public sealed partial class MainWindowViewModel(
                     moduleViewModel.UpdateResult = new(module.Manifest.Id, ModuleUpdateStatus.DisabledByEnvironment);
                 if (_updateResults.TryGetValue(module.Manifest.Id, out prior) && prior.Version != module.Manifest.Version)
                     _updateResults.Remove(module.Manifest.Id);
-                if (moduleViewModel.UpdateResult.SelectedRelease is { } selected &&
+                if (moduleViewModel.UpdateResult.SelectedRelease is not null &&
                     _downloadResults.TryGetValue(module.Manifest.Id, out var download) &&
-                    download.LocalVersion == module.Manifest.Version && download.TargetVersion == selected.Version.ToString() &&
-                    download.Sha256.Equals(selected.Package.Sha256, StringComparison.OrdinalIgnoreCase))
+                    ModulePackageUiBinding.Matches(download.Identity, module.Manifest.Id, module.Manifest.Version, moduleViewModel.UpdateResult))
                     moduleViewModel.DownloadStatus = download.Status;
                 else
                     _downloadResults.Remove(module.Manifest.Id);

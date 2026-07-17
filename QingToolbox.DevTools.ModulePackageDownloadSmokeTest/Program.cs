@@ -99,9 +99,12 @@ static class Smoke
         {
             var transport = new FakeTransport(data, delay: TimeSpan.FromMilliseconds(50)); var checker = new FakeChecker(Result(package));
             await using var coordinator = new ModulePackageDownloadCoordinator(checker, transport, root, new FakeClock(), false);
-            var first = coordinator.DownloadAsync(Request(package)); var second = coordinator.DownloadAsync(Request(package));
-            var results = await Task.WhenAll(first, second);
-            Assert(results.All(x => x.Status == ModulePackageDownloadStatus.Verified) && transport.Calls == 1, "same package coalesced");
+            using var callerCancellation = new CancellationTokenSource();
+            var first = coordinator.DownloadAsync(Request(package), callerToken: callerCancellation.Token);
+            var second = coordinator.DownloadAsync(Request(package)); callerCancellation.Cancel();
+            try { await first; throw new Exception("caller wait cancellation ignored"); } catch (OperationCanceledException) { }
+            var sharedResult = await second;
+            Assert(sharedResult.Status == ModulePackageDownloadStatus.Verified && transport.Calls == 1, "caller cancellation does not cancel shared transfer");
             var third = await coordinator.DownloadAsync(Request(package));
             Assert(third.Status == ModulePackageDownloadStatus.AlreadyVerified && transport.Calls == 1, "existing file reverified without package network");
         });

@@ -112,7 +112,7 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     [ObservableProperty] private long _downloadBytesReceived;
     [ObservableProperty] private long _downloadExpectedBytes;
     public bool CanDownloadUpdate => !_downloadsDisabled && DownloadStatus is not (ModulePackageDownloadStatus.ConfirmingMetadata or
-        ModulePackageDownloadStatus.Downloading or ModulePackageDownloadStatus.Verifying) && UpdateResult.Status == ModuleUpdateStatus.UpdateAvailable &&
+        ModulePackageDownloadStatus.Downloading or ModulePackageDownloadStatus.Verifying or ModulePackageDownloadStatus.Verified or ModulePackageDownloadStatus.AlreadyVerified) && UpdateResult.Status == ModuleUpdateStatus.UpdateAvailable &&
         UpdateResult.SelectedRelease is not null && !UpdateResult.IsFromStaleCache;
     public bool IsDownloadActive => DownloadStatus is ModulePackageDownloadStatus.ConfirmingMetadata or ModulePackageDownloadStatus.Downloading or ModulePackageDownloadStatus.Verifying;
     public bool HasDownloadStatus => DownloadStatus != ModulePackageDownloadStatus.NotDownloaded;
@@ -129,9 +129,11 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         ModulePackageDownloadStatus.HashMismatch => "hashMismatch",
         ModulePackageDownloadStatus.UntrustedRedirect => "untrustedRedirect",
         ModulePackageDownloadStatus.SourceUnavailable => "sourceUnavailable",
-        ModulePackageDownloadStatus.SourceInvalid => "sourceUnavailable",
+        ModulePackageDownloadStatus.SourceInvalid => "sourceInvalid",
         ModulePackageDownloadStatus.StorageUnavailable => "storageUnavailable",
         ModulePackageDownloadStatus.Cancelled => "cancelled",
+        ModulePackageDownloadStatus.TransferTimedOut => "transferTimedOut",
+        ModulePackageDownloadStatus.Failed => "failed",
         ModulePackageDownloadStatus.DisabledByEnvironment => "disabled",
         _ => "sourceUnavailable"
     }}");
@@ -205,6 +207,8 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
 
     partial void OnUpdateResultChanged(ModuleUpdateResult value)
     {
+        if (DownloadStatus is ModulePackageDownloadStatus.Verified or ModulePackageDownloadStatus.AlreadyVerified)
+            DownloadStatus = ModulePackageDownloadStatus.NotDownloaded;
         OnPropertyChanged(nameof(DisplayUpdateStatus));
         OnPropertyChanged(nameof(DisplayUpdateReleaseNote));
         OnPropertyChanged(nameof(HasUpdateReleaseNote));
