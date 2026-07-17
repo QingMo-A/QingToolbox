@@ -776,7 +776,7 @@
                                             <TextBlock Text="{Binding DisplayUpdateStatus}" TextWrapping="Wrap" Foreground="#31598F"/>
                                         </Border>
 
-                                        <CheckBox Margin="0,0,0,12"
+                                        <CheckBox Margin="0,0,0,6"
                                                   Content="{Binding DataContext.Strings[startup.moduleLabel], RelativeSource={RelativeSource AncestorType=Window}}"
                                                   ToolTip="{Binding DataContext.Strings[startup.moduleDescription], RelativeSource={RelativeSource AncestorType=Window}}"
                                                   AutomationProperties.Name="{Binding DataContext.Strings[startup.moduleLabel], RelativeSource={RelativeSource AncestorType=Window}}"
@@ -784,7 +784,7 @@
                                                   IsEnabled="{Binding CanChangeStartupAuthorization}"
                                                   Command="{Binding DataContext.ToggleModuleStartupCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                   CommandParameter="{Binding}"/>
-                                        <TextBlock Margin="0,0,0,8" Text="{Binding StartupAuthorizationMessage}"
+                                        <TextBlock Margin="0,0,0,4" Text="{Binding StartupAuthorizationMessage}"
                                                    TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/>
 
                                         <Button HorizontalAlignment="Left"
@@ -813,7 +813,8 @@
                                         </Grid>
 
                                         <WrapPanel Margin="0,14,0,0">
-                                            <Button AutomationProperties.Name="Load"
+                                            <Button Margin="0,0,8,8"
+                                                    AutomationProperties.Name="Load"
                                                     Command="{Binding DataContext.LoadModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}"
                                                     IsEnabled="{Binding CanLoad}"
@@ -823,7 +824,8 @@
                                                     <TextBlock VerticalAlignment="Center" Text="{Binding DataContext.Strings[modules.load], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                                 </StackPanel>
                                             </Button>
-                                            <Button AutomationProperties.Name="Activate"
+                                            <Button Margin="0,0,8,8"
+                                                    AutomationProperties.Name="Activate"
                                                     Command="{Binding DataContext.ActivateModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}"
                                                     IsEnabled="{Binding CanActivate}"
@@ -833,7 +835,8 @@
                                                     <TextBlock VerticalAlignment="Center" Text="{Binding DataContext.Strings[modules.activate], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                                 </StackPanel>
                                             </Button>
-                                            <Button AutomationProperties.Name="Deactivate"
+                                            <Button Margin="0,0,8,8"
+                                                    AutomationProperties.Name="Deactivate"
                                                     Command="{Binding DataContext.DeactivateModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}"
                                                     IsEnabled="{Binding CanDeactivate}"
@@ -843,7 +846,8 @@
                                                     <TextBlock VerticalAlignment="Center" Text="{Binding DataContext.Strings[modules.deactivate], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                                 </StackPanel>
                                             </Button>
-                                            <Button AutomationProperties.Name="Unload"
+                                            <Button Margin="0,0,8,8"
+                                                    AutomationProperties.Name="Unload"
                                                     Command="{Binding DataContext.UnloadModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}"
                                                     IsEnabled="{Binding CanUnload}"
@@ -853,7 +857,8 @@
                                                     <TextBlock VerticalAlignment="Center" Text="{Binding DataContext.Strings[modules.unload], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                                 </StackPanel>
                                             </Button>
-                                            <Button AutomationProperties.Name="Open"
+                                            <Button Margin="0,0,8,8"
+                                                    AutomationProperties.Name="Open"
                                                     Command="{Binding DataContext.OpenModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}"
                                                     IsEnabled="{Binding CanOpen}"
@@ -863,7 +868,8 @@
                                                     <TextBlock VerticalAlignment="Center" Text="{Binding DataContext.Strings[modules.open], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                                 </StackPanel>
                                             </Button>
-                                            <Button AutomationProperties.Name="Remove module"
+                                            <Button Margin="0,0,8,8"
+                                                    AutomationProperties.Name="Remove module"
                                                     Command="{Binding DataContext.RemoveModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding Id}"
                                                     IsEnabled="{Binding CanRemove}"
