@@ -16,6 +16,7 @@ using QingToolbox.Core.Settings;
 using QingToolbox.Shell.Startup;
 using QingToolbox.Abstractions.Modules;
 using QingToolbox.Core.Updates;
+using QingToolbox.Shell.Views;
 
 namespace QingToolbox.Shell.ViewModels;
 
@@ -452,6 +453,9 @@ public sealed partial class MainWindowViewModel(
                     localizationDiagnosticsByModuleId.GetValueOrDefault(
                         module.Manifest.Id),
                     executionEnvironment.IsModuleTest);
+                moduleViewModel.IsUserInstalled = IsDirectChildOf(
+                    module.ModuleDirectory,
+                    applicationPaths.UserModulesDirectory);
                 if (_updateResults.TryGetValue(module.Manifest.Id, out var prior) && prior.Version == module.Manifest.Version)
                     moduleViewModel.UpdateResult = prior.Result;
                 else if (executionEnvironment.IsModuleTest)
@@ -720,6 +724,68 @@ public sealed partial class MainWindowViewModel(
         }
         OnPropertyChanged(nameof(HasModules));
         OnPropertyChanged(nameof(HasNoModules));
+    }
+
+    [RelayCommand]
+    private async Task RemoveModuleAsync(string moduleId)
+    {
+        var module = Modules.FirstOrDefault(item => item.Id == moduleId);
+        if (module is null || !module.CanRemove) return;
+
+        var dialog = new ModuleRemovalDialog(localization, module.DisplayName)
+        {
+            Owner = Application.Current?.MainWindow
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        module.IsBusy = true;
+        try
+        {
+            moduleWindowManager.CloseWindow(moduleId);
+            var record = runtimeManager.GetRecord(moduleId);
+            if (record?.State.ToString() == "Running")
+                await runtimeManager.DeactivateAsync(moduleId);
+            record = runtimeManager.GetRecord(moduleId);
+            if (record?.State.ToString() is "Loaded" or "Deactivated" or "Failed")
+                await runtimeManager.UnloadAsync(moduleId);
+
+            var moduleDirectory = Path.GetFullPath(module.ModuleDirectory);
+            if (!IsDirectChildOf(moduleDirectory, applicationPaths.UserModulesDirectory))
+                throw new InvalidOperationException(localization.GetString("modules.removeUnsafePath"));
+            EnsureRemovalTreeContainsNoLinks(moduleDirectory);
+
+            await settingsService.UpdateAsync(settings =>
+                settings.StartupModules.RemoveAll(item => item.ModuleId == moduleId));
+            Directory.Delete(moduleDirectory, recursive: true);
+
+            SelectedModule = null;
+            await RefreshModulesAsync();
+            StatusMessage = localization.GetString("status.moduleRemoved", module.DisplayName);
+        }
+        catch (Exception exception)
+        {
+            module.UpdateRuntimeState(runtimeManager.GetRecord(moduleId));
+            StatusMessage = localization.GetString("status.moduleRemoveFailed", module.DisplayName, exception.Message);
+        }
+        finally
+        {
+            module.IsBusy = false;
+        }
+    }
+
+    private static bool IsDirectChildOf(string candidate, string parent)
+    {
+        var fullCandidate = Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar);
+        var fullParent = Path.GetFullPath(parent).TrimEnd(Path.DirectorySeparatorChar);
+        return string.Equals(Path.GetDirectoryName(fullCandidate), fullParent, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void EnsureRemovalTreeContainsNoLinks(string root)
+    {
+        if (!Directory.Exists(root)) throw new DirectoryNotFoundException(root);
+        foreach (var path in Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories).Prepend(root))
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("Module links and reparse points cannot be removed automatically.");
     }
 
     public async Task InitializeDiscoveryAsync(CancellationToken cancellationToken = default)

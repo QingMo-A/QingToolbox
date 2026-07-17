@@ -863,6 +863,16 @@
                                                     <TextBlock VerticalAlignment="Center" Text="{Binding DataContext.Strings[modules.open], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                                 </StackPanel>
                                             </Button>
+                                            <Button AutomationProperties.Name="Remove module"
+                                                    Command="{Binding DataContext.RemoveModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding Id}"
+                                                    IsEnabled="{Binding CanRemove}"
+                                                    Style="{StaticResource DangerActionButtonStyle}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Margin="0,0,6,0" Text="&#xE74D;" Style="{StaticResource CompactFluentIconStyle}"/>
+                                                    <TextBlock VerticalAlignment="Center" Text="{Binding DataContext.Strings[modules.remove], RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                </StackPanel>
+                                            </Button>
                                         </WrapPanel>
 
                                         <Border>

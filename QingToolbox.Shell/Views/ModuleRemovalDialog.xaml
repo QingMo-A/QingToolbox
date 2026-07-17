@@ -1,0 +1,41 @@
+<Window x:Class="QingToolbox.Shell.Views.ModuleRemovalDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:svgc="http://sharpvectors.codeplex.com/svgc/"
+        xmlns:controls="clr-namespace:QingToolbox.Shell.Controls"
+        xmlns:windowing="clr-namespace:QingToolbox.Shell.Windowing"
+        Width="520" SizeToContent="Height" ResizeMode="NoResize" WindowStyle="None"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="#F5F9FF"
+        Icon="../Assets/Branding/QingToolbox.ico" UseLayoutRounding="True"
+        windowing:WindowChromeBehavior.IsEnabled="True">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="{x:Static windowing:WindowChromeMetrics.TitleBarGridLength}"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <controls:WindowTitleBar x:Name="DialogTitleBar" Title="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=Title}"
+                                 ShowMinimizeButton="False" ShowMaximizeButton="False">
+            <controls:WindowTitleBar.IconSource>
+                <svgc:SvgViewbox Width="22" Height="22" Source="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.Mark.svg"/>
+            </controls:WindowTitleBar.IconSource>
+        </controls:WindowTitleBar>
+        <StackPanel Grid.Row="1" Margin="30,28,30,28">
+            <Border Width="52" Height="52" CornerRadius="16" Background="#FFF0F0" HorizontalAlignment="Left">
+                <TextBlock Text="&#xE74D;" FontFamily="Segoe Fluent Icons" FontSize="22" Foreground="#DC4C4C"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <TextBlock x:Name="HeadingText" Margin="0,18,0,0" FontSize="23" FontWeight="SemiBold" Foreground="#14213D"/>
+            <TextBlock x:Name="DescriptionText" Margin="0,8,0,0" FontSize="14" LineHeight="21" TextWrapping="Wrap" Foreground="#64748B"/>
+            <Border Margin="0,20,0,0" Padding="16,13" CornerRadius="14" Background="#EEF5FF" BorderBrush="#D7E6FB" BorderThickness="1">
+                <TextBlock x:Name="DataNoticeText" TextWrapping="Wrap" Foreground="#46617F"/>
+            </Border>
+            <Grid Margin="0,24,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Button x:Name="CancelButton" Grid.Column="1" MinWidth="96" Margin="0,0,10,0" IsCancel="True"
+                        Style="{StaticResource SecondaryActionButtonStyle}" Click="OnCancelClick"/>
+                <Button x:Name="RemoveButton" Grid.Column="2" MinWidth="116" IsDefault="True"
+                        Style="{StaticResource DangerActionButtonStyle}" Click="OnRemoveClick"/>
+            </Grid>
+        </StackPanel>
+    </Grid>
+</Window>

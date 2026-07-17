@@ -59,6 +59,9 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         _downloadsDisabled = downloadsDisabled;
     }
 
+    public bool IsUserInstalled { get; internal set; }
+    public bool CanRemove => IsUserInstalled && !IsBusy;
+
     public string Id { get; }
     public string Name { get; }
     public string Version { get; }
@@ -234,6 +237,7 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     partial void OnIsBusyChanged(bool value)
     {
         NotifyCommandStatesChanged();
+        OnPropertyChanged(nameof(CanRemove));
     }
 
     partial void OnIsStartupAuthorizationBusyChanged(bool value) =>
