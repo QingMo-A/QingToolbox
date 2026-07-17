@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added verified manual module package downloads with fresh metadata confirmation.
+- Added streaming size and SHA256 validation with environment-isolated verified package storage.
+- Kept downloaded packages staged only: no extraction, import, installation, or replacement occurs in this phase.
+
 - Selected the highest compatible module release before reporting compatibility blockers.
 - Propagated stale index provenance into module results.
 - Decoupled cache persistence failures from valid metadata responses.

@@ -1010,6 +1010,29 @@
                                                TextWrapping="Wrap" Foreground="#526B8B"/>
                                 </StackPanel>
                             </Border>
+                            <StackPanel Margin="0,12,0,0">
+                                <WrapPanel>
+                                    <Button Command="{Binding DataContext.DownloadModulePackageCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" IsEnabled="{Binding CanDownloadUpdate}"
+                                            Visibility="{Binding CanDownloadUpdate, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                            Style="{StaticResource PrimaryActionButtonStyle}">
+                                        <TextBlock Text="{Binding DataContext.Strings[moduleDownload.action], RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                    </Button>
+                                    <Button Margin="8,0,0,0"
+                                            Command="{Binding DataContext.CancelModulePackageDownloadCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            Visibility="{Binding IsDownloadActive, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                            Style="{StaticResource SecondaryActionButtonStyle}">
+                                        <TextBlock Text="{Binding DataContext.Strings[moduleDownload.cancel], RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                    </Button>
+                                </WrapPanel>
+                                <TextBlock Margin="0,7,0,0" Text="{Binding DisplayDownloadStatus}" TextWrapping="Wrap"
+                                           Visibility="{Binding HasDownloadStatus, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                           Foreground="#31598F"/>
+                                <TextBlock Margin="0,3,0,0" Text="{Binding DisplayDownloadProgress}"
+                                           Visibility="{Binding IsDownloadActive, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                           Foreground="{StaticResource SecondaryTextBrush}"/>
+                            </StackPanel>
                             <CheckBox Margin="0,14,0,0"
                                       Content="{Binding DataContext.Strings[startup.moduleLabel], RelativeSource={RelativeSource AncestorType=Window}}"
                                       ToolTip="{Binding DataContext.Strings[startup.moduleDescription], RelativeSource={RelativeSource AncestorType=Window}}"

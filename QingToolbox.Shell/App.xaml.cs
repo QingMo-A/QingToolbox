@@ -15,6 +15,7 @@ using QingToolbox.Core.Updates;
 using System.Net.Http.Headers;
 using System.Reflection;
 using System.Net.Http;
+using System.Net;
 
 namespace QingToolbox.Shell;
 
@@ -152,7 +153,19 @@ public partial class App : Application
             });
             services.AddSingleton(provider => new ModuleUpdateChecker(provider.GetRequiredService<IModuleUpdateSource>(),
                 provider.GetRequiredService<ModuleUpdateCompatibilityEvaluator>(), provider.GetRequiredService<TimeProvider>(), environment.IsModuleTest));
+            services.AddSingleton<IModuleUpdateChecker>(provider => provider.GetRequiredService<ModuleUpdateChecker>());
             services.AddSingleton<ModuleUpdateCheckCoordinator>();
+            services.AddSingleton<IModulePackageTransport>(_ =>
+            {
+                var handler = new HttpClientHandler { AllowAutoRedirect = false, AutomaticDecompression = DecompressionMethods.None, UseCookies = false };
+                var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+                var version = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "unknown";
+                client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("QingToolbox", version));
+                return new OfficialModulePackageTransport(client);
+            });
+            services.AddSingleton(provider => new ModulePackageDownloadCoordinator(
+                provider.GetRequiredService<IModuleUpdateChecker>(), provider.GetRequiredService<IModulePackageTransport>(),
+                provider.GetRequiredService<ApplicationPaths>().CacheDirectory, provider.GetRequiredService<TimeProvider>(), environment.IsModuleTest));
             services.AddSingleton<MainWindowViewModel>();
             services.AddSingleton<MainWindow>();
 

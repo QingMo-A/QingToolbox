@@ -45,6 +45,7 @@ static class Smoke
         var manifest = ModuleUpdateProtocolParser.ParseUpdate(Bytes(Update("""[{"version":"0.2.0","channel":"stable","moduleApiVersion":"experimental-0.1","minimumHostVersion":"0.1.0-alpha","publishedAt":"2026-07-20T08:00:00Z","package":{"fileName":"Demo.qmod","url":"https://github.com/QingMo-A/QingToolbox/releases/download/v0.2.0/Demo.qmod","size":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"releaseNotes":{"zh-CN":"说明","en-US":"Notes"}}]""")), "qing.demo");
         var evaluator = new ModuleUpdateCompatibilityEvaluator(SemanticVersion.Parse("0.1.0-alpha"), "experimental-0.1", ModuleUpdateChannel.Preview);
         Assert(evaluator.Evaluate("qing.demo", "0.1.0", manifest, DateTimeOffset.UtcNow).Status == ModuleUpdateStatus.UpdateAvailable, "available");
+        Assert(evaluator.Evaluate("qing.demo", "0.1.0", manifest, DateTimeOffset.UtcNow).SelectedRelease?.Package.FileName == "Demo.qmod", "selected release carries package");
         Assert(evaluator.Evaluate("qing.demo", "0.2.0", manifest, DateTimeOffset.UtcNow).Status == ModuleUpdateStatus.UpToDate, "current");
         Assert(evaluator.Evaluate("qing.demo", "bad", manifest, DateTimeOffset.UtcNow).Status == ModuleUpdateStatus.InvalidLocalVersion, "invalid local");
         var upperManifest = ModuleUpdateProtocolParser.ParseUpdate(Bytes(Update("""[{"version":"0.3.0","channel":"stable","moduleApiVersion":"experimental-0.1","minimumHostVersion":"0.1.0-alpha","maximumHostVersionExclusive":"0.2.0","publishedAt":"2026-07-20T08:00:00Z","package":{"fileName":"Demo.qmod","url":"https://github.com/QingMo-A/QingToolbox/releases/download/v0.3.0/Demo.qmod","size":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"releaseNotes":{"zh-CN":"说明","en-US":"Notes"}}]""")), "qing.demo");
@@ -76,8 +77,8 @@ static class Smoke
         var now = DateTimeOffset.UtcNow;
         var batch = new ModuleUpdateBatchResult(new Dictionary<string, VersionBoundModuleUpdateResult>
         {
-            ["match"] = new("match", "1.0.0", new("match", ModuleUpdateStatus.UpdateAvailable, SemanticVersion.Parse("1.1.0"), IsFromStaleCache: true)),
-            ["changed"] = new("changed", "1.0.0", new("changed", ModuleUpdateStatus.UpdateAvailable, SemanticVersion.Parse("1.1.0")))
+            ["match"] = new("match", "1.0.0", new("match", ModuleUpdateStatus.UpdateAvailable, Release("1.1.0"), IsFromStaleCache: true)),
+            ["changed"] = new("changed", "1.0.0", new("changed", ModuleUpdateStatus.UpdateAvailable, Release("1.1.0")))
         }, true, now);
         var partial = ModuleUpdateBatchApplicator.Apply(new Dictionary<string, string> { ["match"] = "1.0.0", ["changed"] = "2.0.0" }, batch);
         Assert(partial.AppliedResults.Count == 1 && partial.UpdateCount == 1 && partial.UsedStaleCache && !partial.ResultsOutdated, "partial version-bound application");
@@ -106,6 +107,17 @@ static class Smoke
             Assert(handler.Requests.Count == 3, "304 refreshes 24-hour freshness");
             Assert(Directory.GetFiles(root, "*.cache.json").Length == 2 && Directory.GetFiles(root, "*.meta").Length == 0, "single envelope cache");
             Assert(handler.Requests.All(x => !x.RequestUri!.AbsolutePath.EndsWith(".qmod", StringComparison.OrdinalIgnoreCase)), "no qmod request");
+
+            var corrupt = new ModuleUpdateCacheEnvelope(1, ModuleUpdateIdentity.OfficialIndexUrl, "\"bad\"", DateTimeOffset.UtcNow,
+                clock.GetUtcNow(), Bytes("{"));
+            var repairedHandler = new FakeHandler();
+            repairedHandler.Enqueue(HttpStatusCode.OK, """{"schemaVersion":1,"sourceId":"qingtoolbox-official","modules":{}}""", null);
+            var repaired = await new OfficialModuleUpdateSource(new HttpClient(repairedHandler), new StaticCache(corrupt), clock).GetIndexAsync(false, default);
+            Assert(repaired.Value.Modules.Count == 0 && !repairedHandler.Requests[0].Headers.IfNoneMatch.Any() &&
+                repairedHandler.Requests[0].Headers.IfModifiedSince is null, "corrupt fresh cache ignored without validators");
+            var failedHandler = new FakeHandler(); failedHandler.Enqueue(HttpStatusCode.ServiceUnavailable, "", null);
+            try { await new OfficialModuleUpdateSource(new HttpClient(failedHandler), new StaticCache(corrupt), clock).GetIndexAsync(false, default); throw new Exception("corrupt cache masked network failure"); }
+            catch (ModuleUpdateSourceUnavailableException) { }
         }
         finally { try { Directory.Delete(root, true); } catch { } }
     }
@@ -125,6 +137,19 @@ static class Smoke
         source.ReleaseFirst.SetResult();
         await automatic; await manual;
         Assert(source.Calls == 2 && source.MaxConcurrent == 1, "automatic and manual serialized with real manual follow-up");
+
+        var cancellationSource = new SequencedSource();
+        var cancellationChecker = new ModuleUpdateChecker(cancellationSource, new(SemanticVersion.Parse("0.1.0-alpha"), "experimental-0.1", ModuleUpdateChannel.Preview), clock, false);
+        await using var cancellationCoordinator = new ModuleUpdateCheckCoordinator(cancellationChecker, clock);
+        var occupying = cancellationCoordinator.CheckAsync(new(request, false, clock.GetUtcNow()));
+        await cancellationSource.FirstEntered.Task;
+        using var waitingCancellation = new CancellationTokenSource();
+        var waiting = cancellationCoordinator.CheckAsync(new(request, true, clock.GetUtcNow()), waitingCancellation.Token);
+        waitingCancellation.Cancel();
+        try { await waiting; throw new Exception("waiting manual check was not cancelled"); } catch (OperationCanceledException) { }
+        cancellationSource.ReleaseFirst.SetResult(); await occupying;
+        await cancellationCoordinator.CheckAsync(new(request, true, clock.GetUtcNow()));
+        Assert(cancellationSource.Calls == 2, "manual pending reset after gate wait cancellation");
     }
     private static async Task TestStalePropagationAsync()
     {
@@ -258,4 +283,11 @@ sealed class CancelingCache(CancellationTokenSource cancellation) : IModuleUpdat
         return Task.FromCanceled(cancellation.Token);
     }
     public bool IsFresh(ModuleUpdateCacheEnvelope entry) => false;
+}
+
+sealed class StaticCache(ModuleUpdateCacheEnvelope envelope) : IModuleUpdateCache
+{
+    public Task<ModuleUpdateCacheEnvelope?> ReadAsync(string key, string sourceUrl, int payloadLimit, CancellationToken token) => Task.FromResult<ModuleUpdateCacheEnvelope?>(envelope);
+    public Task WriteAsync(string key, ModuleUpdateCacheEnvelope value, CancellationToken token) => Task.CompletedTask;
+    public bool IsFresh(ModuleUpdateCacheEnvelope entry) => true;
 }

@@ -33,6 +33,7 @@ public sealed partial class MainWindowViewModel(
     ILocalizationService localization,
     ApplicationExecutionEnvironment executionEnvironment,
     ModuleUpdateCheckCoordinator moduleUpdateCoordinator,
+    ModulePackageDownloadCoordinator modulePackageDownloadCoordinator,
     TimeProvider timeProvider) : ObservableObject
 {
     private bool _initialized;
@@ -43,6 +44,7 @@ public sealed partial class MainWindowViewModel(
     private readonly CancellationTokenSource _updateCancellation = new();
     private CancellationTokenSource? _automaticUpdateDelay;
     private readonly Dictionary<string, (string Version, ModuleUpdateResult Result)> _updateResults = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (string LocalVersion, string TargetVersion, string Sha256, ModulePackageDownloadStatus Status)> _downloadResults = new(StringComparer.Ordinal);
     private bool _moduleUpdateUsedStaleCache;
     private DateTimeOffset? _moduleUpdateLastCheckedAt;
     private StartupPresentationMode _persistedStartupPresentationMode;
@@ -337,7 +339,39 @@ public sealed partial class MainWindowViewModel(
         catch (Exception exception) { Debug.WriteLine($"Background module update check failed: {exception.GetType().Name}"); }
     }
 
-    public void StopUpdateChecks() { _automaticUpdateDelay?.Cancel(); _updateCancellation.Cancel(); moduleUpdateCoordinator.Cancel(); }
+    public void StopUpdateChecks() { _automaticUpdateDelay?.Cancel(); _updateCancellation.Cancel(); moduleUpdateCoordinator.Cancel(); modulePackageDownloadCoordinator.Cancel(); }
+
+    [RelayCommand]
+    private async Task DownloadModulePackageAsync(DiscoveredModuleViewModel module)
+    {
+        if (!module.CanDownloadUpdate || module.UpdateResult.SelectedRelease is not { } release) return;
+        var request = new ModulePackageDownloadRequest(module.Id, module.Version, release.Version, release.Package);
+        module.DownloadStatus = ModulePackageDownloadStatus.ConfirmingMetadata;
+        module.DownloadBytesReceived = 0; module.DownloadExpectedBytes = release.Package.Size;
+        var progress = new Progress<ModulePackageDownloadProgress>(value =>
+        {
+            module.DownloadStatus = value.BytesReceived == value.ExpectedBytes
+                ? ModulePackageDownloadStatus.Verifying : ModulePackageDownloadStatus.Downloading;
+            module.DownloadBytesReceived = value.BytesReceived;
+            module.DownloadExpectedBytes = value.ExpectedBytes;
+        });
+        var result = await modulePackageDownloadCoordinator.DownloadAsync(request, progress);
+        if (result.LatestUpdateResult is { } latest &&
+            result.Status is ModulePackageDownloadStatus.MetadataChanged or ModulePackageDownloadStatus.MetadataStale)
+        {
+            module.UpdateResult = latest;
+            _updateResults[module.Id] = (module.Version, latest);
+        }
+        module.DownloadStatus = result.Status;
+        _downloadResults[module.Id] = (module.Version, release.Version.ToString(), release.Package.Sha256, result.Status);
+    }
+
+    [RelayCommand]
+    private void CancelModulePackageDownload(DiscoveredModuleViewModel module)
+    {
+        if (module.UpdateResult.SelectedRelease is not { } release) return;
+        modulePackageDownloadCoordinator.Cancel(new(module.Id, module.Version, release.Version, release.Package));
+    }
 
     private void RefreshLanguageOptionLabels()
     {
@@ -365,6 +399,11 @@ public sealed partial class MainWindowViewModel(
         try
         {
             IsScanning = true;
+            foreach (var active in Modules.Where(module => module.IsDownloadActive && module.UpdateResult.SelectedRelease is not null))
+            {
+                var release = active.UpdateResult.SelectedRelease!;
+                modulePackageDownloadCoordinator.Cancel(new(active.Id, active.Version, release.Version, release.Package));
+            }
             StatusMessage = localization.GetString(
                 "status.scanningModules");
 
@@ -403,13 +442,21 @@ public sealed partial class MainWindowViewModel(
                     module,
                     localization,
                     localizationDiagnosticsByModuleId.GetValueOrDefault(
-                        module.Manifest.Id));
+                        module.Manifest.Id),
+                    executionEnvironment.IsModuleTest);
                 if (_updateResults.TryGetValue(module.Manifest.Id, out var prior) && prior.Version == module.Manifest.Version)
                     moduleViewModel.UpdateResult = prior.Result;
                 else if (executionEnvironment.IsModuleTest)
                     moduleViewModel.UpdateResult = new(module.Manifest.Id, ModuleUpdateStatus.DisabledByEnvironment);
                 if (_updateResults.TryGetValue(module.Manifest.Id, out prior) && prior.Version != module.Manifest.Version)
                     _updateResults.Remove(module.Manifest.Id);
+                if (moduleViewModel.UpdateResult.SelectedRelease is { } selected &&
+                    _downloadResults.TryGetValue(module.Manifest.Id, out var download) &&
+                    download.LocalVersion == module.Manifest.Version && download.TargetVersion == selected.Version.ToString() &&
+                    download.Sha256.Equals(selected.Package.Sha256, StringComparison.OrdinalIgnoreCase))
+                    moduleViewModel.DownloadStatus = download.Status;
+                else
+                    _downloadResults.Remove(module.Manifest.Id);
                 moduleViewModel.UpdateRuntimeState(
                     runtimeManager.GetRecord(module.Manifest.Id));
                 if (authorizations.TryGetValue(module.Manifest.Id, out var authorization))
@@ -444,6 +491,8 @@ public sealed partial class MainWindowViewModel(
                 module => module.Id == selectedModuleId) ?? Modules.FirstOrDefault();
             foreach (var removed in _updateResults.Keys.Where(id => Modules.All(module => module.Id != id)).ToArray())
                 _updateResults.Remove(removed);
+            foreach (var removed in _downloadResults.Keys.Where(id => Modules.All(module => module.Id != id)).ToArray())
+                _downloadResults.Remove(removed);
 
             StartupAuthorizationCount = settings.StartupModules.Count;
             MissingStartupAuthorizationCount = settings.StartupModules.Count(

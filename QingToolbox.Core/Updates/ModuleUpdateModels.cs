@@ -21,9 +21,13 @@ public sealed record ModuleUpdateRelease(
 public sealed record ModuleUpdateManifest(string ModuleId, string Publisher, IReadOnlyList<ModuleUpdateRelease> Releases);
 public sealed record OfficialModuleIndex(IReadOnlyDictionary<string, string> Modules);
 public sealed record ModuleUpdateResult(
-    string ModuleId, ModuleUpdateStatus Status, SemanticVersion? TargetVersion = null,
-    IReadOnlyDictionary<string, string>? ReleaseNotes = null,
-    bool IsFromStaleCache = false, DateTimeOffset? CheckedAt = null);
+    string ModuleId, ModuleUpdateStatus Status, ModuleUpdateRelease? SelectedRelease = null,
+    bool IsFromStaleCache = false, DateTimeOffset? CheckedAt = null)
+{
+    public SemanticVersion? TargetVersion => SelectedRelease?.Version;
+    public IReadOnlyDictionary<string, string>? ReleaseNotes => SelectedRelease?.ReleaseNotes;
+    public ModuleUpdatePackage? Package => SelectedRelease?.Package;
+}
 public sealed record InstalledModuleVersion(string ModuleId, string Version);
 public sealed record VersionBoundModuleUpdateResult(string ModuleId, string LocalVersion, ModuleUpdateResult Result);
 public sealed record ModuleUpdateCheckRequest(IReadOnlyList<InstalledModuleVersion> Modules, bool IsManual, DateTimeOffset RequestedAt);
@@ -135,15 +139,15 @@ public sealed class ModuleUpdateCompatibilityEvaluator(
             (candidate.MaximumHostVersionExclusive is null ||
              hostVersion.CompareTo(candidate.MaximumHostVersionExclusive) < 0));
         if (compatible is not null)
-            return new(moduleId, ModuleUpdateStatus.UpdateAvailable, compatible.Version, compatible.ReleaseNotes, CheckedAt: checkedAt);
+            return new(moduleId, ModuleUpdateStatus.UpdateAvailable, compatible, CheckedAt: checkedAt);
         if (higher.FirstOrDefault() is { } candidate)
         {
             if (candidate.ModuleApiVersion != moduleApiVersion)
-                return new(moduleId, ModuleUpdateStatus.ModuleApiIncompatible, candidate.Version, candidate.ReleaseNotes, CheckedAt: checkedAt);
+                return new(moduleId, ModuleUpdateStatus.ModuleApiIncompatible, candidate, CheckedAt: checkedAt);
             if (hostVersion.CompareTo(candidate.MinimumHostVersion) < 0)
-                return new(moduleId, ModuleUpdateStatus.HostUpdateRequired, candidate.Version, candidate.ReleaseNotes, CheckedAt: checkedAt);
+                return new(moduleId, ModuleUpdateStatus.HostUpdateRequired, candidate, CheckedAt: checkedAt);
             if (candidate.MaximumHostVersionExclusive is not null && hostVersion.CompareTo(candidate.MaximumHostVersionExclusive) >= 0)
-                return new(moduleId, ModuleUpdateStatus.HostVersionIncompatible, candidate.Version, candidate.ReleaseNotes, CheckedAt: checkedAt);
+                return new(moduleId, ModuleUpdateStatus.HostVersionIncompatible, candidate, CheckedAt: checkedAt);
         }
         if (allowed.Any(r => r.Version.CompareTo(local) == 0))
             return new(moduleId, ModuleUpdateStatus.UpToDate, CheckedAt: checkedAt);

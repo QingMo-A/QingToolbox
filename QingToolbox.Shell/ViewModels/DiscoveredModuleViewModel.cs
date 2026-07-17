@@ -16,7 +16,8 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     public DiscoveredModuleViewModel(
         DiscoveredModule module,
         ILocalizationService localization,
-        IReadOnlyList<string>? localizationDiagnostics = null)
+        IReadOnlyList<string>? localizationDiagnostics = null,
+        bool downloadsDisabled = false)
     {
         Module = module;
         _localization = localization;
@@ -55,6 +56,7 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         IconPath = ResolveIconPath(module);
         _runtimeState = State;
         _updateResult = new(module.Manifest.Id, ModuleUpdateStatus.NotChecked);
+        _downloadsDisabled = downloadsDisabled;
     }
 
     public string Id { get; }
@@ -105,6 +107,36 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
 
     [ObservableProperty]
     private ModuleUpdateResult _updateResult;
+    private readonly bool _downloadsDisabled;
+    [ObservableProperty] private ModulePackageDownloadStatus _downloadStatus = ModulePackageDownloadStatus.NotDownloaded;
+    [ObservableProperty] private long _downloadBytesReceived;
+    [ObservableProperty] private long _downloadExpectedBytes;
+    public bool CanDownloadUpdate => !_downloadsDisabled && DownloadStatus is not (ModulePackageDownloadStatus.ConfirmingMetadata or
+        ModulePackageDownloadStatus.Downloading or ModulePackageDownloadStatus.Verifying) && UpdateResult.Status == ModuleUpdateStatus.UpdateAvailable &&
+        UpdateResult.SelectedRelease is not null && !UpdateResult.IsFromStaleCache;
+    public bool IsDownloadActive => DownloadStatus is ModulePackageDownloadStatus.ConfirmingMetadata or ModulePackageDownloadStatus.Downloading or ModulePackageDownloadStatus.Verifying;
+    public bool HasDownloadStatus => DownloadStatus != ModulePackageDownloadStatus.NotDownloaded;
+    public string DisplayDownloadStatus => _localization.GetString($"moduleDownload.{DownloadStatus switch
+    {
+        ModulePackageDownloadStatus.ConfirmingMetadata => "confirmingMetadata",
+        ModulePackageDownloadStatus.MetadataChanged => "metadataChanged",
+        ModulePackageDownloadStatus.MetadataStale => "metadataStale",
+        ModulePackageDownloadStatus.Downloading => "downloading",
+        ModulePackageDownloadStatus.Verifying => "verifying",
+        ModulePackageDownloadStatus.Verified => "verified",
+        ModulePackageDownloadStatus.AlreadyVerified => "alreadyVerified",
+        ModulePackageDownloadStatus.SizeMismatch => "sizeMismatch",
+        ModulePackageDownloadStatus.HashMismatch => "hashMismatch",
+        ModulePackageDownloadStatus.UntrustedRedirect => "untrustedRedirect",
+        ModulePackageDownloadStatus.SourceUnavailable => "sourceUnavailable",
+        ModulePackageDownloadStatus.SourceInvalid => "sourceUnavailable",
+        ModulePackageDownloadStatus.StorageUnavailable => "storageUnavailable",
+        ModulePackageDownloadStatus.Cancelled => "cancelled",
+        ModulePackageDownloadStatus.DisabledByEnvironment => "disabled",
+        _ => "sourceUnavailable"
+    }}");
+    public string DisplayDownloadProgress => _localization.GetString("moduleDownload.progress", DownloadBytesReceived, DownloadExpectedBytes,
+        DownloadExpectedBytes > 0 ? Math.Min(100, DownloadBytesReceived * 100d / DownloadExpectedBytes).ToString("F0") : "0");
 
     public string DisplayUpdateStatus => _localization.GetString(
         $"moduleUpdate.status.{UpdateResult.Status}",
@@ -167,6 +199,8 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         OnPropertyChanged(nameof(DisplayRuntimeState));
         OnPropertyChanged(nameof(DisplayUpdateStatus));
         OnPropertyChanged(nameof(DisplayUpdateReleaseNote));
+        OnPropertyChanged(nameof(DisplayDownloadStatus));
+        OnPropertyChanged(nameof(DisplayDownloadProgress));
     }
 
     partial void OnUpdateResultChanged(ModuleUpdateResult value)
@@ -174,7 +208,13 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         OnPropertyChanged(nameof(DisplayUpdateStatus));
         OnPropertyChanged(nameof(DisplayUpdateReleaseNote));
         OnPropertyChanged(nameof(HasUpdateReleaseNote));
+        OnPropertyChanged(nameof(CanDownloadUpdate));
     }
+
+    partial void OnDownloadStatusChanged(ModulePackageDownloadStatus value)
+    { OnPropertyChanged(nameof(CanDownloadUpdate)); OnPropertyChanged(nameof(IsDownloadActive)); OnPropertyChanged(nameof(HasDownloadStatus)); OnPropertyChanged(nameof(DisplayDownloadStatus)); }
+    partial void OnDownloadBytesReceivedChanged(long value) => OnPropertyChanged(nameof(DisplayDownloadProgress));
+    partial void OnDownloadExpectedBytesChanged(long value) => OnPropertyChanged(nameof(DisplayDownloadProgress));
 
     partial void OnRuntimeStateChanged(string value)
     {

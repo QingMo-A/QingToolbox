@@ -90,6 +90,11 @@ public sealed class OfficialModuleUpdateSource(
     private async Task<ModuleUpdateSourceResponse<T>> FetchAsync<T>(string key, Uri uri, int limit, bool manual, Func<ReadOnlyMemory<byte>, T> parse, CancellationToken token)
     {
         var cached = cache is null ? null : await cache.ReadAsync(key, uri.AbsoluteUri, limit, token);
+        if (cached is not null)
+        {
+            try { _ = parse(cached.Payload); }
+            catch (ModuleUpdateProtocolException) { cached = null; }
+        }
         if (!manual && cached is not null && cache!.IsFresh(cached))
             return new(parse(cached.Payload), false, cached.FetchedAt);
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
@@ -146,9 +151,15 @@ public sealed class OfficialModuleUpdateSource(
 
 public sealed class ModuleUpdateSourceUnavailableException(string message, Exception inner) : Exception(message, inner);
 
+public interface IModuleUpdateChecker
+{
+    Task<IReadOnlyDictionary<string, ModuleUpdateResult>> CheckAllInstalledModulesAsync(IReadOnlyCollection<InstalledModuleVersion> installed, bool manual, CancellationToken token);
+    Task<ModuleUpdateResult> CheckModuleAsync(InstalledModuleVersion module, bool manual, CancellationToken token);
+}
+
 public sealed class ModuleUpdateChecker(
     IModuleUpdateSource source, ModuleUpdateCompatibilityEvaluator evaluator,
-    TimeProvider timeProvider, bool disabledByEnvironment)
+    TimeProvider timeProvider, bool disabledByEnvironment) : IModuleUpdateChecker
 {
     private readonly SemaphoreSlim _parallelism = new(3, 3);
     public async Task<IReadOnlyDictionary<string, ModuleUpdateResult>> CheckAllInstalledModulesAsync(
@@ -199,7 +210,7 @@ public sealed class ModuleUpdateChecker(
 }
 
 public sealed class ModuleUpdateCheckCoordinator(
-    ModuleUpdateChecker checker, TimeProvider timeProvider) : IAsyncDisposable
+    IModuleUpdateChecker checker, TimeProvider timeProvider) : IAsyncDisposable
 {
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
@@ -213,9 +224,11 @@ public sealed class ModuleUpdateCheckCoordinator(
             return new(new Dictionary<string, VersionBoundModuleUpdateResult>(), false,
                 timeProvider.GetUtcNow(), ModuleUpdateBatchDisposition.DuplicateSuppressed);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(callerToken, _lifetime.Token);
-        await _operationGate.WaitAsync(linked.Token);
+        var gateAcquired = false;
         try
         {
+            await _operationGate.WaitAsync(linked.Token);
+            gateAcquired = true;
             var snapshot = request.Modules.Select(x => new InstalledModuleVersion(x.ModuleId, x.Version)).ToArray();
             var raw = await checker.CheckAllInstalledModulesAsync(snapshot, request.IsManual, linked.Token);
             var bound = snapshot.ToDictionary(x => x.ModuleId,
@@ -225,7 +238,7 @@ public sealed class ModuleUpdateCheckCoordinator(
         finally
         {
             if (request.IsManual) Volatile.Write(ref _manualPending, 0);
-            _operationGate.Release();
+            if (gateAcquired) _operationGate.Release();
         }
     }
 
