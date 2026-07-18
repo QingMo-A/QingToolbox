@@ -122,6 +122,14 @@ try {
             --no-build
     }
 
+    Write-Host "`n==> Run secure module package staging smoke test"
+    Invoke-CheckedStage -StageName "Module package staging smoke test" -Action {
+        dotnet run `
+            --project (Join-Path $repoRoot "QingToolbox.DevTools.ModulePackageStagingSmokeTest") `
+            -c Release `
+            --no-build
+    }
+
     Write-Host "`n==> Deploy development module"
     Invoke-CheckedStage -StageName "Deploy development module" -Action {
         & (Join-Path $PSScriptRoot "deploy-dev-modules.ps1") `

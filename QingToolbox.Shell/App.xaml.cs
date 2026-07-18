@@ -159,6 +159,18 @@ public partial class App : Application
             services.AddSingleton<ApplicationExitCoordinator>();
             services.AddSingleton(applicationPaths);
             services.AddSingleton<SessionLogService>();
+            services.AddSingleton(provider => new QmodPackageStagingService(
+                provider.GetRequiredService<ApplicationPaths>().QmodStagingDirectory,
+                provider.GetRequiredService<TimeProvider>(),
+                log: entry =>
+                {
+                    var logger = provider.GetRequiredService<SessionLogService>();
+                    var message = $"{entry.EventName}; module={entry.ModuleId}; version={entry.Version}; " +
+                                  $"package={entry.PackageHashPrefix}; failure={entry.FailureCode}; " +
+                                  $"entries={entry.EntryCount}; bytes={entry.TotalUncompressedBytes}.";
+                    if (entry.FailureCode == QmodStagingFailureCode.None) logger.Information("QmodStaging", message);
+                    else logger.Warning("QmodStaging", message);
+                }));
             services.AddSingleton(provider => new StartupHealthJournal(
                 provider.GetRequiredService<ApplicationPaths>().StartupHealthPath,
                 provider.GetRequiredService<TimeProvider>(), processStartedAt, monotonicOrigin,

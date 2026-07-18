@@ -89,6 +89,16 @@ jobs:
           -c Release
           --no-build
 
+      - name: Run secure module package staging smoke test
+        shell: pwsh
+        env:
+          QMOD_STAGING_DIAGNOSTIC_PATH: ${{ runner.temp }}\QingToolboxStagingSmoke\summary.txt
+        run: >-
+          dotnet run
+          --project QingToolbox.DevTools.ModulePackageStagingSmokeTest
+          -c Release
+          --no-build
+
       - name: Deploy development module for smoke test
         shell: pwsh
         run: ./scripts/deploy-dev-modules.ps1 -Configuration Release
@@ -201,6 +211,7 @@ jobs:
             ${{ runner.temp }}\QingToolboxInstallerRoundtrip\uninstall.log
             ${{ runner.temp }}\QingToolboxInstallerRoundtrip\diagnostics.txt
             ${{ runner.temp }}\QingToolboxPreviewUpgrade\Installer Logs With Spaces\*.log
+            ${{ runner.temp }}\QingToolboxStagingSmoke\summary.txt
 
       - name: Clean Preview validation test data
         if: always()
@@ -210,7 +221,8 @@ jobs:
             "${{ runner.temp }}\QingToolboxInstallerRoundtrip",
             "${{ runner.temp }}\QingToolboxProfile",
             "${{ runner.temp }}\QingToolboxPreviewUpgrade",
-            "${{ runner.temp }}\QingToolboxPreview1"
+            "${{ runner.temp }}\QingToolboxPreview1",
+            "${{ runner.temp }}\QingToolboxStagingSmoke"
           )
           foreach ($path in $paths) {
             if (Test-Path -LiteralPath $path) {

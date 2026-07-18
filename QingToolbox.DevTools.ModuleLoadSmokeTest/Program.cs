@@ -372,18 +372,21 @@ internal static class Program
                     productionPaths.UserModulesDirectory == Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "QingToolbox", "Modules") &&
                     productionPaths.ModuleDataDirectory == Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "QingToolbox", "Data"),
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "QingToolbox", "Data") &&
+                    productionPaths.QmodStagingDirectory == Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "QingToolbox",
+                        "cache", "ModulePackages", "Staging"),
                 "Production paths changed incompatibly.");
 
             var devPaths = new ApplicationPaths(dev);
             var testPaths = new ApplicationPaths(moduleTest);
             Require(new[] { devPaths.SettingsPath, devPaths.UserModulesDirectory, devPaths.ModuleDataDirectory,
-                    devPaths.LogsDirectory, devPaths.CacheDirectory, devPaths.TempDirectory }
+                    devPaths.LogsDirectory, devPaths.CacheDirectory, devPaths.QmodStagingDirectory, devPaths.TempDirectory }
                     .All(path => Path.GetFullPath(path).StartsWith(Path.GetFullPath(devRoot) + Path.DirectorySeparatorChar,
                         StringComparison.OrdinalIgnoreCase)),
                 "Development writable paths escaped the sandbox.");
             Require(new[] { testPaths.SettingsPath, testPaths.UserModulesDirectory, testPaths.ModuleDataDirectory,
-                    testPaths.LogsDirectory, testPaths.CacheDirectory, testPaths.TempDirectory }
+                    testPaths.LogsDirectory, testPaths.CacheDirectory, testPaths.QmodStagingDirectory, testPaths.TempDirectory }
                     .All(path => Path.GetFullPath(path).StartsWith(Path.GetFullPath(testRoot) + Path.DirectorySeparatorChar,
                         StringComparison.OrdinalIgnoreCase)),
                 "ModuleTest writable paths escaped the sandbox.");

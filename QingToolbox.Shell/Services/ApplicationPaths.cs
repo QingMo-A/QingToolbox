@@ -27,6 +27,7 @@ public sealed class ApplicationPaths
         ModuleDataDirectory = Path.Combine(RoamingRoot, environment.IsProduction ? "Data" : "data");
         LogsDirectory = Path.Combine(LocalRoot, "logs");
         CacheDirectory = Path.Combine(LocalRoot, "cache");
+        QmodStagingDirectory = Path.Combine(CacheDirectory, "ModulePackages", "Staging");
         TempDirectory = environment.IsProduction ? Path.Combine(LocalRoot, "Temp") : Path.Combine(environment.SandboxRoot!, "temp");
         StartupDirectory = Path.Combine(LocalRoot, "Startup");
         StartupHealthPath = Path.Combine(StartupDirectory, "startup-health.json");
@@ -44,6 +45,7 @@ public sealed class ApplicationPaths
     public string ModuleDataDirectory { get; }
     public string LogsDirectory { get; }
     public string CacheDirectory { get; }
+    public string QmodStagingDirectory { get; }
     public string TempDirectory { get; }
     public string StartupDirectory { get; }
     public string StartupHealthPath { get; }

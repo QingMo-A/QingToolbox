@@ -5,8 +5,13 @@ Version: `0.2.0-alpha` Preview 2
 ## Container
 
 A `.qmod` file is a ZIP archive with a different extension. The archive root
-must contain exactly one `module.json`. Do not wrap the package contents in an
-extra top-level directory.
+must contain exactly one `module.json`. Packages intended for the secure
+Verified Staging pipeline must also contain exactly one `qmod.json`. Do not
+wrap the package contents in an extra top-level directory.
+
+Secure staging `qmod.json` schema 1 contains `schemaVersion`, `moduleId`,
+`version`, `moduleApiVersion`, and `entryManifest`; `entryManifest` must be the
+root `module.json`. See [`QMOD_STAGING_SECURITY.md`](QMOD_STAGING_SECURITY.md).
 
 Required manifest fields:
 
@@ -69,5 +74,6 @@ QingToolbox `0.2.0-alpha` does not verify module signatures. A loaded module
 runs in the user process and has the current user's permissions. Only import
 packages from sources you trust.
 
-Future work includes package signing, a module marketplace, richer permission
-declarations, an overwrite/upgrade policy, and dependency resolution.
+Verified staging remains isolated cache state and is not module installation.
+Future work includes package signing, a module marketplace, transactional
+replacement and rollback, richer permission declarations, and dependency resolution.

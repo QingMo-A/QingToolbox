@@ -28,6 +28,8 @@ Complete this metadata for each candidate. Do not reuse evidence from a differen
 
 Historical automated evidence is informative only: workflow run `29621740800` passed for commit `7b563202dfcc34b3042d8641439c84c175fbb6fe`. A later release candidate must obtain its own exact-HEAD run.
 
+The project owner manually exercised several common A020 functions without finding a remaining blocker. This is a supplemental common-function smoke result only. By explicit owner decision, the remaining Preview 2 in-place upgrade, login/re-login, Repair, uninstall, and representative-environment acceptance is deferred while post-Preview development begins; every unexecuted row below remains **Not Run**.
+
 ## A. Preview 1 in-place upgrade
 
 | Check | Status | Evidence / notes |

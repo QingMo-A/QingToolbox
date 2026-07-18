@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added strict offline `.qmod` validation and environment-isolated atomic Verified Staging without installing, replacing, loading, or activating modules.
+- Added hostile archive, ZIP bomb, manifest identity, concurrency, cancellation, and no-DLL-execution staging smoke coverage.
 - Added a lightweight per-session log viewer with persistent, privacy-conscious log files and environment-aware sidebar visibility.
 
 - Prepared the unified 0.2.0-alpha Preview 2 product and installer metadata.

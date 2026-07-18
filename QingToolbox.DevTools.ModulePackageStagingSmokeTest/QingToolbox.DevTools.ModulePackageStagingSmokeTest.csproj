@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\QingToolbox.Core\QingToolbox.Core.csproj" />
+    <ProjectReference Include="..\QingToolbox.DevTools.StagingPayloadProbe\QingToolbox.DevTools.StagingPayloadProbe.csproj"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <Target Name="CopyStagingPayloadProbe" AfterTargets="Build">
+    <Copy SourceFiles="..\QingToolbox.DevTools.StagingPayloadProbe\bin\$(Configuration)\net10.0\QingToolbox.DevTools.StagingPayloadProbe.dll"
+          DestinationFolder="$(OutDir)" />
+  </Target>
+</Project>
