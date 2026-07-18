@@ -162,6 +162,8 @@ public partial class App : Application
             services.AddSingleton(provider => new QmodPackageStagingService(
                 provider.GetRequiredService<ApplicationPaths>().QmodStagingDirectory,
                 provider.GetRequiredService<TimeProvider>(),
+                environment.Kind.ToString(),
+                provider.GetRequiredService<ApplicationPaths>().UserModulesDirectory,
                 log: entry =>
                 {
                     var logger = provider.GetRequiredService<SessionLogService>();

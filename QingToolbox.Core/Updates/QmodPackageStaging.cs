@@ -29,8 +29,14 @@ public sealed record QmodStagingInput(
     VerifiedModulePackage VerifiedPackage,
     ModulePackageDownloadIdentity ReleaseIdentity,
     string ModuleApiVersion,
-    string SourceIdentity,
+    string SourceIdentity);
+
+public readonly record struct QmodStagingOperationKey(
+    string PackagePath, string ModuleId, string TargetVersion, string FileName,
+    long ExpectedSize, string Sha256, string ModuleApiVersion, string SourceIdentity,
     string EnvironmentIdentity);
+
+public readonly record struct QmodModuleVersionKey(string ModuleId, string TargetVersion);
 
 public enum QmodStagingFailureCode
 {
@@ -39,6 +45,7 @@ public enum QmodStagingFailureCode
     EntryLimitExceeded, SingleFileLimitExceeded, TotalSizeLimitExceeded,
     CompressionRatioExceeded, ManifestMissing, ManifestDuplicate, ManifestInvalid,
     ModuleIdentityMismatch, VersionMismatch, ModuleApiIncompatible, StagingConflict,
+    StagingMetadataInvalid, VerifiedStagingInvalid,
     Cancelled, IoFailure, Unauthorized, Unexpected
 }
 
@@ -67,15 +74,19 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     private readonly string _stagingRoot;
     private readonly string _incomingRoot;
     private readonly string _verifiedRoot;
+    private readonly string? _userModulesRoot;
+    private readonly string _environmentIdentity;
     private readonly QmodStagingLimits _limits;
     private readonly TimeProvider _timeProvider;
     private readonly Action<QmodStagingLogEvent>? _log;
     private readonly SemaphoreSlim _parallelism;
-    private readonly ConcurrentDictionary<string, StagingOperation> _inflight = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<QmodStagingOperationKey, StagingOperation> _inflight =
+        new(QmodStagingOperationKeyComparer.Instance);
     private readonly CancellationTokenSource _lifetime = new();
 
-    public QmodPackageStagingService(string stagingRoot, TimeProvider timeProvider,
-        QmodStagingLimits? limits = null, Action<QmodStagingLogEvent>? log = null, int maximumParallelism = 2)
+    public QmodPackageStagingService(string stagingRoot, TimeProvider timeProvider, string environmentIdentity,
+        string? userModulesRoot = null, QmodStagingLimits? limits = null,
+        Action<QmodStagingLogEvent>? log = null, int maximumParallelism = 2)
     {
         if (!Path.IsPathFullyQualified(stagingRoot)) throw new ArgumentException("Staging root must be absolute.", nameof(stagingRoot));
         if (maximumParallelism <= 0) throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
@@ -83,6 +94,10 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         if (Path.GetPathRoot(_stagingRoot) == _stagingRoot) throw new ArgumentException("Staging root cannot be a volume root.", nameof(stagingRoot));
         _incomingRoot = Path.Combine(_stagingRoot, "Incoming");
         _verifiedRoot = Path.Combine(_stagingRoot, "Verified");
+        _environmentIdentity = environmentIdentity is "Production" or "Development" or "ModuleTest"
+            ? environmentIdentity : throw new ArgumentException("Unsupported execution environment.", nameof(environmentIdentity));
+        _userModulesRoot = string.IsNullOrWhiteSpace(userModulesRoot)
+            ? null : Path.TrimEndingDirectorySeparator(Path.GetFullPath(userModulesRoot));
         _timeProvider = timeProvider;
         _limits = limits ?? new();
         _limits.Validate();
@@ -93,28 +108,37 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     public Task<QmodStagingResult> StageAsync(QmodStagingInput input, CancellationToken callerToken = default)
     {
         ArgumentNullException.ThrowIfNull(input);
-        if (input.ReleaseIdentity.Sha256.Length != 64 || !input.ReleaseIdentity.Sha256.All(Uri.IsHexDigit))
-            return Task.FromResult(QmodStagingResult.Failure(QmodStagingFailureCode.PackageChanged));
-        var key = input.ReleaseIdentity.Sha256;
+        QmodStagingOperationKey key;
+        try { key = ValidateStaticInputAndCreateKey(input); }
+        catch (StagingException exception) { return Task.FromResult(Reject(exception.Code, input)); }
         StagingOperation? candidate = null;
         candidate = new(CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token),
             () => RunAndRemoveAsync(key, input, candidate!));
         var operation = _inflight.GetOrAdd(key, candidate);
-        if (!ReferenceEquals(operation, candidate)) candidate.Dispose();
+        if (!ReferenceEquals(operation, candidate))
+        {
+            candidate.Dispose();
+            Log("Shared operation joined", input);
+        }
         return callerToken.CanBeCanceled ? operation.Task.WaitAsync(callerToken) : operation.Task;
     }
 
     public void Cancel(QmodStagingInput input)
     {
-        if (_inflight.TryGetValue(input.ReleaseIdentity.Sha256, out var operation)) operation.Cancellation.Cancel();
+        try
+        {
+            var key = ValidateStaticInputAndCreateKey(input);
+            if (_inflight.TryGetValue(key, out var operation)) operation.Cancellation.Cancel();
+        }
+        catch (StagingException) { }
     }
 
-    private async Task<QmodStagingResult> RunAndRemoveAsync(string key, QmodStagingInput input, StagingOperation operation)
+    private async Task<QmodStagingResult> RunAndRemoveAsync(QmodStagingOperationKey key, QmodStagingInput input, StagingOperation operation)
     {
         try { return await StageCoreAsync(input, operation.Cancellation.Token); }
         finally
         {
-            _inflight.TryRemove(new KeyValuePair<string, StagingOperation>(key, operation));
+            _inflight.TryRemove(new KeyValuePair<QmodStagingOperationKey, StagingOperation>(key, operation));
             operation.Dispose();
         }
     }
@@ -125,7 +149,6 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         Log("Staging started", input);
         try
         {
-            ValidateInput(input);
             var packagePath = Path.GetFullPath(input.VerifiedPackage.FilePath);
             if (!File.Exists(packagePath)) return Reject(QmodStagingFailureCode.PackageMissing, input);
             if (IsReparse(packagePath)) return Reject(QmodStagingFailureCode.PackageChanged, input);
@@ -142,19 +165,29 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             try
             {
                 EnsureRootChain();
+                Log("Module/version publication lock waiting", input);
+                await using var publicationLock = await AcquirePublicationLockAsync(input, token);
+                Log("Publication lock acquired", input);
                 var final = BuildFinalPath(input);
                 if (Directory.Exists(final))
                 {
-                    if (await IsReusableAsync(final, input, packageStream, token))
+                    Log("Existing staging validation started", input);
+                    var reuse = await ValidateExistingStagingAsync(final, input, packageStream, token);
+                    if (reuse.Succeeded)
                     {
-                        Log("Staging reused", input);
-                        return new(true, true, QmodStagingFailureCode.None, final);
+                        Log("Existing staging reused", input, reuse.FileCount, reuse.TotalUncompressedBytes);
+                        return reuse;
                     }
-                    return Reject(QmodStagingFailureCode.StagingConflict, input);
+                    Log(reuse.FailureCode == QmodStagingFailureCode.StagingMetadataInvalid
+                        ? "Existing staging metadata rejected" : "Existing staging tree rejected", input, failure: reuse.FailureCode);
+                    return Reject(reuse.FailureCode, input);
                 }
                 var versionRoot = Path.GetDirectoryName(final)!;
-                if (Directory.Exists(versionRoot) && Directory.EnumerateDirectories(versionRoot).Any())
+                if (HasConflictingVersionContent(versionRoot, final))
+                {
+                    Log("Conflicting SHA rejected", input, failure: QmodStagingFailureCode.StagingConflict);
                     return Reject(QmodStagingFailureCode.StagingConflict, input);
+                }
 
                 partial = Path.Combine(_incomingRoot, $"{Guid.NewGuid():N}.partial");
                 CreateSafeDirectoryChain(_incomingRoot, partial);
@@ -193,9 +226,18 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
                 CreateSafeDirectoryChain(_verifiedRoot, versionRoot);
                 EnsureSafeParents(_verifiedRoot, versionRoot);
                 token.ThrowIfCancellationRequested();
-                Directory.Move(partial, final);
+                if (HasConflictingVersionContent(versionRoot, final))
+                    return Reject(QmodStagingFailureCode.StagingConflict, input);
+                try { Directory.Move(partial, final); }
+                catch (IOException) when (Directory.Exists(final) || HasConflictingVersionContent(versionRoot, final))
+                {
+                    return Reject(QmodStagingFailureCode.StagingConflict, input);
+                }
                 partial = null;
                 Log("Verified directory published", input, files.Count, actualTotal);
+                packageStream.Position = 0;
+                var published = await ValidateExistingStagingAsync(final, input, packageStream, token);
+                if (!published.Succeeded) return Reject(published.FailureCode, input);
                 return new(true, false, QmodStagingFailureCode.None, final, files.Count, actualTotal);
             }
             finally { _parallelism.Release(); }
@@ -381,14 +423,15 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             throw new StagingException(QmodStagingFailureCode.ManifestInvalid);
     }
 
-    private static void ValidateInput(QmodStagingInput input)
+    private QmodStagingOperationKey ValidateStaticInputAndCreateKey(QmodStagingInput input)
     {
         var package = input.VerifiedPackage;
         var identity = input.ReleaseIdentity;
         if (!IsSafeModuleId(identity.ModuleId) || !SemanticVersion.TryParse(identity.TargetVersion, out _) ||
             identity.TargetVersion.Length > 128 || identity.ExpectedSize <= 0 || identity.Sha256.Length != 64 ||
+            !identity.Sha256.All(Uri.IsHexDigit) || !IsSafeFileName(identity.FileName) ||
             input.SourceIdentity != "qingtoolbox-official" ||
-            input.EnvironmentIdentity is not ("Production" or "Development" or "ModuleTest"))
+            input.ModuleApiVersion != ModuleUpdateIdentity.ModuleApiVersion)
             throw new StagingException(QmodStagingFailureCode.PackageChanged);
         try { _ = Convert.FromHexString(identity.Sha256); }
         catch (FormatException) { throw new StagingException(QmodStagingFailureCode.PackageChanged); }
@@ -401,6 +444,22 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             OfficialModulePackageTransport.ValidatePackage(new(identity.FileName, new(identity.OfficialUrl), identity.ExpectedSize, identity.Sha256));
         }
         catch (ModulePackageTransportException) { throw new StagingException(QmodStagingFailureCode.PackageChanged); }
+        string packagePath;
+        try
+        {
+            packagePath = Path.GetFullPath(package.FilePath);
+            if (!Path.IsPathFullyQualified(package.FilePath) ||
+                !package.FilePath.Equals(packagePath, StringComparison.OrdinalIgnoreCase) ||
+                IsWithin(_stagingRoot, packagePath) || _userModulesRoot is not null && IsWithin(_userModulesRoot, packagePath))
+                throw new StagingException(QmodStagingFailureCode.PackageChanged);
+            if (File.Exists(packagePath) && IsReparse(packagePath))
+                throw new StagingException(QmodStagingFailureCode.PackageChanged);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        { throw new StagingException(QmodStagingFailureCode.PackageChanged); }
+        return new(packagePath, identity.ModuleId, identity.TargetVersion, identity.FileName,
+            identity.ExpectedSize, identity.Sha256.ToLowerInvariant(), input.ModuleApiVersion,
+            input.SourceIdentity, _environmentIdentity);
     }
 
     private string BuildFinalPath(QmodStagingInput input)
@@ -411,10 +470,14 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         return path;
     }
 
-    private async Task<bool> IsReusableAsync(string final, QmodStagingInput input, Stream packageStream, CancellationToken token)
+    private async Task<QmodStagingResult> ValidateExistingStagingAsync(
+        string final, QmodStagingInput input, Stream packageStream, CancellationToken token)
     {
         var metadata = Path.Combine(final, StagingMetadataName);
-        if (!File.Exists(metadata) || IsReparse(final) || IsReparse(metadata)) return false;
+        try { EnsureVerifiedPathChain(final); }
+        catch (StagingException) { return QmodStagingResult.Failure(QmodStagingFailureCode.VerifiedStagingInvalid); }
+        if (!File.Exists(metadata)) return QmodStagingResult.Failure(QmodStagingFailureCode.StagingMetadataInvalid);
+        if (IsReparse(metadata)) return QmodStagingResult.Failure(QmodStagingFailureCode.StagingMetadataInvalid);
         try
         {
             packageStream.Position = 0;
@@ -423,19 +486,12 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             var packageManifest = await ReadPackageManifestAsync(entries.PackageManifest, token);
             var moduleManifest = await ReadModuleManifestAsync(entries.ModuleManifest, token);
             ValidateManifests(packageManifest, moduleManifest, input, entries);
-            await using var stream = new FileStream(metadata, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: token);
-            var root = document.RootElement;
-            if (RequiredInt(root, "schemaVersion") != 1 || RequiredText(root, "moduleId") != input.ReleaseIdentity.ModuleId ||
-                RequiredText(root, "version") != input.ReleaseIdentity.TargetVersion ||
-                !RequiredText(root, "packageSha256").Equals(input.ReleaseIdentity.Sha256, StringComparison.OrdinalIgnoreCase)) return false;
-            if (!root.TryGetProperty("files", out var fileArray) || fileArray.ValueKind != JsonValueKind.Array ||
-                !root.TryGetProperty("fileCount", out var countElement) || countElement.GetInt32() != entries.Files.Count ||
-                !root.TryGetProperty("totalUncompressedBytes", out var totalElement) || totalElement.GetInt64() != entries.TotalLength)
-                return false;
-            var metadataFiles = fileArray.EnumerateArray().ToDictionary(
-                file => RequiredText(file, "relativePath"), file => file, StringComparer.OrdinalIgnoreCase);
-            if (metadataFiles.Count != entries.Files.Count) return false;
+            var stagingMetadata = await ReadAndValidateStagingMetadataAsync(metadata, input, token);
+            if (stagingMetadata.FileCount != entries.Files.Count ||
+                stagingMetadata.TotalUncompressedBytes != entries.TotalLength)
+                return QmodStagingResult.Failure(QmodStagingFailureCode.StagingMetadataInvalid);
+            var metadataFiles = stagingMetadata.Files.ToDictionary(file => CanonicalRelativePath(file.RelativePath),
+                file => file, StringComparer.Ordinal);
             var verifiedFiles = new List<QmodStagedFile>(entries.Files.Count);
             foreach (var entry in entries.Files)
             {
@@ -444,20 +500,19 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
                 var size = await CopyBoundedAsync(source, Stream.Null, hash, entry.Entry.Length,
                     _limits.MaximumSingleFileBytes, _limits.MaximumTotalUncompressedBytes, token);
                 var sha = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
-                if (!metadataFiles.TryGetValue(entry.RelativePath, out var recorded) ||
-                    recorded.GetProperty("size").GetInt64() != size ||
-                    !RequiredText(recorded, "sha256").Equals(sha, StringComparison.OrdinalIgnoreCase)) return false;
-                var path = ResolveTarget(final, entry.RelativePath);
-                if (!File.Exists(path) || IsReparse(path) || new FileInfo(path).Length != size) return false;
-                var stagedHash = await HashFileAsync(path, token);
-                if (!CryptographicOperations.FixedTimeEquals(stagedHash, Convert.FromHexString(sha))) return false;
+                if (!metadataFiles.TryGetValue(CanonicalRelativePath(entry.RelativePath), out var recorded) ||
+                    recorded.Size != size || !recorded.Sha256.Equals(sha, StringComparison.OrdinalIgnoreCase))
+                    return QmodStagingResult.Failure(QmodStagingFailureCode.StagingMetadataInvalid);
                 verifiedFiles.Add(new(entry.RelativePath, size, sha));
             }
-            VerifyExtractedTree(final, verifiedFiles);
-            return true;
+            await VerifyExistingTreeAsync(final, verifiedFiles, token);
+            return new(true, true, QmodStagingFailureCode.None, final, verifiedFiles.Count, entries.TotalLength);
         }
+        catch (MetadataException) { return QmodStagingResult.Failure(QmodStagingFailureCode.StagingMetadataInvalid); }
+        catch (TreeException) { return QmodStagingResult.Failure(QmodStagingFailureCode.VerifiedStagingInvalid); }
         catch (Exception exception) when (exception is IOException or JsonException or StagingException or
-            FormatException or KeyNotFoundException or InvalidOperationException or ArgumentException) { return false; }
+            FormatException or KeyNotFoundException or InvalidOperationException or ArgumentException)
+        { return QmodStagingResult.Failure(QmodStagingFailureCode.VerifiedStagingInvalid); }
     }
 
     private async Task WriteMetadataAsync(string root, QmodStagingInput input, IReadOnlyList<QmodStagedFile> files, long total, CancellationToken token)
@@ -468,7 +523,7 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             schemaVersion = 1, moduleId = input.ReleaseIdentity.ModuleId, version = input.ReleaseIdentity.TargetVersion,
             moduleApiVersion = input.ModuleApiVersion, packageSha256 = input.ReleaseIdentity.Sha256.ToLowerInvariant(),
             packageSize = input.ReleaseIdentity.ExpectedSize, stagedAtUtc = _timeProvider.GetUtcNow(),
-            sourceIdentity = input.SourceIdentity, environmentIdentity = input.EnvironmentIdentity,
+            sourceIdentity = input.SourceIdentity, environmentIdentity = _environmentIdentity,
             fileCount = files.Count, totalUncompressedBytes = total,
             files = files.OrderBy(file => file.RelativePath, StringComparer.Ordinal).Select(file => new
             { relativePath = file.RelativePath, size = file.Size, sha256 = file.Sha256 })
@@ -478,6 +533,141 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         await JsonSerializer.SerializeAsync(stream, metadata, cancellationToken: token);
         await stream.FlushAsync(token);
         stream.Flush(true);
+    }
+
+    private async Task<StagingMetadata> ReadAndValidateStagingMetadataAsync(
+        string path, QmodStagingInput input, CancellationToken token)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length is <= 0 or > 1024 * 1024 || IsReparse(path)) throw new MetadataException();
+            byte[] bytes;
+            await using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                4096, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                bytes = new byte[checked((int)stream.Length)];
+                await stream.ReadExactlyAsync(bytes, token);
+            }
+            using var document = ParseStrictJson(bytes, new HashSet<string>(StringComparer.Ordinal)
+            {
+                "schemaVersion", "moduleId", "version", "moduleApiVersion", "packageSha256", "packageSize",
+                "stagedAtUtc", "sourceIdentity", "environmentIdentity", "fileCount", "totalUncompressedBytes", "files"
+            });
+            var root = document.RootElement;
+            if (RequiredInt(root, "schemaVersion") != 1 ||
+                RequiredText(root, "moduleId") != input.ReleaseIdentity.ModuleId ||
+                RequiredText(root, "version") != input.ReleaseIdentity.TargetVersion ||
+                RequiredText(root, "moduleApiVersion") != input.ModuleApiVersion ||
+                !RequiredText(root, "packageSha256").Equals(input.ReleaseIdentity.Sha256, StringComparison.OrdinalIgnoreCase) ||
+                RequiredLong(root, "packageSize") != input.ReleaseIdentity.ExpectedSize ||
+                RequiredText(root, "sourceIdentity") != input.SourceIdentity ||
+                RequiredText(root, "environmentIdentity") != _environmentIdentity ||
+                !DateTimeOffset.TryParse(RequiredText(root, "stagedAtUtc"), System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind, out _) ||
+                !root.TryGetProperty("files", out var fileArray) || fileArray.ValueKind != JsonValueKind.Array)
+                throw new MetadataException();
+            var fileCount = RequiredInt(root, "fileCount");
+            var total = RequiredLong(root, "totalUncompressedBytes");
+            if (fileCount < 0 || total < 0 || fileArray.GetArrayLength() != fileCount) throw new MetadataException();
+            var files = new List<QmodStagedFile>(fileCount);
+            var paths = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var file in fileArray.EnumerateArray())
+            {
+                if (file.ValueKind != JsonValueKind.Object) throw new MetadataException();
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var property in file.EnumerateObject())
+                    if (!names.Add(property.Name) || property.Name is not ("relativePath" or "size" or "sha256"))
+                        throw new MetadataException();
+                if (names.Count != 3) throw new MetadataException();
+                var relative = RequiredText(file, "relativePath");
+                ValidateMetadataRelativePath(relative);
+                var size = RequiredLong(file, "size");
+                var sha = RequiredText(file, "sha256");
+                if (size < 0 || sha.Length != 64 || !sha.All(Uri.IsHexDigit) ||
+                    !paths.Add(CanonicalRelativePath(relative))) throw new MetadataException();
+                files.Add(new(relative, size, sha.ToLowerInvariant()));
+            }
+            if (files.Sum(file => file.Size) != total) throw new MetadataException();
+            return new(fileCount, total, files);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (MetadataException) { throw; }
+        catch (Exception exception) when (exception is IOException or JsonException or StagingException or
+            FormatException or InvalidOperationException or OverflowException or ArgumentException)
+        { throw new MetadataException(); }
+    }
+
+    private async Task VerifyExistingTreeAsync(string root, IReadOnlyList<QmodStagedFile> files, CancellationToken token)
+    {
+        EnsureVerifiedPathChain(root);
+        var expectedFiles = files.ToDictionary(file => CanonicalRelativePath(file.RelativePath), file => file, StringComparer.Ordinal);
+        var expectedDirectories = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in files)
+        {
+            var segments = file.RelativePath.Split('/');
+            for (var i = 1; i < segments.Length; i++)
+                expectedDirectories.Add(CanonicalRelativePath(string.Join('/', segments[..i])));
+        }
+        var observedFiles = new HashSet<string>(StringComparer.Ordinal);
+        var observedDirectories = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Queue<string>();
+        pending.Enqueue(root);
+        while (pending.TryDequeue(out var directory))
+        {
+            token.ThrowIfCancellationRequested();
+            EnsureWithin(root, directory);
+            if (IsReparse(directory)) throw new TreeException();
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                EnsureWithin(root, entry);
+                if (IsReparse(entry)) throw new TreeException();
+                var relative = Path.GetRelativePath(root, entry).Replace(Path.DirectorySeparatorChar, '/');
+                var canonical = CanonicalRelativePath(relative);
+                if (Directory.Exists(entry))
+                {
+                    if (!expectedDirectories.Contains(canonical) || !observedDirectories.Add(canonical)) throw new TreeException();
+                    pending.Enqueue(entry);
+                }
+                else if (File.Exists(entry))
+                {
+                    if (relative.Equals(StagingMetadataName, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!expectedFiles.TryGetValue(canonical, out var expected) || !observedFiles.Add(canonical)) throw new TreeException();
+                    var info = new FileInfo(entry);
+                    if (info.Length != expected.Size) throw new TreeException();
+                    var hash = await HashFileAsync(entry, token);
+                    if (!CryptographicOperations.FixedTimeEquals(hash, Convert.FromHexString(expected.Sha256))) throw new TreeException();
+                }
+                else throw new TreeException();
+            }
+        }
+        if (observedFiles.Count != expectedFiles.Count || observedDirectories.Count != expectedDirectories.Count)
+            throw new TreeException();
+    }
+
+    private void EnsureVerifiedPathChain(string final)
+    {
+        EnsureWithin(_verifiedRoot, final);
+        EnsureNoReparseAncestors(_stagingRoot);
+        var current = _verifiedRoot;
+        EnsureOrdinaryDirectory(current);
+        foreach (var segment in Path.GetRelativePath(_verifiedRoot, final).Split(Path.DirectorySeparatorChar))
+        {
+            current = Path.Combine(current, segment);
+            EnsureOrdinaryDirectory(current);
+        }
+    }
+
+    private static string CanonicalRelativePath(string value) =>
+        value.Replace('\\', '/').Normalize(NormalizationForm.FormC).ToUpperInvariant();
+
+    private static void ValidateMetadataRelativePath(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Contains('\\') || value.StartsWith('/') || value.EndsWith('/'))
+            throw new MetadataException();
+        var segments = value.Split('/', StringSplitOptions.None);
+        if (segments.Length == 0 || segments.Any(segment => !IsSafeSegment(segment)) ||
+            value != value.Normalize(NormalizationForm.FormC)) throw new MetadataException();
     }
 
     private static void VerifyExtractedTree(string root, IReadOnlyList<QmodStagedFile> files)
@@ -497,6 +687,62 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     {
         foreach (var path in new[] { _stagingRoot, _incomingRoot, _verifiedRoot })
             CreateOrdinaryDirectoryTree(path);
+    }
+
+    private async Task<PublicationLease> AcquirePublicationLockAsync(QmodStagingInput input, CancellationToken token)
+    {
+        var key = new QmodModuleVersionKey(input.ReleaseIdentity.ModuleId, input.ReleaseIdentity.TargetVersion);
+        var local = await PublicationGate.AcquireAsync(key, token);
+        try
+        {
+            var name = BuildPublicationSemaphoreName(_stagingRoot, _environmentIdentity,
+                input.ReleaseIdentity.ModuleId, input.ReleaseIdentity.TargetVersion);
+            var semaphore = new Semaphore(1, 1, name, out _);
+            try { await WaitForSemaphoreAsync(semaphore, token); }
+            catch { semaphore.Dispose(); throw; }
+            return new(local, semaphore);
+        }
+        catch
+        {
+            await local.DisposeAsync();
+            throw;
+        }
+    }
+
+    public static string BuildPublicationSemaphoreName(string stagingRoot, string environmentIdentity,
+        string moduleId, string targetVersion)
+    {
+        var canonicalRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(stagingRoot)).ToUpperInvariant();
+        var identity = Encoding.UTF8.GetBytes($"{canonicalRoot}\0{environmentIdentity}\0{moduleId}\0{targetVersion}");
+        return "Local\\QingToolbox.QmodStaging." + Convert.ToHexString(SHA256.HashData(identity)).ToLowerInvariant();
+    }
+
+    private static async Task WaitForSemaphoreAsync(Semaphore semaphore, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = token.Register(() => completion.TrySetCanceled(token));
+        var registered = ThreadPool.RegisterWaitForSingleObject(semaphore, (_, timedOut) =>
+        {
+            if (timedOut) completion.TrySetException(new TimeoutException());
+            else if (!completion.TrySetResult()) semaphore.Release();
+        }, null, Timeout.Infinite, executeOnlyOnce: true);
+        try { await completion.Task; }
+        finally
+        {
+            using var unregistered = new ManualResetEvent(false);
+            if (registered.Unregister(unregistered))
+                await Task.Run(() => unregistered.WaitOne());
+        }
+    }
+
+    private static bool HasConflictingVersionContent(string versionRoot, string final)
+    {
+        if (!Directory.Exists(versionRoot)) return File.Exists(versionRoot);
+        if (IsReparse(versionRoot)) throw new StagingException(QmodStagingFailureCode.UnsupportedEntryType);
+        foreach (var entry in Directory.EnumerateFileSystemEntries(versionRoot))
+            if (!Path.GetFullPath(entry).Equals(Path.GetFullPath(final), StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
 
     private static void CreateOrdinaryDirectoryTree(string path)
@@ -564,9 +810,30 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             throw new StagingException(QmodStagingFailureCode.UnsafeEntryPath);
     }
 
+    private static bool IsWithin(string root, string path)
+    {
+        var normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        var normalized = Path.GetFullPath(path);
+        return normalized.Equals(normalizedRoot, StringComparison.OrdinalIgnoreCase) ||
+               normalized.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void EnsureOrdinaryDirectory(string path)
     {
         if (!Directory.Exists(path) || IsReparse(path)) throw new StagingException(QmodStagingFailureCode.UnsupportedEntryType);
+    }
+
+    private static void EnsureNoReparseAncestors(string path)
+    {
+        var current = Path.GetFullPath(path);
+        while (true)
+        {
+            if (Directory.Exists(current) && IsReparse(current))
+                throw new StagingException(QmodStagingFailureCode.UnsupportedEntryType);
+            var parent = Path.GetDirectoryName(current);
+            if (string.IsNullOrEmpty(parent) || parent == current) break;
+            current = parent;
+        }
     }
 
     private static bool IsReparse(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
@@ -639,6 +906,8 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     }
 
     private static string SafeHashPrefix(string hash) => hash.Length >= 12 && hash.All(Uri.IsHexDigit) ? hash[..12].ToLowerInvariant() : "invalid";
+    private static bool IsSafeFileName(string value) => !string.IsNullOrWhiteSpace(value) &&
+        value == Path.GetFileName(value) && IsSafeSegment(value);
     private static bool IsSafeModuleId(string value) => !string.IsNullOrEmpty(value) && value.Length <= 128 &&
         value.All(ch => char.IsAsciiLetterOrDigit(ch) && !char.IsUpper(ch) || ch is '.' or '-' or '_');
     private static string RequiredText(JsonElement root, string name) =>
@@ -646,6 +915,9 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             ? value.GetString()! : throw new StagingException(QmodStagingFailureCode.ManifestInvalid);
     private static int RequiredInt(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) && value.TryGetInt32(out var number)
+            ? number : throw new StagingException(QmodStagingFailureCode.ManifestInvalid);
+    private static long RequiredLong(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number)
             ? number : throw new StagingException(QmodStagingFailureCode.ManifestInvalid);
 
     public async ValueTask DisposeAsync()
@@ -663,6 +935,81 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     private sealed record PackageManifest(int SchemaVersion, string ModuleId, string Version, string ModuleApiVersion, string EntryManifest);
     private sealed record ModuleIdentityManifest(string Id, string Version, string Entry);
     private sealed class StagingException(QmodStagingFailureCode code) : Exception { public QmodStagingFailureCode Code { get; } = code; }
+    private sealed class MetadataException : Exception;
+    private sealed class TreeException : Exception;
+    private sealed record StagingMetadata(int FileCount, long TotalUncompressedBytes, IReadOnlyList<QmodStagedFile> Files);
+    private sealed class QmodStagingOperationKeyComparer : IEqualityComparer<QmodStagingOperationKey>
+    {
+        public static QmodStagingOperationKeyComparer Instance { get; } = new();
+        public bool Equals(QmodStagingOperationKey x, QmodStagingOperationKey y) =>
+            StringComparer.OrdinalIgnoreCase.Equals(x.PackagePath, y.PackagePath) &&
+            StringComparer.Ordinal.Equals(x.ModuleId, y.ModuleId) &&
+            StringComparer.Ordinal.Equals(x.TargetVersion, y.TargetVersion) &&
+            StringComparer.Ordinal.Equals(x.FileName, y.FileName) && x.ExpectedSize == y.ExpectedSize &&
+            StringComparer.OrdinalIgnoreCase.Equals(x.Sha256, y.Sha256) &&
+            StringComparer.Ordinal.Equals(x.ModuleApiVersion, y.ModuleApiVersion) &&
+            StringComparer.Ordinal.Equals(x.SourceIdentity, y.SourceIdentity) &&
+            StringComparer.Ordinal.Equals(x.EnvironmentIdentity, y.EnvironmentIdentity);
+        public int GetHashCode(QmodStagingOperationKey value)
+        {
+            var hash = new HashCode();
+            hash.Add(value.PackagePath, StringComparer.OrdinalIgnoreCase);
+            hash.Add(value.ModuleId, StringComparer.Ordinal);
+            hash.Add(value.TargetVersion, StringComparer.Ordinal);
+            hash.Add(value.FileName, StringComparer.Ordinal);
+            hash.Add(value.ExpectedSize);
+            hash.Add(value.Sha256, StringComparer.OrdinalIgnoreCase);
+            hash.Add(value.ModuleApiVersion, StringComparer.Ordinal);
+            hash.Add(value.SourceIdentity, StringComparer.Ordinal);
+            hash.Add(value.EnvironmentIdentity, StringComparer.Ordinal);
+            return hash.ToHashCode();
+        }
+    }
+    private static class PublicationGate
+    {
+        private static readonly object Sync = new();
+        private static readonly Dictionary<QmodModuleVersionKey, GateEntry> Entries = [];
+        public static async Task<GateLease> AcquireAsync(QmodModuleVersionKey key, CancellationToken token)
+        {
+            GateEntry entry;
+            lock (Sync)
+            {
+                if (!Entries.TryGetValue(key, out entry!)) Entries.Add(key, entry = new());
+                entry.References++;
+            }
+            try { await entry.Semaphore.WaitAsync(token); return new(key, entry); }
+            catch { ReleaseReference(key, entry, acquired: false); throw; }
+        }
+        private static void ReleaseReference(QmodModuleVersionKey key, GateEntry entry, bool acquired)
+        {
+            if (acquired) entry.Semaphore.Release();
+            lock (Sync)
+            {
+                entry.References--;
+                if (entry.References == 0 && Entries.TryGetValue(key, out var current) && ReferenceEquals(current, entry))
+                { Entries.Remove(key); entry.Semaphore.Dispose(); }
+            }
+        }
+        public sealed class GateEntry { public SemaphoreSlim Semaphore { get; } = new(1, 1); public int References; }
+        public sealed class GateLease(QmodModuleVersionKey key, GateEntry entry) : IAsyncDisposable
+        {
+            private int _disposed;
+            public ValueTask DisposeAsync()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 0) ReleaseReference(key, entry, acquired: true);
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+    private sealed class PublicationLease(PublicationGate.GateLease local, Semaphore crossProcess) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            crossProcess.Release();
+            crossProcess.Dispose();
+            await local.DisposeAsync();
+        }
+    }
     private sealed class StagingOperation(CancellationTokenSource cancellation, Func<Task<QmodStagingResult>> factory) : IDisposable
     {
         public CancellationTokenSource Cancellation { get; } = cancellation;
