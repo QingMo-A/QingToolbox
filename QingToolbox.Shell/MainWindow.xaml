@@ -250,6 +250,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
@@ -353,7 +354,34 @@
                     </Grid>
                 </Button>
 
-                <Button Grid.Row="5"
+                <Button Grid.Row="4"
+                        AutomationProperties.Name="Logs"
+                        Command="{Binding SelectNavigationCommand}"
+                        CommandParameter="Logs"
+                        Visibility="{Binding ShowLogsInSidebar, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Button.Style>
+                        <Style BasedOn="{StaticResource SidebarButtonStyle}" TargetType="Button">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedNavigationKey}" Value="Logs">
+                                    <Setter Property="Tag" Value="Selected"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="32"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Style="{StaticResource SidebarIconContainerStyle}">
+                            <TextBlock Text="&#xE9D9;" Style="{StaticResource FluentIconStyle}"/>
+                        </Border>
+                        <TextBlock Grid.Column="1" Text="{Binding Strings[nav.logs]}"
+                                   Style="{StaticResource SidebarLabelStyle}"/>
+                    </Grid>
+                </Button>
+
+                <Button Grid.Row="6"
                         Click="OnPinSidebarClick"
                         ToolTip="{Binding Strings[sidebar.pinTooltip]}"
                         Style="{StaticResource SidebarButtonStyle}">
@@ -371,7 +399,7 @@
                     </Grid>
                 </Button>
 
-                <Button Grid.Row="6"
+                <Button Grid.Row="7"
                         AutomationProperties.Name="Settings"
                         Command="{Binding SelectNavigationCommand}"
                         CommandParameter="Settings">
@@ -1406,6 +1434,62 @@
 
             <Grid Grid.Row="2" Grid.RowSpan="2"
                   Style="{StaticResource PageTransitionStyle}"
+                  Visibility="{Binding IsLogsSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Grid Margin="20">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="{Binding Strings[logs.title]}" FontSize="26" FontWeight="SemiBold"/>
+                            <TextBlock Margin="0,6,0,0" Text="{Binding Strings[logs.subtitle]}"
+                                       Foreground="{StaticResource SecondaryTextBrush}"/>
+                        </StackPanel>
+                        <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                            <Button Margin="0,0,8,0" Content="{Binding Strings[logs.openDirectory]}"
+                                    Command="{Binding OpenLogsDirectoryCommand}" Style="{StaticResource SecondaryActionButtonStyle}"/>
+                            <Button Content="{Binding Strings[logs.clearView]}" Command="{Binding ClearVisibleLogsCommand}"
+                                    Style="{StaticResource SecondaryActionButtonStyle}"/>
+                        </WrapPanel>
+                    </Grid>
+                    <Border Grid.Row="1" Margin="0,18,0,0" Padding="8" Background="#F9FBFF"
+                            BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1"
+                            CornerRadius="16">
+                        <ListBox ItemsSource="{Binding LogEntries}" BorderThickness="0" Background="Transparent"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                    <Setter Property="Padding" Value="0"/>
+                                    <Setter Property="Margin" Value="0,0,0,4"/>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Padding="12,9" Background="White" CornerRadius="10">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="90"/><ColumnDefinition Width="92"/>
+                                                <ColumnDefinition Width="120"/><ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding TimeDisplay}" FontFamily="Consolas" Foreground="{StaticResource SecondaryTextBrush}"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding LevelDisplay}" FontWeight="SemiBold"/>
+                                            <TextBlock Grid.Column="2" Text="{Binding Category}" Foreground="{StaticResource AccentBrush}"/>
+                                            <TextBlock Grid.Column="3" Text="{Binding Message}" TextWrapping="Wrap"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Border>
+                </Grid>
+            </Grid>
+
+            <Grid Grid.Row="2" Grid.RowSpan="2"
+                  Style="{StaticResource PageTransitionStyle}"
                   Visibility="{Binding IsSettingsSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <ScrollViewer behaviors:SmoothScrollBehavior.IsEnabled="True"
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -1430,6 +1514,15 @@
                                   DisplayMemberPath="DisplayText"
                                   SelectedValuePath="Code"
                                   SelectedValue="{Binding SelectedLanguageCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Margin="0,22,0,0" Text="{Binding Strings[logs.settingsTitle]}"
+                                   FontSize="16" FontWeight="SemiBold"/>
+                        <CheckBox Margin="0,10,0,0" Content="{Binding Strings[logs.showInSidebar]}"
+                                  IsChecked="{Binding ShowLogsInSidebar, Mode=TwoWay}"/>
+                        <TextBlock Margin="0,6,0,0" Text="{Binding Strings[logs.settingsDescription]}"
+                                   TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <Button Margin="0,10,0,0" HorizontalAlignment="Left"
+                                Content="{Binding Strings[logs.openDirectory]}" Command="{Binding OpenLogsDirectoryCommand}"
+                                Style="{StaticResource SecondaryActionButtonStyle}"/>
                         <Border Margin="0,24,0,0" Height="1" Background="#E2E8F0"/>
                         <TextBlock Margin="0,20,0,0" Text="{Binding Strings[closeBehavior.title]}"
                                    FontSize="16" FontWeight="SemiBold"/>

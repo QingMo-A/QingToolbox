@@ -27,6 +27,7 @@ public partial class App : Application
     private StartupSessionCoordinator? _startupSession;
     private Func<InstanceActivationRequest, Task>? _activationHandler;
     private int _activationDispatchPending;
+    private SessionLogService? _sessionLog;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -157,6 +158,7 @@ public partial class App : Application
             services.AddSingleton<INotificationAreaIcon>(provider => provider.GetRequiredService<NotificationAreaService>());
             services.AddSingleton<ApplicationExitCoordinator>();
             services.AddSingleton(applicationPaths);
+            services.AddSingleton<SessionLogService>();
             services.AddSingleton(provider => new StartupHealthJournal(
                 provider.GetRequiredService<ApplicationPaths>().StartupHealthPath,
                 provider.GetRequiredService<TimeProvider>(), processStartedAt, monotonicOrigin,
@@ -205,6 +207,13 @@ public partial class App : Application
             services.AddSingleton<MainWindow>();
 
             _serviceProvider = services.BuildServiceProvider();
+            _sessionLog = _serviceProvider.GetRequiredService<SessionLogService>();
+            _sessionLog.Information("Application",
+                $"Session started. Environment={environment.Kind}; Version={typeof(App).Assembly.GetName().Version}");
+            DispatcherUnhandledException += (_, args) =>
+                _sessionLog?.Error("UnhandledException", "A dispatcher exception reached the application boundary.", args.Exception);
+            TaskScheduler.UnobservedTaskException += (_, args) =>
+                _sessionLog?.Error("UnobservedTask", "An unobserved task exception was reported.", args.Exception);
             var startupJournal = _serviceProvider.GetRequiredService<StartupHealthJournal>();
             startupJournal.Mark(StartupPhase.InstanceReady);
 
@@ -262,6 +271,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _sessionLog?.Information("Application", $"Application exit requested. ExitCode={e.ApplicationExitCode}");
         try { _serviceProvider?.GetService<MainWindowViewModel>()?.StopUpdateChecks(); } catch { }
         try { _startupSession?.PrepareForExit(); }
         catch (Exception exception) { System.Diagnostics.Debug.WriteLine($"Final startup cleanup failed: {exception.GetType().Name}"); }
@@ -298,6 +308,7 @@ public partial class App : Application
             _startupSession?.Dispose();
         }
         catch (Exception exception) { System.Diagnostics.Debug.WriteLine($"Final service cleanup failed: {exception.GetType().Name}"); }
+        _sessionLog = null;
         base.OnExit(e);
     }
 

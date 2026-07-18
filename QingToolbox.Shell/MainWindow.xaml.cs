@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private readonly StartupPreferenceSnapshot _startupPreferences;
     private readonly StartupHealthJournal _startupJournal;
     private readonly StartupPipelineCoordinator _startupPipeline;
+    private readonly SessionLogService _sessionLog;
     private Task? _backgroundStartupTask;
     private int _closeRequestPending;
     private WindowState _notificationAreaRestoreState = WindowState.Normal;
@@ -41,7 +42,8 @@ public partial class MainWindow : Window
         ModuleWindowManager moduleWindowManager,
         StartupPreferenceSnapshot startupPreferences,
         StartupHealthJournal startupJournal,
-        StartupPipelineCoordinator startupPipeline)
+        StartupPipelineCoordinator startupPipeline,
+        SessionLogService sessionLog)
     {
         InitializeComponent();
 
@@ -56,6 +58,7 @@ public partial class MainWindow : Window
         _startupPreferences = startupPreferences;
         _startupJournal = startupJournal;
         _startupPipeline = startupPipeline;
+        _sessionLog = sessionLog;
         _startupSession.Attach(this, floatingBadgeManager);
         _floatingBadgeManager.Attach(this);
         DataContext = viewModel;
@@ -86,6 +89,7 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
+        _sessionLog.Information("Shell", "Main window loaded; critical startup presentation is beginning.");
         try
         {
             await PresentCriticalStartupAsync();
@@ -97,6 +101,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
+            _sessionLog.Error("Shell", "Shell startup failed.", exception);
             System.Diagnostics.Debug.WriteLine($"Shell startup failed: {exception.GetType().Name}");
             if (_startupSession.State != StartupSessionState.Exiting)
             {
@@ -124,6 +129,7 @@ public partial class MainWindow : Window
 
     private async Task InitializeApplicationInBackgroundAsync()
     {
+        _sessionLog.Information("Startup", "Background startup pipeline started.");
         try
         {
             var token = _startupSession.LifetimeToken;
@@ -131,6 +137,8 @@ public partial class MainWindow : Window
             try { settings = await _settingsService.ReadAsync(token); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             { System.Diagnostics.Debug.WriteLine($"Startup settings read degraded: {exception.GetType().Name}"); }
+
+            if (settings is not null) _viewModel.InitializeLogSettings(settings);
 
             var startupSettings = settings;
             var results = await _startupPipeline.RunAsync(
@@ -160,11 +168,13 @@ public partial class MainWindow : Window
             {
                 _startupSession.Complete();
                 _startupJournal.Mark(StartupPhase.Ready);
+                _sessionLog.Information("Startup", "Background startup pipeline completed.");
             }
         }
         catch(OperationCanceledException) when(_startupSession.State==StartupSessionState.Exiting){}
         catch(Exception exception)
         {
+            _sessionLog.Error("Startup", "Background startup pipeline failed.", exception);
             System.Diagnostics.Debug.WriteLine($"Background startup failed: {exception.GetType().Name}");
             _viewModel.StatusMessage = _viewModel.Strings["status.startupFailed"];
         }
@@ -172,9 +182,14 @@ public partial class MainWindow : Window
 
     private void ApplyPipelineResult(StartupPipelineStageResult result, StartupPhase phase, string diagnostic)
     {
-        if (result.Outcome == StartupPhaseOutcome.Succeeded) _startupJournal.Mark(phase);
+        if (result.Outcome == StartupPhaseOutcome.Succeeded)
+        {
+            _startupJournal.Mark(phase);
+            _sessionLog.Information("Startup", $"Stage {phase} completed.");
+        }
         else
         {
+            _sessionLog.Warning("Startup", $"Stage {phase} degraded: {result.Error?.GetType().Name ?? diagnostic}.");
             System.Diagnostics.Debug.WriteLine($"Startup stage {phase} degraded: {result.Error?.GetType().Name}");
             _startupJournal.Mark(phase, StartupPhaseOutcome.Degraded, diagnostic);
             _viewModel.StatusMessage = _viewModel.Strings[diagnostic];

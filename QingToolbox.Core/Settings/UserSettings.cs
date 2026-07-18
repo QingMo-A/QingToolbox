@@ -2,7 +2,7 @@ namespace QingToolbox.Core.Settings;
 
 public sealed class UserSettings
 {
-    public int SettingsSchemaVersion { get; set; } = 5;
+    public int SettingsSchemaVersion { get; set; } = 6;
     public string Language { get; set; } = "system";
     public double? FloatingBadgeLeft { get; set; }
     public double? FloatingBadgeTop { get; set; }
@@ -15,11 +15,12 @@ public sealed class UserSettings
     public bool StartupRegistrationCleanupPending { get; set; }
     public StartupPresentationMode StartupPresentationMode { get; set; } = StartupPresentationMode.FloatingBadge;
     public MainWindowCloseBehavior MainWindowCloseBehavior { get; set; } = MainWindowCloseBehavior.Ask;
+    public bool? ShowLogsInSidebar { get; set; }
     public List<StartupModuleAuthorization> StartupModules { get; set; } = [];
 
     internal void Normalize()
     {
-        SettingsSchemaVersion = Math.Max(5, SettingsSchemaVersion);
+        SettingsSchemaVersion = Math.Max(6, SettingsSchemaVersion);
         Language = string.IsNullOrWhiteSpace(Language) ? "system" : Language;
         StartupRegistrationBackend = StartupRegistrationBackend is "TaskScheduler" or "RegistryRun"
             ? StartupRegistrationBackend : "None";

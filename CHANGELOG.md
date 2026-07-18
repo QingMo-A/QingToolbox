@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a lightweight per-session log viewer with persistent, privacy-conscious log files and environment-aware sidebar visibility.
+
 - Prepared the unified 0.2.0-alpha Preview 2 product and installer metadata.
 - Added deterministic host payload ownership manifests and exact obsolete-file cleanup inputs.
 - Added in-place Preview upgrade, same-version repair, and SemVer downgrade-guard infrastructure.

@@ -302,5 +302,13 @@
   "moduleUpdate.status.SourceInvalid": "官方更新源数据无效",
   "moduleUpdate.status.DisabledByEnvironment": "模块测试环境不检查更新"
   ,"moduleUpdate.noModules": "没有可检查更新的模块。",
-  "moduleUpdate.unexpectedFailure": "未能完成更新检查。"
+  "moduleUpdate.unexpectedFailure": "未能完成更新检查。",
+  "nav.logs": "日志",
+  "logs.title": "日志",
+  "logs.subtitle": "查看 QingToolbox 本次运行期间的活动记录。",
+  "logs.openDirectory": "打开日志目录",
+  "logs.clearView": "清空当前视图",
+  "logs.settingsTitle": "日志",
+  "logs.showInSidebar": "在侧边栏显示日志",
+  "logs.settingsDescription": "开发环境默认显示，正式发布版默认隐藏。隐藏入口不会停止保存每次运行的日志文件。"
 }

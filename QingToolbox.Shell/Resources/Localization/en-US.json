@@ -302,5 +302,13 @@
   "moduleUpdate.status.SourceInvalid": "The official update metadata is invalid",
   "moduleUpdate.status.DisabledByEnvironment": "Update checks are disabled in ModuleTest"
   ,"moduleUpdate.noModules": "There are no modules to check for updates.",
-  "moduleUpdate.unexpectedFailure": "The update check could not be completed."
+  "moduleUpdate.unexpectedFailure": "The update check could not be completed.",
+  "nav.logs": "Logs",
+  "logs.title": "Logs",
+  "logs.subtitle": "Review activity from this QingToolbox session.",
+  "logs.openDirectory": "Open logs folder",
+  "logs.clearView": "Clear view",
+  "logs.settingsTitle": "Logs",
+  "logs.showInSidebar": "Show Logs in the sidebar",
+  "logs.settingsDescription": "The sidebar entry is enabled by default in Development and hidden by default in published builds. Session log files are always retained."
 }

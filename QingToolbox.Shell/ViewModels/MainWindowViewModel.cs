@@ -36,7 +36,8 @@ public sealed partial class MainWindowViewModel(
     ModuleUpdateCheckCoordinator moduleUpdateCoordinator,
     ModulePackageDownloadCoordinator modulePackageDownloadCoordinator,
     TimeProvider timeProvider,
-    StartupHealthJournal startupHealthJournal) : ObservableObject
+    StartupHealthJournal startupHealthJournal,
+    SessionLogService sessionLog) : ObservableObject
 {
     public void ApplyNotificationAvailability(NotificationAvailabilityChangedEventArgs change)
     {
@@ -68,6 +69,7 @@ public sealed partial class MainWindowViewModel(
     private bool _suppressCloseBehaviorSave;
     private MainWindowCloseBehavior _persistedCloseBehavior = MainWindowCloseBehavior.Ask;
     private int _closeBehaviorSaveVersion;
+    private bool _logSettingInitialized;
     [ObservableProperty] private bool _isCheckingModuleUpdates;
     [ObservableProperty] private int _moduleUpdateCount;
     [ObservableProperty] private string _moduleUpdateSummary = string.Empty;
@@ -137,6 +139,7 @@ public sealed partial class MainWindowViewModel(
 
     [ObservableProperty] private bool _canTestStartup;
     [ObservableProperty] private bool _canRepairStartup;
+    [ObservableProperty] private bool _showLogsInSidebar = executionEnvironment.IsDevelopment;
 
     public IReadOnlyList<StartupPresentationMode> StartupPresentationModes { get; } = Enum.GetValues<StartupPresentationMode>();
     public string StartupAuthorizationSummary => localization.GetString("startup.authorizationSummary", StartupAuthorizationCount);
@@ -165,11 +168,13 @@ public sealed partial class MainWindowViewModel(
     public bool IsHomeSelected => SelectedNavigationKey == "Home";
     public bool IsModulesSelected => SelectedNavigationKey == "Modules";
     public bool IsRunningSelected => SelectedNavigationKey == "Running";
+    public bool IsLogsSelected => SelectedNavigationKey == "Logs";
     public bool IsSettingsSelected => SelectedNavigationKey == "Settings";
     public string PageTitle => SelectedNavigationKey switch
     {
         "Modules" => localization.GetString("modules.title"),
         "Running" => localization.GetString("running.title"),
+        "Logs" => localization.GetString("logs.title"),
         "Settings" => localization.GetString("settings.title"),
         _ => localization.GetString("app.name")
     };
@@ -177,12 +182,15 @@ public sealed partial class MainWindowViewModel(
     {
         "Modules" => localization.GetString("modules.subtitle"),
         "Running" => localization.GetString("running.subtitle"),
+        "Logs" => localization.GetString("logs.subtitle"),
         "Settings" => localization.GetString("settings.subtitle"),
         _ => localization.GetString("app.subtitle")
     };
 
     public ObservableCollection<DiscoveredModuleViewModel> Modules { get; } = [];
     public ObservableCollection<DiscoveredModuleViewModel> RunningModules { get; } = [];
+    public ObservableCollection<SessionLogEntry> LogEntries => sessionLog.Entries;
+    public string CurrentLogPath => sessionLog.CurrentLogPath;
     public bool HasModules => Modules.Count > 0;
     public bool HasNoModules => !HasModules;
     public bool HasSelectedModule => SelectedModule is not null;
@@ -197,8 +205,34 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand]
     private void SelectNavigation(string key)
     {
+        if (key == "Logs" && !ShowLogsInSidebar) return;
         SelectedNavigationKey = key;
     }
+
+    public void InitializeLogSettings(UserSettings settings)
+    {
+        ShowLogsInSidebar = settings.ShowLogsInSidebar ?? executionEnvironment.IsDevelopment;
+        _logSettingInitialized = true;
+        sessionLog.Information("Settings", $"Log navigation visibility initialized: {ShowLogsInSidebar}.");
+    }
+
+    [RelayCommand]
+    private void OpenLogsDirectory()
+    {
+        try
+        {
+            Directory.CreateDirectory(sessionLog.LogsDirectory);
+            Process.Start(new ProcessStartInfo(sessionLog.LogsDirectory) { UseShellExecute = true });
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+            System.ComponentModel.Win32Exception)
+        {
+            sessionLog.Error("Logs", "The logs directory could not be opened.", exception);
+        }
+    }
+
+    [RelayCommand]
+    private void ClearVisibleLogs() => sessionLog.ClearVisible();
 
     [RelayCommand]
     private void OpenUserModulesDirectory()
@@ -261,6 +295,7 @@ public sealed partial class MainWindowViewModel(
         OnPropertyChanged(nameof(IsHomeSelected));
         OnPropertyChanged(nameof(IsModulesSelected));
         OnPropertyChanged(nameof(IsRunningSelected));
+        OnPropertyChanged(nameof(IsLogsSelected));
         OnPropertyChanged(nameof(IsSettingsSelected));
         OnPropertyChanged(nameof(PageTitle));
         OnPropertyChanged(nameof(PageSubtitle));
@@ -444,6 +479,25 @@ public sealed partial class MainWindowViewModel(
         OnPropertyChanged(nameof(PinLabel));
     }
 
+    partial void OnShowLogsInSidebarChanged(bool value)
+    {
+        if (!value && SelectedNavigationKey == "Logs") SelectedNavigationKey = "Settings";
+        if (_logSettingInitialized) _ = SaveLogVisibilityAsync(value);
+    }
+
+    private async Task SaveLogVisibilityAsync(bool value)
+    {
+        try
+        {
+            await settingsService.UpdateAsync(settings => settings.ShowLogsInSidebar = value);
+            sessionLog.Information("Settings", $"Log navigation visibility changed: {value}.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            sessionLog.Error("Settings", "Log navigation visibility could not be saved.", exception);
+        }
+    }
+
     [RelayCommand]
     private async Task RefreshModulesAsync(CancellationToken cancellationToken = default)
     {
@@ -460,6 +514,7 @@ public sealed partial class MainWindowViewModel(
     {
         try
         {
+            sessionLog.Information("Discovery", "Module discovery started.");
             IsScanning = true;
             foreach (var active in Modules.Where(module => module.IsDownloadActive && module.UpdateResult.SelectedRelease is not null))
             {
@@ -559,6 +614,7 @@ public sealed partial class MainWindowViewModel(
             StatusMessage = localization.GetString(
                 "status.modulesFound",
                 Modules.Count);
+            sessionLog.Information("Discovery", $"Module discovery completed. Count={Modules.Count}; Valid={ValidModuleCount}; Failed={FailedModuleCount}.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -708,6 +764,7 @@ public sealed partial class MainWindowViewModel(
             "status.moduleOperationStarted",
             localizedOperation,
             moduleViewModel.DisplayName);
+        sessionLog.Information("Module", $"{operation} started for module '{moduleId}'.");
 
         try
         {
@@ -717,6 +774,7 @@ public sealed partial class MainWindowViewModel(
                 "status.moduleOperationCompleted",
                 moduleViewModel.DisplayName,
                 localizedOperation);
+            sessionLog.Information("Module", $"{operation} completed for module '{moduleId}'.");
         }
         catch (Exception exception)
         {
@@ -731,6 +789,7 @@ public sealed partial class MainWindowViewModel(
                 localizedOperation,
                 moduleViewModel.DisplayName,
                 exception.Message);
+            sessionLog.Error("Module", $"{operation} failed for module '{moduleId}'.", exception);
         }
         finally
         {
