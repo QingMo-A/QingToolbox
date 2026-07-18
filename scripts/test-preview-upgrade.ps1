@@ -98,7 +98,8 @@ try {
     'module'|Set-Content $module -Encoding ASCII; 'data'|Set-Content $data -Encoding ASCII; 'cache'|Set-Content $cache -Encoding ASCII
     $unknown=Join-Path $install 'user-owned-unknown.txt'; 'unknown'|Set-Content $unknown -Encoding ASCII
     $sentinels=@($settings,$module,$data,$cache,$unknown);$hashes=@{};foreach($item in $sentinels){$hashes[$item]=(Get-FileHash $item -Algorithm SHA256).Hash}
-    if((Invoke-Setup $current (Join-Path $TestRoot 'upgrade.log') $false)-ne 0){throw 'Preview 2 in-place upgrade without /DIR failed.'}
+    $upgradeExitCode=Invoke-Setup $current (Join-Path $TestRoot 'upgrade.log') $false
+    if($upgradeExitCode-ne 0){throw "Preview 2 in-place upgrade without /DIR failed with exit code $upgradeExitCode."}
     Wait-Until { $preview1Process.Refresh(); $preview1Process.HasExited } 20 'Preview 1 Shell remained running after the in-place upgrade.'
     $newShellProcesses=@()
     Wait-Until { $script:newShellProcesses=@(Get-ShellProcessesAtInstallPath); $script:newShellProcesses.Count-eq 1 } 20 'Preview 2 Shell was not restored exactly once in the original custom directory.'
