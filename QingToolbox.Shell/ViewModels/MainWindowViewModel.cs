@@ -1125,7 +1125,11 @@ public sealed partial class MainWindowViewModel(
         catch (Exception exception)
         {
             Debug.WriteLine($"Startup registration update failed: {exception.GetType().Name}");
-            ApplyRegistrationSnapshot(await startupRegistrationService.GetSnapshotAsync());
+            try { ApplyRegistrationSnapshot(await startupRegistrationService.GetSnapshotAsync()); }
+            catch (Exception snapshotException)
+            {
+                Debug.WriteLine($"Startup registration refresh failed: {snapshotException.GetType().Name}");
+            }
             if (_lastStartupRegistrationState?.Health != StartupRegistrationHealth.PartialFailure)
                 StartupSettingsMessage = localization.GetString("startup.registrationFailed");
         }

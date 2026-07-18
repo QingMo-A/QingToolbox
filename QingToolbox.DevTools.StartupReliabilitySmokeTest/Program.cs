@@ -3,6 +3,7 @@ using StartupReliabilitySmokeTest.Tests;
 var tests = new (string Name, Func<Task> Run)[]
 {
     ("Task paths", TaskPathTests.RunAsync),
+    ("Task Scheduler interop", SchedulerInteropTests.RunAsync),
     ("Definitions and presence", DefinitionTests.RunAsync),
     ("Transactions", TransactionTests.RunAsync),
     ("Reconcile", ReconcileTests.RunAsync),

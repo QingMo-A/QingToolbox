@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.IO;
+using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Principal;
@@ -291,10 +293,10 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
             try
             {
                 try { folder = Invoke(service, "GetFolder", Identity.PreferredFolderPath); }
-                catch (COMException exception) when (IsMissing(exception))
+                catch (Exception exception) when (IsMissing(exception))
                 { folder = Invoke(root, "CreateFolder", Identity.PreferredFolderPath.TrimStart('\\')); }
             }
-            catch (COMException exception) when (IsFolderRegistrationFailure(exception))
+            catch (Exception exception) when (IsFolderRegistrationFailure(exception))
             { folder = root; root = null; useFallback = true; }
 
             definition = Invoke(service, "NewTask", 0);
@@ -356,7 +358,7 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
             else
             {
                 try { folder = Invoke(service, "GetFolder", folderPath); }
-                catch (COMException exception) when (IsMissing(exception))
+                catch (Exception exception) when (IsMissing(exception))
                 { folder = Invoke(root, "CreateFolder", folderPath.TrimStart('\\')); }
             }
             registered = Invoke(folder, "RegisterTask", taskName, snapshot.DefinitionXml, 6, null!, null!, 3, null!);
@@ -379,7 +381,7 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
             else
             {
                 try { folder = Invoke(service, "GetFolder", folderPath); }
-                catch (COMException exception) when (IsMissing(exception))
+                catch (Exception exception) when (IsMissing(exception))
                 { folder = Invoke(root, "CreateFolder", folderPath.TrimStart('\\')); }
             }
             definition = Invoke(service, "NewTask", 0);
@@ -413,7 +415,7 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
                 var (folderPath, name) = OwnedStartupTaskIdentity.SplitTaskPath(path);
                 object? folder = null;
                 try { folder = Invoke(service, "GetFolder", folderPath); _ = Invoke(folder, "DeleteTask", name, 0); }
-                catch (COMException exception) when (IsMissing(exception)) { }
+                catch (Exception exception) when (IsMissing(exception)) { }
                 finally { Release(folder); }
             }
             TryDeletePreferredFolder(service);
@@ -431,7 +433,7 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
             service = Connect();
             var (folderPath, name) = OwnedStartupTaskIdentity.SplitTaskPath(taskPath);
             try { folder = Invoke(service, "GetFolder", folderPath); _ = Invoke(folder, "DeleteTask", name, 0); }
-            catch (COMException exception) when (IsMissing(exception)) { }
+            catch (Exception exception) when (IsMissing(exception)) { }
         }
         finally { Release(folder); Release(service); }
     }
@@ -469,7 +471,7 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
             root = Invoke(service, "GetFolder", "\\");
             _ = Invoke(root, "DeleteFolder", Identity.PreferredFolderPath.TrimStart('\\'), 0);
         }
-        catch (COMException exception) when (IsMissing(exception) || (uint)exception.HResult == 0x80070091u) { }
+        catch (Exception exception) when (IsMissing(exception) || (uint)exception.HResult == 0x80070091u) { }
         finally { Release(root); }
     }
 
@@ -479,7 +481,7 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
         try
         {
             try { folder = Invoke(service, "GetFolder", folderPath); }
-            catch (COMException exception) when (IsMissing(exception)) { return; }
+            catch (Exception exception) when (IsMissing(exception)) { return; }
             tasks = Invoke(folder, "GetTasks", 1);
             var paths = new List<string>();
             for (var index = 1; index <= ToInt(Get(tasks, "Count")); index++)
@@ -487,7 +489,7 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
                 object? task = null;
                 try
                 {
-                    task = Invoke(tasks, "Item", index);
+                    task = GetIndexed(tasks, "Item", index);
                     var path = Text(Get(task, "Path"));
                     if (Identity.IsOwnedTestPath(path)) paths.Add(path);
                 }
@@ -507,8 +509,8 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
             definition = Get(task, "Definition"); triggers = Get(definition, "Triggers"); actions = Get(definition, "Actions");
             settings = Get(definition, "Settings"); principal = Get(definition, "Principal");
             var triggerCount = ToInt(Get(triggers, "Count")); var actionCount = ToInt(Get(actions, "Count"));
-            if (triggerCount > 0) trigger = Invoke(triggers, "Item", 1);
-            if (actionCount > 0) action = Invoke(actions, "Item", 1);
+            if (triggerCount > 0) trigger = GetIndexed(triggers, "Item", 1);
+            if (actionCount > 0) action = GetIndexed(actions, "Item", 1);
             var taskPath = Text(Get(task, "Path"));
             return new(taskPath, Text(Get(action, "Path")), Text(Get(action, "Arguments")), Text(Get(action, "WorkingDirectory")),
                 Text(Get(principal, "UserId")), ToBool(Get(task, "Enabled")), trigger is not null && ToInt(Get(trigger, "Type")) == 9,
@@ -544,17 +546,42 @@ public sealed class WindowsTaskSchedulerStore : ITaskSchedulerStore
     {
         var (folderPath, name) = OwnedStartupTaskIdentity.SplitTaskPath(path); object? folder = null;
         try { folder = Invoke(service, "GetFolder", folderPath); return Invoke(folder, "GetTask", name); }
-        catch (COMException exception) when (IsMissing(exception)) { return null; }
+        catch (Exception exception) when (IsMissing(exception)) { return null; }
         finally { Release(folder); }
     }
-    private static bool IsMissing(COMException e) => (uint)e.HResult is 0x80070002u or 0x80070003u;
-    private static bool IsFolderRegistrationFailure(COMException e) => IsMissing(e) || (uint)e.HResult is 0x80070005u;
+    internal static bool IsMissing(Exception exception)
+    {
+        var unwrapped = UnwrapInvocationException(exception);
+        return (uint)unwrapped.HResult is 0x80070002u or 0x80070003u;
+    }
+    private static bool IsFolderRegistrationFailure(Exception exception)
+    {
+        var unwrapped = UnwrapInvocationException(exception);
+        return IsMissing(unwrapped) || (uint)unwrapped.HResult is 0x80070005u;
+    }
+    internal static Exception UnwrapInvocationException(Exception exception)
+    {
+        while (exception is TargetInvocationException { InnerException: not null } invocation)
+            exception = invocation.InnerException!;
+        return exception;
+    }
+    private static T InvokeReflected<T>(Func<T> action)
+    {
+        try { return action(); }
+        catch (TargetInvocationException exception) when (exception.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(UnwrapInvocationException(exception)).Throw();
+            throw;
+        }
+    }
     private static object Invoke(object target, string name, params object?[] arguments) =>
-        target.GetType().InvokeMember(name, System.Reflection.BindingFlags.InvokeMethod, null, target, arguments, CultureInfo.InvariantCulture)!;
+        InvokeReflected(() => target.GetType().InvokeMember(name, BindingFlags.InvokeMethod, null, target, arguments, CultureInfo.InvariantCulture)!);
     private static object Get(object? target, string name) => target is null ? string.Empty :
-        target.GetType().InvokeMember(name, System.Reflection.BindingFlags.GetProperty, null, target, null, CultureInfo.InvariantCulture)!;
-    private static void Set(object target, string name, object value) => target.GetType().InvokeMember(name,
-        System.Reflection.BindingFlags.SetProperty, null, target, [value], CultureInfo.InvariantCulture);
+        InvokeReflected(() => target.GetType().InvokeMember(name, BindingFlags.GetProperty, null, target, null, CultureInfo.InvariantCulture)!);
+    private static object GetIndexed(object target, string name, object index) =>
+        InvokeReflected(() => target.GetType().InvokeMember(name, BindingFlags.GetProperty, null, target, [index], CultureInfo.InvariantCulture)!);
+    private static void Set(object target, string name, object value) => InvokeReflected(() => target.GetType().InvokeMember(name,
+        BindingFlags.SetProperty, null, target, [value], CultureInfo.InvariantCulture));
     private static string Text(object? value) => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
     private static int ToInt(object? value) => Convert.ToInt32(value, CultureInfo.InvariantCulture);
     private static bool ToBool(object? value) => Convert.ToBoolean(value, CultureInfo.InvariantCulture);
