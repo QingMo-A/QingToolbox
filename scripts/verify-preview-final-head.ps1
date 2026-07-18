@@ -23,7 +23,7 @@ function Get-Run {
     $json = & gh run view $Id --repo QingMo-A/QingToolbox `
         --json databaseId,event,headBranch,headSha,status,conclusion,url 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Unable to inspect workflow run $Id.`n$($json -join "`n")" }
-    return ($json | ConvertFrom-Json)
+    return (($json -join "`n") | ConvertFrom-Json)
 }
 
 function Assert-ExactRun {
@@ -53,7 +53,7 @@ try {
         --json databaseId 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Unable to list existing workflow runs.`n$($beforeJson -join "`n")" }
     $beforeIds = [Collections.Generic.HashSet[long]]::new()
-    foreach ($run in @($beforeJson | ConvertFrom-Json)) { [void]$beforeIds.Add([long]$run.databaseId) }
+    foreach ($run in @(($beforeJson -join "`n") | ConvertFrom-Json)) { [void]$beforeIds.Add([long]$run.databaseId) }
 
     $dispatchOutput = @(& gh workflow run $Workflow --repo QingMo-A/QingToolbox --ref toolbox 2>&1)
     if ($LASTEXITCODE -ne 0) { throw "Workflow dispatch failed.`n$($dispatchOutput -join "`n")" }
@@ -70,7 +70,7 @@ try {
                 --branch toolbox --event workflow_dispatch --limit 20 `
                 --json databaseId,event,headBranch,headSha,status,conclusion,url 2>&1
             if ($LASTEXITCODE -ne 0) { throw "Unable to discover the dispatched workflow run.`n$($candidateJson -join "`n")" }
-            $candidates = @($candidateJson | ConvertFrom-Json | Where-Object {
+            $candidates = @((($candidateJson -join "`n") | ConvertFrom-Json) | Where-Object {
                 -not $beforeIds.Contains([long]$_.databaseId) -and $_.event -eq 'workflow_dispatch' -and
                 $_.headBranch -eq 'toolbox' -and $_.headSha -eq $head
             })
