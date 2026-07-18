@@ -189,6 +189,17 @@ static class StagingSmoke
         AssertConstructorRejected(Path.Combine(root, "same-roots"), same: true, nestedUser: false, nestedStaging: false);
         AssertConstructorRejected(Path.Combine(root, "nested-user-root"), same: false, nestedUser: true, nestedStaging: false);
         AssertConstructorRejected(Path.Combine(root, "nested-staging-root"), same: false, nestedUser: false, nestedStaging: true);
+        try
+        {
+            _ = new QmodPackageStagingService(Path.Combine(root, "unsupported-environment", "Staging"),
+                TimeProvider.System, "Unknown");
+            throw new Exception("unsupported environment accepted");
+        }
+        catch (QmodStagingConfigurationException exception)
+        {
+            Assert(exception.FailureCode == QmodStagingConfigurationFailureCode.UnsupportedEnvironment,
+                "unsupported environment reports the precise configuration failure");
+        }
     }
 
     private static void AssertConstructorRejected(string root, bool same, bool nestedUser, bool nestedStaging)
@@ -203,7 +214,11 @@ static class StagingSmoke
             _ = new QmodPackageStagingService(staging, TimeProvider.System, "ModuleTest", user);
             throw new Exception("overlapping roots accepted");
         }
-        catch (ArgumentException) { }
+        catch (QmodStagingConfigurationException exception)
+        {
+            Assert(exception.FailureCode == QmodStagingConfigurationFailureCode.OverlappingRoots,
+                "overlapping roots report the precise configuration failure");
+        }
     }
 
     private static async Task PathAttacksAsync(string root)
@@ -264,16 +279,16 @@ static class StagingSmoke
             return;
         }
         _ = CreatePackage(caseRoot);
-        var constructorRejected = false;
         try
         {
             await using var service = Service(caseRoot);
+            throw new Exception("filesystem staging-root reparse accepted");
         }
-        catch
+        catch (QmodStagingConfigurationException exception)
         {
-            constructorRejected = true;
+            Assert(exception.FailureCode == QmodStagingConfigurationFailureCode.UnsafeStagingRoot,
+                "staging root reparse reports UnsafeStagingRoot");
         }
-        Assert(constructorRejected, "filesystem staging-root reparse rejected before service construction");
         Assert(await File.ReadAllTextAsync(sentinel) == "keep", "filesystem reparse target untouched");
         Directory.Delete(staging, false);
     }
@@ -711,26 +726,89 @@ static class StagingSmoke
 
     private static async Task FailedPublicationCommitAsync(string root)
     {
-        var caseRoot = Case(root, "failed-publication-commit"); var input = CreatePackage(caseRoot);
+        var caseRoot = Case(root, "failed-candidate-attestation"); var input = CreatePackage(caseRoot);
         var userModules = Path.Combine(caseRoot, "UserModules"); Directory.CreateDirectory(userModules);
         var sentinel = Path.Combine(userModules, "keep.txt"); await File.WriteAllTextAsync(sentinel, "keep");
         var events = new List<QmodStagingLogEvent>();
-        var hooks = new QmodStagingTestHooks(PublicationMoveCompleted: (_, _) =>
-            Task.FromException(new IOException("Injected post-move attestation failure.")));
+        var hooks = new QmodStagingTestHooks(CandidateAttestationStarting: async (_, candidate, token) =>
+            await File.WriteAllTextAsync(Path.Combine(candidate, QmodPackageStagingService.StagingMetadataName),
+                "{\"schemaVersion\":999}", token));
         await using (var service = Service(caseRoot, log: events.Add, hooks: hooks))
         {
             var result = await service.StageAsync(input);
-            Assert(result.FailureCode == QmodStagingFailureCode.IoFailure, "post-move failure is structured");
+            Assert(result.FailureCode == QmodStagingFailureCode.StagingMetadataInvalid,
+                "candidate attestation failure is structured");
             Assert(events.All(item => item.EventName != "Verified directory published"),
-                "failed attestation never logs successful publication");
+                "failed candidate never logs successful publication");
         }
         var final = Path.Combine(caseRoot, "Staging", "Verified", ModuleId, Version, input.ReleaseIdentity.Sha256);
-        Assert(!Directory.Exists(final), "failed publication leaves no normal Verified directory");
-        Assert(Directory.EnumerateDirectories(Path.Combine(caseRoot, "Staging", "Rejected"), "*.invalid").Count() == 1,
-            "owned failed publication is quarantined");
+        Assert(!Directory.Exists(final), "candidate failure never reaches the Verified namespace");
+        AssertNoPartial(caseRoot, "candidate attestation failure");
         await using (var retry = Service(caseRoot)) Assert((await retry.StageAsync(input)).Succeeded,
-            "valid retry succeeds after failed publication quarantine");
-        Assert(await File.ReadAllTextAsync(sentinel) == "keep", "failed publication never modifies UserModules");
+            "valid retry succeeds after candidate failure");
+        Assert(await File.ReadAllTextAsync(sentinel) == "keep", "candidate failure never modifies UserModules");
+
+        var moveRoot = Case(root, "failed-publication-move"); var moveInput = CreatePackage(moveRoot);
+        var moveHooks = new QmodStagingTestHooks(PublicationMove: (_, _) =>
+            Task.FromException(new IOException("Injected atomic move failure.")));
+        await using (var service = Service(moveRoot, hooks: moveHooks))
+            Assert((await service.StageAsync(moveInput)).FailureCode == QmodStagingFailureCode.IoFailure,
+                "ordinary move IO failure is not misreported as a conflict");
+        Assert(!Directory.Exists(Path.Combine(moveRoot, "Staging", "Verified", ModuleId, Version,
+            moveInput.ReleaseIdentity.Sha256)), "failed move produces no final directory");
+        AssertNoPartial(moveRoot, "move failure");
+
+        var cleanupRoot = Case(root, "lock-marker-cleanup"); var cleanupInput = CreatePackage(cleanupRoot);
+        var cleanupEvents = new List<QmodStagingLogEvent>();
+        var cleanupHooks = new QmodStagingTestHooks(PublicationLockMarkerCleanup: () =>
+            throw new IOException("Injected marker cleanup failure."));
+        await using (var service = Service(cleanupRoot, log: cleanupEvents.Add, hooks: cleanupHooks))
+            Assert((await service.StageAsync(cleanupInput)).Succeeded,
+                "marker cleanup failure cannot rewrite committed success");
+        Assert(cleanupEvents.Count(item => item.EventName == "Verified directory published") == 1,
+            "committed publication is logged exactly once");
+        Assert(cleanupEvents.Any(item => item.EventName == "Publication lock marker cleanup failed"),
+            "marker cleanup failure emits a safe warning");
+        AssertNoLocks(cleanupRoot, "marker cleanup failure", requireCleanMarker: false);
+        await using (var reuse = Service(cleanupRoot))
+        {
+            var reused = await reuse.StageAsync(cleanupInput);
+            Assert(reused.Succeeded && reused.Reused,
+                "new service reacquires the released lock and strictly reuses final");
+        }
+        AssertNoPartial(cleanupRoot, "marker cleanup failure");
+
+        var cancelRoot = Case(root, "post-commit-cancellation"); var cancelInput = CreatePackage(cancelRoot);
+        using var callerCancellation = new CancellationTokenSource();
+        var cancelHooks = new QmodStagingTestHooks(PublicationMoveCompleted: _ =>
+        {
+            callerCancellation.Cancel();
+            return Task.CompletedTask;
+        });
+        await using (var service = Service(cancelRoot, hooks: cancelHooks))
+            Assert((await service.StageAsync(cancelInput, callerCancellation.Token)).Succeeded,
+                "caller cancellation after atomic move cannot rewrite committed success");
+
+        var disposeRoot = Case(root, "post-commit-dispose"); var disposeInput = CreatePackage(disposeRoot);
+        QmodPackageStagingService? disposeService = null; Task? disposal = null;
+        var disposeHooks = new QmodStagingTestHooks(PublicationMoveCompleted: _ =>
+        {
+            disposal = disposeService!.DisposeAsync().AsTask();
+            return Task.CompletedTask;
+        });
+        disposeService = Service(disposeRoot, hooks: disposeHooks);
+        Assert((await disposeService.StageAsync(disposeInput)).Succeeded,
+            "service disposal after atomic move cannot rewrite committed success");
+        await (disposal ?? throw new Exception("post-commit disposal was not started"));
+
+        var diagnosticRoot = Case(root, "post-commit-diagnostic"); var diagnosticInput = CreatePackage(diagnosticRoot);
+        var diagnosticHooks = new QmodStagingTestHooks(PublicationMoveCompleted: _ =>
+            Task.FromException(new IOException("Injected post-commit diagnostic failure.")));
+        await using (var service = Service(diagnosticRoot,
+            log: item => { if (item.EventName == "Verified directory published") throw new IOException(); },
+            hooks: diagnosticHooks))
+            Assert((await service.StageAsync(diagnosticInput)).Succeeded,
+                "post-commit hooks and logging cannot rewrite committed success");
     }
 
     private static async Task ServiceDisposalAsync(string root)
@@ -993,13 +1071,13 @@ static class StagingSmoke
         var staging = Path.Combine(root, "Staging");
         Assert(!Directory.Exists(staging) || !Directory.EnumerateDirectories(staging, "*.partial", SearchOption.AllDirectories).Any(), name + " cleans partial");
     }
-    private static void AssertNoLocks(string root, string name)
+    private static void AssertNoLocks(string root, string name, bool requireCleanMarker = true)
     {
         var locks = Path.Combine(root, "Staging", "Locks");
         if (!Directory.Exists(locks)) return;
         foreach (var path in Directory.EnumerateFiles(locks, "*.lock", SearchOption.AllDirectories))
             using (var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-                Assert(stream.Length == 0, name + " leaves no active lock owner marker");
+                if (requireCleanMarker) Assert(stream.Length == 0, name + " leaves no active lock owner marker");
     }
     private static void Assert(bool condition, string name) { if (!condition) throw new Exception("Assertion failed: " + name); }
     private static async Task InTemp(Func<string, Task> action)
