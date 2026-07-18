@@ -82,6 +82,10 @@ try {
         if ($null -eq $runId) { throw "The newly dispatched exact-HEAD workflow run was not found within $DiscoveryTimeoutSeconds seconds." }
     }
 
+    if ($beforeIds.Contains([long]$runId)) {
+        throw "Dispatched workflow run $runId already existed before dispatch; refusing stale run evidence."
+    }
+
     $initialRun = Get-Run $runId
     $runUrl = $initialRun.url
     Assert-ExactRun $initialRun
