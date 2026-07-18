@@ -35,17 +35,46 @@ if (Get-Process QingToolbox.Shell -ErrorAction SilentlyContinue) { throw 'A Qing
 $previous = [IO.Path]::GetFullPath($PreviousInstallerPath); $current = [IO.Path]::GetFullPath($CurrentInstallerPath)
 foreach($installer in @($previous,$current)){if(-not(Test-Path $installer -PathType Leaf)-or(Get-Item $installer).Length-le 0){throw "Installer is missing: $installer"}}
 $install = Join-Path $TestRoot 'Custom Install\QingToolbox'; $profile = Join-Path $TestRoot 'Profile'
+$logDirectory = Join-Path $TestRoot 'Installer Logs With Spaces'
 $oldLocal=$env:LOCALAPPDATA; $oldRoaming=$env:APPDATA
-function Invoke-Setup([string]$path,[string]$log,[bool]$SpecifyDirectory){
-    $arguments=@('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',("/LOG=`"$log`""))
-    if ($SpecifyDirectory) { $arguments += "/DIR=`"$install`"" }
+function ConvertTo-WindowsCommandLineArgument([AllowEmptyString()][string]$Value) {
+    if ($null -eq $Value) { throw 'A process argument cannot be null.' }
+    $builder=[Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    $backslashes=0
+    foreach($character in $Value.ToCharArray()) {
+        if($character-eq'\'){$backslashes++;continue}
+        if($character-eq'"') {
+            [void]$builder.Append(('\' * (($backslashes * 2) + 1)))
+            [void]$builder.Append('"')
+        } else {
+            if($backslashes-gt 0){[void]$builder.Append(('\' * $backslashes))}
+            [void]$builder.Append($character)
+        }
+        $backslashes=0
+    }
+    if($backslashes-gt 0){[void]$builder.Append(('\' * ($backslashes * 2)))}
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+function Invoke-Setup([string]$path,[string]$log,[bool]$SpecifyDirectory,[AllowEmptyString()][string]$Directory=$install){
+    $arguments=@('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/LANG=english',("/LOG=$log"))
+    if ($SpecifyDirectory) { $arguments += "/DIR=$Directory" }
     $startInfo=[Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName=$path
-    $startInfo.Arguments=$arguments -join ' '
+    $startInfo.Arguments=($arguments | ForEach-Object { ConvertTo-WindowsCommandLineArgument $_ }) -join ' '
     $startInfo.UseShellExecute=$false
-    $process=[Diagnostics.Process]::Start($startInfo)
-    $process.WaitForExit()
-    return $process.ExitCode
+    $process=$null
+    try {
+        $process=[Diagnostics.Process]::Start($startInfo)
+        if($null-eq$process){throw 'Process.Start returned no installer process.'}
+        $process.WaitForExit()
+        return $process.ExitCode
+    } catch {
+        throw "Failed to execute installer '$path': $($_.Exception.Message)"
+    } finally {
+        if($null-ne$process){$process.Dispose()}
+    }
 }
 function Assert-FileVersion([string]$expected){$info=[Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $install 'QingToolbox.Shell.exe'));if($info.FileVersion-ne$expected){throw "Shell FileVersion mismatch: $($info.FileVersion)"};return $info}
 function Wait-Until {
@@ -83,10 +112,10 @@ function Assert-InstallerIdentityAndShortcuts {
 }
 $newShell=$null
 try {
-    New-Item -ItemType Directory -Path $TestRoot,$profile -Force | Out-Null
+    New-Item -ItemType Directory -Path $TestRoot,$profile,$logDirectory -Force | Out-Null
     $env:LOCALAPPDATA=Join-Path $profile 'LocalAppData'; $env:APPDATA=Join-Path $profile 'AppData'
     New-Item -ItemType Directory -Path $env:LOCALAPPDATA,$env:APPDATA -Force | Out-Null
-    if((Invoke-Setup $previous (Join-Path $TestRoot 'preview1-install.log') $true)-ne 0){throw 'Preview 1 installation failed.'}
+    if((Invoke-Setup $previous (Join-Path $logDirectory 'preview1-install.log') $true)-ne 0){throw 'Preview 1 installation failed.'}
     [void](Assert-FileVersion '0.1.0.0')
     if(-not(Test-Path $uninstallKey)){throw 'Preview 1 fixed Inno uninstall entry is missing.'}
     $preview1Entry=Get-ItemProperty $uninstallKey
@@ -103,7 +132,7 @@ try {
     'module'|Set-Content $module -Encoding ASCII; 'data'|Set-Content $data -Encoding ASCII; 'cache'|Set-Content $cache -Encoding ASCII
     $unknown=Join-Path $install 'user-owned-unknown.txt'; 'unknown'|Set-Content $unknown -Encoding ASCII
     $sentinels=@($settings,$module,$data,$cache,$unknown);$hashes=@{};foreach($item in $sentinels){$hashes[$item]=(Get-FileHash $item -Algorithm SHA256).Hash}
-    $upgradeExitCode=Invoke-Setup $current (Join-Path $TestRoot 'upgrade.log') $false
+    $upgradeExitCode=Invoke-Setup $current (Join-Path $logDirectory 'upgrade.log') $false
     if($upgradeExitCode-ne 0){throw "Preview 2 in-place upgrade without /DIR failed with exit code $upgradeExitCode."}
     Wait-Until { $preview1Process.Refresh(); $preview1Process.HasExited } 20 'Preview 1 Shell remained running after the in-place upgrade.'
     $newShellProcesses=@()
@@ -135,7 +164,7 @@ try {
     }
     Stop-Process -Id $newShell.ProcessId -ErrorAction Stop
     Wait-Until { -not(Get-Process -Id $newShell.ProcessId -ErrorAction SilentlyContinue) } 10 'Preview 2 Shell did not stop before repair validation.'
-    if((Invoke-Setup $current (Join-Path $TestRoot 'repair.log') $false)-ne 0){throw 'Preview 2 repair installation without /DIR failed.'}
+    if((Invoke-Setup $current (Join-Path $logDirectory 'repair.log') $false)-ne 0){throw 'Preview 2 repair installation without /DIR failed.'}
     foreach($item in $sentinels){if(-not(Test-Path $item)-or(Get-FileHash $item -Algorithm SHA256).Hash-ne$hashes[$item]){throw "Repair did not preserve sentinel: $item"}}
     $repairEntry = Get-ItemProperty $uninstallKey
     if ($repairEntry.DisplayVersion -ne '0.2.0-alpha' -or
@@ -143,9 +172,59 @@ try {
         throw 'Repair changed the registered version or installation directory.'
     }
     [void](Assert-InstallerIdentityAndShortcuts 'Repair')
+    $conflictingInstall=Join-Path $TestRoot 'Conflicting Record\QingToolbox'
+    New-Item -ItemType Directory -Path $conflictingInstall -Force|Out-Null
+    $conflictingShell=Join-Path $conflictingInstall 'QingToolbox.Shell.exe'
+    Copy-Item -LiteralPath (Join-Path $install 'QingToolbox.Shell.exe') -Destination $conflictingShell
+    $primaryHash=(Get-FileHash (Join-Path $install 'QingToolbox.Shell.exe') -Algorithm SHA256).Hash
+    $conflictingHash=(Get-FileHash $conflictingShell -Algorithm SHA256).Hash
+    Set-ItemProperty $markerKey InstallLocation $conflictingInstall
+    $conflictLog=Join-Path $logDirectory 'conflict-without-dir.log'
+    $conflictExitCode=Invoke-Setup $current $conflictLog $false
+    if($conflictExitCode-eq 0){throw 'Installer accepted conflicting trusted records without /DIR.'}
+    if(-not(Select-String -LiteralPath $conflictLog -Pattern 'conflicting valid installation records' -Quiet)){
+        throw 'Conflict rejection log did not record the expected reason.'
+    }
+    if((Get-FileHash (Join-Path $install 'QingToolbox.Shell.exe') -Algorithm SHA256).Hash-ne$primaryHash){throw 'Rejected conflict changed the real installation.'}
+    if((Get-FileHash $conflictingShell -Algorithm SHA256).Hash-ne$conflictingHash){throw 'Rejected conflict changed the secondary candidate.'}
+    $emptyDirLog=Join-Path $logDirectory 'empty-explicit-dir.log'
+    if((Invoke-Setup $current $emptyDirLog $true '')-eq 0){throw 'Installer accepted an explicitly empty /DIR.'}
+    if(-not(Select-String -LiteralPath $emptyDirLog -Pattern 'Rejected empty install directory candidate from explicit /DIR' -Quiet)){
+        throw 'Empty explicit /DIR rejection was not recorded.'
+    }
+    $unsafeDirLog=Join-Path $logDirectory 'unsafe-explicit-dir.log'
+    $unsafeDirectory=[IO.Path]::GetPathRoot($TestRoot)
+    if((Invoke-Setup $current $unsafeDirLog $true $unsafeDirectory)-eq 0){throw 'Installer accepted a drive root as explicit /DIR.'}
+    if(-not(Select-String -LiteralPath $unsafeDirLog -Pattern 'Rejected unsafe install directory candidate from explicit /DIR' -Quiet)){
+        throw 'Unsafe explicit /DIR rejection was not recorded.'
+    }
+    if((Get-FileHash (Join-Path $install 'QingToolbox.Shell.exe') -Algorithm SHA256).Hash-ne$primaryHash){throw 'Rejected explicit directories changed the real installation.'}
+    if((Get-FileHash $conflictingShell -Algorithm SHA256).Hash-ne$conflictingHash){throw 'Rejected explicit directories changed the secondary candidate.'}
+    $explicitOldProcess=Start-Process -FilePath (Join-Path $install 'QingToolbox.Shell.exe') -PassThru
+    Wait-Until { -not $explicitOldProcess.HasExited } 10 'Shell exited before explicit /DIR process replacement could be tested.'
+    $explicitOldPid=$explicitOldProcess.Id
+    $explicitLog=Join-Path $logDirectory 'explicit-dir-overrides-conflict.log'
+    if((Invoke-Setup $current $explicitLog $true $install)-ne 0){throw 'Explicit /DIR did not override conflicting discovered records.'}
+    Wait-Until { $explicitOldProcess.Refresh(); $explicitOldProcess.HasExited } 20 'Explicit /DIR upgrade did not close the Shell from its final target directory.'
+    $explicitNewShellProcesses=@()
+    Wait-Until { $script:explicitNewShellProcesses=@(Get-ShellProcessesAtInstallPath); $script:explicitNewShellProcesses.Count-eq 1 } 20 'Explicit /DIR upgrade did not restore exactly one Shell from its final target directory.'
+    $explicitNewShell=$explicitNewShellProcesses[0]
+    if($explicitNewShell.ProcessId-eq$explicitOldPid){throw 'Explicit /DIR upgrade reused the old Shell process ID.'}
+    $explicitEntry=Get-ItemProperty $uninstallKey
+    $explicitMarker=Get-ItemProperty $markerKey
+    foreach($registeredPath in @([string]$explicitEntry.InstallLocation,[string]$explicitMarker.InstallLocation)){
+        if(-not [IO.Path]::GetFullPath($registeredPath).TrimEnd('\').Equals($install.TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)){
+            throw 'Explicit /DIR did not unify the registered installation directory.'
+        }
+    }
+    [void](Assert-FileVersion '0.2.0.0')
+    [void](Assert-InstallerIdentityAndShortcuts 'Explicit DIR repair')
+    if((Get-FileHash $conflictingShell -Algorithm SHA256).Hash-ne$conflictingHash){throw 'Explicit /DIR overwrote the secondary discovered directory.'}
+    Stop-Process -Id $explicitNewShell.ProcessId -ErrorAction Stop
+    Wait-Until { -not(Get-Process -Id $explicitNewShell.ProcessId -ErrorAction SilentlyContinue) } 10 'Explicit /DIR replacement Shell did not stop before downgrade validation.'
     New-Item -Path $markerKey -Force|Out-Null;Set-ItemProperty $markerKey InstalledVersion '0.3.0-alpha'
     $before=(Get-FileHash (Join-Path $install 'QingToolbox.Shell.exe') -Algorithm SHA256).Hash
-    $downgrade=Invoke-Setup $current (Join-Path $TestRoot 'downgrade.log') $false
+    $downgrade=Invoke-Setup $current (Join-Path $logDirectory 'downgrade.log') $false
     if($downgrade-eq 0){throw 'Downgrade guard accepted a newer installed version.'}
     if((Get-FileHash (Join-Path $install 'QingToolbox.Shell.exe') -Algorithm SHA256).Hash-ne$before){throw 'Rejected downgrade changed host files.'}
     Set-ItemProperty $markerKey InstalledVersion '0.2.0-alpha'; Remove-Item -LiteralPath $unknown -Force
@@ -157,7 +236,7 @@ try {
         (Test-Path -LiteralPath $shortcutRoots.CommonGroup)) {
         throw 'Uninstall left a QingToolbox Start Menu group behind.'
     }
-    Write-Host 'Preview 1 -> Preview 2 upgrade, repair, downgrade guard, and user-state preservation passed.'
+    Write-Host 'Preview upgrade, repair, DIR precedence, unsafe DIR rejection, downgrade guard, and user-state preservation passed.'
 }
 finally {
     foreach($process in @(Get-ShellProcessesAtInstallPath)){

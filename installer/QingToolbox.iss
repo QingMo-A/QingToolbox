@@ -72,6 +72,8 @@ english.UninstallQingToolbox=Uninstall QingToolbox
 chinesesimplified.UninstallQingToolbox=卸载 QingToolbox
 english.ConflictingInstallLocations=QingToolbox has conflicting valid installation records. Setup will not choose a directory automatically. Repair or remove the old installation record, then try again.
 chinesesimplified.ConflictingInstallLocations=QingToolbox 存在多个冲突的有效安装记录。安装程序不会自动选择目录。请修复或移除旧安装记录后重试。
+english.InvalidExplicitInstallLocation=The directory supplied with /DIR is empty, relative, remote, or a protected system root. Setup will not use another directory instead.
+chinesesimplified.InvalidExplicitInstallLocation=/DIR 指定的目录为空、相对路径、远程路径或受保护的系统根目录。安装程序不会改用其他目录。
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:DesktopShortcut}"; GroupDescription: "{cm:AdditionalShortcuts}"; Flags: unchecked
@@ -108,6 +110,9 @@ const
 var
   ResolvedPreviousInstallDir: String;
   PreviousInstallConflict: Boolean;
+  ExplicitInstallDirSpecified: Boolean;
+  ExplicitInstallDir: String;
+  FinalInstallDir: String;
   WasQingToolboxRunningBeforeInstall: Boolean;
 
 function GetFileAttributesW(FileName: String): LongWord;
@@ -129,19 +134,20 @@ end;
 
 function IsUnsafeInstallRoot(const Candidate: String): Boolean;
 var
-  WindowsRoot, SystemRoot, ProfileRoot, TempRoot: String;
+  WindowsRoot, LegacySystemRoot, SystemRoot, ProfileRoot, TempRoot: String;
 begin
   WindowsRoot := RemoveBackslashUnlessRoot(ExpandConstant('{win}'));
+  LegacySystemRoot := RemoveBackslashUnlessRoot(AddBackslash(WindowsRoot) + 'System');
   SystemRoot := RemoveBackslashUnlessRoot(ExpandConstant('{sys}'));
   ProfileRoot := RemoveBackslashUnlessRoot(GetEnv('USERPROFILE'));
   TempRoot := RemoveBackslashUnlessRoot(ExpandConstant('{tmp}'));
   Result := (Length(Candidate) <= 3) or SamePath(Candidate, WindowsRoot) or
-    SamePath(Candidate, SystemRoot) or SamePath(Candidate, ProfileRoot) or
-    SamePath(Candidate, TempRoot);
+    SamePath(Candidate, LegacySystemRoot) or SamePath(Candidate, SystemRoot) or
+    SamePath(Candidate, ProfileRoot) or SamePath(Candidate, TempRoot);
 end;
 
 function NormalizeAndValidateInstallDir(const Source, RawValue: String;
-  var Candidate: String): Boolean;
+  RequireExistingShell: Boolean; var Candidate: String): Boolean;
 var
   Value, ShellPath: String;
 begin
@@ -163,10 +169,12 @@ begin
     Log('Rejected unsafe install directory candidate from ' + Source + ': ' + Candidate);
     exit;
   end;
-  ShellPath := AddBackslash(Candidate) + 'QingToolbox.Shell.exe';
-  if (not DirExists(Candidate)) or (not FileExists(ShellPath)) then begin
-    Log('Rejected missing or incomplete install directory candidate from ' + Source + ': ' + Candidate);
-    exit;
+  if RequireExistingShell then begin
+    ShellPath := AddBackslash(Candidate) + 'QingToolbox.Shell.exe';
+    if (not DirExists(Candidate)) or (not FileExists(ShellPath)) then begin
+      Log('Rejected missing or incomplete install directory candidate from ' + Source + ': ' + Candidate);
+      exit;
+    end;
   end;
   Log('Accepted install directory candidate from ' + Source + ': ' + Candidate);
   Result := True;
@@ -177,7 +185,7 @@ procedure AddInstallDirCandidate(const Source, RawValue: String;
 var
   Candidate: String;
 begin
-  if not NormalizeAndValidateInstallDir(Source, RawValue, Candidate) then exit;
+  if not NormalizeAndValidateInstallDir(Source, RawValue, True, Candidate) then exit;
   if Selected = '' then begin
     Selected := Candidate;
     Log('Selected previous installation directory from ' + Source + ': ' + Candidate);
@@ -185,6 +193,21 @@ begin
     Log('Conflicting previous installation directory from ' + Source + ': ' + Candidate);
     Conflict := True;
   end;
+end;
+
+procedure ResolveExplicitInstallDirectory;
+var
+  FirstProbe, SecondProbe: String;
+begin
+  { Two distinct defaults distinguish an absent parameter from an explicitly empty value. }
+  FirstProbe := ExpandConstant('{param:DIR|QingToolbox-DIR-Not-Specified-A}');
+  SecondProbe := ExpandConstant('{param:DIR|QingToolbox-DIR-Not-Specified-B}');
+  ExplicitInstallDirSpecified := FirstProbe = SecondProbe;
+  if ExplicitInstallDirSpecified then begin
+    ExplicitInstallDir := FirstProbe;
+    Log('An explicit /DIR parameter was supplied; it has priority over discovered records.');
+  end else
+    ExplicitInstallDir := '';
 end;
 
 function DirectoryFromDisplayIcon(const Value: String): String;
@@ -252,7 +275,7 @@ end;
 
 function GetDefaultInstallDir(Param: String): String;
 begin
-  if ResolvedPreviousInstallDir <> '' then Result := ResolvedPreviousInstallDir
+  if FinalInstallDir <> '' then Result := FinalInstallDir
   else Result := ExpandConstant('{userpf}\QingToolbox');
 end;
 
@@ -430,14 +453,26 @@ var
   Comparison: Integer;
 begin
   Result := True;
+  ResolveExplicitInstallDirectory;
   ResolvePreviousInstallDirectory;
-  if PreviousInstallConflict then begin
+  FinalInstallDir := '';
+  if ExplicitInstallDirSpecified then begin
+    if not NormalizeAndValidateInstallDir('explicit /DIR', ExplicitInstallDir,
+      False, FinalInstallDir) then begin
+      SuppressibleMsgBox(ExpandConstant('{cm:InvalidExplicitInstallLocation}'), mbError, MB_OK, IDOK);
+      Result := False;
+      exit;
+    end;
+    if PreviousInstallConflict then
+      Log('Ignoring conflicting discovered installation records because explicit /DIR is authoritative.');
+  end else if PreviousInstallConflict then begin
     SuppressibleMsgBox(ExpandConstant('{cm:ConflictingInstallLocations}'), mbError, MB_OK, IDOK);
     Result := False;
     exit;
-  end;
+  end else
+    FinalInstallDir := ResolvedPreviousInstallDir;
   WasQingToolboxRunningBeforeInstall :=
-    IsTargetShellRunning(ResolvedPreviousInstallDir);
+    IsTargetShellRunning(FinalInstallDir);
   Installed := '';
   if not RegQueryStringValue(HKCU, 'Software\QingMo-A\QingToolbox', 'InstalledVersion', Installed) then begin
     UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}_is1';

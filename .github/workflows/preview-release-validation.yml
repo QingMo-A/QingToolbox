@@ -200,10 +200,7 @@ jobs:
             ${{ runner.temp }}\QingToolboxInstallerRoundtrip\install.log
             ${{ runner.temp }}\QingToolboxInstallerRoundtrip\uninstall.log
             ${{ runner.temp }}\QingToolboxInstallerRoundtrip\diagnostics.txt
-            ${{ runner.temp }}\QingToolboxPreviewUpgrade\preview1-install.log
-            ${{ runner.temp }}\QingToolboxPreviewUpgrade\upgrade.log
-            ${{ runner.temp }}\QingToolboxPreviewUpgrade\repair.log
-            ${{ runner.temp }}\QingToolboxPreviewUpgrade\downgrade.log
+            ${{ runner.temp }}\QingToolboxPreviewUpgrade\Installer Logs With Spaces\*.log
 
       - name: Clean Preview validation test data
         if: always()

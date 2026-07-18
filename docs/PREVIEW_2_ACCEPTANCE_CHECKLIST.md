@@ -51,6 +51,8 @@ Historical automated evidence is informative only: workflow run `29621740800` pa
 
 Automated coverage installs Preview 1 into a custom path containing spaces, then runs Preview 2 and Repair without `/DIR`. It verifies automatic directory discovery, old/new PID replacement, single-instance restart, and absence of a second default-directory installation. These automated checks do not change the manual statuses above.
 
+The isolated installer gate also constructs two conflicting valid discovery records. It verifies that no `/DIR` fails closed without changing either candidate, a legal explicit `/DIR` selects and restarts only the Shell at the final target, and empty or protected-root explicit values fail without falling back. These automated checks do not change any manual status.
+
 ## B. Login startup
 
 | Check | Status | Evidence / notes |
