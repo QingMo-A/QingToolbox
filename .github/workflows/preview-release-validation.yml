@@ -57,6 +57,10 @@ jobs:
         shell: pwsh
         run: dotnet restore
 
+      - name: Verify final HEAD PowerShell contracts
+        shell: powershell
+        run: ./scripts/test-preview-final-head-contracts.ps1
+
       - name: Build Release
         shell: pwsh
         run: dotnet build -c Release --no-restore

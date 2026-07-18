@@ -10,6 +10,7 @@ $repoRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $runId = $null
 $runUrl = $null
 $head = $null
+. (Join-Path $PSScriptRoot 'preview-final-head-helpers.ps1')
 
 function Invoke-Git {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
@@ -23,14 +24,9 @@ function Get-Run {
     $json = & gh run view $Id --repo QingMo-A/QingToolbox `
         --json databaseId,event,headBranch,headSha,status,conclusion,url 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Unable to inspect workflow run $Id.`n$($json -join "`n")" }
-    return (($json -join "`n") | ConvertFrom-Json)
-}
-
-function Assert-ExactRun {
-    param([Parameter(Mandatory = $true)]$Run)
-    if ($Run.event -ne 'workflow_dispatch') { throw "Run $($Run.databaseId) event is '$($Run.event)', not workflow_dispatch." }
-    if ($Run.headBranch -ne 'toolbox') { throw "Run $($Run.databaseId) branch is '$($Run.headBranch)', not toolbox." }
-    if ($Run.headSha -ne $head) { throw "Run $($Run.databaseId) head SHA $($Run.headSha) does not match final HEAD $head." }
+    $runs = @(ConvertFrom-GhJsonLines -Lines $json)
+    if ($runs.Count -ne 1) { throw "Expected one workflow run from gh run view, found $($runs.Count)." }
+    return $runs[0]
 }
 
 try {
@@ -53,7 +49,7 @@ try {
         --json databaseId 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Unable to list existing workflow runs.`n$($beforeJson -join "`n")" }
     $beforeIds = [Collections.Generic.HashSet[long]]::new()
-    $existingRuns = (($beforeJson -join "`n") | ConvertFrom-Json)
+    $existingRuns = @(ConvertFrom-GhJsonLines -Lines $beforeJson)
     foreach ($run in $existingRuns) { [void]$beforeIds.Add([long]$run.databaseId) }
 
     $dispatchOutput = @(& gh workflow run $Workflow --repo QingMo-A/QingToolbox --ref toolbox 2>&1)
@@ -71,24 +67,20 @@ try {
                 --branch toolbox --event workflow_dispatch --limit 20 `
                 --json databaseId,event,headBranch,headSha,status,conclusion,url 2>&1
             if ($LASTEXITCODE -ne 0) { throw "Unable to discover the dispatched workflow run.`n$($candidateJson -join "`n")" }
-            $listedRuns = (($candidateJson -join "`n") | ConvertFrom-Json)
-            $candidates = @($listedRuns | Where-Object {
-                -not $beforeIds.Contains([long]$_.databaseId) -and $_.event -eq 'workflow_dispatch' -and
-                $_.headBranch -eq 'toolbox' -and $_.headSha -eq $head
-            })
-            if ($candidates.Count -gt 1) { throw 'More than one new exact-HEAD workflow run was found; refusing an ambiguous result.' }
-            if ($candidates.Count -eq 1) { $runId = [long]$candidates[0].databaseId }
+            $listedRuns = @(ConvertFrom-GhJsonLines -Lines $candidateJson)
+            $candidates = @(Get-ExactNewWorkflowRuns -Runs $listedRuns `
+                -ExistingRunIds $beforeIds -HeadSha $head)
+            $candidate = Resolve-UniqueExactWorkflowRun -Candidates $candidates
+            if ($null -ne $candidate) { $runId = [long]$candidate.databaseId }
         } while ($null -eq $runId -and [DateTimeOffset]::UtcNow -lt $deadline)
         if ($null -eq $runId) { throw "The newly dispatched exact-HEAD workflow run was not found within $DiscoveryTimeoutSeconds seconds." }
     }
 
-    if ($beforeIds.Contains([long]$runId)) {
-        throw "Dispatched workflow run $runId already existed before dispatch; refusing stale run evidence."
-    }
+    Assert-NewWorkflowRunId -RunId $runId -ExistingRunIds $beforeIds
 
     $initialRun = Get-Run $runId
     $runUrl = $initialRun.url
-    Assert-ExactRun $initialRun
+    Assert-ExactWorkflowRun -Run $initialRun -HeadSha $head
     Write-Host "Watching exact Preview validation run $runId for $head"
     Write-Host $runUrl
     & gh run watch $runId --repo QingMo-A/QingToolbox --exit-status
@@ -96,7 +88,7 @@ try {
 
     $finalRun = Get-Run $runId
     $runUrl = $finalRun.url
-    Assert-ExactRun $finalRun
+    Assert-ExactWorkflowRun -Run $finalRun -HeadSha $head
     if ($watchExitCode -ne 0 -or $finalRun.status -ne 'completed' -or $finalRun.conclusion -ne 'success') {
         throw "Exact-HEAD workflow validation did not succeed."
     }

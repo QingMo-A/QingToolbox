@@ -86,6 +86,13 @@ try {
         & (Join-Path $PSScriptRoot "test-preview-stage-runner.ps1")
     }
 
+    $windowsPowerShell = Join-Path $env:SystemRoot `
+        "System32\WindowsPowerShell\v1.0\powershell.exe"
+    Invoke-CheckedStage -StageName "Preview final HEAD PowerShell contracts" -Action {
+        & $windowsPowerShell -NoProfile -ExecutionPolicy Bypass `
+            -File (Join-Path $PSScriptRoot "test-preview-final-head-contracts.ps1")
+    }
+
     Write-Host "`n==> Build Release"
     Invoke-CheckedStage -StageName "Build Release" -Action {
         dotnet build -c Release
