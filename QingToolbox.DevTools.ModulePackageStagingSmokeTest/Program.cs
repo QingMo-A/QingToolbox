@@ -263,10 +263,17 @@ static class StagingSmoke
             Console.WriteLine("Filesystem reparse race check skipped because symbolic-link creation is unavailable.");
             return;
         }
-        var input = CreatePackage(caseRoot);
-        await using var service = Service(caseRoot);
-        var result = await service.StageAsync(input);
-        Assert(result.FailureCode == QmodStagingFailureCode.UnsupportedEntryType, "filesystem staging-root reparse rejected");
+        _ = CreatePackage(caseRoot);
+        var constructorRejected = false;
+        try
+        {
+            await using var service = Service(caseRoot);
+        }
+        catch
+        {
+            constructorRejected = true;
+        }
+        Assert(constructorRejected, "filesystem staging-root reparse rejected before service construction");
         Assert(await File.ReadAllTextAsync(sentinel) == "keep", "filesystem reparse target untouched");
         Directory.Delete(staging, false);
     }
