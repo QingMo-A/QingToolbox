@@ -40,7 +40,7 @@ try {
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($dirty.Count -ne 0) { throw "Final Preview verification requires a clean worktree.`n$($dirty -join "`n")" }
 
-    [void](Invoke-Git @('fetch', '--no-tags', 'origin', 'toolbox'))
+    [void](Invoke-Git @('fetch', '--quiet', '--no-tags', 'origin', 'toolbox'))
     $head = ([string](Invoke-Git @('rev-parse', 'HEAD'))).Trim().ToLowerInvariant()
     $origin = ([string](Invoke-Git @('rev-parse', 'refs/remotes/origin/toolbox'))).Trim().ToLowerInvariant()
     if ($head -ne $origin) { throw "HEAD is not synchronized with origin/toolbox. HEAD $head, origin $origin." }
