@@ -73,3 +73,17 @@ manifest。manifest 记录 `QingMo-A/QingToolbox`、完整 source commit、
 
 RC 脚本和 CI 都不会替发布者创建 Release/tag，不会推送代码，不会提交
 `artifacts/`，也不会更改版本或签名状态。
+
+真实 Preview 1 升级测试会启动 Production 模式的旧宿主。Windows Known Folder 不能通过修改
+`APPDATA`/`LOCALAPPDATA` 环境变量安全重定向，因此该自动化只允许在一次性 GitHub Actions
+Windows 账户中运行。普通本机 RC 应将这一阶段报告为 **Blocked**，不得强制关闭用户 Shell 或
+以真实用户配置换取测试通过。
+
+全部候选修改提交并推送后，使用以下命令对精确最终 HEAD 调度并验证远程门禁：
+
+```powershell
+./scripts/verify-preview-final-head.ps1
+```
+
+人工证据记录在 [`PREVIEW_2_ACCEPTANCE_CHECKLIST.md`](PREVIEW_2_ACCEPTANCE_CHECKLIST.md)。
+远程自动化成功不能替代其中的人工登录、升级、Repair、卸载和代表性环境验收。

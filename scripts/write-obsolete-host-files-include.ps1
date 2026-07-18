@@ -21,11 +21,12 @@ $currentSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordin
 foreach ($entry in $current.entries) { [void]$currentSet.Add((Assert-Safe ([string]$entry.relativePath))) }
 $obsolete = @($previous.entries | ForEach-Object { Assert-Safe ([string]$_.relativePath) } |
     Where-Object { -not $currentSet.Contains($_) } | Sort-Object -Unique)
-$lines = @('; Generated exact Preview host cleanup. Do not edit.', '[InstallDelete]')
-foreach ($path in $obsolete) { $lines += 'Type: files; Name: "{app}\' + $path.Replace('/', '\') + '"' }
+$lines = @('// Generated exact Preview host cleanup. Do not edit.', 'procedure DeleteObsoleteHostPayload();', 'begin')
+foreach ($path in $obsolete) { $lines += "  SafeDeleteObsoleteHostFile('" + $path.Replace('/', '\') + "');" }
 $directories = @($obsolete | ForEach-Object { [IO.Path]::GetDirectoryName($_.Replace('/', '\')) } |
     Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object Length -Descending -Unique)
-foreach ($directory in $directories) { $lines += 'Type: dirifempty; Name: "{app}\' + $directory + '"' }
+foreach ($directory in $directories) { $lines += "  SafeRemoveObsoleteHostDirectory('" + $directory + "');" }
+$lines += 'end;'
 $parent = Split-Path -Parent ([IO.Path]::GetFullPath($OutputPath)); New-Item -ItemType Directory -Path $parent -Force | Out-Null
 $lines | Set-Content -LiteralPath $OutputPath -Encoding UTF8
 Write-Host "Obsolete host payload include: $OutputPath ($($obsolete.Count) files)"

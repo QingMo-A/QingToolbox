@@ -12,13 +12,32 @@ try {
     if ($manifest.schemaVersion -ne 1 -or @($manifest.entries).Count -ne 2) { throw "Host manifest contract failed." }
     $paths = @($manifest.entries.relativePath)
     if (@(Compare-Object $paths @($paths | Sort-Object)).Count -ne 0) { throw "Host manifest paths are not deterministic." }
-    function Assert-SafeRelativePath([string]$path) {
-        if ([string]::IsNullOrWhiteSpace($path) -or [IO.Path]::IsPathRooted($path) -or
-            $path -match '^[A-Za-z]:' -or $path -match '^\\' -or
-            $path -match '(^|[\\/])\.\.([\\/]|$)' -or $path -match ':') { throw "Unsafe obsolete path: $path" }
+    $currentPath = Join-Path $root 'current.json'
+    $previousPath = Join-Path $root 'previous.json'
+    $includePath = Join-Path $root 'obsolete.iss'
+    [ordered]@{ schemaVersion = 1; entries = @([ordered]@{ relativePath = 'QingToolbox.Shell.exe' }) } |
+        ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $currentPath -Encoding UTF8
+    [ordered]@{ schemaVersion = 1; entries = @(
+        [ordered]@{ relativePath = 'QingToolbox.Shell.exe' },
+        [ordered]@{ relativePath = 'docs/releases/old.md' }) } |
+        ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $previousPath -Encoding UTF8
+    & (Join-Path $PSScriptRoot 'write-obsolete-host-files-include.ps1') `
+        -PreviousManifestPath $previousPath -CurrentManifestPath $currentPath -OutputPath $includePath
+    $include = Get-Content -LiteralPath $includePath -Raw
+    if ($include -match '\[InstallDelete\]' -or
+        $include -notmatch "SafeDeleteObsoleteHostFile\('docs\\releases\\old\.md'\)" -or
+        $include -notmatch "SafeRemoveObsoleteHostDirectory\('docs\\releases'\)") {
+        throw 'Obsolete cleanup did not generate guarded exact-path installer code.'
     }
     foreach ($unsafe in @('..\escape.dll', 'C:\escape.dll', '\\server\share.dll', 'file.dll:stream')) {
-        $rejected = $false; try { Assert-SafeRelativePath $unsafe } catch { $rejected = $true }
+        [ordered]@{ schemaVersion = 1; entries = @([ordered]@{ relativePath = $unsafe }) } |
+            ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $previousPath -Encoding UTF8
+        $rejected = $false
+        try {
+            & (Join-Path $PSScriptRoot 'write-obsolete-host-files-include.ps1') `
+                -PreviousManifestPath $previousPath -CurrentManifestPath $currentPath -OutputPath $includePath
+        }
+        catch { $rejected = $true }
         if (-not $rejected) { throw "Unsafe obsolete path was accepted: $unsafe" }
     }
     Write-Host "Host payload manifest and obsolete-path contracts passed."

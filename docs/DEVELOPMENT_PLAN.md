@@ -133,6 +133,8 @@ Preview 2 当前已完成但仍需远程门禁确认的实现：
 - 官方 Preview 1 安装器及 SHA256 sidecar 解析与校验。
 - 原地升级、旧进程替换、用户状态与未知文件保留、单一卸载入口和快捷方式验证。
 - Startup Recovery 托管、Startup Test 记录分离、并发扫描共享和 Dispatcher 外最终 Hash 复验。
+- 精确最终 HEAD 的 `workflow_dispatch` 调度、run 身份核对和结论验证工具。
+- 可记录 Automated Pass、Manual Pass、Blocked、Not Run 和 Failed 的 Preview 2 人工验收清单。
 
 ## 4. 当前发布目标：QingToolbox Preview 2
 
@@ -271,14 +273,13 @@ Manifest 不包含用户数据、具体模块、缓存、日志、DevTools、PDB
 
 CI 和 RC Gate 必须使用精确最终 HEAD。没有旧版官方安装器时，不得声称完整 Upgrade Gate 或 RC Gate 已通过。
 
-当前本地状态：Release 构建、全部 Smoke Test、本地环境契约、便携 ZIP 审计、Host Payload/SemVer
-契约、安装器构建和当前版本 Roundtrip 已通过。官方 Preview 1 安装器及 sidecar 已核对，SHA256 为
-`2A565C8B6E4F9A588FCA7ED52473FDC4CE1096811154248BCDC1C8F824916F6A`。GitHub Actions run
-`29621499590` 已对提交 `06c4f2b9c34e2ca436ac09a57429cd0a47bc7b38` 完成隔离的
-Upgrade/Repair/Downgrade、用户状态、未知文件、废弃文件和发布资产门禁。此结果不替代下面的人工验收。
-本机存在用户正在运行的 Production Shell，因此本地 RC Gate 按安全规则拒绝执行真实原地升级；不得为完成测试
-而强制终止用户进程。在人工升级、登录启动和代表性 Windows 环境验收完成前，当前最高优先级仍保持发布验收，
-不自动进入下一阶段。
+Preview 2 自动化升级门禁已经实现，并至少有一个历史提交通过了对应精确 SHA 的隔离远程验证；历史运行证据记录在
+`docs/PREVIEW_2_ACCEPTANCE_CHECKLIST.md`，不能代表后续最终 HEAD。每个新候选必须在全部修改提交并推送后，使用
+`scripts/verify-preview-final-head.ps1` 调度 `workflow_dispatch`，严格核对 event、branch、head SHA 和最终结论。
+真实升级测试会启动 Production 模式宿主，而普通 Windows 账户的 Known Folder 无法通过环境变量可靠重定向，因此
+本地安全门禁不得为测试强制关闭用户 Shell 或触及真实 Production 数据；该测试只在一次性 GitHub Actions 账户中执行。
+所有未实际执行的人工升级、登录启动、Repair、卸载和代表性 Windows 环境项目必须保持 **Not Run** 或 **Blocked**。
+在人工发布验收完成前，当前最高优先级仍是 Preview 2 发布验收，不自动进入 `.qmod` Staging。
 
 ### 6.2 人工验收
 
@@ -449,7 +450,7 @@ docs/DEVELOPMENT_PLAN.md
 
 当前最高优先级不是继续扩展开机自启，也不是实现 qmod 自动安装，而是：
 
-Preview 1 → Preview 2 原地覆盖升级发布门禁。
+Preview 2 最终发布验收与精确最终 HEAD 远程验证。
 
 目标版本：
 
@@ -459,18 +460,17 @@ Preview 1 → Preview 2 原地覆盖升级发布门禁。
 - 显示名称：QingToolbox Preview 2
 - 主题：Reliable Startup & Module Lifecycle
 
-下一阶段必须完成：
+Preview 2 自动化能力已经完成：官方旧安装器和 sidecar 校验、真实原地覆盖、用户状态与未知文件保留、固定 AppId、
+Repair、SemVer 降级保护、Host Payload Manifest、精确废弃文件清理、Startup Recovery 收尾以及隔离 GitHub Actions
+门禁。每个候选仍必须对精确最终 HEAD 调度并通过远程验证。
 
-1. 从 GitHub 官方 v0.1.0-alpha Release 获取并校验旧安装器。
-2. 建立真实旧版安装到新版原地覆盖测试。
-3. 保留 settings、用户模块、模块数据、缓存和启动授权。
-4. 保持固定 AppId 和同一安装目录、单一卸载入口。
-5. 生成 host-payload.manifest.json。
-6. 使用旧官方基线精确清理废弃宿主文件，未知用户文件必须保留。
-7. 为 0.2.0-alpha 及未来安装器加入 SemVer 降级保护。
-8. 测试同版本 Repair Install。
-9. 将 Preview Upgrade Gate 加入 GitHub Actions 和 RC Gate。
-10. 收尾 Startup Recovery 托管、Startup Test 单记录、正式健康与测试结果分离、并发扫描共享和最终指纹复验离开 Dispatcher。
+当前必须完成的发布验收：
+
+1. 使用人工验收清单记录真实 Windows 普通用户环境。
+2. 人工验证 Preview 1 原地升级、登录启动、同版本 Repair 和卸载。
+3. 记录安装器 SHA256、Windows 版本、测试人员和非隐私证据位置。
+4. 保持未执行项目为 Not Run 或 Blocked，不以自动化结果替代人工结果。
+5. 在验收完成前不进入 qmod Staging 或 0.3.0-alpha。
 
 Preview 2 明确不包含：
 

@@ -4,8 +4,7 @@ param(
     [Parameter(Mandatory = $true)][string]$CurrentInstallerPath,
     [string]$PreviousHostManifestPath,
     [string]$TestRoot,
-    [switch]$KeepTestFiles,
-    [switch]$AllowIsolatedLocalRun
+    [switch]$KeepTestFiles
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -18,7 +17,9 @@ if ([string]::IsNullOrWhiteSpace($PreviousHostManifestPath)) {
 if ([string]::IsNullOrWhiteSpace($TestRoot)) { $TestRoot = Join-Path $env:TEMP ("QingToolbox-upgrade-" + [guid]::NewGuid().ToString('N')) }
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $isCi = $env:GITHUB_ACTIONS -eq 'true'
-if (-not $isCi -and -not $AllowIsolatedLocalRun) { throw 'Local upgrade testing requires -AllowIsolatedLocalRun after safety review.' }
+if (-not $isCi) {
+    throw 'The real upgrade test requires a disposable GitHub Actions Windows profile; local Known Folders cannot be safely redirected.'
+}
 $allowedTempRoots = @([IO.Path]::GetFullPath($env:TEMP))
 if ($isCi -and -not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
     $allowedTempRoots += [IO.Path]::GetFullPath($env:RUNNER_TEMP)
@@ -41,6 +42,27 @@ function Invoke-Setup([string]$path,[string]$log){
     return $process.ExitCode
 }
 function Assert-FileVersion([string]$expected){$info=[Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $install 'QingToolbox.Shell.exe'));if($info.FileVersion-ne$expected){throw "Shell FileVersion mismatch: $($info.FileVersion)"};return $info}
+function Assert-InstallerIdentityAndShortcuts {
+    param([string]$Phase)
+    if (-not (Test-Path $uninstallKey)) { throw "$Phase removed the fixed Inno uninstall entry." }
+    $entries = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' |
+        Where-Object { $_.PSChildName -eq $appId })
+    if ($entries.Count -ne 1) { throw "$Phase expected one QingToolbox uninstall entry, found $($entries.Count)." }
+    $currentPrograms = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+    $commonPrograms = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)
+    if ([string]::IsNullOrWhiteSpace($currentPrograms) -or [string]::IsNullOrWhiteSpace($commonPrograms)) {
+        throw "$Phase could not resolve Windows Start Menu Known Folders."
+    }
+    $currentGroup = Join-Path $currentPrograms 'QingToolbox'
+    $currentShortcuts = @(Get-ChildItem -LiteralPath $currentGroup -Filter '*.lnk' -File -ErrorAction SilentlyContinue)
+    if ($currentShortcuts.Count -ne 2 -or @($currentShortcuts.Name | Sort-Object -Unique).Count -ne 2) {
+        throw "$Phase expected one application and one uninstall shortcut, found $($currentShortcuts.Count)."
+    }
+    $commonGroup = Join-Path $commonPrograms 'QingToolbox'
+    $commonShortcuts = @(Get-ChildItem -LiteralPath $commonGroup -Filter '*.lnk' -File -ErrorAction SilentlyContinue)
+    if ($commonShortcuts.Count -ne 0) { throw "$Phase left $($commonShortcuts.Count) unexpected public Start Menu shortcuts." }
+    return [pscustomobject]@{ CurrentGroup = $currentGroup; CommonGroup = $commonGroup }
+}
 try {
     New-Item -ItemType Directory -Path $TestRoot,$profile -Force | Out-Null
     $env:LOCALAPPDATA=Join-Path $profile 'LocalAppData'; $env:APPDATA=Join-Path $profile 'AppData'
@@ -66,16 +88,7 @@ try {
     if(-not(Test-Path $uninstallKey)){throw 'Fixed Inno uninstall entry is missing after upgrade.'}
     $entry=Get-ItemProperty $uninstallKey;if($entry.DisplayVersion-ne'0.2.0-alpha'){throw "Uninstall DisplayVersion mismatch: $($entry.DisplayVersion)"}
     if ([IO.Path]::GetFullPath([string]$entry.InstallLocation).TrimEnd('\') -ne $install.TrimEnd('\')) { throw 'Upgrade registered a different installation directory.' }
-    $matchingEntries = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' |
-        Where-Object { $_.PSChildName -eq $appId })
-    if ($matchingEntries.Count -ne 1) { throw "Expected one QingToolbox uninstall entry, found $($matchingEntries.Count)." }
-    $programsFolder = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
-    if ([string]::IsNullOrWhiteSpace($programsFolder)) { throw 'Windows Start Menu Programs folder could not be resolved.' }
-    $startMenu = Join-Path $programsFolder 'QingToolbox'
-    $shortcuts = @(Get-ChildItem -LiteralPath $startMenu -Filter '*.lnk' -File -ErrorAction SilentlyContinue)
-    if ($shortcuts.Count -ne 2 -or @($shortcuts.Name | Sort-Object -Unique).Count -ne 2) {
-        throw "Expected one application and one uninstall Start Menu shortcut, found $($shortcuts.Count)."
-    }
+    $shortcutRoots = Assert-InstallerIdentityAndShortcuts 'Upgrade'
     $previousManifest = Get-Content -LiteralPath $PreviousHostManifestPath -Raw | ConvertFrom-Json
     $currentManifest = Get-Content -LiteralPath (Join-Path $install 'host-payload.manifest.json') -Raw | ConvertFrom-Json
     $currentOwned = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -90,10 +103,12 @@ try {
     }
     if((Invoke-Setup $current (Join-Path $TestRoot 'repair.log'))-ne 0){throw 'Preview 2 repair installation failed.'}
     foreach($item in $sentinels){if(-not(Test-Path $item)-or(Get-FileHash $item -Algorithm SHA256).Hash-ne$hashes[$item]){throw "Repair did not preserve sentinel: $item"}}
-    $shortcuts = @(Get-ChildItem -LiteralPath $startMenu -Filter '*.lnk' -File -ErrorAction SilentlyContinue)
-    if ($shortcuts.Count -ne 2 -or @($shortcuts.Name | Sort-Object -Unique).Count -ne 2) {
-        throw "Repair changed or duplicated Start Menu shortcuts: $($shortcuts.Count)."
+    $repairEntry = Get-ItemProperty $uninstallKey
+    if ($repairEntry.DisplayVersion -ne '0.2.0-alpha' -or
+        [IO.Path]::GetFullPath([string]$repairEntry.InstallLocation).TrimEnd('\') -ne $install.TrimEnd('\')) {
+        throw 'Repair changed the registered version or installation directory.'
     }
+    [void](Assert-InstallerIdentityAndShortcuts 'Repair')
     New-Item -Path $markerKey -Force|Out-Null;Set-ItemProperty $markerKey InstalledVersion '0.3.0-alpha'
     $before=(Get-FileHash (Join-Path $install 'QingToolbox.Shell.exe') -Algorithm SHA256).Hash
     $downgrade=Invoke-Setup $current (Join-Path $TestRoot 'downgrade.log')
@@ -104,6 +119,10 @@ try {
     if($p.ExitCode-ne 0){throw 'Preview 2 uninstall failed.'}
     foreach($item in @($settings,$module,$data,$cache)){if(-not(Test-Path $item)){throw "Uninstall removed user data: $item"}}
     if(Test-Path $uninstallKey){throw 'Uninstall entry remained after uninstall.'}
+    if ((Test-Path -LiteralPath $shortcutRoots.CurrentGroup) -or
+        (Test-Path -LiteralPath $shortcutRoots.CommonGroup)) {
+        throw 'Uninstall left a QingToolbox Start Menu group behind.'
+    }
     Write-Host 'Preview 1 -> Preview 2 upgrade, repair, downgrade guard, and user-state preservation passed.'
 }
 finally {

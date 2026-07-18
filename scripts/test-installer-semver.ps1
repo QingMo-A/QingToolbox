@@ -16,5 +16,9 @@ $cases=@(
     @('0.1.0-alpha','0.2.0-alpha',-1), @('0.2.0-alpha','0.2.0-alpha',0),
     @('0.2.0-alpha','0.2.0-beta',-1), @('0.2.0-beta','0.2.0',-1), @('0.2.0','0.3.0-alpha',-1))
 foreach($case in $cases){if((Compare-SemVer $case[0] $case[1]) -ne $case[2]){throw "SemVer comparison failed: $($case -join ' ')"}}
-$rejected=$false; try{Convert-SemVer 'broken'}catch{$rejected=$true}; if(-not $rejected){throw 'Malformed version was accepted.'}
+foreach ($invalid in @('broken', '00.2.0-alpha', '0.02.0-alpha', '0.2.00-alpha',
+    '0.2.0-preview', '0.2.0-alpha+build', '0.2.0-alpha.1')) {
+    $rejected=$false; try{Convert-SemVer $invalid}catch{$rejected=$true}
+    if(-not $rejected){throw "Malformed or unsupported version was accepted: $invalid"}
+}
 Write-Host 'Installer SemVer downgrade guard contracts passed.'

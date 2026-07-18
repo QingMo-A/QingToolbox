@@ -95,14 +95,81 @@ Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox"; ValueType: string; ValueNam
 Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox"; ValueType: string; ValueName: "InstallLocation"; ValueData: "{app}"
 Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox"; ValueType: dword; ValueName: "InstallerSchemaVersion"; ValueData: "2"
 
-#include ObsoleteIncludePath
-
 [Code]
+const
+  InvalidFileAttributes = $FFFFFFFF;
+  FileAttributeReparsePoint = $400;
+
+function GetFileAttributesW(FileName: String): LongWord;
+  external 'GetFileAttributesW@kernel32.dll stdcall';
+
+function HasReparsePoint(const RelativePath: String; IncludeLeaf: Boolean): Boolean;
+var
+  Remaining, Part, Current: String;
+  Separator: Integer;
+  Attributes: LongWord;
+begin
+  Result := False;
+  Remaining := RelativePath;
+  Current := ExpandConstant('{app}');
+  while Remaining <> '' do begin
+    Separator := Pos('\', Remaining);
+    if Separator = 0 then begin
+      Part := Remaining;
+      Remaining := '';
+    end else begin
+      Part := Copy(Remaining, 1, Separator - 1);
+      Remaining := Copy(Remaining, Separator + 1, Length(Remaining));
+    end;
+    if (Remaining = '') and (not IncludeLeaf) then exit;
+    Current := AddBackslash(Current) + Part;
+    Attributes := GetFileAttributesW(Current);
+    if (Attributes <> InvalidFileAttributes) and
+       ((Attributes and FileAttributeReparsePoint) <> 0) then begin
+      Log('Skipping obsolete payload cleanup through reparse point: ' + Current);
+      Result := True;
+      exit;
+    end;
+  end;
+end;
+
+procedure SafeDeleteObsoleteHostFile(const RelativePath: String);
+var
+  Target: String;
+begin
+  if HasReparsePoint(RelativePath, False) then exit;
+  Target := AddBackslash(ExpandConstant('{app}')) + RelativePath;
+  if FileExists(Target) and (not DeleteFile(Target)) then
+    Log('Unable to delete obsolete host file: ' + Target);
+end;
+
+procedure SafeRemoveObsoleteHostDirectory(const RelativePath: String);
+var
+  Target: String;
+begin
+  if HasReparsePoint(RelativePath, True) then exit;
+  Target := AddBackslash(ExpandConstant('{app}')) + RelativePath;
+  if DirExists(Target) and (not RemoveDir(Target)) then
+    Log('Obsolete host directory was retained because it is not empty: ' + Target);
+end;
+
+function IsValidNumericIdentifier(const Value: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  if Value = '' then exit;
+  if (Length(Value) > 1) and (Value[1] = '0') then exit;
+  for I := 1 to Length(Value) do
+    if (Value[I] < '0') or (Value[I] > '9') then exit;
+  Result := True;
+end;
+
 function TryParseCore(const Value: String; var Major, Minor, Patch: Integer; var Pre: String): Boolean;
 var
   Core: String;
   Dash, FirstDot, SecondDot: Integer;
-  Rest: String;
+  Rest, MajorText, MinorText, PatchText: String;
 begin
   Result := False;
   Core := Value;
@@ -118,10 +185,24 @@ begin
   Rest := Copy(Core, FirstDot + 1, Length(Core));
   SecondDot := Pos('.', Rest);
   if (SecondDot <= 1) or (Pos('.', Copy(Rest, SecondDot + 1, Length(Rest))) > 0) then exit;
-  Major := StrToIntDef(Copy(Core, 1, FirstDot - 1), -1);
-  Minor := StrToIntDef(Copy(Rest, 1, SecondDot - 1), -1);
-  Patch := StrToIntDef(Copy(Rest, SecondDot + 1, Length(Rest)), -1);
+  MajorText := Copy(Core, 1, FirstDot - 1);
+  MinorText := Copy(Rest, 1, SecondDot - 1);
+  PatchText := Copy(Rest, SecondDot + 1, Length(Rest));
+  if (not IsValidNumericIdentifier(MajorText)) or
+     (not IsValidNumericIdentifier(MinorText)) or
+     (not IsValidNumericIdentifier(PatchText)) then exit;
+  Major := StrToIntDef(MajorText, -1);
+  Minor := StrToIntDef(MinorText, -1);
+  Patch := StrToIntDef(PatchText, -1);
   Result := (Major >= 0) and (Minor >= 0) and (Patch >= 0);
+end;
+
+#include ObsoleteIncludePath
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    DeleteObsoleteHostPayload();
 end;
 
 function PreRank(const Value: String): Integer;

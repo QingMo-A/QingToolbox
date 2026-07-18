@@ -1,0 +1,100 @@
+# QingToolbox Preview 2 Acceptance Checklist
+
+This checklist records release evidence without embedding private machine paths, usernames, registry exports, or Task Scheduler XML.
+
+Allowed status values:
+
+- **Automated Pass** — an automated gate passed for the recorded exact commit.
+- **Manual Pass** — a person completed the check and recorded non-private evidence.
+- **Blocked** — a stated external or safety condition prevents the check.
+- **Not Run** — the check has not been performed.
+- **Failed** — the check was performed and did not satisfy the expected result.
+
+## Candidate evidence
+
+Complete this metadata for each candidate. Do not reuse evidence from a different commit or installer.
+
+| Field | Value |
+|---|---|
+| Candidate commit | Not Run |
+| Workflow run ID and URL | Not Run |
+| Workflow conclusion | Not Run |
+| Test date | Not Run |
+| Windows version | Not Run |
+| Installer SHA256 | Not Run |
+| Tester | Not Run |
+| Evidence or log location | Not Run |
+| Notes | Not Run |
+
+Historical automated evidence is informative only: workflow run `29621740800` passed for commit `7b563202dfcc34b3042d8641439c84c175fbb6fe`. A later release candidate must obtain its own exact-HEAD run.
+
+## A. Preview 1 in-place upgrade
+
+| Check | Status | Evidence / notes |
+|---|---|---|
+| Use the official GitHub `v0.1.0-alpha` installer | Not Run | |
+| Verify its official SHA256 sidecar | Not Run | |
+| Install to the standard user-writable location | Not Run | |
+| Start Preview 1 | Not Run | |
+| Create real settings | Not Run | |
+| Add a test user module | Not Run | |
+| Create module data and cache | Not Run | |
+| Enable login startup | Not Run | |
+| Add an unknown file under the install directory | Not Run | |
+| Run Preview 2 without uninstalling Preview 1 | Not Run | |
+| Confirm the same install directory and safe old-process shutdown | Not Run | |
+| Confirm Preview 2 version and display name | Not Run | |
+| Confirm settings, module, data, cache, and startup authorization are retained | Not Run | |
+| Confirm the unknown install file is retained | Not Run | |
+| Confirm current-user shortcuts are not duplicated and no public shortcuts appear | Not Run | |
+| Confirm exactly one uninstall entry remains | Not Run | |
+
+## B. Login startup
+
+| Check | Status | Evidence / notes |
+|---|---|---|
+| Enable login startup, sign out, and sign in again | Not Run | |
+| Confirm the host starts visibly with no duplicate process | Not Run | |
+| Confirm notification-area state and module recovery | Not Run | |
+| Record whether Task Scheduler or Registry Run is active | Not Run | Do not attach raw Task XML or registry exports. |
+| Confirm diagnostics match the actual backend | Not Run | |
+
+## C. Repair Install
+
+| Check | Status | Evidence / notes |
+|---|---|---|
+| Run the same Preview 2 installer again | Not Run | |
+| Confirm the same directory and retained user state | Not Run | |
+| Confirm the unknown install file remains | Not Run | |
+| Confirm current-user and public shortcut topology is unchanged | Not Run | |
+| Confirm exactly one uninstall entry remains | Not Run | |
+| Confirm host version and hashes match the candidate | Not Run | |
+
+## D. Uninstall
+
+| Check | Status | Evidence / notes |
+|---|---|---|
+| Uninstall Preview 2 and confirm host files are removed | Not Run | |
+| Confirm QingToolbox-owned Task Scheduler and Registry Run entries are removed | Not Run | |
+| Confirm Start Menu and optional desktop shortcuts are removed | Not Run | |
+| Confirm the uninstall entry is removed | Not Run | |
+| Confirm settings, user modules, and module data remain | Not Run | |
+| Confirm unrelated external files are untouched | Not Run | |
+
+## E. Representative Windows environments
+
+For each row record the status, test date, Windows version, installer SHA256, tester, evidence location, and notes.
+
+| Environment | Status | Date | Windows version | Installer SHA256 | Tester | Evidence / notes |
+|---|---|---|---|---|---|---|
+| Windows 11 standard user | Not Run | | | | | |
+| Standard `%LOCALAPPDATA%` install path | Not Run | | | | | |
+| Username or path containing spaces | Not Run | | | | | |
+| Non-administrator execution | Not Run | | | | | |
+| Task Scheduler available | Not Run | | | | | |
+| Registry Run fallback when Task Scheduler is unavailable | Not Run | | | | | |
+| Notification-area recovery after Explorer restart | Not Run | | | | | |
+
+## Automated candidate gates
+
+Run [`../scripts/verify-preview-final-head.ps1`](../scripts/verify-preview-final-head.ps1) only after all candidate changes are committed and pushed. Record its exact commit, run ID, URL, status, and conclusion in the candidate evidence table. Automated success does not change any manual row to **Manual Pass**.

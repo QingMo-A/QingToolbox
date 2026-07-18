@@ -196,8 +196,7 @@ try {
         & (Join-Path $PSScriptRoot "test-preview-upgrade.ps1") `
             -PreviousInstallerPath $previous.InstallerPath `
             -CurrentInstallerPath $installerPath `
-            -TestRoot (Join-Path $tempRoot "Upgrade") `
-            -AllowIsolatedLocalRun
+            -TestRoot (Join-Path $tempRoot "Upgrade")
     }
 
     Write-Host "`n==> Generate and verify Preview manifest"
