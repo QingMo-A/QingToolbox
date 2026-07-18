@@ -1,8 +1,15 @@
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using QingToolbox.Core.Updates;
+
+if (args.Length > 0)
+{
+    await StagingWorker.RunAsync(args);
+    return;
+}
 
 try
 {
@@ -31,6 +38,65 @@ static void WriteDiagnostic(string status, string summary)
     catch { }
 }
 
+static class StagingWorker
+{
+    public static async Task RunAsync(string[] args)
+    {
+        if (args.Length != 8 || args[0] is not ("--worker-stage" or "--worker-hold"))
+            throw new ArgumentException("Invalid staging worker arguments.");
+        var mode = args[0]; var root = SafePath(args[1]); var package = SafePath(args[2]);
+        var moduleId = args[3]; var version = args[4]; var gate = SafePath(args[5]);
+        var signal = SafePath(args[6]); var resultPath = SafePath(args[7]);
+        foreach (var path in new[] { package, gate, signal, resultPath })
+            if (!IsWithin(root, path)) throw new UnauthorizedAccessException("Worker path escaped its temporary root.");
+        if (mode == "--worker-stage") await File.WriteAllTextAsync(signal, "ready");
+        await WaitForFileAsync(gate, TimeSpan.FromSeconds(30));
+        var input = CreateInput(package, moduleId, version);
+        QmodStagingTestHooks? hooks = mode == "--worker-hold"
+            ? new(PublicationLockAcquired: async (_, token) =>
+            {
+                await File.WriteAllTextAsync(signal, "lock-acquired", token);
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            }) : null;
+        var events = new List<QmodStagingLogEvent>();
+        await using var service = new QmodPackageStagingService(Path.Combine(root, "Staging"), TimeProvider.System,
+            "ModuleTest", Path.Combine(root, "UserModules"), null, events.Add, 2, hooks);
+        var result = await service.StageAsync(input);
+        await File.WriteAllTextAsync(resultPath,
+            $"success={result.Succeeded};reused={result.Reused};failure={result.FailureCode};" +
+            $"crashRecovery={events.Any(item => item.EventName == "Publication lock recovered after process exit")}");
+    }
+
+    private static QmodStagingInput CreateInput(string package, string moduleId, string version)
+    {
+        var bytes = File.ReadAllBytes(package); var fileName = Path.GetFileName(package);
+        var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        var verified = new VerifiedModulePackage(moduleId, SemanticVersion.Parse(version), fileName, package,
+            bytes.LongLength, sha, DateTimeOffset.UtcNow);
+        var identity = new ModulePackageDownloadIdentity(moduleId, "0.1.0", version, fileName,
+            $"https://github.com/QingMo-A/QingToolbox/releases/download/v{version}/{fileName}", bytes.LongLength, sha);
+        return new(verified, identity, ModuleUpdateIdentity.ModuleApiVersion, "qingtoolbox-official");
+    }
+
+    private static async Task WaitForFileAsync(string path, TimeSpan timeout)
+    {
+        using var cancellation = new CancellationTokenSource(timeout);
+        while (!File.Exists(path)) await Task.Delay(25, cancellation.Token);
+    }
+
+    private static string SafePath(string value)
+    {
+        var path = Path.GetFullPath(value);
+        var temp = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
+        if (!IsWithin(temp, path) || !path.Contains("QingToolbox-staging-smoke-", StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Worker accepts only its generated test root.");
+        return path;
+    }
+
+    private static bool IsWithin(string root, string path) => path.Equals(root, StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith(Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+}
+
 static class StagingSmoke
 {
     private const string ModuleId = "qing.staging-probe";
@@ -50,9 +116,13 @@ static class StagingSmoke
             await PathAttacksAsync(root);
             await EntryTypesAsync(root);
             await FilesystemReparseAsync(root);
+            await PackageSourceReparseAsync(root);
             await BombLimitsAsync(root);
             await ManifestFailuresAsync(root);
             await IdentityAndConcurrencyAsync(root);
+            await CrossProcessPublicationAsync(root);
+            await FailedPublicationCommitAsync(root);
+            await ServiceDisposalAsync(root);
             await ExistingStagingTamperingAsync(root);
             await LockCancellationAsync(root);
             await TransactionsAsync(root);
@@ -116,6 +186,24 @@ static class StagingSmoke
             File.Copy(input.VerifiedPackage.FilePath, path);
             return input with { VerifiedPackage = input.VerifiedPackage with { FilePath = path } };
         });
+        AssertConstructorRejected(Path.Combine(root, "same-roots"), same: true, nestedUser: false, nestedStaging: false);
+        AssertConstructorRejected(Path.Combine(root, "nested-user-root"), same: false, nestedUser: true, nestedStaging: false);
+        AssertConstructorRejected(Path.Combine(root, "nested-staging-root"), same: false, nestedUser: false, nestedStaging: true);
+    }
+
+    private static void AssertConstructorRejected(string root, bool same, bool nestedUser, bool nestedStaging)
+    {
+        Directory.CreateDirectory(root);
+        var staging = Path.Combine(root, "Staging");
+        var user = same ? staging : nestedUser ? Path.Combine(staging, "UserModules") :
+            nestedStaging ? Path.Combine(root, "UserModules", "Staging") : Path.Combine(root, "UserModules");
+        if (nestedStaging) staging = Path.Combine(user, "NestedStaging");
+        try
+        {
+            _ = new QmodPackageStagingService(staging, TimeProvider.System, "ModuleTest", user);
+            throw new Exception("overlapping roots accepted");
+        }
+        catch (ArgumentException) { }
     }
 
     private static async Task PathAttacksAsync(string root)
@@ -182,6 +270,70 @@ static class StagingSmoke
         Assert(await File.ReadAllTextAsync(sentinel) == "keep", "filesystem reparse target untouched");
         Directory.Delete(staging, false);
     }
+
+    private static async Task PackageSourceReparseAsync(string root)
+    {
+        var caseRoot = Case(root, "package-source-reparse");
+        var target = Path.Combine(caseRoot, "physical-source"); var link = Path.Combine(caseRoot, "linked-source");
+        Directory.CreateDirectory(target); var input = CreatePackage(target);
+        var sentinel = Path.Combine(target, "must-survive.txt"); await File.WriteAllTextAsync(sentinel, "keep");
+        try { Directory.CreateSymbolicLink(link, target); }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            Console.WriteLine("Package parent reparse checks skipped because symbolic-link creation is unavailable.");
+            return;
+        }
+        var linkedInput = input with { VerifiedPackage = input.VerifiedPackage with
+        { FilePath = Path.Combine(link, input.ReleaseIdentity.FileName) } };
+        await using (var service = Service(caseRoot))
+            Assert((await service.StageAsync(linkedInput)).FailureCode == QmodStagingFailureCode.PackageChanged,
+                "package parent reparse rejected");
+        var userModules = Path.Combine(caseRoot, "UserModules"); Directory.CreateDirectory(userModules);
+        var userPackage = Path.Combine(userModules, "user-source.qmod"); File.Copy(input.VerifiedPackage.FilePath, userPackage);
+        var userLink = Path.Combine(caseRoot, "linked-user-modules"); Directory.CreateSymbolicLink(userLink, userModules);
+        var userInput = RepathInput(input, Path.Combine(userLink, "user-source.qmod"), "user-source.qmod");
+        await using (var service = Service(caseRoot))
+            Assert((await service.StageAsync(userInput)).FailureCode == QmodStagingFailureCode.PackageChanged,
+                "junction-style parent into UserModules rejected");
+        var stagingSource = Path.Combine(caseRoot, "Staging", "source"); Directory.CreateDirectory(stagingSource);
+        var stagingPackage = Path.Combine(stagingSource, "staging-source.qmod"); File.Copy(input.VerifiedPackage.FilePath, stagingPackage);
+        var stagingLink = Path.Combine(caseRoot, "linked-staging"); Directory.CreateSymbolicLink(stagingLink, stagingSource);
+        var stagingInput = RepathInput(input, Path.Combine(stagingLink, "staging-source.qmod"), "staging-source.qmod");
+        await using (var service = Service(caseRoot))
+            Assert((await service.StageAsync(stagingInput)).FailureCode == QmodStagingFailureCode.PackageChanged,
+                "junction-style parent into Staging rejected");
+        var fileLink = Path.Combine(caseRoot, "linked-file.qmod");
+        try
+        {
+            File.CreateSymbolicLink(fileLink, input.VerifiedPackage.FilePath);
+            var fileInput = input with
+            {
+                VerifiedPackage = input.VerifiedPackage with { FilePath = fileLink, FileName = "linked-file.qmod" },
+                ReleaseIdentity = input.ReleaseIdentity with
+                {
+                    FileName = "linked-file.qmod",
+                    OfficialUrl = input.ReleaseIdentity.OfficialUrl.Replace(input.ReleaseIdentity.FileName, "linked-file.qmod")
+                }
+            };
+            await using var service = Service(caseRoot);
+            Assert((await service.StageAsync(fileInput)).FailureCode == QmodStagingFailureCode.PackageChanged,
+                "package file symlink rejected");
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or PlatformNotSupportedException) { }
+        Assert(await File.ReadAllTextAsync(sentinel) == "keep", "external package reparse target remains untouched");
+        Directory.Delete(link, false);
+        Directory.Delete(userLink, false); Directory.Delete(stagingLink, false);
+    }
+
+    private static QmodStagingInput RepathInput(QmodStagingInput input, string path, string fileName) => input with
+    {
+        VerifiedPackage = input.VerifiedPackage with { FilePath = path, FileName = fileName },
+        ReleaseIdentity = input.ReleaseIdentity with
+        {
+            FileName = fileName,
+            OfficialUrl = input.ReleaseIdentity.OfficialUrl.Replace(input.ReleaseIdentity.FileName, fileName)
+        }
+    };
 
     private static async Task BombLimitsAsync(string root)
     {
@@ -360,6 +512,21 @@ static class StagingSmoke
             Assert((await differentEnvironment.StageAsync(correct)).FailureCode == QmodStagingFailureCode.StagingMetadataInvalid,
                 "service-bound environment cannot reuse other environment metadata");
 
+        var releaseRoot = Case(root, "official-release-identity");
+        var releaseInput = CreatePackage(releaseRoot);
+        var otherRelease = releaseInput with { ReleaseIdentity = releaseInput.ReleaseIdentity with
+        { OfficialUrl = releaseInput.ReleaseIdentity.OfficialUrl.Replace($"/v{Version}/", $"/v{Version}-alternate/") } };
+        var releaseEvents = new List<QmodStagingLogEvent>();
+        await using (var service = Service(releaseRoot, log: item => { lock (releaseEvents) releaseEvents.Add(item); }))
+        {
+            var releaseResults = await Task.WhenAll(service.StageAsync(releaseInput), service.StageAsync(otherRelease));
+            Assert(releaseResults.Count(result => result.Succeeded) == 1 &&
+                   releaseResults.Count(result => result.FailureCode == QmodStagingFailureCode.StagingMetadataInvalid) == 1,
+                "distinct official Release identities cannot reuse each other's staging metadata");
+            Assert(releaseEvents.All(item => item.EventName != "Shared operation joined"),
+                "OfficialUrl identity prevents in-flight sharing");
+        }
+
         var conflictRoot = Case(root, "cross-service-sha-conflict");
         var first = CreatePackage(conflictRoot, entries => ReplaceResource(entries, "i18n/en-US.json", [10]), "first.qmod");
         var second = CreatePackage(conflictRoot, entries => ReplaceResource(entries, "i18n/en-US.json", [20]), "second.qmod");
@@ -392,11 +559,25 @@ static class StagingSmoke
             Assert(results.All(result => result.Succeeded),
                 "different modules remain parallel (" + string.Join(",", results.Select(result => result.FailureCode)) + ")");
         }
+
+        var isolatedA = Case(root, "gate-root-a"); var isolatedB = Case(root, "gate-root-b");
+        var isolatedInputA = CreatePackage(isolatedA); var isolatedInputB = CreatePackage(isolatedB);
+        using var isolatedReached = new CountdownEvent(2); using var isolatedRelease = new ManualResetEventSlim(false);
+        async Task IsolatedBarrier(QmodStagingInput _, CancellationToken token)
+        {
+            isolatedReached.Signal(); if (isolatedReached.CurrentCount == 0) isolatedRelease.Set();
+            await Task.Run(() => isolatedRelease.Wait(token), token);
+        }
+        var isolatedHooks = new QmodStagingTestHooks(PublicationLockAcquired: IsolatedBarrier);
+        await using var isolatedServiceA = Service(isolatedA, environment: "ModuleTest", hooks: isolatedHooks);
+        await using var isolatedServiceB = Service(isolatedB, environment: "Development", hooks: isolatedHooks);
+        var isolatedResults = await Task.WhenAll(isolatedServiceA.StageAsync(isolatedInputA), isolatedServiceB.StageAsync(isolatedInputB));
+        Assert(isolatedResults.All(result => result.Succeeded), "different roots and environments do not share local publication gates");
     }
 
     private static async Task ExistingStagingTamperingAsync(string root)
     {
-        await TamperMetadata(root, "metadata-schema", node => node["schemaVersion"] = 2);
+        await TamperMetadata(root, "metadata-schema", node => node["schemaVersion"] = 99);
         await TamperMetadata(root, "metadata-module", node => node["moduleId"] = "qing.other");
         await TamperMetadata(root, "metadata-version", node => node["version"] = "9.9.9");
         await TamperMetadata(root, "metadata-api", node => node["moduleApiVersion"] = "wrong");
@@ -404,6 +585,7 @@ static class StagingSmoke
         await TamperMetadata(root, "metadata-size", node => node["packageSize"] = 1);
         await TamperMetadata(root, "metadata-source", node => node["sourceIdentity"] = "wrong");
         await TamperMetadata(root, "metadata-environment", node => node["environmentIdentity"] = "Development");
+        await TamperMetadata(root, "metadata-release-identity", node => node["officialReleaseIdentityHash"] = new string('0', 64));
         await TamperMetadata(root, "metadata-count", node => node["fileCount"] = 99);
         await TamperMetadata(root, "metadata-total", node => node["totalUncompressedBytes"] = 1);
         await TamperMetadata(root, "metadata-file-sha", node => node["files"]![0]!["sha256"] = new string('0', 64));
@@ -441,6 +623,153 @@ static class StagingSmoke
             Directory.CreateDirectory(Path.Combine(final, "payload.dll"));
         });
         await ExistingTreeReparseAsync(root);
+    }
+
+    private static async Task CrossProcessPublicationAsync(string root)
+    {
+        var conflictRoot = Case(root, "real-process-conflict");
+        var first = CreatePackage(conflictRoot, entries => ReplaceResource(entries, "i18n/en-US.json", [71]), "first.qmod");
+        var second = CreatePackage(conflictRoot, entries => ReplaceResource(entries, "i18n/en-US.json", [72]), "second.qmod");
+        var start = Path.Combine(conflictRoot, "start.signal");
+        var firstResult = Path.Combine(conflictRoot, "first.result");
+        var secondResult = Path.Combine(conflictRoot, "second.result");
+        using var firstWorker = StartWorker("--worker-stage", conflictRoot, first.VerifiedPackage.FilePath,
+            ModuleId, Version, start, Path.Combine(conflictRoot, "first.signal"), firstResult);
+        using var secondWorker = StartWorker("--worker-stage", conflictRoot, second.VerifiedPackage.FilePath,
+            ModuleId, Version, start, Path.Combine(conflictRoot, "second.signal"), secondResult);
+        await WaitForFileAsync(Path.Combine(conflictRoot, "first.signal"), TimeSpan.FromSeconds(20));
+        await WaitForFileAsync(Path.Combine(conflictRoot, "second.signal"), TimeSpan.FromSeconds(20));
+        await File.WriteAllTextAsync(start, "go");
+        await WaitForExitAsync(firstWorker, TimeSpan.FromSeconds(30));
+        await WaitForExitAsync(secondWorker, TimeSpan.FromSeconds(30));
+        Assert(firstWorker.ExitCode == 0 && secondWorker.ExitCode == 0, "independent staging workers exit normally");
+        var results = new[] { await File.ReadAllTextAsync(firstResult), await File.ReadAllTextAsync(secondResult) };
+        Assert(results.Count(value => value.Contains("success=True", StringComparison.Ordinal)) == 1 &&
+               results.Count(value => value.Contains("failure=StagingConflict", StringComparison.Ordinal)) == 1,
+            "independent processes publish exactly one SHA");
+        var versionRoot = Path.Combine(conflictRoot, "Staging", "Verified", ModuleId, Version);
+        Assert(Directory.EnumerateDirectories(versionRoot).Count() == 1, "process conflict leaves one SHA directory");
+        var winner = results[0].Contains("success=True", StringComparison.Ordinal) ? first : second;
+        await using (var reuse = Service(conflictRoot))
+            Assert((await reuse.StageAsync(winner)).Reused, "cross-process winner remains strictly reusable");
+        AssertNoPartial(conflictRoot, "process conflict"); AssertNoLocks(conflictRoot, "process conflict");
+
+        var crashRoot = Case(root, "process-crash-recovery"); var crashInput = CreatePackage(crashRoot);
+        var crashGate = Path.Combine(crashRoot, "start.signal"); await File.WriteAllTextAsync(crashGate, "go");
+        var held = Path.Combine(crashRoot, "held.signal");
+        using (var crashing = StartWorker("--worker-hold", crashRoot, crashInput.VerifiedPackage.FilePath,
+            ModuleId, Version, crashGate, held, Path.Combine(crashRoot, "crash.result")))
+        {
+            await WaitForFileAsync(held, TimeSpan.FromSeconds(20));
+            crashing.Kill(entireProcessTree: true);
+            await WaitForExitAsync(crashing, TimeSpan.FromSeconds(20));
+        }
+        var recoveryResult = Path.Combine(crashRoot, "recovery.result");
+        using (var recovery = StartWorker("--worker-stage", crashRoot, crashInput.VerifiedPackage.FilePath,
+            ModuleId, Version, crashGate, Path.Combine(crashRoot, "recovery.signal"), recoveryResult))
+        {
+            await WaitForExitAsync(recovery, TimeSpan.FromSeconds(30));
+            var recovered = await File.ReadAllTextAsync(recoveryResult);
+            Assert(recovery.ExitCode == 0 && recovered.Contains("success=True", StringComparison.Ordinal) &&
+                   recovered.Contains("crashRecovery=True", StringComparison.Ordinal),
+                "new process recovers lock after holder crash");
+        }
+        AssertNoLocks(crashRoot, "crash recovery"); AssertNoPartial(crashRoot, "crash recovery");
+
+        var cancellationRoot = Case(root, "process-lock-cancellation"); var cancellationInput = CreatePackage(cancellationRoot);
+        var cancellationGate = Path.Combine(cancellationRoot, "start.signal"); await File.WriteAllTextAsync(cancellationGate, "go");
+        var cancellationHeld = Path.Combine(cancellationRoot, "held.signal");
+        using var holder = StartWorker("--worker-hold", cancellationRoot, cancellationInput.VerifiedPackage.FilePath,
+            ModuleId, Version, cancellationGate, cancellationHeld, Path.Combine(cancellationRoot, "holder.result"));
+        await WaitForFileAsync(cancellationHeld, TimeSpan.FromSeconds(20));
+        await using (var waiter = Service(cancellationRoot, maximumParallelism: 1))
+        {
+            var blocked = waiter.StageAsync(cancellationInput);
+            await Task.Delay(100);
+            var otherModule = CreatePackage(cancellationRoot, fileName: "other.qmod", moduleId: "qing.capacity-probe");
+            using var capacityTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            Assert((await waiter.StageAsync(otherModule, capacityTimeout.Token)).Succeeded,
+                "lock waiter does not consume unrelated extraction capacity");
+            waiter.Cancel(cancellationInput);
+            Assert((await blocked).FailureCode == QmodStagingFailureCode.Cancelled,
+                "current process cancels while independent process retains lock");
+        }
+        Assert(!holder.HasExited, "cancelled waiter does not release worker ownership");
+        holder.Kill(entireProcessTree: true); await WaitForExitAsync(holder, TimeSpan.FromSeconds(20));
+        await using (var afterCancellation = Service(cancellationRoot))
+            Assert((await afterCancellation.StageAsync(cancellationInput)).Succeeded,
+                "next transaction acquires lock after holder exits");
+        AssertNoLocks(cancellationRoot, "process cancellation");
+    }
+
+    private static async Task FailedPublicationCommitAsync(string root)
+    {
+        var caseRoot = Case(root, "failed-publication-commit"); var input = CreatePackage(caseRoot);
+        var userModules = Path.Combine(caseRoot, "UserModules"); Directory.CreateDirectory(userModules);
+        var sentinel = Path.Combine(userModules, "keep.txt"); await File.WriteAllTextAsync(sentinel, "keep");
+        var events = new List<QmodStagingLogEvent>();
+        var hooks = new QmodStagingTestHooks(PublicationMoveCompleted: (_, _) =>
+            Task.FromException(new IOException("Injected post-move attestation failure.")));
+        await using (var service = Service(caseRoot, log: events.Add, hooks: hooks))
+        {
+            var result = await service.StageAsync(input);
+            Assert(result.FailureCode == QmodStagingFailureCode.IoFailure, "post-move failure is structured");
+            Assert(events.All(item => item.EventName != "Verified directory published"),
+                "failed attestation never logs successful publication");
+        }
+        var final = Path.Combine(caseRoot, "Staging", "Verified", ModuleId, Version, input.ReleaseIdentity.Sha256);
+        Assert(!Directory.Exists(final), "failed publication leaves no normal Verified directory");
+        Assert(Directory.EnumerateDirectories(Path.Combine(caseRoot, "Staging", "Rejected"), "*.invalid").Count() == 1,
+            "owned failed publication is quarantined");
+        await using (var retry = Service(caseRoot)) Assert((await retry.StageAsync(input)).Succeeded,
+            "valid retry succeeds after failed publication quarantine");
+        Assert(await File.ReadAllTextAsync(sentinel) == "keep", "failed publication never modifies UserModules");
+    }
+
+    private static async Task ServiceDisposalAsync(string root)
+    {
+        var caseRoot = Case(root, "service-disposal"); var input = CreatePackage(caseRoot);
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hooks = new QmodStagingTestHooks(PublicationLockAcquired: async (_, token) =>
+        {
+            reached.TrySetResult(); await Task.Delay(Timeout.InfiniteTimeSpan, token);
+        });
+        var service = Service(caseRoot, hooks: hooks);
+        var operation = service.StageAsync(input);
+        await reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var firstDispose = service.DisposeAsync().AsTask();
+        var secondDispose = service.DisposeAsync().AsTask();
+        await Task.WhenAll(firstDispose, secondDispose);
+        Assert((await operation).FailureCode == QmodStagingFailureCode.Cancelled,
+            "dispose cancels and awaits existing staging operation");
+        try { await service.StageAsync(input); throw new Exception("disposed service accepted StageAsync"); }
+        catch (ObjectDisposedException) { }
+        service.Cancel(input);
+        AssertNoPartial(caseRoot, "service disposal"); AssertNoLocks(caseRoot, "service disposal");
+    }
+
+    private static Process StartWorker(string mode, string root, string package, string moduleId, string version,
+        string gate, string signal, string result)
+    {
+        var executable = Environment.ProcessPath ?? throw new InvalidOperationException("Worker executable unavailable.");
+        var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true };
+        if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            start.ArgumentList.Add(typeof(StagingSmoke).Assembly.Location);
+        foreach (var argument in new[] { mode, root, package, moduleId, version, gate, signal, result })
+            start.ArgumentList.Add(argument);
+        return Process.Start(start) ?? throw new InvalidOperationException("Unable to start staging worker.");
+    }
+
+    private static async Task WaitForExitAsync(Process process, TimeSpan timeout)
+    {
+        using var cancellation = new CancellationTokenSource(timeout);
+        await process.WaitForExitAsync(cancellation.Token);
+    }
+
+    private static async Task WaitForFileAsync(string path, TimeSpan timeout)
+    {
+        using var cancellation = new CancellationTokenSource(timeout);
+        while (!File.Exists(path)) await Task.Delay(25, cancellation.Token);
     }
 
     private static async Task ExistingTreeReparseAsync(string root)
@@ -494,7 +823,7 @@ static class StagingSmoke
         var holderResult = await holderTask;
         var waiterResult = await survivingWait;
         Assert(holderResult.Succeeded && waiterResult.FailureCode == QmodStagingFailureCode.StagingConflict,
-            "caller cancellation leaves shared lock transaction intact");
+            $"caller cancellation leaves shared lock transaction intact ({holderResult.FailureCode}/{waiterResult.FailureCode})");
         AssertNoPartial(caseRoot, "caller lock cancellation");
         AssertNoLocks(caseRoot, "caller lock cancellation");
 
@@ -522,32 +851,22 @@ static class StagingSmoke
 
         var externalLockRoot = Case(root, "external-lock-cancellation");
         var externalInput = CreatePackage(externalLockRoot);
-        var externalName = QmodPackageStagingService.BuildPublicationSemaphoreName(
-            Path.Combine(externalLockRoot, "Staging"), "ModuleTest", ModuleId, Version);
-        using (var externalHandle = new Semaphore(0, 1, externalName, out var created))
+        await using (var blockedService = Service(externalLockRoot))
         {
-            Assert(created, "external semaphore owns fresh cross-process lock");
-            await using (var blockedService = Service(externalLockRoot))
+            var externalPath = blockedService.GetPublicationLockPathForTest(ModuleId, Version);
+            Directory.CreateDirectory(Path.GetDirectoryName(externalPath)!);
+            using (var externalHandle = new FileStream(externalPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
             {
                 var blocked = blockedService.StageAsync(externalInput);
                 await Task.Delay(100);
                 blockedService.Cancel(externalInput);
                 Assert((await blocked).FailureCode == QmodStagingFailureCode.Cancelled,
-                    "cross-process semaphore wait observes transaction cancellation");
+                    "cross-process file lock wait observes transaction cancellation");
             }
-            externalHandle.Release();
-            await using (var recoveredService = Service(externalLockRoot))
-                Assert((await recoveredService.StageAsync(externalInput)).Succeeded,
-                    "cross-process semaphore is acquirable after cancelled waiter and owner release");
+            Assert((await blockedService.StageAsync(externalInput)).Succeeded,
+                "cross-process file lock is acquirable after cancelled waiter and owner release");
         }
         AssertNoLocks(externalLockRoot, "external lock cancellation");
-
-        var existingRoot = Case(root, "existing-kernel-lock-object"); var existingInput = CreatePackage(existingRoot);
-        var existingName = QmodPackageStagingService.BuildPublicationSemaphoreName(
-            Path.Combine(existingRoot, "Staging"), "ModuleTest", ModuleId, Version);
-        using var existingObject = new Semaphore(1, 1, existingName, out _);
-        await using var existingService = Service(existingRoot);
-        Assert((await existingService.StageAsync(existingInput)).Succeeded, "existing kernel lock object remains usable");
     }
 
     private static async Task TamperMetadata(string root, string name, Action<JsonObject> mutate)
@@ -614,9 +933,10 @@ static class StagingSmoke
     }
 
     private static QmodPackageStagingService Service(string root, QmodStagingLimits? limits = null,
-        Action<QmodStagingLogEvent>? log = null, string environment = "ModuleTest") =>
+        Action<QmodStagingLogEvent>? log = null, string environment = "ModuleTest", int maximumParallelism = 2,
+        QmodStagingTestHooks? hooks = null) =>
         new(Path.Combine(root, "Staging"), TimeProvider.System, environment,
-            Path.Combine(root, "UserModules"), limits, log);
+            Path.Combine(root, "UserModules"), limits, log, maximumParallelism, hooks);
 
     private static QmodStagingInput CreatePackage(string root, Func<List<EntrySpec>, List<EntrySpec>>? mutate = null,
         string fileName = "probe.qmod", string moduleId = ModuleId, string version = Version)
@@ -669,7 +989,10 @@ static class StagingSmoke
     private static void AssertNoLocks(string root, string name)
     {
         var locks = Path.Combine(root, "Staging", "Locks");
-        Assert(!Directory.Exists(locks) || !Directory.EnumerateFiles(locks, "*.lock", SearchOption.AllDirectories).Any(), name + " cleans locks");
+        if (!Directory.Exists(locks)) return;
+        foreach (var path in Directory.EnumerateFiles(locks, "*.lock", SearchOption.AllDirectories))
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                Assert(stream.Length == 0, name + " leaves no active lock owner marker");
     }
     private static void Assert(bool condition, string name) { if (!condition) throw new Exception("Assertion failed: " + name); }
     private static async Task InTemp(Func<string, Task> action)

@@ -1,8 +1,13 @@
 using System.Collections.Concurrent;
 using System.IO.Compression;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
+
+[assembly: InternalsVisibleTo("QingToolbox.DevTools.ModulePackageStagingSmokeTest")]
 
 namespace QingToolbox.Core.Updates;
 
@@ -34,9 +39,15 @@ public sealed record QmodStagingInput(
 public readonly record struct QmodStagingOperationKey(
     string PackagePath, string ModuleId, string TargetVersion, string FileName,
     long ExpectedSize, string Sha256, string ModuleApiVersion, string SourceIdentity,
-    string EnvironmentIdentity);
+    string EnvironmentIdentity, string OfficialReleaseIdentityHash);
 
-public readonly record struct QmodModuleVersionKey(string ModuleId, string TargetVersion);
+public readonly record struct QmodModuleVersionKey(
+    string StagingRootIdentity, string EnvironmentIdentity, string ModuleId, string TargetVersion);
+
+internal sealed record QmodStagingTestHooks(
+    Func<QmodStagingInput, CancellationToken, Task>? PublicationLockAcquired = null,
+    Func<QmodStagingInput, CancellationToken, Task>? ExtractionCapacityAcquired = null,
+    Func<QmodStagingInput, CancellationToken, Task>? PublicationMoveCompleted = null);
 
 public enum QmodStagingFailureCode
 {
@@ -74,19 +85,31 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     private readonly string _stagingRoot;
     private readonly string _incomingRoot;
     private readonly string _verifiedRoot;
+    private readonly string _rejectedRoot;
+    private readonly string _locksRoot;
     private readonly string? _userModulesRoot;
     private readonly string _environmentIdentity;
     private readonly QmodStagingLimits _limits;
     private readonly TimeProvider _timeProvider;
     private readonly Action<QmodStagingLogEvent>? _log;
     private readonly SemaphoreSlim _parallelism;
+    private readonly QmodStagingTestHooks? _testHooks;
     private readonly ConcurrentDictionary<QmodStagingOperationKey, StagingOperation> _inflight =
         new(QmodStagingOperationKeyComparer.Instance);
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly object _lifecycleSync = new();
+    private readonly TaskCompletionSource _disposeCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _disposeState;
 
     public QmodPackageStagingService(string stagingRoot, TimeProvider timeProvider, string environmentIdentity,
         string? userModulesRoot = null, QmodStagingLimits? limits = null,
         Action<QmodStagingLogEvent>? log = null, int maximumParallelism = 2)
+        : this(stagingRoot, timeProvider, environmentIdentity, userModulesRoot, limits, log, maximumParallelism, null)
+    { }
+
+    internal QmodPackageStagingService(string stagingRoot, TimeProvider timeProvider, string environmentIdentity,
+        string? userModulesRoot, QmodStagingLimits? limits, Action<QmodStagingLogEvent>? log,
+        int maximumParallelism, QmodStagingTestHooks? testHooks)
     {
         if (!Path.IsPathFullyQualified(stagingRoot)) throw new ArgumentException("Staging root must be absolute.", nameof(stagingRoot));
         if (maximumParallelism <= 0) throw new ArgumentOutOfRangeException(nameof(maximumParallelism));
@@ -94,15 +117,19 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         if (Path.GetPathRoot(_stagingRoot) == _stagingRoot) throw new ArgumentException("Staging root cannot be a volume root.", nameof(stagingRoot));
         _incomingRoot = Path.Combine(_stagingRoot, "Incoming");
         _verifiedRoot = Path.Combine(_stagingRoot, "Verified");
+        _rejectedRoot = Path.Combine(_stagingRoot, "Rejected");
+        _locksRoot = Path.Combine(_stagingRoot, "Locks");
         _environmentIdentity = environmentIdentity is "Production" or "Development" or "ModuleTest"
             ? environmentIdentity : throw new ArgumentException("Unsupported execution environment.", nameof(environmentIdentity));
         _userModulesRoot = string.IsNullOrWhiteSpace(userModulesRoot)
             ? null : Path.TrimEndingDirectorySeparator(Path.GetFullPath(userModulesRoot));
+        ValidateRootIsolation();
         _timeProvider = timeProvider;
         _limits = limits ?? new();
         _limits.Validate();
         _log = log;
         _parallelism = new(maximumParallelism, maximumParallelism);
+        _testHooks = testHooks;
     }
 
     public Task<QmodStagingResult> StageAsync(QmodStagingInput input, CancellationToken callerToken = default)
@@ -112,9 +139,14 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         try { key = ValidateStaticInputAndCreateKey(input); }
         catch (StagingException exception) { return Task.FromResult(Reject(exception.Code, input)); }
         StagingOperation? candidate = null;
-        candidate = new(CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token),
-            () => RunAndRemoveAsync(key, input, candidate!));
-        var operation = _inflight.GetOrAdd(key, candidate);
+        StagingOperation operation;
+        lock (_lifecycleSync)
+        {
+            ObjectDisposedException.ThrowIf(_disposeState != 0, this);
+            candidate = new(CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token),
+                () => RunAndRemoveAsync(key, input, candidate!));
+            operation = _inflight.GetOrAdd(key, candidate);
+        }
         if (!ReferenceEquals(operation, candidate))
         {
             candidate.Dispose();
@@ -125,12 +157,13 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
 
     public void Cancel(QmodStagingInput input)
     {
+        lock (_lifecycleSync) { if (_disposeState != 0) return; }
         try
         {
             var key = ValidateStaticInputAndCreateKey(input);
             if (_inflight.TryGetValue(key, out var operation)) operation.Cancellation.Cancel();
         }
-        catch (StagingException) { }
+        catch (Exception exception) when (exception is StagingException or ObjectDisposedException) { }
     }
 
     private async Task<QmodStagingResult> RunAndRemoveAsync(QmodStagingOperationKey key, QmodStagingInput input, StagingOperation operation)
@@ -150,10 +183,9 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         try
         {
             var packagePath = Path.GetFullPath(input.VerifiedPackage.FilePath);
-            if (!File.Exists(packagePath)) return Reject(QmodStagingFailureCode.PackageMissing, input);
-            if (IsReparse(packagePath)) return Reject(QmodStagingFailureCode.PackageChanged, input);
-            await using var packageStream = new FileStream(packagePath, FileMode.Open, FileAccess.Read, FileShare.Read,
-                65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            EnsureRootChain();
+            await using var packageStream = OpenAndAttestPackage(packagePath);
+            Log("Package source path attested", input);
             if (packageStream.Length != input.ReleaseIdentity.ExpectedSize)
                 return Reject(QmodStagingFailureCode.PackageSizeMismatch, input);
             var packageHash = await SHA256.HashDataAsync(packageStream, token);
@@ -161,13 +193,15 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
                 return Reject(QmodStagingFailureCode.PackageHashMismatch, input);
             packageStream.Position = 0;
 
+            Log("Publication lock waiting", input);
+            await using var publicationLock = await AcquirePublicationLockAsync(input, token);
+            Log("Publication lock acquired", input);
+            if (_testHooks?.PublicationLockAcquired is { } lockHook) await lockHook(input, token);
             await _parallelism.WaitAsync(token);
             try
             {
-                EnsureRootChain();
-                Log("Module/version publication lock waiting", input);
-                await using var publicationLock = await AcquirePublicationLockAsync(input, token);
-                Log("Publication lock acquired", input);
+                Log("Extraction capacity acquired", input);
+                if (_testHooks?.ExtractionCapacityAcquired is { } capacityHook) await capacityHook(input, token);
                 var final = BuildFinalPath(input);
                 if (Directory.Exists(final))
                 {
@@ -221,7 +255,8 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
                 }
                 if (actualTotal != entries.TotalLength) throw new StagingException(QmodStagingFailureCode.InvalidArchive);
                 Log("Extraction completed", input, files.Count, actualTotal);
-                await WriteMetadataAsync(partial, input, files, actualTotal, token);
+                var transactionId = Guid.NewGuid();
+                await WriteMetadataAsync(partial, input, files, actualTotal, transactionId, token);
                 VerifyExtractedTree(partial, files);
                 CreateSafeDirectoryChain(_verifiedRoot, versionRoot);
                 EnsureSafeParents(_verifiedRoot, versionRoot);
@@ -234,10 +269,32 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
                     return Reject(QmodStagingFailureCode.StagingConflict, input);
                 }
                 partial = null;
+                Log("Publication move completed", input, files.Count, actualTotal);
+                try
+                {
+                    if (_testHooks?.PublicationMoveCompleted is { } moveHook) await moveHook(input, token);
+                    packageStream.Position = 0;
+                    var published = await ValidateExistingStagingAsync(final, input, packageStream, token);
+                    if (!published.Succeeded) throw new PublicationAttestationException(published.FailureCode);
+                    Log("Publication attestation completed", input, files.Count, actualTotal);
+                }
+                catch (OperationCanceledException)
+                {
+                    Log("Publication attestation failed", input, failure: QmodStagingFailureCode.Cancelled);
+                    if (QuarantineOwnedPublication(final, transactionId))
+                        Log("Published directory quarantined", input, failure: QmodStagingFailureCode.Cancelled);
+                    throw;
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    var failure = exception is PublicationAttestationException attestation
+                        ? attestation.Code : QmodStagingFailureCode.IoFailure;
+                    Log("Publication attestation failed", input, failure: failure);
+                    if (QuarantineOwnedPublication(final, transactionId))
+                        Log("Published directory quarantined", input, failure: failure);
+                    return Reject(failure, input);
+                }
                 Log("Verified directory published", input, files.Count, actualTotal);
-                packageStream.Position = 0;
-                var published = await ValidateExistingStagingAsync(final, input, packageStream, token);
-                if (!published.Succeeded) return Reject(published.FailureCode, input);
                 return new(true, false, QmodStagingFailureCode.None, final, files.Count, actualTotal);
             }
             finally { _parallelism.Release(); }
@@ -444,6 +501,7 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             OfficialModulePackageTransport.ValidatePackage(new(identity.FileName, new(identity.OfficialUrl), identity.ExpectedSize, identity.Sha256));
         }
         catch (ModulePackageTransportException) { throw new StagingException(QmodStagingFailureCode.PackageChanged); }
+        var releaseIdentityHash = HashOfficialReleaseIdentity(identity.OfficialUrl);
         string packagePath;
         try
         {
@@ -457,9 +515,18 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
         { throw new StagingException(QmodStagingFailureCode.PackageChanged); }
+        // LocalVersion is UI/update-selection context; it does not alter the selected Release asset trust identity.
         return new(packagePath, identity.ModuleId, identity.TargetVersion, identity.FileName,
             identity.ExpectedSize, identity.Sha256.ToLowerInvariant(), input.ModuleApiVersion,
-            input.SourceIdentity, _environmentIdentity);
+            input.SourceIdentity, _environmentIdentity, releaseIdentityHash);
+    }
+
+    private static string HashOfficialReleaseIdentity(string officialUrl)
+    {
+        var uri = new Uri(officialUrl, UriKind.Absolute);
+        var builder = new UriBuilder(uri) { Host = uri.IdnHost.ToLowerInvariant(), Port = -1, Fragment = string.Empty };
+        var canonical = builder.Uri.AbsoluteUri;
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
     private string BuildFinalPath(QmodStagingInput input)
@@ -515,15 +582,18 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         { return QmodStagingResult.Failure(QmodStagingFailureCode.VerifiedStagingInvalid); }
     }
 
-    private async Task WriteMetadataAsync(string root, QmodStagingInput input, IReadOnlyList<QmodStagedFile> files, long total, CancellationToken token)
+    private async Task WriteMetadataAsync(string root, QmodStagingInput input, IReadOnlyList<QmodStagedFile> files,
+        long total, Guid transactionId, CancellationToken token)
     {
         var path = Path.Combine(root, StagingMetadataName);
         var metadata = new
         {
-            schemaVersion = 1, moduleId = input.ReleaseIdentity.ModuleId, version = input.ReleaseIdentity.TargetVersion,
+            schemaVersion = 2, moduleId = input.ReleaseIdentity.ModuleId, version = input.ReleaseIdentity.TargetVersion,
             moduleApiVersion = input.ModuleApiVersion, packageSha256 = input.ReleaseIdentity.Sha256.ToLowerInvariant(),
             packageSize = input.ReleaseIdentity.ExpectedSize, stagedAtUtc = _timeProvider.GetUtcNow(),
             sourceIdentity = input.SourceIdentity, environmentIdentity = _environmentIdentity,
+            officialReleaseIdentityHash = HashOfficialReleaseIdentity(input.ReleaseIdentity.OfficialUrl),
+            transactionId,
             fileCount = files.Count, totalUncompressedBytes = total,
             files = files.OrderBy(file => file.RelativePath, StringComparer.Ordinal).Select(file => new
             { relativePath = file.RelativePath, size = file.Size, sha256 = file.Sha256 })
@@ -540,22 +610,23 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     {
         try
         {
-            var info = new FileInfo(path);
-            if (!info.Exists || info.Length is <= 0 or > 1024 * 1024 || IsReparse(path)) throw new MetadataException();
             byte[] bytes;
-            await using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-                4096, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            var physicalRoot = GetPhysicalDirectoryPath(Path.GetDirectoryName(path)!);
+            await using (var stream = OpenAttestedTreeFile(path, physicalRoot))
             {
+                if (stream.Length is <= 0 or > 1024 * 1024) throw new MetadataException();
                 bytes = new byte[checked((int)stream.Length)];
                 await stream.ReadExactlyAsync(bytes, token);
+                if (stream.Length != bytes.Length) throw new MetadataException();
             }
             using var document = ParseStrictJson(bytes, new HashSet<string>(StringComparer.Ordinal)
             {
                 "schemaVersion", "moduleId", "version", "moduleApiVersion", "packageSha256", "packageSize",
-                "stagedAtUtc", "sourceIdentity", "environmentIdentity", "fileCount", "totalUncompressedBytes", "files"
+                "stagedAtUtc", "sourceIdentity", "environmentIdentity", "officialReleaseIdentityHash",
+                "fileCount", "totalUncompressedBytes", "files", "transactionId"
             });
             var root = document.RootElement;
-            if (RequiredInt(root, "schemaVersion") != 1 ||
+            if (RequiredInt(root, "schemaVersion") != 2 ||
                 RequiredText(root, "moduleId") != input.ReleaseIdentity.ModuleId ||
                 RequiredText(root, "version") != input.ReleaseIdentity.TargetVersion ||
                 RequiredText(root, "moduleApiVersion") != input.ModuleApiVersion ||
@@ -563,6 +634,8 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
                 RequiredLong(root, "packageSize") != input.ReleaseIdentity.ExpectedSize ||
                 RequiredText(root, "sourceIdentity") != input.SourceIdentity ||
                 RequiredText(root, "environmentIdentity") != _environmentIdentity ||
+                RequiredText(root, "officialReleaseIdentityHash") != HashOfficialReleaseIdentity(input.ReleaseIdentity.OfficialUrl) ||
+                !Guid.TryParseExact(RequiredText(root, "transactionId"), "D", out var transactionId) ||
                 !DateTimeOffset.TryParse(RequiredText(root, "stagedAtUtc"), System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.RoundtripKind, out _) ||
                 !root.TryGetProperty("files", out var fileArray) || fileArray.ValueKind != JsonValueKind.Array)
@@ -589,10 +662,11 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
                 files.Add(new(relative, size, sha.ToLowerInvariant()));
             }
             if (files.Sum(file => file.Size) != total) throw new MetadataException();
-            return new(fileCount, total, files);
+            return new(transactionId, fileCount, total, files);
         }
         catch (OperationCanceledException) { throw; }
         catch (MetadataException) { throw; }
+        catch (TreeException) { throw new MetadataException(); }
         catch (Exception exception) when (exception is IOException or JsonException or StagingException or
             FormatException or InvalidOperationException or OverflowException or ArgumentException)
         { throw new MetadataException(); }
@@ -601,6 +675,7 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     private async Task VerifyExistingTreeAsync(string root, IReadOnlyList<QmodStagedFile> files, CancellationToken token)
     {
         EnsureVerifiedPathChain(root);
+        var physicalRoot = GetPhysicalDirectoryPath(root);
         var expectedFiles = files.ToDictionary(file => CanonicalRelativePath(file.RelativePath), file => file, StringComparer.Ordinal);
         var expectedDirectories = new HashSet<string>(StringComparer.Ordinal);
         foreach (var file in files)
@@ -611,38 +686,72 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         }
         var observedFiles = new HashSet<string>(StringComparer.Ordinal);
         var observedDirectories = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new Queue<string>();
-        pending.Enqueue(root);
-        while (pending.TryDequeue(out var directory))
+        var handles = new List<SafeFileHandle>();
+        try
         {
-            token.ThrowIfCancellationRequested();
-            EnsureWithin(root, directory);
-            if (IsReparse(directory)) throw new TreeException();
-            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            var rootHandle = OpenAttestedDirectory(root, physicalRoot);
+            handles.Add(rootHandle);
+            var pending = new Queue<string>();
+            pending.Enqueue(root);
+            while (pending.TryDequeue(out var directory))
             {
-                EnsureWithin(root, entry);
-                if (IsReparse(entry)) throw new TreeException();
-                var relative = Path.GetRelativePath(root, entry).Replace(Path.DirectorySeparatorChar, '/');
-                var canonical = CanonicalRelativePath(relative);
-                if (Directory.Exists(entry))
+                token.ThrowIfCancellationRequested();
+                foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
                 {
-                    if (!expectedDirectories.Contains(canonical) || !observedDirectories.Add(canonical)) throw new TreeException();
-                    pending.Enqueue(entry);
+                    EnsureWithin(root, entry);
+                    if (IsReparse(entry)) throw new TreeException();
+                    var relative = Path.GetRelativePath(root, entry).Replace(Path.DirectorySeparatorChar, '/');
+                    var canonical = CanonicalRelativePath(relative);
+                    if (Directory.Exists(entry))
+                    {
+                        if (!expectedDirectories.Contains(canonical) || !observedDirectories.Add(canonical)) throw new TreeException();
+                        handles.Add(OpenAttestedDirectory(entry, physicalRoot));
+                        pending.Enqueue(entry);
+                    }
+                    else if (File.Exists(entry))
+                    {
+                        if (relative.Equals(StagingMetadataName, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!expectedFiles.TryGetValue(canonical, out var expected) || !observedFiles.Add(canonical)) throw new TreeException();
+                        await using var stream = OpenAttestedTreeFile(entry, physicalRoot);
+                        var lengthBefore = stream.Length;
+                        if (lengthBefore != expected.Size) throw new TreeException();
+                        var hash = await SHA256.HashDataAsync(stream, token);
+                        if (stream.Length != lengthBefore ||
+                            !CryptographicOperations.FixedTimeEquals(hash, Convert.FromHexString(expected.Sha256))) throw new TreeException();
+                    }
+                    else throw new TreeException();
                 }
-                else if (File.Exists(entry))
-                {
-                    if (relative.Equals(StagingMetadataName, StringComparison.OrdinalIgnoreCase)) continue;
-                    if (!expectedFiles.TryGetValue(canonical, out var expected) || !observedFiles.Add(canonical)) throw new TreeException();
-                    var info = new FileInfo(entry);
-                    if (info.Length != expected.Size) throw new TreeException();
-                    var hash = await HashFileAsync(entry, token);
-                    if (!CryptographicOperations.FixedTimeEquals(hash, Convert.FromHexString(expected.Sha256))) throw new TreeException();
-                }
-                else throw new TreeException();
             }
         }
+        finally { foreach (var handle in handles) handle.Dispose(); }
         if (observedFiles.Count != expectedFiles.Count || observedDirectories.Count != expectedDirectories.Count)
             throw new TreeException();
+    }
+
+    private static SafeFileHandle OpenAttestedDirectory(string path, string physicalRoot)
+    {
+        var handle = NativeMethods.OpenDirectory(path);
+        if (handle.IsInvalid || NativeMethods.IsReparseHandle(handle)) { handle.Dispose(); throw new TreeException(); }
+        var final = NativeMethods.GetFinalPath(handle);
+        if (!final.Equals(Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase) || !IsWithin(physicalRoot, final))
+        { handle.Dispose(); throw new TreeException(); }
+        return handle;
+    }
+
+    private static FileStream OpenAttestedTreeFile(string path, string physicalRoot)
+    {
+        FileStream? stream = null;
+        try
+        {
+            stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            if (NativeMethods.IsReparseHandle(stream.SafeFileHandle)) throw new TreeException();
+            var final = NativeMethods.GetFinalPath(stream.SafeFileHandle);
+            if (!final.Equals(Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase) || !IsWithin(physicalRoot, final))
+                throw new TreeException();
+            return stream;
+        }
+        catch { stream?.Dispose(); throw; }
     }
 
     private void EnsureVerifiedPathChain(string final)
@@ -685,22 +794,51 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
 
     private void EnsureRootChain()
     {
-        foreach (var path in new[] { _stagingRoot, _incomingRoot, _verifiedRoot })
+        foreach (var path in new[] { _stagingRoot, _incomingRoot, _verifiedRoot, _rejectedRoot, _locksRoot })
             CreateOrdinaryDirectoryTree(path);
+        EnsureNoReparseAncestors(_stagingRoot);
+        if (_userModulesRoot is not null && Directory.Exists(_userModulesRoot))
+        {
+            EnsureNoReparseAncestors(_userModulesRoot);
+            var staging = GetPhysicalDirectoryPath(_stagingRoot);
+            var userModules = GetPhysicalDirectoryPath(_userModulesRoot);
+            if (IsWithin(staging, userModules) || IsWithin(userModules, staging))
+                throw new StagingException(QmodStagingFailureCode.PackageChanged);
+        }
     }
 
     private async Task<PublicationLease> AcquirePublicationLockAsync(QmodStagingInput input, CancellationToken token)
     {
-        var key = new QmodModuleVersionKey(input.ReleaseIdentity.ModuleId, input.ReleaseIdentity.TargetVersion);
+        var key = BuildModuleVersionKey(input.ReleaseIdentity.ModuleId, input.ReleaseIdentity.TargetVersion);
         var local = await PublicationGate.AcquireAsync(key, token);
         try
         {
-            var name = BuildPublicationSemaphoreName(_stagingRoot, _environmentIdentity,
-                input.ReleaseIdentity.ModuleId, input.ReleaseIdentity.TargetVersion);
-            var semaphore = new Semaphore(1, 1, name, out _);
-            try { await WaitForSemaphoreAsync(semaphore, token); }
-            catch { semaphore.Dispose(); throw; }
-            return new(local, semaphore);
+            var lockPath = BuildPublicationLockPath(key);
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                EnsureSafeParents(_stagingRoot, _locksRoot);
+                var handle = NativeMethods.CreateLockFile(lockPath);
+                if (!handle.IsInvalid)
+                {
+                    bool recovered;
+                    try
+                    {
+                        if (NativeMethods.IsReparseHandle(handle))
+                            throw new StagingException(QmodStagingFailureCode.UnsupportedEntryType);
+                        recovered = MarkLockOwned(handle);
+                    }
+                    catch { handle.Dispose(); throw; }
+                    if (recovered) Log("Publication lock recovered after process exit", input);
+                    return new(local, handle);
+                }
+                var error = Marshal.GetLastPInvokeError();
+                handle.Dispose();
+                if (error is NativeMethods.ErrorSharingViolation or NativeMethods.ErrorLockViolation)
+                { await Task.Delay(40, token); continue; }
+                if (error == NativeMethods.ErrorAccessDenied) throw new UnauthorizedAccessException();
+                throw new IOException($"Publication lock open failed with Win32 error {error}.");
+            }
         }
         catch
         {
@@ -709,32 +847,30 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         }
     }
 
-    public static string BuildPublicationSemaphoreName(string stagingRoot, string environmentIdentity,
-        string moduleId, string targetVersion)
+    private static bool MarkLockOwned(SafeFileHandle handle)
     {
-        var canonicalRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(stagingRoot)).ToUpperInvariant();
-        var identity = Encoding.UTF8.GetBytes($"{canonicalRoot}\0{environmentIdentity}\0{moduleId}\0{targetVersion}");
-        return "Local\\QingToolbox.QmodStaging." + Convert.ToHexString(SHA256.HashData(identity)).ToLowerInvariant();
+        var recovered = RandomAccess.GetLength(handle) != 0;
+        RandomAccess.SetLength(handle, 0);
+        RandomAccess.Write(handle, Encoding.ASCII.GetBytes(Environment.ProcessId.ToString(
+            System.Globalization.CultureInfo.InvariantCulture)), 0);
+        RandomAccess.FlushToDisk(handle);
+        return recovered;
     }
 
-    private static async Task WaitForSemaphoreAsync(Semaphore semaphore, CancellationToken token)
+    private QmodModuleVersionKey BuildModuleVersionKey(string moduleId, string targetVersion) =>
+        new(Path.TrimEndingDirectorySeparator(Path.GetFullPath(_stagingRoot)).ToUpperInvariant(),
+            _environmentIdentity, moduleId, targetVersion);
+
+    private string BuildPublicationLockPath(QmodModuleVersionKey key)
     {
-        token.ThrowIfCancellationRequested();
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var cancellation = token.Register(() => completion.TrySetCanceled(token));
-        var registered = ThreadPool.RegisterWaitForSingleObject(semaphore, (_, timedOut) =>
-        {
-            if (timedOut) completion.TrySetException(new TimeoutException());
-            else if (!completion.TrySetResult()) semaphore.Release();
-        }, null, Timeout.Infinite, executeOnlyOnce: true);
-        try { await completion.Task; }
-        finally
-        {
-            using var unregistered = new ManualResetEvent(false);
-            if (registered.Unregister(unregistered))
-                await Task.Run(() => unregistered.WaitOne());
-        }
+        var identity = Encoding.UTF8.GetBytes($"{key.StagingRootIdentity}\0{key.EnvironmentIdentity}\0{key.ModuleId}\0{key.TargetVersion}");
+        var path = Path.Combine(_locksRoot, Convert.ToHexString(SHA256.HashData(identity)).ToLowerInvariant() + ".lock");
+        EnsureWithin(_locksRoot, path);
+        return path;
     }
+
+    internal string GetPublicationLockPathForTest(string moduleId, string targetVersion) =>
+        BuildPublicationLockPath(BuildModuleVersionKey(moduleId, targetVersion));
 
     private static bool HasConflictingVersionContent(string versionRoot, string final)
     {
@@ -743,6 +879,34 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         foreach (var entry in Directory.EnumerateFileSystemEntries(versionRoot))
             if (!Path.GetFullPath(entry).Equals(Path.GetFullPath(final), StringComparison.OrdinalIgnoreCase)) return true;
         return false;
+    }
+
+    private bool QuarantineOwnedPublication(string final, Guid transactionId)
+    {
+        try
+        {
+            EnsureVerifiedPathChain(final);
+            var metadataPath = Path.Combine(final, StagingMetadataName);
+            if (!File.Exists(metadataPath) || IsReparse(metadataPath)) return false;
+            var bytes = File.ReadAllBytes(metadataPath);
+            if (bytes.Length is <= 0 or > 1024 * 1024) return false;
+            using var document = ParseStrictJson(bytes, new HashSet<string>(StringComparer.Ordinal)
+            {
+                "schemaVersion", "moduleId", "version", "moduleApiVersion", "packageSha256", "packageSize",
+                "stagedAtUtc", "sourceIdentity", "environmentIdentity", "officialReleaseIdentityHash", "transactionId", "fileCount",
+                "totalUncompressedBytes", "files"
+            });
+            if (RequiredInt(document.RootElement, "schemaVersion") != 2 ||
+                !Guid.TryParseExact(RequiredText(document.RootElement, "transactionId"), "D", out var recorded) ||
+                recorded != transactionId) return false;
+            EnsureOrdinaryDirectory(_rejectedRoot);
+            var rejected = Path.Combine(_rejectedRoot, transactionId.ToString("N") + ".invalid");
+            EnsureWithin(_rejectedRoot, rejected);
+            if (Directory.Exists(rejected) || File.Exists(rejected)) return false;
+            Directory.Move(final, rejected);
+            return true;
+        }
+        catch { return false; }
     }
 
     private static void CreateOrdinaryDirectoryTree(string path)
@@ -818,6 +982,46 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
                normalized.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
+    private void ValidateRootIsolation()
+    {
+        if (_userModulesRoot is null) return;
+        if (IsWithin(_stagingRoot, _userModulesRoot) || IsWithin(_userModulesRoot, _stagingRoot))
+            throw new ArgumentException("Staging and user module roots must be disjoint.");
+        EnsureNoReparseAncestorsIfPresent(_stagingRoot);
+        EnsureNoReparseAncestorsIfPresent(_userModulesRoot);
+    }
+
+    private FileStream OpenAndAttestPackage(string packagePath)
+    {
+        if (!File.Exists(packagePath)) throw new StagingException(QmodStagingFailureCode.PackageMissing);
+        EnsureNoReparseAncestors(Path.GetDirectoryName(packagePath)!);
+        if (IsReparse(packagePath)) throw new StagingException(QmodStagingFailureCode.PackageChanged);
+        FileStream? stream = null;
+        try
+        {
+            stream = new FileStream(packagePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var physicalPackage = NativeMethods.GetFinalPath(stream.SafeFileHandle);
+            if (!physicalPackage.Equals(Path.GetFullPath(packagePath), StringComparison.OrdinalIgnoreCase))
+                throw new StagingException(QmodStagingFailureCode.PackageChanged);
+            var physicalStaging = GetPhysicalDirectoryPath(_stagingRoot);
+            if (IsWithin(physicalStaging, physicalPackage)) throw new StagingException(QmodStagingFailureCode.PackageChanged);
+            if (_userModulesRoot is not null && Directory.Exists(_userModulesRoot) &&
+                IsWithin(GetPhysicalDirectoryPath(_userModulesRoot), physicalPackage))
+                throw new StagingException(QmodStagingFailureCode.PackageChanged);
+            return stream;
+        }
+        catch { stream?.Dispose(); throw; }
+    }
+
+    private static string GetPhysicalDirectoryPath(string path)
+    {
+        using var handle = NativeMethods.OpenDirectory(path);
+        if (handle.IsInvalid) throw new IOException($"Directory attestation failed with Win32 error {Marshal.GetLastPInvokeError()}.");
+        if (NativeMethods.IsReparseHandle(handle)) throw new StagingException(QmodStagingFailureCode.UnsupportedEntryType);
+        return NativeMethods.GetFinalPath(handle);
+    }
+
     private static void EnsureOrdinaryDirectory(string path)
     {
         if (!Directory.Exists(path) || IsReparse(path)) throw new StagingException(QmodStagingFailureCode.UnsupportedEntryType);
@@ -834,6 +1038,14 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             if (string.IsNullOrEmpty(parent) || parent == current) break;
             current = parent;
         }
+    }
+
+    private static void EnsureNoReparseAncestorsIfPresent(string path)
+    {
+        var current = Path.GetFullPath(path);
+        while (!Directory.Exists(current))
+            current = Path.GetDirectoryName(current) ?? throw new StagingException(QmodStagingFailureCode.UnsafeEntryPath);
+        EnsureNoReparseAncestors(current);
     }
 
     private static bool IsReparse(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
@@ -902,7 +1114,8 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         var version = input.ReleaseIdentity.TargetVersion.Length <= 128 &&
                       SemanticVersion.TryParse(input.ReleaseIdentity.TargetVersion, out _)
             ? input.ReleaseIdentity.TargetVersion : "invalid";
-        _log?.Invoke(new(name, moduleId, version, SafeHashPrefix(input.ReleaseIdentity.Sha256), failure, entries, total));
+        try { _log?.Invoke(new(name, moduleId, version, SafeHashPrefix(input.ReleaseIdentity.Sha256), failure, entries, total)); }
+        catch { }
     }
 
     private static string SafeHashPrefix(string hash) => hash.Length >= 12 && hash.All(Uri.IsHexDigit) ? hash[..12].ToLowerInvariant() : "invalid";
@@ -922,10 +1135,33 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _lifetime.Cancel();
-        try { await Task.WhenAll(_inflight.Values.Select(operation => operation.Task)); } catch { }
-        _lifetime.Dispose();
-        _parallelism.Dispose();
+        var ownsDisposal = false;
+        lock (_lifecycleSync)
+        {
+            if (_disposeState == 0) { _disposeState = 1; ownsDisposal = true; LogService("Service disposal started"); }
+        }
+        if (!ownsDisposal) { await _disposeCompletion.Task; return; }
+        try
+        {
+            _lifetime.Cancel();
+            try { await Task.WhenAll(_inflight.Values.Select(operation => operation.Task)); } catch { }
+            _parallelism.Dispose();
+            _lifetime.Dispose();
+            lock (_lifecycleSync) _disposeState = 2;
+            LogService("Service disposal completed");
+            _disposeCompletion.TrySetResult();
+        }
+        catch (Exception exception)
+        {
+            _disposeCompletion.TrySetException(exception);
+            throw;
+        }
+    }
+
+    private void LogService(string name)
+    {
+        try { _log?.Invoke(new(name, "service", "0.0.0", "000000000000")); }
+        catch { }
     }
 
     private enum EntryKind { File, Directory }
@@ -937,7 +1173,75 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     private sealed class StagingException(QmodStagingFailureCode code) : Exception { public QmodStagingFailureCode Code { get; } = code; }
     private sealed class MetadataException : Exception;
     private sealed class TreeException : Exception;
-    private sealed record StagingMetadata(int FileCount, long TotalUncompressedBytes, IReadOnlyList<QmodStagedFile> Files);
+    private sealed class PublicationAttestationException(QmodStagingFailureCode code) : Exception
+    { public QmodStagingFailureCode Code { get; } = code; }
+    private sealed record StagingMetadata(Guid TransactionId, int FileCount, long TotalUncompressedBytes,
+        IReadOnlyList<QmodStagedFile> Files);
+    private static class NativeMethods
+    {
+        public const int ErrorAccessDenied = 5;
+        public const int ErrorSharingViolation = 32;
+        public const int ErrorLockViolation = 33;
+        private const uint GenericRead = 0x80000000;
+        private const uint GenericWrite = 0x40000000;
+        private const uint FileReadAttributes = 0x80;
+        private const uint FileShareRead = 0x1;
+        private const uint FileShareWrite = 0x2;
+        private const uint OpenExisting = 3;
+        private const uint OpenAlways = 4;
+        private const uint FileAttributeNormal = 0x80;
+        private const uint FileFlagBackupSemantics = 0x02000000;
+        private const uint FileFlagOpenReparsePoint = 0x00200000;
+        private const int FileAttributeTagInfo = 9;
+
+        [DllImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, uint shareMode,
+            IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int infoClass,
+            out FileAttributeTagInformation information, uint bufferSize);
+
+        [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern uint GetFinalPathNameByHandle(SafeFileHandle file, StringBuilder path,
+            uint pathLength, uint flags);
+
+        public static SafeFileHandle CreateLockFile(string path) => CreateFile(path, GenericRead | GenericWrite, 0,
+            IntPtr.Zero, OpenAlways, FileAttributeNormal | FileFlagOpenReparsePoint, IntPtr.Zero);
+
+        public static SafeFileHandle OpenDirectory(string path) => CreateFile(path, FileReadAttributes,
+            FileShareRead | FileShareWrite, IntPtr.Zero, OpenExisting,
+            FileFlagBackupSemantics | FileFlagOpenReparsePoint, IntPtr.Zero);
+
+        public static bool IsReparseHandle(SafeFileHandle handle)
+        {
+            if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfo, out var information,
+                (uint)Marshal.SizeOf<FileAttributeTagInformation>()))
+                throw new IOException($"Handle attribute query failed with Win32 error {Marshal.GetLastPInvokeError()}.");
+            return (information.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0;
+        }
+
+        public static string GetFinalPath(SafeFileHandle handle)
+        {
+            var buffer = new StringBuilder(512);
+            var length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+            if (length == 0) throw new IOException($"Final path query failed with Win32 error {Marshal.GetLastPInvokeError()}.");
+            if (length >= buffer.Capacity)
+            {
+                buffer.EnsureCapacity(checked((int)length + 1));
+                length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+                if (length == 0 || length >= buffer.Capacity)
+                    throw new IOException($"Final path query failed with Win32 error {Marshal.GetLastPInvokeError()}.");
+            }
+            var value = buffer.ToString();
+            if (value.StartsWith("\\\\?\\UNC\\", StringComparison.OrdinalIgnoreCase)) value = "\\\\" + value[8..];
+            else if (value.StartsWith("\\\\?\\", StringComparison.Ordinal)) value = value[4..];
+            return Path.GetFullPath(value);
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileAttributeTagInformation { public uint FileAttributes; public uint ReparseTag; }
+    }
     private sealed class QmodStagingOperationKeyComparer : IEqualityComparer<QmodStagingOperationKey>
     {
         public static QmodStagingOperationKeyComparer Instance { get; } = new();
@@ -949,7 +1253,8 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             StringComparer.OrdinalIgnoreCase.Equals(x.Sha256, y.Sha256) &&
             StringComparer.Ordinal.Equals(x.ModuleApiVersion, y.ModuleApiVersion) &&
             StringComparer.Ordinal.Equals(x.SourceIdentity, y.SourceIdentity) &&
-            StringComparer.Ordinal.Equals(x.EnvironmentIdentity, y.EnvironmentIdentity);
+            StringComparer.Ordinal.Equals(x.EnvironmentIdentity, y.EnvironmentIdentity) &&
+            StringComparer.Ordinal.Equals(x.OfficialReleaseIdentityHash, y.OfficialReleaseIdentityHash);
         public int GetHashCode(QmodStagingOperationKey value)
         {
             var hash = new HashCode();
@@ -962,6 +1267,7 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             hash.Add(value.ModuleApiVersion, StringComparer.Ordinal);
             hash.Add(value.SourceIdentity, StringComparer.Ordinal);
             hash.Add(value.EnvironmentIdentity, StringComparer.Ordinal);
+            hash.Add(value.OfficialReleaseIdentityHash, StringComparer.Ordinal);
             return hash.ToHashCode();
         }
     }
@@ -1001,13 +1307,16 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             }
         }
     }
-    private sealed class PublicationLease(PublicationGate.GateLease local, Semaphore crossProcess) : IAsyncDisposable
+    private sealed class PublicationLease(PublicationGate.GateLease local, SafeFileHandle crossProcess) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()
         {
-            crossProcess.Release();
-            crossProcess.Dispose();
-            await local.DisposeAsync();
+            try
+            {
+                try { RandomAccess.SetLength(crossProcess, 0); RandomAccess.FlushToDisk(crossProcess); }
+                finally { crossProcess.Dispose(); }
+            }
+            finally { await local.DisposeAsync(); }
         }
     }
     private sealed class StagingOperation(CancellationTokenSource cancellation, Func<Task<QmodStagingResult>> factory) : IDisposable

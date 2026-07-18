@@ -4,6 +4,7 @@
 
 - Added strict offline `.qmod` validation and environment-isolated atomic Verified Staging without installing, replacing, loading, or activating modules.
 - Bound staging work to complete package identity, serialized publication per module/version across service instances, and added strict metadata/tree tamper detection without automatic deletion or overwrite.
+- Replaced named staging semaphores with crash-recoverable exclusive file handles, added real child-process contention/crash tests, stable-handle path attestation, Release identity binding, post-move quarantine, and disposal/capacity scheduling contracts.
 - Added hostile archive, ZIP bomb, manifest identity, concurrency, cancellation, and no-DLL-execution staging smoke coverage.
 - Added a lightweight per-session log viewer with persistent, privacy-conscious log files and environment-aware sidebar visibility.
 
