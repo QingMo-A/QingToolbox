@@ -133,7 +133,7 @@ var
 begin
   WindowsRoot := RemoveBackslashUnlessRoot(ExpandConstant('{win}'));
   SystemRoot := RemoveBackslashUnlessRoot(ExpandConstant('{sys}'));
-  ProfileRoot := RemoveBackslashUnlessRoot(ExpandConstant('{userprofile}'));
+  ProfileRoot := RemoveBackslashUnlessRoot(GetEnv('USERPROFILE'));
   TempRoot := RemoveBackslashUnlessRoot(ExpandConstant('{tmp}'));
   Result := (Length(Candidate) <= 3) or SamePath(Candidate, WindowsRoot) or
     SamePath(Candidate, SystemRoot) or SamePath(Candidate, ProfileRoot) or
