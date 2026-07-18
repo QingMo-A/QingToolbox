@@ -994,7 +994,14 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     private FileStream OpenAndAttestPackage(string packagePath)
     {
         if (!File.Exists(packagePath)) throw new StagingException(QmodStagingFailureCode.PackageMissing);
-        EnsureNoReparseAncestors(Path.GetDirectoryName(packagePath)!);
+        try
+        {
+            EnsureNoReparseAncestors(Path.GetDirectoryName(packagePath)!);
+        }
+        catch (StagingException exception) when (exception.Code == QmodStagingFailureCode.UnsupportedEntryType)
+        {
+            throw new StagingException(QmodStagingFailureCode.PackageChanged);
+        }
         if (IsReparse(packagePath)) throw new StagingException(QmodStagingFailureCode.PackageChanged);
         FileStream? stream = null;
         try
