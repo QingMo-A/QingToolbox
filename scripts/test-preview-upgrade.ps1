@@ -57,9 +57,17 @@ function ConvertTo-WindowsCommandLineArgument([AllowEmptyString()][string]$Value
     [void]$builder.Append('"')
     return $builder.ToString()
 }
-function Invoke-Setup([string]$path,[string]$log,[bool]$SpecifyDirectory,[AllowEmptyString()][string]$Directory=$install){
+function Invoke-Setup(
+    [string]$path,
+    [string]$log,
+    [bool]$SpecifyDirectory,
+    [AllowEmptyString()][string]$Directory=$install,
+    [string]$LoadInfPath,
+    [string]$SaveInfPath){
     $arguments=@('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/LANG=english',("/LOG=$log"))
     if ($SpecifyDirectory) { $arguments += "/DIR=$Directory" }
+    if (-not [string]::IsNullOrWhiteSpace($LoadInfPath)) { $arguments += "/LOADINF=$LoadInfPath" }
+    if (-not [string]::IsNullOrWhiteSpace($SaveInfPath)) { $arguments += "/SAVEINF=$SaveInfPath" }
     $startInfo=[Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName=$path
     $startInfo.Arguments=($arguments | ForEach-Object { ConvertTo-WindowsCommandLineArgument $_ }) -join ' '
@@ -76,6 +84,16 @@ function Invoke-Setup([string]$path,[string]$log,[bool]$SpecifyDirectory,[AllowE
         if($null-ne$process){$process.Dispose()}
     }
 }
+function New-LoadInfWithDirectory([string]$SourcePath,[string]$DestinationPath,[string]$Directory) {
+    if(-not(Test-Path -LiteralPath $SourcePath -PathType Leaf)){throw "Saved installer INF is missing: $SourcePath"}
+    $lines=[IO.File]::ReadAllLines($SourcePath)
+    $found=$false
+    for($index=0;$index-lt$lines.Length;$index++){
+        if($lines[$index]-match '^Dir='){$lines[$index]="Dir=$Directory";$found=$true}
+    }
+    if(-not$found){throw "Saved installer INF does not contain an official Dir field: $SourcePath"}
+    [IO.File]::WriteAllLines($DestinationPath,$lines,[Text.UTF8Encoding]::new($false))
+}
 function Assert-FileVersion([string]$expected){$info=[Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $install 'QingToolbox.Shell.exe'));if($info.FileVersion-ne$expected){throw "Shell FileVersion mismatch: $($info.FileVersion)"};return $info}
 function Wait-Until {
     param([scriptblock]$Condition,[int]$TimeoutSeconds,[string]$FailureMessage)
@@ -83,11 +101,18 @@ function Wait-Until {
     do { if(& $Condition){return}; Start-Sleep -Milliseconds 200 } while([DateTimeOffset]::UtcNow-lt$deadline)
     throw $FailureMessage
 }
-function Get-ShellProcessesAtInstallPath {
-    $expected=[IO.Path]::GetFullPath((Join-Path $install 'QingToolbox.Shell.exe'))
+function Get-ShellProcessesAtInstallPath([string]$InstallPath=$install) {
+    $expected=[IO.Path]::GetFullPath((Join-Path $InstallPath 'QingToolbox.Shell.exe'))
     return @(Get-CimInstance Win32_Process -Filter "Name='QingToolbox.Shell.exe'" -ErrorAction SilentlyContinue |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_.ExecutablePath) -and
             [IO.Path]::GetFullPath($_.ExecutablePath).Equals($expected,[StringComparison]::OrdinalIgnoreCase) })
+}
+function Invoke-RegisteredUninstall([string]$LogPath) {
+    if(-not(Test-Path $uninstallKey)){throw 'The registered QingToolbox uninstaller is missing.'}
+    $uninstaller=([string](Get-ItemProperty $uninstallKey).UninstallString).Trim('"')
+    $process=Start-Process $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',("/LOG=`"$LogPath`"")) -Wait -PassThru
+    try { if($process.ExitCode-ne 0){throw "Registered uninstall failed with exit code $($process.ExitCode)."} }
+    finally { $process.Dispose() }
 }
 function Assert-InstallerIdentityAndShortcuts {
     param([string]$Phase)
@@ -115,7 +140,9 @@ try {
     New-Item -ItemType Directory -Path $TestRoot,$profile,$logDirectory -Force | Out-Null
     $env:LOCALAPPDATA=Join-Path $profile 'LocalAppData'; $env:APPDATA=Join-Path $profile 'AppData'
     New-Item -ItemType Directory -Path $env:LOCALAPPDATA,$env:APPDATA -Force | Out-Null
-    if((Invoke-Setup $previous (Join-Path $logDirectory 'preview1-install.log') $true)-ne 0){throw 'Preview 1 installation failed.'}
+    $savedInf=Join-Path $logDirectory 'official-saveinf-baseline.inf'
+    if((Invoke-Setup $previous (Join-Path $logDirectory 'preview1-install.log') $true $install $null $savedInf)-ne 0){throw 'Preview 1 installation failed.'}
+    if(-not(Test-Path -LiteralPath $savedInf -PathType Leaf)){throw 'Preview 1 installer did not create the requested SAVEINF baseline.'}
     [void](Assert-FileVersion '0.1.0.0')
     if(-not(Test-Path $uninstallKey)){throw 'Preview 1 fixed Inno uninstall entry is missing.'}
     $preview1Entry=Get-ItemProperty $uninstallKey
@@ -222,6 +249,63 @@ try {
     if((Get-FileHash $conflictingShell -Algorithm SHA256).Hash-ne$conflictingHash){throw 'Explicit /DIR overwrote the secondary discovered directory.'}
     Stop-Process -Id $explicitNewShell.ProcessId -ErrorAction Stop
     Wait-Until { -not(Get-Process -Id $explicitNewShell.ProcessId -ErrorAction SilentlyContinue) } 10 'Explicit /DIR replacement Shell did not stop before downgrade validation.'
+
+    $wizardTarget=Join-Path $TestRoot 'Wizard Selected Target\QingToolbox'
+    $unsafeFinalInf=Join-Path $logDirectory 'invalid-final-directory.inf'
+    New-LoadInfWithDirectory $savedInf $unsafeFinalInf ([IO.Path]::GetPathRoot($TestRoot))
+    $unsafeFinalLog=Join-Path $logDirectory 'invalid-final-directory.log'
+    $beforeUnsafeFinal=(Get-FileHash (Join-Path $install 'QingToolbox.Shell.exe') -Algorithm SHA256).Hash
+    if((Invoke-Setup $current $unsafeFinalLog $false $install $unsafeFinalInf $null)-eq 0){throw 'Installer accepted an unsafe final wizard directory.'}
+    if((Get-FileHash (Join-Path $install 'QingToolbox.Shell.exe') -Algorithm SHA256).Hash-ne$beforeUnsafeFinal){throw 'Rejected final wizard directory changed the initial installation.'}
+    if(-not(Select-String -LiteralPath $unsafeFinalLog -Pattern 'Rejected the final wizard installation directory' -Quiet)){
+        throw 'Unsafe final wizard directory rejection was not recorded.'
+    }
+
+    $changedFinalInf=Join-Path $logDirectory 'final-directory-changed.inf'
+    New-LoadInfWithDirectory $savedInf $changedFinalInf $wizardTarget
+    $initialDirectoryProcess=Start-Process -FilePath (Join-Path $install 'QingToolbox.Shell.exe') -PassThru
+    Wait-Until { -not $initialDirectoryProcess.HasExited } 10 'Initial-directory Shell exited before final-directory change validation.'
+    $changedFinalLog=Join-Path $logDirectory 'final-directory-changed.log'
+    if((Invoke-Setup $current $changedFinalLog $false $install $changedFinalInf $null)-ne 0){throw 'Installer failed after the final wizard directory changed from A to B.'}
+    $initialDirectoryProcess.Refresh()
+    if($initialDirectoryProcess.HasExited){throw 'Changing the final directory incorrectly closed the Shell from the initial directory.'}
+    if(@(Get-ShellProcessesAtInstallPath $wizardTarget).Count-ne 0){throw 'Changing A to a new B incorrectly auto-started the final-directory Shell.'}
+    if(-not(Test-Path -LiteralPath (Join-Path $wizardTarget 'QingToolbox.Shell.exe') -PathType Leaf)){throw 'Final wizard directory B did not receive the installation.'}
+    $changedEntry=Get-ItemProperty $uninstallKey
+    if(-not [IO.Path]::GetFullPath([string]$changedEntry.InstallLocation).TrimEnd('\').Equals($wizardTarget.TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)){
+        throw 'Final wizard directory B was not registered as InstallLocation.'
+    }
+    if(-not(Select-String -LiteralPath $changedFinalLog -Pattern 'final installation directory changed from' -Quiet)){
+        throw 'Final A-to-B directory change was not recorded.'
+    }
+    Stop-Process -Id $initialDirectoryProcess.Id -ErrorAction Stop
+    Wait-Until { -not(Get-Process -Id $initialDirectoryProcess.Id -ErrorAction SilentlyContinue) } 10 'Initial-directory Shell did not stop after A-to-B validation.'
+    Invoke-RegisteredUninstall (Join-Path $logDirectory 'final-directory-changed-uninstall.log')
+    if((Invoke-Setup $current (Join-Path $logDirectory 'restore-initial-registration.log') $true $install $null $null)-ne 0){throw 'Failed to restore the initial installation registration after A-to-B validation.'}
+
+    if(Test-Path -LiteralPath $wizardTarget){Remove-Item -LiteralPath $wizardTarget -Recurse -Force}
+    New-Item -ItemType Directory -Path $wizardTarget -Force|Out-Null
+    Copy-Item -Path (Join-Path $install '*') -Destination $wizardTarget -Recurse -Force
+    $finalDirectoryProcess=Start-Process -FilePath (Join-Path $wizardTarget 'QingToolbox.Shell.exe') -PassThru
+    Wait-Until { -not $finalDirectoryProcess.HasExited } 10 'Final-directory Shell exited before running-target validation.'
+    $finalDirectoryOldPid=$finalDirectoryProcess.Id
+    $runningFinalInf=Join-Path $logDirectory 'final-directory-running-shell.inf'
+    New-LoadInfWithDirectory $savedInf $runningFinalInf $wizardTarget
+    $runningFinalLog=Join-Path $logDirectory 'final-directory-running-shell.log'
+    if((Invoke-Setup $current $runningFinalLog $false $install $runningFinalInf $null)-ne 0){throw 'Installer failed while replacing the Shell from final wizard directory B.'}
+    Wait-Until { $finalDirectoryProcess.Refresh(); $finalDirectoryProcess.HasExited } 20 'Final-directory B old Shell remained running after installation.'
+    $finalDirectoryNewProcesses=@()
+    Wait-Until { $script:finalDirectoryNewProcesses=@(Get-ShellProcessesAtInstallPath $wizardTarget); $script:finalDirectoryNewProcesses.Count-eq 1 } 20 'Final-directory B Shell was not restored exactly once.'
+    $finalDirectoryNewProcess=$finalDirectoryNewProcesses[0]
+    if($finalDirectoryNewProcess.ProcessId-eq$finalDirectoryOldPid){throw 'Final-directory B replacement reused the old PID.'}
+    if(@(Get-ShellProcessesAtInstallPath $install).Count-ne 0){throw 'Final-directory B replacement incorrectly started the initial-directory A Shell.'}
+    $wizardVersion=[Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $wizardTarget 'QingToolbox.Shell.exe'))
+    if($wizardVersion.FileVersion-ne'0.2.0.0'){throw "Final-directory B Shell FileVersion mismatch: $($wizardVersion.FileVersion)"}
+    Stop-Process -Id $finalDirectoryNewProcess.ProcessId -ErrorAction Stop
+    Wait-Until { -not(Get-Process -Id $finalDirectoryNewProcess.ProcessId -ErrorAction SilentlyContinue) } 10 'Final-directory B replacement Shell did not stop after validation.'
+    Invoke-RegisteredUninstall (Join-Path $logDirectory 'final-directory-running-shell-uninstall.log')
+    if((Invoke-Setup $current (Join-Path $logDirectory 'restore-initial-after-running-final.log') $true $install $null $null)-ne 0){throw 'Failed to restore the initial installation after running-final-directory validation.'}
+
     New-Item -Path $markerKey -Force|Out-Null;Set-ItemProperty $markerKey InstalledVersion '0.3.0-alpha'
     $before=(Get-FileHash (Join-Path $install 'QingToolbox.Shell.exe') -Algorithm SHA256).Hash
     $downgrade=Invoke-Setup $current (Join-Path $logDirectory 'downgrade.log') $false

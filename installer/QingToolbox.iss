@@ -74,6 +74,8 @@ english.ConflictingInstallLocations=QingToolbox has conflicting valid installati
 chinesesimplified.ConflictingInstallLocations=QingToolbox 存在多个冲突的有效安装记录。安装程序不会自动选择目录。请修复或移除旧安装记录后重试。
 english.InvalidExplicitInstallLocation=The directory supplied with /DIR is empty, relative, remote, or a protected system root. Setup will not use another directory instead.
 chinesesimplified.InvalidExplicitInstallLocation=/DIR 指定的目录为空、相对路径、远程路径或受保护的系统根目录。安装程序不会改用其他目录。
+english.InvalidFinalInstallLocation=The final installation directory is empty, relative, remote, or a protected system root. Choose a safe local subdirectory before installing.
+chinesesimplified.InvalidFinalInstallLocation=最终安装目录为空、相对路径、远程路径或受保护的系统根目录。请在安装前选择安全的本地子目录。
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:DesktopShortcut}"; GroupDescription: "{cm:AdditionalShortcuts}"; Flags: unchecked
@@ -112,7 +114,8 @@ var
   PreviousInstallConflict: Boolean;
   ExplicitInstallDirSpecified: Boolean;
   ExplicitInstallDir: String;
-  FinalInstallDir: String;
+  InitialInstallDir: String;
+  PreparedInstallDir: String;
   WasQingToolboxRunningBeforeInstall: Boolean;
 
 function GetFileAttributesW(FileName: String): LongWord;
@@ -275,7 +278,7 @@ end;
 
 function GetDefaultInstallDir(Param: String): String;
 begin
-  if FinalInstallDir <> '' then Result := FinalInstallDir
+  if InitialInstallDir <> '' then Result := InitialInstallDir
   else Result := ExpandConstant('{userpf}\QingToolbox');
 end;
 
@@ -315,6 +318,36 @@ end;
 function ShouldOfferPostInstallRun(): Boolean;
 begin
   Result := not WasQingToolboxRunningBeforeInstall;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  SelectedInstallDir: String;
+begin
+  Result := '';
+  PreparedInstallDir := '';
+  WasQingToolboxRunningBeforeInstall := False;
+  SelectedInstallDir := WizardDirValue();
+  Log('Preparing final installation directory. Initial: ' + InitialInstallDir +
+    '; selected: ' + SelectedInstallDir);
+  if not NormalizeAndValidateInstallDir('final wizard directory',
+    SelectedInstallDir, False, PreparedInstallDir) then begin
+    Log('Rejected the final wizard installation directory; installation will not continue.');
+    Result := ExpandConstant('{cm:InvalidFinalInstallLocation}');
+    exit;
+  end;
+  WizardForm.DirEdit.Text := PreparedInstallDir;
+  if SamePath(InitialInstallDir, PreparedInstallDir) then
+    Log('The final installation directory matches the initial directory: ' + PreparedInstallDir)
+  else
+    Log('The final installation directory changed from ' + InitialInstallDir +
+      ' to ' + PreparedInstallDir);
+  WasQingToolboxRunningBeforeInstall :=
+    IsTargetShellRunning(PreparedInstallDir);
+  if WasQingToolboxRunningBeforeInstall then
+    Log('The Shell at the final installation directory is running and will be restored after success.')
+  else
+    Log('No running Shell matches the final installation directory.');
 end;
 
 function HasReparsePoint(const RelativePath: String; IncludeLeaf: Boolean): Boolean;
@@ -455,10 +488,12 @@ begin
   Result := True;
   ResolveExplicitInstallDirectory;
   ResolvePreviousInstallDirectory;
-  FinalInstallDir := '';
+  InitialInstallDir := '';
+  PreparedInstallDir := '';
+  WasQingToolboxRunningBeforeInstall := False;
   if ExplicitInstallDirSpecified then begin
     if not NormalizeAndValidateInstallDir('explicit /DIR', ExplicitInstallDir,
-      False, FinalInstallDir) then begin
+      False, InitialInstallDir) then begin
       SuppressibleMsgBox(ExpandConstant('{cm:InvalidExplicitInstallLocation}'), mbError, MB_OK, IDOK);
       Result := False;
       exit;
@@ -470,9 +505,7 @@ begin
     Result := False;
     exit;
   end else
-    FinalInstallDir := ResolvedPreviousInstallDir;
-  WasQingToolboxRunningBeforeInstall :=
-    IsTargetShellRunning(FinalInstallDir);
+    InitialInstallDir := ResolvedPreviousInstallDir;
   Installed := '';
   if not RegQueryStringValue(HKCU, 'Software\QingMo-A\QingToolbox', 'InstalledVersion', Installed) then begin
     UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}_is1';

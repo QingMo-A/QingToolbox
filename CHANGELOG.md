@@ -7,6 +7,7 @@
 - Added in-place Preview upgrade, same-version repair, and SemVer downgrade-guard infrastructure.
 - Reused validated custom installation directories without `/DIR`, closed the matching old Shell through Restart Manager, and restored it after successful upgrades.
 - Honored legal explicit `/DIR` selections over conflicting discovered records while rejecting empty, relative, remote, and protected-root destinations without fallback.
+- Revalidated the directory selected by the installer wizard immediately before installation and restored only a Shell running from that final target.
 - Restricted production-AppId installer roundtrip tests to disposable GitHub Actions Windows profiles so local tests cannot overwrite a real uninstall registration.
 - Preserved settings, user modules, module data, caches, startup authorizations, and unknown install files across upgrades.
 
