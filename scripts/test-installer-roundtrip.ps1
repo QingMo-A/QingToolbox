@@ -8,6 +8,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+if ($env:GITHUB_ACTIONS -ne "true") {
+    throw "The production-AppId installer roundtrip requires a disposable GitHub Actions Windows profile; local execution can overwrite the real uninstall registration."
+}
 $repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 . (Join-Path $PSScriptRoot "get-preview-release-metadata.ps1")
 $metadata = Get-PreviewReleaseMetadata

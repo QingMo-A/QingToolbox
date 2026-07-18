@@ -34,14 +34,27 @@ if (Test-Path $uninstallKey) { throw 'A real QingToolbox uninstall entry exists;
 if (Get-Process QingToolbox.Shell -ErrorAction SilentlyContinue) { throw 'A QingToolbox.Shell process is running; refusing isolated upgrade test.' }
 $previous = [IO.Path]::GetFullPath($PreviousInstallerPath); $current = [IO.Path]::GetFullPath($CurrentInstallerPath)
 foreach($installer in @($previous,$current)){if(-not(Test-Path $installer -PathType Leaf)-or(Get-Item $installer).Length-le 0){throw "Installer is missing: $installer"}}
-$install = Join-Path $TestRoot 'Install'; $profile = Join-Path $TestRoot 'Profile'
+$install = Join-Path $TestRoot 'Custom Install\QingToolbox'; $profile = Join-Path $TestRoot 'Profile'
 $oldLocal=$env:LOCALAPPDATA; $oldRoaming=$env:APPDATA
-function Invoke-Setup([string]$path,[string]$log){
-    $arguments=@('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',("/DIR=$install"),("/LOG=$log"))
+function Invoke-Setup([string]$path,[string]$log,[bool]$SpecifyDirectory){
+    $arguments=@('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',("/LOG=`"$log`""))
+    if ($SpecifyDirectory) { $arguments += "/DIR=`"$install`"" }
     $process=Start-Process -FilePath $path -ArgumentList $arguments -Wait -PassThru
     return $process.ExitCode
 }
 function Assert-FileVersion([string]$expected){$info=[Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $install 'QingToolbox.Shell.exe'));if($info.FileVersion-ne$expected){throw "Shell FileVersion mismatch: $($info.FileVersion)"};return $info}
+function Wait-Until {
+    param([scriptblock]$Condition,[int]$TimeoutSeconds,[string]$FailureMessage)
+    $deadline=[DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+    do { if(& $Condition){return}; Start-Sleep -Milliseconds 200 } while([DateTimeOffset]::UtcNow-lt$deadline)
+    throw $FailureMessage
+}
+function Get-ShellProcessesAtInstallPath {
+    $expected=[IO.Path]::GetFullPath((Join-Path $install 'QingToolbox.Shell.exe'))
+    return @(Get-CimInstance Win32_Process -Filter "Name='QingToolbox.Shell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_.ExecutablePath) -and
+            [IO.Path]::GetFullPath($_.ExecutablePath).Equals($expected,[StringComparison]::OrdinalIgnoreCase) })
+}
 function Assert-InstallerIdentityAndShortcuts {
     param([string]$Phase)
     if (-not (Test-Path $uninstallKey)) { throw "$Phase removed the fixed Inno uninstall entry." }
@@ -63,15 +76,21 @@ function Assert-InstallerIdentityAndShortcuts {
     if ($commonShortcuts.Count -ne 0) { throw "$Phase left $($commonShortcuts.Count) unexpected public Start Menu shortcuts." }
     return [pscustomobject]@{ CurrentGroup = $currentGroup; CommonGroup = $commonGroup }
 }
+$newShell=$null
 try {
     New-Item -ItemType Directory -Path $TestRoot,$profile -Force | Out-Null
     $env:LOCALAPPDATA=Join-Path $profile 'LocalAppData'; $env:APPDATA=Join-Path $profile 'AppData'
     New-Item -ItemType Directory -Path $env:LOCALAPPDATA,$env:APPDATA -Force | Out-Null
-    if((Invoke-Setup $previous (Join-Path $TestRoot 'preview1-install.log'))-ne 0){throw 'Preview 1 installation failed.'}
+    if((Invoke-Setup $previous (Join-Path $TestRoot 'preview1-install.log') $true)-ne 0){throw 'Preview 1 installation failed.'}
     [void](Assert-FileVersion '0.1.0.0')
+    if(-not(Test-Path $uninstallKey)){throw 'Preview 1 fixed Inno uninstall entry is missing.'}
+    $preview1Entry=Get-ItemProperty $uninstallKey
+    if(-not [IO.Path]::GetFullPath([string]$preview1Entry.InstallLocation).TrimEnd('\').Equals(
+        $install.TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)){throw 'Preview 1 did not register the custom installation directory.'}
     $preview1Process = Start-Process -FilePath (Join-Path $install 'QingToolbox.Shell.exe') -PassThru
-    Start-Sleep -Milliseconds 750
-    if ($preview1Process.HasExited) { throw 'Preview 1 Shell exited before the in-place upgrade could exercise process replacement.' }
+    Wait-Until { -not $preview1Process.HasExited } 10 'Preview 1 Shell exited before the in-place upgrade could exercise process replacement.'
+    $oldPid=$preview1Process.Id
+    $oldPath=[IO.Path]::GetFullPath($preview1Process.Path)
     $settings=Join-Path $env:APPDATA 'QingToolbox\settings.json'; $module=Join-Path $env:LOCALAPPDATA 'QingToolbox\Modules\sentinel\module.json'
     $data=Join-Path $env:APPDATA 'QingToolbox\Data\sentinel.dat'; $cache=Join-Path $env:LOCALAPPDATA 'QingToolbox\Cache\sentinel.cache'
     foreach($parent in @((Split-Path $settings -Parent),(Split-Path $module -Parent),(Split-Path $data -Parent),(Split-Path $cache -Parent))){New-Item -ItemType Directory -Path $parent -Force|Out-Null}
@@ -79,10 +98,17 @@ try {
     'module'|Set-Content $module -Encoding ASCII; 'data'|Set-Content $data -Encoding ASCII; 'cache'|Set-Content $cache -Encoding ASCII
     $unknown=Join-Path $install 'user-owned-unknown.txt'; 'unknown'|Set-Content $unknown -Encoding ASCII
     $sentinels=@($settings,$module,$data,$cache,$unknown);$hashes=@{};foreach($item in $sentinels){$hashes[$item]=(Get-FileHash $item -Algorithm SHA256).Hash}
-    if((Invoke-Setup $current (Join-Path $TestRoot 'upgrade.log'))-ne 0){throw 'Preview 2 in-place upgrade failed.'}
-    $preview1Process.Refresh()
-    if (-not $preview1Process.HasExited) { throw 'Preview 1 Shell remained running after the in-place upgrade.' }
+    if((Invoke-Setup $current (Join-Path $TestRoot 'upgrade.log') $false)-ne 0){throw 'Preview 2 in-place upgrade without /DIR failed.'}
+    Wait-Until { $preview1Process.Refresh(); $preview1Process.HasExited } 20 'Preview 1 Shell remained running after the in-place upgrade.'
+    $newShellProcesses=@()
+    Wait-Until { $script:newShellProcesses=@(Get-ShellProcessesAtInstallPath); $script:newShellProcesses.Count-eq 1 } 20 'Preview 2 Shell was not restored exactly once in the original custom directory.'
+    $newShell=$newShellProcesses[0]
+    if($newShell.ProcessId-eq$oldPid){throw 'Preview 2 Shell reused the old process ID.'}
+    if(-not [IO.Path]::GetFullPath([string]$newShell.ExecutablePath).Equals($oldPath,[StringComparison]::OrdinalIgnoreCase)){throw 'Preview 2 Shell restarted from a different installation directory.'}
     $info=Assert-FileVersion '0.2.0.0';if($info.ProductVersion-notlike'0.2.0-alpha*'){throw "Shell ProductVersion mismatch: $($info.ProductVersion)"}
+    $defaultInstall=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'Programs\QingToolbox'
+    if(-not [IO.Path]::GetFullPath($defaultInstall).TrimEnd('\').Equals($install.TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)-and
+        (Test-Path -LiteralPath (Join-Path $defaultInstall 'QingToolbox.Shell.exe'))){throw 'Upgrade created a second QingToolbox installation in the default directory.'}
     if(-not(Test-Path (Join-Path $install 'host-payload.manifest.json'))){throw 'Host payload manifest is missing after upgrade.'}
     foreach($item in $sentinels){if(-not(Test-Path $item)-or(Get-FileHash $item -Algorithm SHA256).Hash-ne$hashes[$item]){throw "Upgrade did not preserve sentinel: $item"}}
     if(-not(Test-Path $uninstallKey)){throw 'Fixed Inno uninstall entry is missing after upgrade.'}
@@ -101,7 +127,9 @@ try {
         $relative = ([string]$owned.relativePath).Replace('/', '\')
         if (Test-Path -LiteralPath (Join-Path $install $relative)) { throw "Obsolete Preview 1 host file remained after upgrade: $relative" }
     }
-    if((Invoke-Setup $current (Join-Path $TestRoot 'repair.log'))-ne 0){throw 'Preview 2 repair installation failed.'}
+    Stop-Process -Id $newShell.ProcessId -ErrorAction Stop
+    Wait-Until { -not(Get-Process -Id $newShell.ProcessId -ErrorAction SilentlyContinue) } 10 'Preview 2 Shell did not stop before repair validation.'
+    if((Invoke-Setup $current (Join-Path $TestRoot 'repair.log') $false)-ne 0){throw 'Preview 2 repair installation without /DIR failed.'}
     foreach($item in $sentinels){if(-not(Test-Path $item)-or(Get-FileHash $item -Algorithm SHA256).Hash-ne$hashes[$item]){throw "Repair did not preserve sentinel: $item"}}
     $repairEntry = Get-ItemProperty $uninstallKey
     if ($repairEntry.DisplayVersion -ne '0.2.0-alpha' -or
@@ -111,7 +139,7 @@ try {
     [void](Assert-InstallerIdentityAndShortcuts 'Repair')
     New-Item -Path $markerKey -Force|Out-Null;Set-ItemProperty $markerKey InstalledVersion '0.3.0-alpha'
     $before=(Get-FileHash (Join-Path $install 'QingToolbox.Shell.exe') -Algorithm SHA256).Hash
-    $downgrade=Invoke-Setup $current (Join-Path $TestRoot 'downgrade.log')
+    $downgrade=Invoke-Setup $current (Join-Path $TestRoot 'downgrade.log') $false
     if($downgrade-eq 0){throw 'Downgrade guard accepted a newer installed version.'}
     if((Get-FileHash (Join-Path $install 'QingToolbox.Shell.exe') -Algorithm SHA256).Hash-ne$before){throw 'Rejected downgrade changed host files.'}
     Set-ItemProperty $markerKey InstalledVersion '0.2.0-alpha'; Remove-Item -LiteralPath $unknown -Force
@@ -126,6 +154,9 @@ try {
     Write-Host 'Preview 1 -> Preview 2 upgrade, repair, downgrade guard, and user-state preservation passed.'
 }
 finally {
+    foreach($process in @(Get-ShellProcessesAtInstallPath)){
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
     $env:LOCALAPPDATA=$oldLocal;$env:APPDATA=$oldRoaming
     if(-not$KeepTestFiles -and (Test-Path $TestRoot)){Remove-Item -LiteralPath $TestRoot -Recurse -Force}
 }

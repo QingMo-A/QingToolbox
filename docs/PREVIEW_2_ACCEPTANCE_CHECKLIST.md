@@ -49,6 +49,8 @@ Historical automated evidence is informative only: workflow run `29621740800` pa
 | Confirm current-user shortcuts are not duplicated and no public shortcuts appear | Not Run | |
 | Confirm exactly one uninstall entry remains | Not Run | |
 
+Automated coverage installs Preview 1 into a custom path containing spaces, then runs Preview 2 and Repair without `/DIR`. It verifies automatic directory discovery, old/new PID replacement, single-instance restart, and absence of a second default-directory installation. These automated checks do not change the manual statuses above.
+
 ## B. Login startup
 
 | Check | Status | Evidence / notes |

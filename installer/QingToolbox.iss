@@ -36,7 +36,7 @@ VersionInfoCompany=QingMo-A
 VersionInfoProductName=QingToolbox
 VersionInfoDescription=QingToolbox Preview Installer
 VersionInfoVersion={#FileVersion}
-DefaultDirName={userpf}\QingToolbox
+DefaultDirName={code:GetDefaultInstallDir}
 UsePreviousAppDir=yes
 DefaultGroupName=QingToolbox
 PrivilegesRequired=lowest
@@ -70,6 +70,8 @@ english.RunQingToolbox=Run QingToolbox
 chinesesimplified.RunQingToolbox=运行 QingToolbox
 english.UninstallQingToolbox=Uninstall QingToolbox
 chinesesimplified.UninstallQingToolbox=卸载 QingToolbox
+english.ConflictingInstallLocations=QingToolbox has conflicting valid installation records. Setup will not choose a directory automatically. Repair or remove the old installation record, then try again.
+chinesesimplified.ConflictingInstallLocations=QingToolbox 存在多个冲突的有效安装记录。安装程序不会自动选择目录。请修复或移除旧安装记录后重试。
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:DesktopShortcut}"; GroupDescription: "{cm:AdditionalShortcuts}"; Flags: unchecked
@@ -83,7 +85,8 @@ Name: "{group}\{cm:UninstallQingToolbox}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\QingToolbox"; Filename: "{app}\QingToolbox.Shell.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\QingToolbox.Shell.exe"; WorkingDir: "{app}"; Description: "{cm:RunQingToolbox}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\QingToolbox.Shell.exe"; WorkingDir: "{app}"; Flags: nowait; Check: ShouldRestoreRunningShell
+Filename: "{app}\QingToolbox.Shell.exe"; WorkingDir: "{app}"; Description: "{cm:RunQingToolbox}"; Flags: nowait postinstall skipifsilent; Check: ShouldOfferPostInstallRun
 
 [UninstallRun]
 Filename: "{app}\QingToolbox.StartupMaintenance.exe"; Parameters: "--remove-owned-startup"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveOwnedStartup"
@@ -99,9 +102,197 @@ Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox"; ValueType: dword; ValueName
 const
   InvalidFileAttributes = $FFFFFFFF;
   FileAttributeReparsePoint = $400;
+  UninstallRegistryKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}_is1';
+  ProductRegistryKey = 'Software\QingMo-A\QingToolbox';
+
+var
+  ResolvedPreviousInstallDir: String;
+  PreviousInstallConflict: Boolean;
+  WasQingToolboxRunningBeforeInstall: Boolean;
 
 function GetFileAttributesW(FileName: String): LongWord;
   external 'GetFileAttributesW@kernel32.dll stdcall';
+
+function SamePath(const Left, Right: String): Boolean;
+begin
+  Result := CompareText(RemoveBackslashUnlessRoot(Left),
+    RemoveBackslashUnlessRoot(Right)) = 0;
+end;
+
+function StripPairedQuotes(const Value: String): String;
+begin
+  Result := Trim(Value);
+  if (Length(Result) >= 2) and (Result[1] = '"') and
+     (Result[Length(Result)] = '"') then
+    Result := Copy(Result, 2, Length(Result) - 2);
+end;
+
+function IsUnsafeInstallRoot(const Candidate: String): Boolean;
+var
+  WindowsRoot, SystemRoot, ProfileRoot, TempRoot: String;
+begin
+  WindowsRoot := RemoveBackslashUnlessRoot(ExpandConstant('{win}'));
+  SystemRoot := RemoveBackslashUnlessRoot(ExpandConstant('{sys}'));
+  ProfileRoot := RemoveBackslashUnlessRoot(ExpandConstant('{userprofile}'));
+  TempRoot := RemoveBackslashUnlessRoot(ExpandConstant('{tmp}'));
+  Result := (Length(Candidate) <= 3) or SamePath(Candidate, WindowsRoot) or
+    SamePath(Candidate, SystemRoot) or SamePath(Candidate, ProfileRoot) or
+    SamePath(Candidate, TempRoot);
+end;
+
+function NormalizeAndValidateInstallDir(const Source, RawValue: String;
+  var Candidate: String): Boolean;
+var
+  Value, ShellPath: String;
+begin
+  Result := False;
+  Value := StripPairedQuotes(RawValue);
+  if Value = '' then begin
+    Log('Rejected empty install directory candidate from ' + Source + '.');
+    exit;
+  end;
+  Value := ExpandConstant(Value);
+  StringChangeEx(Value, '/', '\', True);
+  if (Length(Value) < 3) or (Value[2] <> ':') or
+     ((Value[3] <> '\')) or (Copy(Value, 1, 2) = '\\') then begin
+    Log('Rejected non-local or non-absolute install directory candidate from ' + Source + ': ' + Value);
+    exit;
+  end;
+  Candidate := RemoveBackslashUnlessRoot(ExpandFileName(Value));
+  if IsUnsafeInstallRoot(Candidate) then begin
+    Log('Rejected unsafe install directory candidate from ' + Source + ': ' + Candidate);
+    exit;
+  end;
+  ShellPath := AddBackslash(Candidate) + 'QingToolbox.Shell.exe';
+  if (not DirExists(Candidate)) or (not FileExists(ShellPath)) then begin
+    Log('Rejected missing or incomplete install directory candidate from ' + Source + ': ' + Candidate);
+    exit;
+  end;
+  Log('Accepted install directory candidate from ' + Source + ': ' + Candidate);
+  Result := True;
+end;
+
+procedure AddInstallDirCandidate(const Source, RawValue: String;
+  var Selected: String; var Conflict: Boolean);
+var
+  Candidate: String;
+begin
+  if not NormalizeAndValidateInstallDir(Source, RawValue, Candidate) then exit;
+  if Selected = '' then begin
+    Selected := Candidate;
+    Log('Selected previous installation directory from ' + Source + ': ' + Candidate);
+  end else if not SamePath(Selected, Candidate) then begin
+    Log('Conflicting previous installation directory from ' + Source + ': ' + Candidate);
+    Conflict := True;
+  end;
+end;
+
+function DirectoryFromDisplayIcon(const Value: String): String;
+var
+  IconPath: String;
+  Comma: Integer;
+  Index: Integer;
+begin
+  Result := '';
+  IconPath := Trim(Value);
+  Comma := 0;
+  for Index := 1 to Length(IconPath) do
+    if IconPath[Index] = ',' then Comma := Index;
+  if Comma > 0 then IconPath := Copy(IconPath, 1, Comma - 1);
+  IconPath := StripPairedQuotes(IconPath);
+  if CompareText(ExtractFileName(IconPath), 'QingToolbox.Shell.exe') <> 0 then exit;
+  Result := ExtractFileDir(IconPath);
+end;
+
+function DirectoryFromUninstallString(const Value: String): String;
+var
+  Command, Executable: String;
+  ClosingQuote, ExeEnd: Integer;
+  FileName: String;
+begin
+  Result := '';
+  Command := Trim(Value);
+  if Command = '' then exit;
+  if Command[1] = '"' then begin
+    ClosingQuote := Pos('"', Copy(Command, 2, Length(Command)));
+    if ClosingQuote = 0 then exit;
+    Executable := Copy(Command, 2, ClosingQuote - 1);
+  end else begin
+    ExeEnd := Pos('.exe', Lowercase(Command));
+    if ExeEnd = 0 then exit;
+    Executable := Copy(Command, 1, ExeEnd + 3);
+  end;
+  FileName := Lowercase(ExtractFileName(Executable));
+  if (Copy(FileName, 1, 5) <> 'unins') or
+     (Copy(FileName, Length(FileName) - 3, 4) <> '.exe') then exit;
+  Result := ExtractFileDir(Executable);
+end;
+
+procedure ResolvePreviousInstallDirectory;
+var
+  Value: String;
+begin
+  ResolvedPreviousInstallDir := '';
+  PreviousInstallConflict := False;
+  if RegQueryStringValue(HKCU, UninstallRegistryKey, 'InstallLocation', Value) then
+    AddInstallDirCandidate('fixed AppId InstallLocation', Value,
+      ResolvedPreviousInstallDir, PreviousInstallConflict);
+  if RegQueryStringValue(HKCU, ProductRegistryKey, 'InstallLocation', Value) then
+    AddInstallDirCandidate('QingToolbox marker InstallLocation', Value,
+      ResolvedPreviousInstallDir, PreviousInstallConflict);
+  if RegQueryStringValue(HKCU, UninstallRegistryKey, 'DisplayIcon', Value) then
+    AddInstallDirCandidate('fixed AppId DisplayIcon', DirectoryFromDisplayIcon(Value),
+      ResolvedPreviousInstallDir, PreviousInstallConflict);
+  if RegQueryStringValue(HKCU, UninstallRegistryKey, 'UninstallString', Value) then
+    AddInstallDirCandidate('fixed AppId UninstallString', DirectoryFromUninstallString(Value),
+      ResolvedPreviousInstallDir, PreviousInstallConflict);
+  if ResolvedPreviousInstallDir = '' then
+    Log('No trusted previous QingToolbox installation directory was found; using the default directory.');
+end;
+
+function GetDefaultInstallDir(Param: String): String;
+begin
+  if ResolvedPreviousInstallDir <> '' then Result := ResolvedPreviousInstallDir
+  else Result := ExpandConstant('{userpf}\QingToolbox');
+end;
+
+function IsTargetShellRunning(const InstallDir: String): Boolean;
+var
+  Locator, Services, Processes, Process: Variant;
+  I: Integer;
+  TargetPath, ImagePath: String;
+begin
+  Result := False;
+  if InstallDir = '' then exit;
+  TargetPath := AddBackslash(InstallDir) + 'QingToolbox.Shell.exe';
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Services := Locator.ConnectServer('.', 'root\CIMV2');
+    Processes := Services.ExecQuery(
+      'SELECT ExecutablePath FROM Win32_Process WHERE Name="QingToolbox.Shell.exe"');
+    for I := 0 to Processes.Count - 1 do begin
+      Process := Processes.ItemIndex(I);
+      ImagePath := Process.ExecutablePath;
+      if (ImagePath <> '') and SamePath(ExpandFileName(ImagePath), TargetPath) then begin
+        Result := True;
+        Log('The verified previous QingToolbox Shell is running and will be restored after upgrade.');
+        exit;
+      end;
+    end;
+  except
+    Log('Unable to inspect one or more QingToolbox process image paths; no process will be forcefully terminated.');
+  end;
+end;
+
+function ShouldRestoreRunningShell(): Boolean;
+begin
+  Result := WasQingToolboxRunningBeforeInstall;
+end;
+
+function ShouldOfferPostInstallRun(): Boolean;
+begin
+  Result := not WasQingToolboxRunningBeforeInstall;
+end;
 
 function HasReparsePoint(const RelativePath: String; IncludeLeaf: Boolean): Boolean;
 var
@@ -239,6 +430,14 @@ var
   Comparison: Integer;
 begin
   Result := True;
+  ResolvePreviousInstallDirectory;
+  if PreviousInstallConflict then begin
+    SuppressibleMsgBox(ExpandConstant('{cm:ConflictingInstallLocations}'), mbError, MB_OK, IDOK);
+    Result := False;
+    exit;
+  end;
+  WasQingToolboxRunningBeforeInstall :=
+    IsTargetShellRunning(ResolvedPreviousInstallDir);
   Installed := '';
   if not RegQueryStringValue(HKCU, 'Software\QingMo-A\QingToolbox', 'InstalledVersion', Installed) then begin
     UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}_is1';
