@@ -39,7 +39,12 @@ $oldLocal=$env:LOCALAPPDATA; $oldRoaming=$env:APPDATA
 function Invoke-Setup([string]$path,[string]$log,[bool]$SpecifyDirectory){
     $arguments=@('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',("/LOG=`"$log`""))
     if ($SpecifyDirectory) { $arguments += "/DIR=`"$install`"" }
-    $process=Start-Process -FilePath $path -ArgumentList $arguments -Wait -PassThru
+    $startInfo=[Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName=$path
+    $startInfo.Arguments=$arguments -join ' '
+    $startInfo.UseShellExecute=$false
+    $process=[Diagnostics.Process]::Start($startInfo)
+    $process.WaitForExit()
     return $process.ExitCode
 }
 function Assert-FileVersion([string]$expected){$info=[Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $install 'QingToolbox.Shell.exe'));if($info.FileVersion-ne$expected){throw "Shell FileVersion mismatch: $($info.FileVersion)"};return $info}
