@@ -11,7 +11,7 @@ if (args.Length > 0)
     return;
 }
 
-var root = Path.Combine(Path.GetTempPath(), "QingToolbox-transaction-smoke-" + Guid.NewGuid().ToString("N"));
+var root = Path.Combine(Path.GetTempPath(), "qt-tx-" + Guid.NewGuid().ToString("N")[..16]);
 try
 {
     Directory.CreateDirectory(root);
@@ -421,6 +421,7 @@ static async Task SecurityHardeningAsync(string root)
     var longRoot = Path.Combine(root, "long-handles", new string('x', 70), new string('y', 70), new string('z', 70));
     Directory.CreateDirectory(longRoot);
     var longFile = Path.Combine(longRoot, "payload.bin");
+    Require(longFile.Length > 260, "long-path probe exceeds the legacy MAX_PATH boundary");
     await File.WriteAllTextAsync(longFile, "stable");
     using (var handle = SecureWindowsFileSystem.OpenStableRead(longFile,
                SecureWindowsFileSystem.PhysicalDirectory(longRoot)))
@@ -1110,7 +1111,8 @@ static bool TryCreateJunction(string link, string target)
 
 static async Task WorkerAsync(string[] args)
 {
-    if (args.Length != 5 || args[0] != "--worker-crash" || !args[1].Contains("QingToolbox-transaction-smoke-") ||
+    if (args.Length != 5 || args[0] != "--worker-crash" ||
+        !Path.GetFullPath(args[1]).Contains($"{Path.DirectorySeparatorChar}qt-tx-", StringComparison.Ordinal) ||
         !Enum.TryParse<ModuleUpdateTransactionCrashPoint>(args[4], out var crashPoint))
         throw new InvalidOperationException("Invalid crash worker arguments.");
     var root = args[1]; var package = args[2]; var moduleId = args[3];
