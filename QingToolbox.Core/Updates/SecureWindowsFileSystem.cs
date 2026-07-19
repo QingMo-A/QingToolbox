@@ -15,6 +15,12 @@ internal readonly record struct SecureDirectoryIdentity(ulong VolumeSerialNumber
 
 internal readonly record struct SecureTreeEntry(string FullPath, string RelativePath, bool IsDirectory,
     bool IsReparsePoint, SecureDirectoryIdentity? DirectoryIdentity);
+internal sealed record SecureTreeSnapshotEntry(string FullPath, string RelativePath, bool IsDirectory,
+    bool IsReparsePoint, SecureDirectoryIdentity ObjectIdentity, long Length, string Sha256);
+internal sealed record SecureTreeSnapshot(SecureDirectoryIdentity RootIdentity,
+    IReadOnlyList<SecureTreeSnapshotEntry> Entries);
+
+internal enum SecureDirectoryRenameStage { SourceHandleAttested, BeforeHandleRename, AfterHandleRename }
 
 internal static class SecureModuleIdentity
 {
@@ -41,6 +47,7 @@ internal static class SecureWindowsFileSystem
     public const int ErrorLockViolation = 33;
     private const uint GenericRead = 0x80000000;
     private const uint GenericWrite = 0x40000000;
+    private const uint DeleteAccess = 0x00010000;
     private const uint ReadAttributes = 0x80;
     private const uint ShareRead = 1;
     private const uint ShareWrite = 2;
@@ -51,6 +58,7 @@ internal static class SecureWindowsFileSystem
     private const uint OpenReparse = 0x00200000;
     private const int FileAttributeTagInfo = 9;
     private const int FileIdInfoClass = 18;
+    private const int FileRenameInfoClass = 3;
 
     public static string ValidateAbsoluteNonRoot(string path)
     {
@@ -125,6 +133,50 @@ internal static class SecureWindowsFileSystem
         return DirectoryIdentity(handle);
     }
 
+    public static SecureDirectoryLease AcquireDirectoryLease(string path, string expectedPhysicalRoot,
+        SecureDirectoryIdentity expectedIdentity)
+    {
+        var handle = CreateFile(path, GenericRead | ReadAttributes, ShareRead | ShareWrite,
+            IntPtr.Zero, OpenExisting, BackupSemantics | OpenReparse, IntPtr.Zero);
+        if (handle.IsInvalid) throw Win32IOException("Directory lease open");
+        try
+        {
+            if (IsReparse(handle) || DirectoryIdentity(handle) != expectedIdentity ||
+                !IsWithin(expectedPhysicalRoot, FinalPath(handle))) throw new IOException("Directory lease rejected.");
+            return new(handle, expectedPhysicalRoot, expectedIdentity);
+        }
+        catch { handle.Dispose(); throw; }
+    }
+
+    public static void RenameDirectoryByIdentity(string sourcePath, SecureDirectoryIdentity expectedSourceIdentity,
+        string destinationPath, string expectedPhysicalAllowedRoot,
+        SecureDirectoryIdentity expectedDestinationParentIdentity, bool overwrite = false,
+        Action<SecureDirectoryRenameStage>? testHook = null)
+    {
+        if (overwrite) throw new NotSupportedException("Owned directory rename never overwrites destinations.");
+        var source = Path.GetFullPath(sourcePath);
+        var destination = Path.GetFullPath(destinationPath);
+        var destinationParent = Path.GetDirectoryName(destination) ?? throw new IOException("Rename destination has no parent.");
+        using var parentLease = AcquireDirectoryLease(destinationParent, expectedPhysicalAllowedRoot,
+            expectedDestinationParentIdentity);
+        using var sourceHandle = CreateFile(source, DeleteAccess | ReadAttributes, ShareRead | ShareWrite,
+            IntPtr.Zero, OpenExisting, BackupSemantics | OpenReparse, IntPtr.Zero);
+        if (sourceHandle.IsInvalid) throw Win32IOException("Rename source open");
+        if (IsReparse(sourceHandle) || DirectoryIdentity(sourceHandle) != expectedSourceIdentity ||
+            !IsWithin(expectedPhysicalAllowedRoot, FinalPath(sourceHandle)))
+            throw new IOException("Rename source identity rejected.");
+        testHook?.Invoke(SecureDirectoryRenameStage.SourceHandleAttested);
+        if (Directory.Exists(destination) || File.Exists(destination)) throw new IOException("Rename destination exists.");
+        parentLease.Verify();
+        testHook?.Invoke(SecureDirectoryRenameStage.BeforeHandleRename);
+        SetRenameInformation(sourceHandle, destination);
+        testHook?.Invoke(SecureDirectoryRenameStage.AfterHandleRename);
+        parentLease.Verify();
+        if (Directory.Exists(source) || File.Exists(source) || !Directory.Exists(destination) ||
+            DirectoryIdentity(destination) != expectedSourceIdentity)
+            throw new IOException("Handle rename postcondition failed.");
+    }
+
     public static IReadOnlyList<SecureTreeEntry> WalkTreeNoFollow(string root)
     {
         var fullRoot = Path.GetFullPath(root);
@@ -158,6 +210,48 @@ internal static class SecureWindowsFileSystem
         return result;
     }
 
+    public static SecureTreeSnapshot CaptureStableTreeSnapshot(string root, Action? betweenPasses = null)
+    {
+        var first = CaptureTreeSnapshotOnce(root);
+        betweenPasses?.Invoke();
+        var second = CaptureTreeSnapshotOnce(root);
+        if (first.RootIdentity != second.RootIdentity || !first.Entries.SequenceEqual(second.Entries))
+            throw new IOException("Tree changed during stable snapshot.");
+        return second;
+    }
+
+    private static SecureTreeSnapshot CaptureTreeSnapshotOnce(string root)
+    {
+        var physicalRoot = PhysicalDirectory(root);
+        var rootIdentity = DirectoryIdentity(root);
+        var entries = new List<SecureTreeSnapshotEntry>();
+        foreach (var entry in WalkTreeNoFollow(root).OrderBy(item => item.RelativePath, StringComparer.Ordinal))
+        {
+            if (entry.IsReparsePoint)
+            {
+                entries.Add(new(entry.FullPath, entry.RelativePath, entry.IsDirectory, true,
+                    default, 0, string.Empty));
+                continue;
+            }
+            if (entry.IsDirectory)
+            {
+                entries.Add(new(entry.FullPath, entry.RelativePath, true, false,
+                    entry.DirectoryIdentity!.Value, 0, string.Empty));
+                continue;
+            }
+            using var handle = OpenStableRead(entry.FullPath, physicalRoot);
+            var identity = DirectoryIdentity(handle);
+            var length = RandomAccess.GetLength(handle);
+            using var stream = new FileStream(handle, FileAccess.Read, 65536, false);
+            var hash = SHA256.HashData(stream);
+            if (RandomAccess.GetLength(handle) != length) throw new IOException("Tree file changed during snapshot.");
+            entries.Add(new(entry.FullPath, entry.RelativePath, false, false, identity, length,
+                Convert.ToHexString(hash).ToLowerInvariant()));
+        }
+        if (DirectoryIdentity(root) != rootIdentity) throw new IOException("Tree root changed during snapshot.");
+        return new(rootIdentity, entries);
+    }
+
     public static SafeFileHandle OpenStableRead(string path, string physicalRoot)
     {
         EnsureNoReparseAncestors(Path.GetDirectoryName(path)!);
@@ -172,13 +266,16 @@ internal static class SecureWindowsFileSystem
     }
 
     public static async Task<CrashRecoverableFileLock> AcquireLockAsync(string path,
-        string expectedPhysicalLockRoot, SecureDirectoryIdentity expectedLockRootIdentity, CancellationToken token)
+        string expectedPhysicalLockRoot, SecureDirectoryIdentity expectedLockRootIdentity, CancellationToken token,
+        Action? parentLeaseAcquired = null)
     {
         var parent = Path.GetDirectoryName(path)!;
         EnsureNoReparseAncestors(parent);
         if (DirectoryIdentity(parent) != expectedLockRootIdentity ||
             !PhysicalDirectory(parent).Equals(expectedPhysicalLockRoot, StringComparison.OrdinalIgnoreCase))
             throw new IOException("Lock root identity changed.");
+        using var parentLease = AcquireDirectoryLease(parent, expectedPhysicalLockRoot, expectedLockRootIdentity);
+        parentLeaseAcquired?.Invoke();
         while (true)
         {
             token.ThrowIfCancellationRequested();
@@ -195,6 +292,7 @@ internal static class SecureWindowsFileSystem
                     RandomAccess.SetLength(handle, 0);
                     RandomAccess.Write(handle, Encoding.ASCII.GetBytes(Environment.ProcessId.ToString(CultureInfo.InvariantCulture)), 0);
                     RandomAccess.FlushToDisk(handle);
+                    parentLease.Verify();
                     return new(handle, recovered);
                 }
                 catch { handle.Dispose(); throw; }
@@ -285,6 +383,9 @@ internal static class SecureWindowsFileSystem
         out FileIdInformation information, uint size);
     [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern uint GetFinalPathNameByHandle(SafeFileHandle file, StringBuilder path, uint length, uint flags);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetFileInformationByHandle(SafeFileHandle file, int informationClass,
+        IntPtr information, uint size);
 
     private static SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security,
         uint creation, uint flags, IntPtr template) =>
@@ -307,14 +408,14 @@ internal static class SecureWindowsFileSystem
                 (uint)Marshal.SizeOf<FileAttributeTagInformation>())) throw Win32IOException("Handle attribute query");
         return (info.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0;
     }
-    private static SecureDirectoryIdentity DirectoryIdentity(SafeFileHandle handle)
+    internal static SecureDirectoryIdentity DirectoryIdentity(SafeFileHandle handle)
     {
         if (!GetFileIdInformationByHandle(handle, FileIdInfoClass, out FileIdInformation info,
                 (uint)Marshal.SizeOf<FileIdInformation>())) throw Win32IOException("Directory file ID query");
         return new(info.VolumeSerialNumber,
             $"{info.FileIdHigh:x16}{info.FileIdLow:x16}");
     }
-    private static string FinalPath(SafeFileHandle handle)
+    internal static string FinalPath(SafeFileHandle handle)
     {
         var buffer = new StringBuilder(512); var length = GetFinalPathNameByHandle(handle, buffer, 512, 0);
         if (length == 0) throw Win32IOException("Final path query");
@@ -328,6 +429,24 @@ internal static class SecureWindowsFileSystem
         else if (value.StartsWith("\\\\?\\", StringComparison.Ordinal)) value = value[4..];
         return Path.GetFullPath(value);
     }
+    private static void SetRenameInformation(SafeFileHandle sourceHandle, string destinationPath)
+    {
+        var name = Encoding.Unicode.GetBytes(Path.GetFullPath(destinationPath));
+        var nameOffset = IntPtr.Size == 8 ? 20 : 12;
+        var size = checked(nameOffset + name.Length + sizeof(char));
+        var buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            Marshal.Copy(new byte[size], 0, buffer, size);
+            Marshal.WriteByte(buffer, 0, 0);
+            Marshal.WriteIntPtr(buffer, IntPtr.Size == 8 ? 8 : 4, IntPtr.Zero);
+            Marshal.WriteInt32(buffer, IntPtr.Size == 8 ? 16 : 8, name.Length);
+            Marshal.Copy(name, 0, buffer + nameOffset, name.Length);
+            if (!SetFileInformationByHandle(sourceHandle, FileRenameInfoClass, buffer, (uint)size))
+                throw Win32IOException("Handle-bound directory rename");
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
     private static IOException Win32IOException(string action) => new($"{action} failed with Win32 error {Marshal.GetLastPInvokeError()}.");
     [StructLayout(LayoutKind.Sequential)] private struct FileAttributeTagInformation { public uint FileAttributes; public uint ReparseTag; }
     [StructLayout(LayoutKind.Sequential)] private struct FileIdInformation
@@ -336,6 +455,22 @@ internal static class SecureWindowsFileSystem
         public ulong FileIdLow;
         public ulong FileIdHigh;
     }
+}
+
+internal sealed class SecureDirectoryLease : IDisposable
+{
+    private readonly SafeFileHandle _handle;
+    private readonly string _physicalRoot;
+    private readonly SecureDirectoryIdentity _identity;
+    internal SecureDirectoryLease(SafeFileHandle handle, string physicalRoot, SecureDirectoryIdentity identity)
+    { _handle = handle; _physicalRoot = physicalRoot; _identity = identity; }
+    public void Verify()
+    {
+        if (_handle.IsInvalid || _handle.IsClosed || SecureWindowsFileSystem.DirectoryIdentity(_handle) != _identity ||
+            !SecureWindowsFileSystem.IsWithin(_physicalRoot, SecureWindowsFileSystem.FinalPath(_handle)))
+            throw new IOException("Directory lease identity changed.");
+    }
+    public void Dispose() => _handle.Dispose();
 }
 
 internal sealed class CrashRecoverableFileLock : IAsyncDisposable

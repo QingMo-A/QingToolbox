@@ -83,6 +83,20 @@ directory is restored when present, and prior runtime intent is requested again.
 ownership or restoration cannot be proven, the journal and backup are preserved as
 `RecoveryRequired`; the engine does not pretend success.
 
+All four security-critical directory transitions now use a source-directory handle opened
+with `DELETE`, directory semantics, and `FILE_FLAG_OPEN_REPARSE_POINT`, followed by
+`SetFileInformationByHandle(FileRenameInfo)`. The destination parent remains open through
+the operation. Source File ID, destination-parent File ID, physical-root membership, target
+absence, and the post-rename File ID are verified around the single handle-bound rename.
+There is no `Directory.Move` fallback for installed-to-backup, candidate-to-installed,
+installed-to-failed-candidate, or backup-to-installed.
+
+Runtime progress distinguishes the promoted runtime from the restored previous runtime.
+If the promoted runtime was restored but `Committed` was not durable, rollback first closes,
+deactivates, unloads, and verifies that runtime. Only then does it restore the old directory
+and reapply the previous runtime intent. A failure to quiesce preserves installed v2, the
+backup, and the journal as `RecoveryRequired`, preventing disk-v1/runtime-v2 divergence.
+
 Journals are isolated below a namespace hash of physical UserModules root, environment, and
 module ID, so a corrupt journal for one module cannot block another. Journal filenames are
 bound to their transaction IDs; strict UTF-8 JSON rejects BOM, missing/duplicate/unknown
@@ -105,6 +119,11 @@ are removed as links, and every ordinary child remains bounded by the attested w
 Transaction and staging locks are checked against the constructor-attested physical
 LocksRoot and its File ID after opening. Journal reads use one stable handle; writes use
 `CreateNew`, flush, atomic replacement, and namespace/root File-ID checks before and after.
+Exact verification takes two complete snapshots. Each entry records type, reparse state,
+object File ID, length, and SHA256; any entry addition, removal, type change, child-directory
+replacement, or file change between passes rejects the tree before rename. LocksRoot and
+Journal namespace child operations retain stable parent-directory leases for their entire
+create/write/replace interval.
 Module identities share a strict lower-case Windows path-segment validator and reject device
 names plus the `.qing-` host namespace, including `.qing-transactions`.
 
@@ -114,10 +133,12 @@ names plus the `.qing-` host namespace, including `.qing-transactions`.
 installed modules at runtime. It covers successful update/new install, lifecycle and file
 failure injection, exact-tree and marker attacks, reserved identities, root overlap,
 rogue Verified roots, File-ID-preserving rename and replacement, module-isolated journal
-corruption, lock/journal namespace replacement, early installed-tree rejection,
+corruption, live lock/journal namespace replacement, deterministic source-path replacement,
+early installed-tree rejection, post-runtime commit-write rollback, promoted-runtime unload
+failure, cancellation after runtime restoration, exact-tree mutation,
 lock/link boundaries, external cleanup sentinels,
-committed cleanup failures, and data/cache isolation. Four real child processes fail fast
-after backup move, after candidate move, after runtime restoration, and after durable
+committed cleanup failures, and data/cache isolation. Five real child processes fail fast
+during candidate copy, after backup move, after candidate move, after runtime restoration, and after durable
 commit. The candidate-move crash case corrupts the promoted payload before recovery and
 still restores v1 by directory identity. The first three recover v1; the committed window keeps v2 and only cleans ownership
 state. Windows CI runs this required step without `continue-on-error`.

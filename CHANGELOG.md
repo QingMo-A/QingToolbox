@@ -1,5 +1,8 @@
 # Changelog
 
+- Replaced all security-critical transaction directory moves with identity-attested, handle-bound Win32 renames and stable destination-parent leases.
+- Split promoted-runtime and previous-runtime recovery progress so pre-commit rollback quiesces v2 before restoring v1 on disk and in memory.
+- Added double-pass exact tree snapshots, live lock/journal parent replacement tests, deterministic rename races, post-restore cancellation, and a candidate-copy crash window.
 - Bound Development/ModuleTest update transactions to the host-configured Verified Staging attestor, upgraded journals to schema 3 directory identities, and rejected rogue staging roots.
 - Added Windows volume/File-ID ownership across candidate promotion and backup recovery, stable-handle journal I/O, physical LocksRoot binding, and shared no-follow tree traversal.
 - Added rogue-root, directory replacement, journal/lock junction, pre-lifecycle reparse, and corrupt-promoted-candidate crash recovery coverage.

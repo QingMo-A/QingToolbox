@@ -18,10 +18,12 @@ try
     await SuccessAndIsolationAsync(root);
     await ValidationAndLifecycleAsync(root);
     await FailureRollbackAsync(root);
+    await PostRestoreRollbackAsync(root);
     await CleanupAndConcurrencyAsync(root);
     await SecurityHardeningAsync(root);
+    HandleBoundRenameRaces(root);
     await CrashRecoveryAsync(root);
-    Console.WriteLine("Module update transaction smoke test passed: stable copy, strict ownership, four crash windows, committed cleanup and isolation.");
+    Console.WriteLine("Module update transaction smoke test passed: handle-bound rename, runtime-consistent rollback, five crash windows and isolation.");
 }
 finally { try { Directory.Delete(root, true); } catch { } }
 
@@ -33,10 +35,12 @@ static async Task SuccessAndIsolationAsync(string root)
     await File.WriteAllTextAsync(Path.Combine(data, "keep.txt"), "data");
     await File.WriteAllTextAsync(Path.Combine(cache, "keep.txt"), "cache");
     var coordinator = new FakeCoordinator(new(true, true, true, true));
-    await using var service = test.Service(coordinator);
+    Exception? observed = null;
+    await using var service = test.Service(coordinator,
+        new ModuleUpdateTransactionTestHooks(ExceptionObserved: exception => observed = exception));
     var result = await service.ExecuteAsync(new(test.Attestation));
     Require(result.Succeeded && result.State == ModuleUpdateTransactionState.Committed,
-        $"successful update commits ({result.State}/{result.FailureCode}, rollback={result.RolledBack})");
+        $"successful update commits ({result.State}/{result.FailureCode}, rollback={result.RolledBack}, error={observed})");
     Require(Fixture.Version(test.Installed) == "2.0.0", "v2 promoted");
     Require(coordinator.Closed && coordinator.Deactivated && coordinator.Unloaded && coordinator.Restored,
         "runtime lifecycle coordinated");
@@ -121,10 +125,10 @@ static async Task FailureRollbackAsync(string root)
     Require(Fixture.Version(copy.Installed) == "1.0.0", "copy failure preserves v1");
 
     var backup = await Fixture.CreateAsync(root, "backup-failure", "qing.backup", "2.0.0", "1.0.0");
-    var backupHooks = new ModuleUpdateTransactionTestHooks(DirectoryMove: (source, destination) =>
+    var backupHooks = new ModuleUpdateTransactionTestHooks(DirectoryRename: (source, destination, stage) =>
     {
-        if (source.Equals(backup.Installed, StringComparison.OrdinalIgnoreCase)) throw new IOException("backup");
-        Directory.Move(source, destination);
+        if (stage == SecureDirectoryRenameStage.SourceHandleAttested &&
+            source.Equals(backup.Installed, StringComparison.OrdinalIgnoreCase)) throw new IOException("backup");
     });
     await using (var service = backup.Service(new FakeCoordinator(new(false, false, false, false)), backupHooks))
         Require((await service.ExecuteAsync(new(backup.Attestation))).FailureCode ==
@@ -132,10 +136,10 @@ static async Task FailureRollbackAsync(string root)
     Require(Fixture.Version(backup.Installed) == "1.0.0", "backup move failure preserves v1");
 
     var promotion = await Fixture.CreateAsync(root, "promotion-failure", "qing.promotion", "2.0.0", "1.0.0");
-    var promotionHooks = new ModuleUpdateTransactionTestHooks(DirectoryMove: (source, destination) =>
+    var promotionHooks = new ModuleUpdateTransactionTestHooks(DirectoryRename: (source, destination, stage) =>
     {
-        if (Path.GetFileName(source) == "candidate") throw new IOException("promotion");
-        Directory.Move(source, destination);
+        if (stage == SecureDirectoryRenameStage.SourceHandleAttested && Path.GetFileName(source) == "candidate")
+            throw new IOException("promotion");
     });
     await using (var service = promotion.Service(new FakeCoordinator(new(false, false, false, false)), promotionHooks))
     {
@@ -158,10 +162,9 @@ static async Task FailureRollbackAsync(string root)
 
     var corruptBackup = await Fixture.CreateAsync(root, "corrupt-backup", "qing.corrupt-backup", "2.0.0", "1.0.0");
     var corruptBackupHooks = new ModuleUpdateTransactionTestHooks(
-        DirectoryMove: (source, destination) =>
+        DirectoryRename: (source, destination, stage) =>
         {
-            Directory.Move(source, destination);
-            if (Path.GetFileName(destination) == "backup")
+            if (stage == SecureDirectoryRenameStage.AfterHandleRename && Path.GetFileName(destination) == "backup")
                 File.WriteAllText(Path.Combine(destination, "payload.dll"), "tampered-old-program");
         },
         InstalledVerificationStarting: () =>
@@ -171,7 +174,9 @@ static async Task FailureRollbackAsync(string root)
     {
         var result = await service.ExecuteAsync(new(corruptBackup.Attestation));
         Require(result.FailureCode == ModuleUpdateTransactionFailureCode.RecoveryRequired &&
-                Directory.Exists(corruptBackup.Installed),
+                !Directory.Exists(corruptBackup.Installed) &&
+                Directory.Exists(Path.Combine(Directory.EnumerateDirectories(
+                    Path.Combine(corruptBackup.UserModules, ".qing-transactions")).Single(), "backup")),
             "corrupt backup is never restored as trusted old program");
     }
 
@@ -211,6 +216,64 @@ static async Task CleanupAndConcurrencyAsync(string root)
     Require(contender.FailureCode == ModuleUpdateTransactionFailureCode.Cancelled,
         "second transaction waits behind the physical module lock and cancels structurally");
     release.Set(); Require((await firstTask).Succeeded, "first transaction completes after contender cancellation");
+}
+
+static async Task PostRestoreRollbackAsync(string root)
+{
+    foreach (var scenario in new[] { "verify", "commit" })
+    {
+        var fixture = await Fixture.CreateAsync(root, "post-restore-" + scenario,
+            "qing.post-restore-" + scenario, "2.0.0", "1.0.0");
+        var coordinator = new FakeCoordinator(new(true, true, true, false))
+        { CurrentVersion = "1.0.0", InstalledVersion = () => Fixture.Version(fixture.Installed) };
+        var hooks = scenario == "verify"
+            ? new ModuleUpdateTransactionTestHooks(FinalInstalledVerificationStarting: () =>
+                File.WriteAllText(Path.Combine(fixture.Installed, "payload.dll"), "late-corruption"))
+            : new ModuleUpdateTransactionTestHooks(JournalPersistStarting: state =>
+            { if (state == ModuleUpdateTransactionState.Committed) throw new IOException("commit journal"); });
+        await using var service = fixture.Service(coordinator, hooks);
+        var result = await service.ExecuteAsync(new(fixture.Attestation));
+        Require(result.RolledBack && Fixture.Version(fixture.Installed) == "1.0.0" &&
+                coordinator.CurrentVersion == "1.0.0", scenario + " restores matching disk/runtime v1");
+        var restoreV2 = coordinator.Calls.IndexOf("Restore:2.0.0");
+        var unloadV2 = coordinator.Calls.IndexOf("Unload:2.0.0");
+        var restoreV1 = coordinator.Calls.LastIndexOf("Restore:1.0.0");
+        Require(restoreV2 >= 0 && unloadV2 > restoreV2 && restoreV1 > unloadV2,
+            scenario + " quiesces promoted runtime before restoring previous runtime");
+    }
+
+    var blocked = await Fixture.CreateAsync(root, "post-restore-blocked",
+        "qing.post-restore-blocked", "2.0.0", "1.0.0");
+    var blockedCoordinator = new FakeCoordinator(new(true, true, true, false))
+    {
+        CurrentVersion = "1.0.0", InstalledVersion = () => Fixture.Version(blocked.Installed),
+        FailUnloadOnCall = 2
+    };
+    var blockedHooks = new ModuleUpdateTransactionTestHooks(FinalInstalledVerificationStarting: () =>
+        File.WriteAllText(Path.Combine(blocked.Installed, "payload.dll"), "late-corruption"));
+    await using (var service = blocked.Service(blockedCoordinator, blockedHooks))
+    {
+        var result = await service.ExecuteAsync(new(blocked.Attestation));
+        Require(result.FailureCode == ModuleUpdateTransactionFailureCode.RecoveryRequired &&
+                Fixture.Version(blocked.Installed) == "2.0.0" && blockedCoordinator.CurrentVersion == "2.0.0",
+            "failed promoted-runtime unload preserves v2 and backup for recovery");
+    }
+
+
+    var cancelled = await Fixture.CreateAsync(root, "post-restore-cancelled",
+        "qing.post-restore-cancelled", "2.0.0", "1.0.0");
+    var cancellation = new CancellationTokenSource();
+    var cancelledCoordinator = new FakeCoordinator(new(true, true, true, false))
+    { CurrentVersion = "1.0.0", InstalledVersion = () => Fixture.Version(cancelled.Installed) };
+    var cancelledHooks = new ModuleUpdateTransactionTestHooks(
+        FinalInstalledVerificationStarting: cancellation.Cancel);
+    await using (var service = cancelled.Service(cancelledCoordinator, cancelledHooks))
+    {
+        var result = await service.ExecuteAsync(new(cancelled.Attestation), cancellation.Token);
+        Require(result.RolledBack && Fixture.Version(cancelled.Installed) == "1.0.0" &&
+                cancelledCoordinator.CurrentVersion == "1.0.0",
+            "cancellation after promoted runtime restore completes safe rollback");
+    }
 }
 
 static async Task SecurityHardeningAsync(string root)
@@ -363,6 +426,19 @@ static async Task SecurityHardeningAsync(string root)
         Require(await File.ReadAllTextAsync(sentinel) == "keep", "lock directory target unchanged");
     }
 
+    var liveLock = await Fixture.CreateAsync(root, "live-lock-lease", "qing.live-lock", "2.0.0", "1.0.0");
+    var liveLockMoved = false;
+    ModuleUpdateTransactionService? liveLockService = null;
+    var liveLockHooks = new ModuleUpdateTransactionTestHooks(LockParentLeaseAcquired: () =>
+    {
+        var locks = Path.GetDirectoryName(liveLockService!.GetTransactionLockPathForTest(liveLock.ModuleId))!;
+        try { Directory.Move(locks, Path.Combine(liveLock.Root, "stolen-locks")); liveLockMoved = true; }
+        catch (IOException) { }
+    });
+    await using (liveLockService = liveLock.Service(new FakeCoordinator(new(false, false, false, false)), liveLockHooks))
+        Require((await liveLockService.ExecuteAsync(new(liveLock.Attestation))).Succeeded && !liveLockMoved,
+            "live LocksRoot lease blocks replacement during lock creation");
+
     var journalDirectoryLink = await Fixture.CreateAsync(root, "journal-directory-link", "qing.journal-directory-link", "2.0.0", "1.0.0");
     await using (var service = journalDirectoryLink.Service(new FakeCoordinator(new(false, false, false, false))))
     {
@@ -379,6 +455,20 @@ static async Task SecurityHardeningAsync(string root)
                 await File.ReadAllTextAsync(sentinel) == "keep",
             "journal namespace replacement is rejected without external writes");
     }
+
+    var liveJournal = await Fixture.CreateAsync(root, "live-journal-lease", "qing.live-journal", "2.0.0", "1.0.0");
+    var liveJournalMoved = false;
+    ModuleUpdateTransactionService? liveJournalService = null;
+    var liveJournalHooks = new ModuleUpdateTransactionTestHooks(JournalTempWritten: () =>
+    {
+        var journalNamespace = liveJournalService!.GetJournalNamespaceForTest(liveJournal.ModuleId);
+        try { Directory.Move(journalNamespace, Path.Combine(liveJournal.Root, "stolen-journal")); liveJournalMoved = true; }
+        catch (IOException) { }
+    });
+    await using (liveJournalService = liveJournal.Service(
+                     new FakeCoordinator(new(false, false, false, false)), liveJournalHooks))
+        Require((await liveJournalService.ExecuteAsync(new(liveJournal.Attestation))).Succeeded && !liveJournalMoved,
+            "live Journal namespace lease blocks replacement during atomic persistence");
 
     var precheck = await Fixture.CreateAsync(root, "precheck-reparse", "qing.precheck", "2.0.0", "1.0.0");
     var externalModule = Path.Combine(precheck.Root, "external-module");
@@ -462,14 +552,99 @@ static async Task CrashRecoveryAsync(string root)
         Require(exitCode != 0, $"worker terminated at {point}");
         if (point == ModuleUpdateTransactionCrashPoint.CandidateMovedBeforeJournal)
             await File.WriteAllTextAsync(Path.Combine(fixture.Installed, "payload.dll"), "corrupt-after-crash");
-        await using var recovery = fixture.Service(new FakeCoordinator(new(false, false, false, false)));
+        var recoveryCoordinator = new FakeCoordinator(new(false, false, false, false))
+        {
+            CurrentVersion = point == ModuleUpdateTransactionCrashPoint.RuntimeRestoredBeforeCommit ? "2.0.0" : null,
+            InstalledVersion = () => Fixture.Version(fixture.Installed)
+        };
+        await using var recovery = fixture.Service(recoveryCoordinator);
         var result = await recovery.RecoverAsync();
         var committed = point == ModuleUpdateTransactionCrashPoint.CommittedBeforeCleanup;
         Require((committed ? result.CleanupCompleted : result.Recovered) == 1,
             $"recovery classified {point}");
         Require(Fixture.Version(fixture.Installed) == (committed ? "2.0.0" : "1.0.0"),
             $"recovery selected correct version at {point}");
+        if (point == ModuleUpdateTransactionCrashPoint.RuntimeRestoredBeforeCommit)
+            Require(recoveryCoordinator.CurrentVersion == "1.0.0" &&
+                    recoveryCoordinator.Calls.Contains("Restore:1.0.0"),
+                "post-restore crash recovery restores previous runtime against v1 disk");
     }
+}
+
+static void HandleBoundRenameRaces(string root)
+{
+    foreach (var operation in new[] { "installed-backup", "candidate-installed", "installed-failed", "backup-installed" })
+    {
+        var boundary = Path.Combine(root, "rename-" + operation);
+        var source = Path.Combine(boundary, "source");
+        var destinationParent = Path.Combine(boundary, "destination-parent");
+        var destination = Path.Combine(destinationParent, "destination");
+        var displaced = Path.Combine(boundary, "displaced");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(destinationParent);
+        File.WriteAllText(Path.Combine(source, "sentinel.txt"), "owned");
+        var sourceIdentity = SecureWindowsFileSystem.DirectoryIdentity(source);
+        var parentIdentity = SecureWindowsFileSystem.DirectoryIdentity(destinationParent);
+        var externalReplacementSucceeded = false;
+        SecureWindowsFileSystem.RenameDirectoryByIdentity(source, sourceIdentity, destination,
+            SecureWindowsFileSystem.PhysicalDirectory(boundary), parentIdentity, testHook: stage =>
+            {
+                if (stage != SecureDirectoryRenameStage.SourceHandleAttested) return;
+                try
+                {
+                    Directory.Move(source, displaced);
+                    Directory.CreateDirectory(source);
+                    File.WriteAllText(Path.Combine(source, "unknown.txt"), "unknown");
+                    externalReplacementSucceeded = true;
+                }
+                catch (IOException) { }
+            });
+        Require(!externalReplacementSucceeded &&
+                SecureWindowsFileSystem.DirectoryIdentity(destination) == sourceIdentity &&
+                File.ReadAllText(Path.Combine(destination, "sentinel.txt")) == "owned",
+            operation + " handle lease prevents path substitution");
+
+        var blockedSource = Path.Combine(boundary, "blocked-source");
+        var unknownDestination = Path.Combine(destinationParent, "unknown-destination");
+        Directory.CreateDirectory(blockedSource);
+        Directory.CreateDirectory(unknownDestination);
+        File.WriteAllText(Path.Combine(unknownDestination, "sentinel.txt"), "keep");
+        try
+        {
+            SecureWindowsFileSystem.RenameDirectoryByIdentity(blockedSource,
+                SecureWindowsFileSystem.DirectoryIdentity(blockedSource), unknownDestination,
+                SecureWindowsFileSystem.PhysicalDirectory(boundary), parentIdentity);
+            throw new Exception("unknown destination was overwritten");
+        }
+        catch (IOException) { }
+        Require(File.ReadAllText(Path.Combine(unknownDestination, "sentinel.txt")) == "keep",
+            operation + " never overwrites unknown destination");
+    }
+
+
+    var changingTree = Path.Combine(root, "changing-tree");
+    Directory.CreateDirectory(Path.Combine(changingTree, "child"));
+    File.WriteAllText(Path.Combine(changingTree, "child", "payload.txt"), "one");
+    try
+    {
+        _ = SecureWindowsFileSystem.CaptureStableTreeSnapshot(changingTree,
+            () => File.WriteAllText(Path.Combine(changingTree, "extra.txt"), "extra"));
+        throw new Exception("tree growth was accepted");
+    }
+    catch (IOException) { }
+
+    File.Delete(Path.Combine(changingTree, "extra.txt"));
+    try
+    {
+        _ = SecureWindowsFileSystem.CaptureStableTreeSnapshot(changingTree, () =>
+        {
+            Directory.Delete(Path.Combine(changingTree, "child"), true);
+            Directory.CreateDirectory(Path.Combine(changingTree, "child"));
+            File.WriteAllText(Path.Combine(changingTree, "child", "payload.txt"), "one");
+        });
+        throw new Exception("tree directory replacement was accepted");
+    }
+    catch (IOException) { }
 }
 
 static async Task<int> RunCrashWorkerAsync(Fixture fixture, ModuleUpdateTransactionCrashPoint point)
@@ -521,15 +696,32 @@ sealed class FakeCoordinator(ModuleUpdateRuntimeState state) : IModuleUpdateRunt
     public bool FailClose, FailDeactivate, FailUnload, StillLoaded, FailRestore;
     public bool Closed, Deactivated, Unloaded, Restored;
     public int TotalCalls;
-    public Task<ModuleUpdateRuntimeState> GetRuntimeStateAsync(string moduleId, CancellationToken token) { TotalCalls++; return Task.FromResult(state); }
-    public Task<bool> RequestCloseWindowsAsync(string moduleId, CancellationToken token) { TotalCalls++; return Task.FromResult(Closed = !FailClose); }
-    public Task<bool> DeactivateAsync(string moduleId, CancellationToken token) { TotalCalls++; return Task.FromResult(Deactivated = !FailDeactivate); }
-    public Task<bool> UnloadAsync(string moduleId, CancellationToken token) { TotalCalls++; return Task.FromResult(Unloaded = !FailUnload); }
-    public Task<bool> VerifyUnloadedAsync(string moduleId, CancellationToken token) { TotalCalls++; return Task.FromResult(!StillLoaded); }
+    public int? FailUnloadOnCall;
+    public int UnloadCalls;
+    public string? CurrentVersion;
+    public Func<string>? InstalledVersion;
+    public List<string> Calls { get; } = [];
+    public Task<ModuleUpdateRuntimeState> GetRuntimeStateAsync(string moduleId, CancellationToken token)
+    { TotalCalls++; Calls.Add("GetState"); return Task.FromResult(state); }
+    public Task<bool> RequestCloseWindowsAsync(string moduleId, CancellationToken token)
+    { TotalCalls++; Calls.Add("Close:" + CurrentVersion); return Task.FromResult(Closed = !FailClose); }
+    public Task<bool> DeactivateAsync(string moduleId, CancellationToken token)
+    { TotalCalls++; Calls.Add("Deactivate:" + CurrentVersion); return Task.FromResult(Deactivated = !FailDeactivate); }
+    public Task<bool> UnloadAsync(string moduleId, CancellationToken token)
+    {
+        TotalCalls++; UnloadCalls++; Calls.Add("Unload:" + CurrentVersion);
+        var fail = FailUnload || FailUnloadOnCall == UnloadCalls;
+        if (!fail) CurrentVersion = null;
+        return Task.FromResult(Unloaded = !fail);
+    }
+    public Task<bool> VerifyUnloadedAsync(string moduleId, CancellationToken token)
+    { TotalCalls++; Calls.Add("VerifyUnloaded"); return Task.FromResult(!StillLoaded); }
     public Task<bool> RestorePreviousRuntimeStateAsync(string moduleId, ModuleUpdateRuntimeState previous, CancellationToken token)
     {
         TotalCalls++;
+        Calls.Add("Restore:" + (InstalledVersion?.Invoke() ?? "unknown"));
         if (FailRestore) { FailRestore = false; return Task.FromResult(false); }
+        CurrentVersion = InstalledVersion?.Invoke();
         return Task.FromResult(Restored = true);
     }
 }
