@@ -229,6 +229,8 @@ internal static class SecureWindowsFileSystem
     private static SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security,
         uint creation, uint flags, IntPtr template) =>
         CreateFileNative(ToExtendedPath(path), access, share, security, creation, flags, template);
+
+    // Keep Win32 handle-based validation working when CI or user profile paths exceed MAX_PATH.
     private static string ToExtendedPath(string path)
     {
         var full = Path.GetFullPath(path);
