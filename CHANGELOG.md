@@ -1,9 +1,15 @@
 # Changelog
 
+- Bound every transaction destination to a leased parent handle plus validated relative leaf, including same-handle Journal temp replacement, with no path-move fallback.
+- Added bounded secure tree leases, same-read manifest capture, post-snapshot mutation rejection, and immediate exact post-rename verification around the Windows descendant-handle rename constraint.
+- Upgraded transaction journals to schema 4 with a strict legacy schema 3 migration path and fail-closed handling for ambiguous shapes and sites.
+- Preserved process-local promoted-runtime side-effect knowledge across progress persistence faults and quiesced partial/successful v2 restores from actual runtime state before disk rollback.
+- Extended required Windows smoke coverage for destination ancestors, Journal temp replacement, installed/candidate/backup lease races, runtime fault windows, legacy migration, and genuine mid-copy FailFast recovery.
+- Marked the Development/ModuleTest-only B1 transaction core Engineering Complete — Frozen; Production lifecycle integration and the TextTools canary remain B2 work.
 - Replaced all security-critical transaction directory moves with identity-attested, handle-bound Win32 renames and stable destination-parent leases.
 - Split promoted-runtime and previous-runtime recovery progress so pre-commit rollback quiesces v2 before restoring v1 on disk and in memory.
 - Added double-pass exact tree snapshots, live lock/journal parent replacement tests, deterministic rename races, post-restore cancellation, and a candidate-copy crash window.
-- Bound Development/ModuleTest update transactions to the host-configured Verified Staging attestor, upgraded journals to schema 3 directory identities, and rejected rogue staging roots.
+- Bound Development/ModuleTest update transactions to the host-configured Verified Staging attestor, added directory identities to the then-current schema 3 journals, and rejected rogue staging roots.
 - Added Windows volume/File-ID ownership across candidate promotion and backup recovery, stable-handle journal I/O, physical LocksRoot binding, and shared no-follow tree traversal.
 - Added rogue-root, directory replacement, journal/lock junction, pre-lifecycle reparse, and corrupt-promoted-candidate crash recovery coverage.
 
@@ -11,7 +17,7 @@
 
 - Preserved installed ownership markers and backups until the committed journal is durable, and made every post-commit cleanup failure non-rollbackable and recoverable.
 - Unified staging and transaction locks on crash-recoverable exclusive Windows handles, added stable-handle staging-to-candidate copying, strict tree verification, reserved module identities, and physically isolated roots.
-- Isolated strict journals per physical root/environment/module, replaced fixed temp files and recursive deletion, and covered four real promotion/commit crash windows plus hostile ownership and journal cases.
+- Isolated strict journals per physical root/environment/module, replaced fixed temp files and recursive deletion, and covered five real copy/promotion/commit crash windows plus hostile ownership and journal cases.
 - Added the Development/ModuleTest-only recoverable module update transaction core with strict durable journals, physical-root locks, same-volume candidates, atomic directory promotion, rollback, and crash recovery.
 - Added immutable Verified Staging attestations bound to the physical Verified root and official release identity, with exact re-attestation before transaction mutation.
 - Added deterministic lifecycle/filesystem failure coverage and a real child-process crash recovery smoke test required by Windows CI.

@@ -19,11 +19,13 @@ try
     await ValidationAndLifecycleAsync(root);
     await FailureRollbackAsync(root);
     await PostRestoreRollbackAsync(root);
+    await TreeLeaseTransactionRacesAsync(root);
     await CleanupAndConcurrencyAsync(root);
     await SecurityHardeningAsync(root);
+    await LegacySchemaRecoveryAsync(root);
     HandleBoundRenameRaces(root);
     await CrashRecoveryAsync(root);
-    Console.WriteLine("Module update transaction smoke test passed: handle-bound rename, runtime-consistent rollback, five crash windows and isolation.");
+    Console.WriteLine("Module update transaction smoke test passed: parent-relative rename, tree leases, schema migration, runtime-consistent rollback, five crash windows and isolation.");
 }
 finally { try { Directory.Delete(root, true); } catch { } }
 
@@ -274,6 +276,144 @@ static async Task PostRestoreRollbackAsync(string root)
                 cancelledCoordinator.CurrentVersion == "1.0.0",
             "cancellation after promoted runtime restore completes safe rollback");
     }
+
+    foreach (var scenario in new[] { "progress-write", "partial-false", "partial-throw", "quiesced-write" })
+    {
+        var fixture = await Fixture.CreateAsync(root, "runtime-fault-" + scenario,
+            "qing.runtime-fault-" + scenario, "2.0.0", "1.0.0");
+        var coordinator = new FakeCoordinator(new(true, true, true, false))
+        { CurrentVersion = "1.0.0", InstalledVersion = () => Fixture.Version(fixture.Installed) };
+        var injected = false;
+        if (scenario == "partial-false") coordinator.PartialRestoreReturnsFalse = true;
+        if (scenario == "partial-throw") coordinator.PartialRestoreThrows = true;
+        var hooks = new ModuleUpdateTransactionTestHooks(
+            FinalInstalledVerificationStarting: scenario == "quiesced-write"
+                ? () => File.WriteAllText(Path.Combine(fixture.Installed, "payload.dll"), "force-rollback")
+                : null,
+            JournalProgressPersistStarting: progress =>
+            {
+                if (injected) return;
+                if ((scenario == "progress-write" && progress.PromotedRuntimeRestored &&
+                     !progress.PromotedRuntimeQuiescedForRollback) ||
+                    (scenario == "quiesced-write" && progress.PromotedRuntimeQuiescedForRollback &&
+                     !progress.PreviousRuntimeRestoreStarted))
+                {
+                    injected = true;
+                    throw new IOException("runtime progress persistence probe");
+                }
+            });
+        await using var service = fixture.Service(coordinator, hooks);
+        var result = await service.ExecuteAsync(new(fixture.Attestation));
+        Require(result.RolledBack && Fixture.Version(fixture.Installed) == "1.0.0" &&
+                coordinator.CurrentVersion == "1.0.0",
+            scenario + " restores matching v1 disk and runtime");
+        var restoreV2 = coordinator.Calls.IndexOf("Restore:2.0.0");
+        var stateV2 = coordinator.Calls.FindIndex(call => call == "GetState:2.0.0");
+        var unloadV2 = coordinator.Calls.IndexOf("Unload:2.0.0");
+        var restoreV1 = coordinator.Calls.LastIndexOf("Restore:1.0.0");
+        Require(restoreV2 >= 0 && stateV2 > restoreV2 && unloadV2 > stateV2 && restoreV1 > unloadV2,
+            scenario + " observes and quiesces partial v2 before v1 restore");
+    }
+}
+
+static async Task TreeLeaseTransactionRacesAsync(string root)
+{
+    foreach (var stage in new[] { "installed-to-backup", "candidate-to-installed" })
+    {
+        var suffix = stage == "installed-to-backup" ? "old" : "new";
+        var fixture = await Fixture.CreateAsync(root, "tree-" + suffix,
+            "qing.tree-" + suffix, "2.0.0", "1.0.0");
+        var blocked = 0;
+        var hooks = new ModuleUpdateTransactionTestHooks(TreeLeaseAcquired: actual =>
+        {
+            if (actual != stage) return;
+            var path = actual == "installed-to-backup" ? fixture.Installed :
+                Directory.EnumerateDirectories(Path.Combine(fixture.UserModules, ".qing-transactions"))
+                    .Select(directory => Path.Combine(directory, "candidate")).Single(Directory.Exists);
+            foreach (var action in new Action[]
+            {
+                () => File.WriteAllText(Path.Combine(path, "payload.dll"), "blocked"),
+                () => File.Delete(Path.Combine(path, "module.json")),
+                () => File.Move(Path.Combine(path, "module.json"), Path.Combine(path, "module.replaced"))
+            })
+            {
+                try { action(); }
+                catch (IOException) { blocked++; }
+            }
+        });
+        await using var service = fixture.Service(new FakeCoordinator(new(false, false, false, false)), hooks);
+        var result = await service.ExecuteAsync(new(fixture.Attestation));
+        Require(result.Succeeded && blocked == 3 && Fixture.Version(fixture.Installed) == "2.0.0",
+            stage + " keeps verified files leased until the rename boundary");
+    }
+
+    foreach (var stage in new[] { "installed-to-backup", "candidate-to-installed" })
+    {
+        var fixture = await Fixture.CreateAsync(root, "tree-growth-" + (stage == "installed-to-backup" ? "old" : "new"),
+            "qing.tree-growth-" + (stage == "installed-to-backup" ? "old" : "new"), "2.0.0", "1.0.0");
+        var injected = false;
+        var hooks = new ModuleUpdateTransactionTestHooks(TreeLeaseAcquired: actual =>
+        {
+            if (actual != stage || injected) return;
+            var path = actual == "installed-to-backup" ? fixture.Installed :
+                Directory.EnumerateDirectories(Path.Combine(fixture.UserModules, ".qing-transactions"))
+                    .Select(directory => Path.Combine(directory, "candidate")).Single(Directory.Exists);
+            File.WriteAllText(Path.Combine(path, "post-snapshot-extra.dll"), "untrusted");
+            injected = true;
+        });
+        await using var service = fixture.Service(new FakeCoordinator(new(false, false, false, false)), hooks);
+        var result = await service.ExecuteAsync(new(fixture.Attestation));
+        Require(injected && result.RolledBack && Fixture.Version(fixture.Installed) == "1.0.0",
+            stage + " detects namespace growth after the second pass and does not promote it");
+    }
+
+    var rollback = await Fixture.CreateAsync(root, "tree-rollback", "qing.tree-rollback", "2.0.0", "1.0.0");
+    var rollbackBlocked = 0;
+    var rollbackHooks = new ModuleUpdateTransactionTestHooks(
+        FinalInstalledVerificationStarting: () =>
+            File.WriteAllText(Path.Combine(rollback.Installed, "payload.dll"), "force rollback"),
+        TreeLeaseAcquired: stage =>
+        {
+            if (stage is not ("installed-to-failed-candidate" or "backup-to-installed")) return;
+            var transactionRoot = Directory.EnumerateDirectories(
+                Path.Combine(rollback.UserModules, ".qing-transactions")).Single();
+            var path = stage == "installed-to-failed-candidate"
+                ? rollback.Installed
+                : Path.Combine(transactionRoot, "backup");
+            foreach (var action in new Action[]
+            {
+                () => File.WriteAllText(Path.Combine(path, "payload.dll"), "blocked"),
+                () => File.Delete(Path.Combine(path, "module.json")),
+                () => File.Move(Path.Combine(path, "module.json"), Path.Combine(path, "module.replaced"))
+            })
+            {
+                try { action(); }
+                catch (IOException) { rollbackBlocked++; }
+            }
+        });
+    await using (var service = rollback.Service(new FakeCoordinator(new(false, false, false, false)), rollbackHooks))
+    {
+        var result = await service.ExecuteAsync(new(rollback.Attestation));
+        Require(result.RolledBack && rollbackBlocked == 6 && Fixture.Version(rollback.Installed) == "1.0.0",
+            "rollback leases both promoted and backup trees through their rename boundaries");
+    }
+
+    var renameGap = await Fixture.CreateAsync(root, "tree-rename-gap", "qing.tree-rename-gap",
+        "2.0.0", "1.0.0");
+    var gapMutation = false;
+    var gapHooks = new ModuleUpdateTransactionTestHooks(DirectoryRename: (source, _, stage) =>
+    {
+        if (stage != SecureDirectoryRenameStage.BeforeHandleRename ||
+            !Path.GetFileName(source).Equals("candidate", StringComparison.Ordinal)) return;
+        File.WriteAllText(Path.Combine(source, "payload.dll"), "post-seal mutation");
+        gapMutation = true;
+    });
+    await using (var service = renameGap.Service(new FakeCoordinator(new(false, false, false, false)), gapHooks))
+    {
+        var result = await service.ExecuteAsync(new(renameGap.Attestation));
+        Require(gapMutation && result.RolledBack && Fixture.Version(renameGap.Installed) == "1.0.0",
+            "mutation in the native descendant-handle rename gap is detected after rename and never committed");
+    }
 }
 
 static async Task SecurityHardeningAsync(string root)
@@ -458,17 +598,30 @@ static async Task SecurityHardeningAsync(string root)
 
     var liveJournal = await Fixture.CreateAsync(root, "live-journal-lease", "qing.live-journal", "2.0.0", "1.0.0");
     var liveJournalMoved = false;
+    var liveJournalTempMutationBlocked = 0;
     ModuleUpdateTransactionService? liveJournalService = null;
     var liveJournalHooks = new ModuleUpdateTransactionTestHooks(JournalTempWritten: () =>
     {
         var journalNamespace = liveJournalService!.GetJournalNamespaceForTest(liveJournal.ModuleId);
+        var temp = Directory.EnumerateFiles(journalNamespace, "*.tmp-*", SearchOption.TopDirectoryOnly).Single();
+        foreach (var action in new Action[]
+        {
+            () => File.WriteAllText(temp, "replacement"),
+            () => File.Delete(temp),
+            () => File.Move(temp, temp + ".replaced")
+        })
+        {
+            try { action(); }
+            catch (IOException) { liveJournalTempMutationBlocked++; }
+        }
         try { Directory.Move(journalNamespace, Path.Combine(liveJournal.Root, "stolen-journal")); liveJournalMoved = true; }
         catch (IOException) { }
     });
     await using (liveJournalService = liveJournal.Service(
                      new FakeCoordinator(new(false, false, false, false)), liveJournalHooks))
-        Require((await liveJournalService.ExecuteAsync(new(liveJournal.Attestation))).Succeeded && !liveJournalMoved,
-            "live Journal namespace lease blocks replacement during atomic persistence");
+        Require((await liveJournalService.ExecuteAsync(new(liveJournal.Attestation))).Succeeded &&
+                !liveJournalMoved && liveJournalTempMutationBlocked >= 3,
+            "live Journal temp handle and namespace lease block replacement during atomic persistence");
 
     var precheck = await Fixture.CreateAsync(root, "precheck-reparse", "qing.precheck", "2.0.0", "1.0.0");
     var externalModule = Path.Combine(precheck.Root, "external-module");
@@ -548,8 +701,26 @@ static async Task CrashRecoveryAsync(string root)
         var suffix = ((int)point).ToString();
         var fixture = await Fixture.CreateAsync(root, "crash-" + suffix, "qing.crash-" + suffix,
             "2.0.0", "1.0.0");
+        var dataSentinel = Path.Combine(fixture.Root, "data", "keep.txt");
+        var cacheSentinel = Path.Combine(fixture.Root, "module-cache", "keep.txt");
+        var otherModuleSentinel = Path.Combine(fixture.UserModules, "qing.other", "keep.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(dataSentinel)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(cacheSentinel)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(otherModuleSentinel)!);
+        await File.WriteAllTextAsync(dataSentinel, "data");
+        await File.WriteAllTextAsync(cacheSentinel, "cache");
+        await File.WriteAllTextAsync(otherModuleSentinel, "other");
         var exitCode = await RunCrashWorkerAsync(fixture, point);
         Require(exitCode != 0, $"worker terminated at {point}");
+        if (point == ModuleUpdateTransactionCrashPoint.CandidateCopyInProgress)
+        {
+            var work = Directory.EnumerateDirectories(Path.Combine(fixture.UserModules, ".qing-transactions")).Single();
+            var partialCandidate = Path.Combine(work, "candidate");
+            Require(Directory.Exists(partialCandidate) &&
+                    Directory.EnumerateFiles(partialCandidate, "*", SearchOption.AllDirectories)
+                        .Any(path => Path.GetFileName(path) != ".qing-transaction-owner"),
+                "candidate copy crash occurs after a payload file is durably written");
+        }
         if (point == ModuleUpdateTransactionCrashPoint.CandidateMovedBeforeJournal)
             await File.WriteAllTextAsync(Path.Combine(fixture.Installed, "payload.dll"), "corrupt-after-crash");
         var recoveryCoordinator = new FakeCoordinator(new(false, false, false, false))
@@ -564,6 +735,14 @@ static async Task CrashRecoveryAsync(string root)
             $"recovery classified {point}");
         Require(Fixture.Version(fixture.Installed) == (committed ? "2.0.0" : "1.0.0"),
             $"recovery selected correct version at {point}");
+        Require(await File.ReadAllTextAsync(dataSentinel) == "data" &&
+                await File.ReadAllTextAsync(cacheSentinel) == "cache" &&
+                await File.ReadAllTextAsync(otherModuleSentinel) == "other",
+            $"recovery preserves data cache and unrelated modules at {point}");
+        if (point == ModuleUpdateTransactionCrashPoint.CandidateCopyInProgress)
+            Require(recoveryCoordinator.TotalCalls == 0 &&
+                    !Directory.EnumerateDirectories(Path.Combine(fixture.UserModules, ".qing-transactions")).Any(),
+                "mid-copy recovery deletes only the owned partial candidate without loading it");
         if (point == ModuleUpdateTransactionCrashPoint.RuntimeRestoredBeforeCommit)
             Require(recoveryCoordinator.CurrentVersion == "1.0.0" &&
                     recoveryCoordinator.Calls.Contains("Restore:1.0.0"),
@@ -571,8 +750,126 @@ static async Task CrashRecoveryAsync(string root)
     }
 }
 
+static async Task LegacySchemaRecoveryAsync(string root)
+{
+    var fixture = await Fixture.CreateAsync(root, "legacy-schema-3", "qing.legacy-schema-3",
+        "2.0.0", "1.0.0");
+    var migrated = false;
+    var hooks = new ModuleUpdateTransactionTestHooks(JournalPersistStarting: state =>
+    { if (state == ModuleUpdateTransactionState.Prepared) migrated = true; });
+    await using var service = fixture.Service(new FakeCoordinator(new(false, false, false, false)), hooks);
+    var transactionId = Guid.NewGuid();
+    var work = Path.Combine(fixture.UserModules, ".qing-transactions", transactionId.ToString("N"));
+    var candidate = Path.Combine(work, "candidate");
+    Directory.CreateDirectory(candidate);
+    SecureWindowsFileSystem.WriteOwnerMarker(work, ".qing-transaction-owner", transactionId);
+    SecureWindowsFileSystem.WriteOwnerMarker(candidate, ".qing-transaction-owner", transactionId);
+    File.WriteAllText(Path.Combine(candidate, "partial.dll"), "partial");
+    var installedIdentity = SecureWindowsFileSystem.DirectoryIdentity(fixture.Installed);
+    var candidateIdentity = SecureWindowsFileSystem.DirectoryIdentity(candidate);
+    var installedFiles = SecureWindowsFileSystem.CaptureStableTreeSnapshot(fixture.Installed).Entries
+        .Where(entry => !entry.IsDirectory && !entry.IsReparsePoint)
+        .OrderBy(entry => entry.RelativePath, StringComparer.Ordinal)
+        .Select(entry => $"{{\"relativePath\":\"{entry.RelativePath.Replace('\\', '/')}\",\"size\":{entry.Length},\"sha256\":\"{entry.Sha256}\"}}")
+        .ToArray();
+    var started = DateTimeOffset.UtcNow;
+    var namespaceDirectory = service.GetJournalNamespaceForTest(fixture.ModuleId);
+    Directory.CreateDirectory(namespaceDirectory);
+    var journalPath = Path.Combine(namespaceDirectory, transactionId.ToString("N") + ".json");
+    var legacyFixture = $$"""
+    {"schemaVersion":3,"transactionId":"{{transactionId:D}}","environmentIdentity":"ModuleTest","moduleId":"{{fixture.ModuleId}}","sourceVersion":"1.0.0","targetVersion":"2.0.0","moduleApiVersion":"experimental-0.1","packageSha256":"{{new string('a', 64)}}","verifiedStagingIdentity":"{{new string('b', 64)}}","userModulesRootIdentity":"{{SecureWindowsFileSystem.HashIdentity(SecureWindowsFileSystem.PhysicalDirectory(fixture.UserModules))}}","state":1,"previousRuntimeState":{"hasWindows":false,"isActive":false,"isLoaded":false,"hasStartupAuthorization":false},"lifecycleProgress":{"windowsClosed":false,"deactivated":false,"unloaded":false,"runtimeRestored":false},"attempt":1,"lastFailureCode":0,"hadInstalledModule":true,"payloadFiles":[{"relativePath":"payload.dll","size":1,"sha256":"{{new string('c', 64)}}"}],"installedFiles":[{{string.Join(',', installedFiles)}}],"installedDirectoryIdentity":{"volumeSerialNumber":{{installedIdentity.VolumeSerialNumber}},"fileId":"{{installedIdentity.FileId}}"},"candidateDirectoryIdentity":{"volumeSerialNumber":{{candidateIdentity.VolumeSerialNumber}},"fileId":"{{candidateIdentity.FileId}}"},"backupDirectoryIdentity":null,"promotedDirectoryIdentity":null,"startedAtUtc":"{{started:O}}","updatedAtUtc":"{{started:O}}"}
+    """;
+    await File.WriteAllTextAsync(journalPath, legacyFixture, new UTF8Encoding(false));
+    var result = await service.RecoverAsync();
+    Require(migrated && result.Recovered == 1 && Fixture.Version(fixture.Installed) == "1.0.0" &&
+            !Directory.Exists(work) && !File.Exists(journalPath),
+        "strict legacy schema 3 fixture migrates atomically to schema 4 before recovery");
+
+    var rollbackFixture = await Fixture.CreateAsync(root, "legacy-rollback", "qing.legacy-rollback",
+        "2.0.0", "1.0.0");
+    var rollbackId = Guid.NewGuid();
+    var rollbackWork = Path.Combine(rollbackFixture.UserModules, ".qing-transactions", rollbackId.ToString("N"));
+    var rollbackBackup = Path.Combine(rollbackWork, "backup");
+    Directory.CreateDirectory(rollbackWork);
+    SecureWindowsFileSystem.WriteOwnerMarker(rollbackWork, ".qing-transaction-owner", rollbackId);
+    Directory.Move(rollbackFixture.Installed, rollbackBackup);
+    Fixture.WriteModule(rollbackFixture.Installed, rollbackFixture.ModuleId, "2.0.0", "promoted");
+    SecureWindowsFileSystem.WriteOwnerMarker(rollbackFixture.Installed, ".qing-transaction-owner", rollbackId);
+    var oldIdentity = SecureWindowsFileSystem.DirectoryIdentity(rollbackBackup);
+    var promotedIdentity = SecureWindowsFileSystem.DirectoryIdentity(rollbackFixture.Installed);
+    var rollbackCoordinator = new FakeCoordinator(new(true, true, true, false))
+    {
+        CurrentVersion = "2.0.0",
+        InstalledVersion = () => Fixture.Version(rollbackFixture.Installed)
+    };
+    await using var rollbackService = rollbackFixture.Service(rollbackCoordinator);
+    var rollbackNamespace = rollbackService.GetJournalNamespaceForTest(rollbackFixture.ModuleId);
+    Directory.CreateDirectory(rollbackNamespace);
+    var rollbackJournal = Path.Combine(rollbackNamespace, rollbackId.ToString("N") + ".json");
+    var rollbackStarted = DateTimeOffset.UtcNow;
+    var rollbackLegacy = $$"""
+    {"schemaVersion":3,"transactionId":"{{rollbackId:D}}","environmentIdentity":"ModuleTest","moduleId":"{{rollbackFixture.ModuleId}}","sourceVersion":"1.0.0","targetVersion":"2.0.0","moduleApiVersion":"experimental-0.1","packageSha256":"{{new string('a', 64)}}","verifiedStagingIdentity":"{{new string('b', 64)}}","userModulesRootIdentity":"{{SecureWindowsFileSystem.HashIdentity(SecureWindowsFileSystem.PhysicalDirectory(rollbackFixture.UserModules))}}","state":{{(int)ModuleUpdateTransactionState.RollbackStarted}},"previousRuntimeState":{"hasWindows":true,"isActive":true,"isLoaded":true,"hasStartupAuthorization":false},"lifecycleProgress":{"windowsClosed":true,"deactivated":true,"unloaded":true,"runtimeRestored":false},"attempt":1,"lastFailureCode":{{(int)ModuleUpdateTransactionFailureCode.RuntimeRestoreFailed}},"hadInstalledModule":true,"payloadFiles":{{SnapshotFilesJson(rollbackFixture.Installed, omitOwnerMarker: true)}},"installedFiles":{{SnapshotFilesJson(rollbackBackup)}},"installedDirectoryIdentity":{"volumeSerialNumber":{{oldIdentity.VolumeSerialNumber}},"fileId":"{{oldIdentity.FileId}}"},"candidateDirectoryIdentity":{"volumeSerialNumber":{{promotedIdentity.VolumeSerialNumber}},"fileId":"{{promotedIdentity.FileId}}"},"backupDirectoryIdentity":{"volumeSerialNumber":{{oldIdentity.VolumeSerialNumber}},"fileId":"{{oldIdentity.FileId}}"},"promotedDirectoryIdentity":{"volumeSerialNumber":{{promotedIdentity.VolumeSerialNumber}},"fileId":"{{promotedIdentity.FileId}}"},"startedAtUtc":"{{rollbackStarted:O}}","updatedAtUtc":"{{rollbackStarted:O}}"}
+    """;
+    await File.WriteAllTextAsync(rollbackJournal, rollbackLegacy, new UTF8Encoding(false));
+    var rollbackRecovery = await rollbackService.RecoverAsync();
+    var getV2 = rollbackCoordinator.Calls.IndexOf("GetState:2.0.0");
+    var unloadV2 = rollbackCoordinator.Calls.IndexOf("Unload:2.0.0");
+    var restoreV1 = rollbackCoordinator.Calls.IndexOf("Restore:1.0.0");
+    Require(rollbackRecovery.Recovered == 1 && Fixture.Version(rollbackFixture.Installed) == "1.0.0" &&
+            getV2 >= 0 && unloadV2 > getV2 && restoreV1 > unloadV2,
+        "legacy RollbackStarted conservatively observes and unloads a possibly running v2 before restoring v1");
+
+    var completedFixture = await Fixture.CreateAsync(root, "previous-complete", "qing.previous-complete",
+        "2.0.0", "1.0.0");
+    var completedId = Guid.NewGuid();
+    var completedWork = Path.Combine(completedFixture.UserModules, ".qing-transactions", completedId.ToString("N"));
+    var completedFailed = Path.Combine(completedWork, "failed-candidate");
+    Directory.CreateDirectory(completedWork);
+    SecureWindowsFileSystem.WriteOwnerMarker(completedWork, ".qing-transaction-owner", completedId);
+    Fixture.WriteModule(completedFailed, completedFixture.ModuleId, "2.0.0", "isolated");
+    SecureWindowsFileSystem.WriteOwnerMarker(completedFailed, ".qing-transaction-owner", completedId);
+    var completedOldIdentity = SecureWindowsFileSystem.DirectoryIdentity(completedFixture.Installed);
+    var completedFailedIdentity = SecureWindowsFileSystem.DirectoryIdentity(completedFailed);
+    var completedCoordinator = new FakeCoordinator(new(true, true, true, false))
+    {
+        CurrentVersion = "1.0.0",
+        InstalledVersion = () => Fixture.Version(completedFixture.Installed)
+    };
+    await using var completedService = completedFixture.Service(completedCoordinator);
+    var completedNamespace = completedService.GetJournalNamespaceForTest(completedFixture.ModuleId);
+    Directory.CreateDirectory(completedNamespace);
+    var completedJournal = Path.Combine(completedNamespace, completedId.ToString("N") + ".json");
+    var completedAt = DateTimeOffset.UtcNow;
+    var completedSchema4 = $$"""
+    {"schemaVersion":4,"transactionId":"{{completedId:D}}","environmentIdentity":"ModuleTest","moduleId":"{{completedFixture.ModuleId}}","sourceVersion":"1.0.0","targetVersion":"2.0.0","moduleApiVersion":"experimental-0.1","packageSha256":"{{new string('a', 64)}}","verifiedStagingIdentity":"{{new string('b', 64)}}","userModulesRootIdentity":"{{SecureWindowsFileSystem.HashIdentity(SecureWindowsFileSystem.PhysicalDirectory(completedFixture.UserModules))}}","state":{{(int)ModuleUpdateTransactionState.RollbackStarted}},"previousRuntimeState":{"hasWindows":true,"isActive":true,"isLoaded":true,"hasStartupAuthorization":false},"lifecycleProgress":{"windowsClosed":true,"deactivated":true,"unloaded":true,"promotedRuntimeRestoreStarted":true,"promotedRuntimeRestored":true,"promotedRuntimeQuiescedForRollback":true,"previousRuntimeRestoreStarted":true,"previousRuntimeRestoredAfterRollback":true},"attempt":1,"lastFailureCode":{{(int)ModuleUpdateTransactionFailureCode.RuntimeRestoreFailed}},"hadInstalledModule":true,"payloadFiles":{{SnapshotFilesJson(completedFailed, omitOwnerMarker: true)}},"installedFiles":{{SnapshotFilesJson(completedFixture.Installed)}},"installedDirectoryIdentity":{"volumeSerialNumber":{{completedOldIdentity.VolumeSerialNumber}},"fileId":"{{completedOldIdentity.FileId}}"},"candidateDirectoryIdentity":{"volumeSerialNumber":{{completedFailedIdentity.VolumeSerialNumber}},"fileId":"{{completedFailedIdentity.FileId}}"},"backupDirectoryIdentity":null,"promotedDirectoryIdentity":{"volumeSerialNumber":{{completedFailedIdentity.VolumeSerialNumber}},"fileId":"{{completedFailedIdentity.FileId}}"},"startedAtUtc":"{{completedAt:O}}","updatedAtUtc":"{{completedAt:O}}"}
+    """;
+    await File.WriteAllTextAsync(completedJournal, completedSchema4, new UTF8Encoding(false));
+    var completedRecovery = await completedService.RecoverAsync();
+    Require(completedRecovery.Recovered == 1 && completedCoordinator.TotalCalls == 0 &&
+            Fixture.Version(completedFixture.Installed) == "1.0.0" && !Directory.Exists(completedWork),
+        "completed previous-runtime restoration is not mistaken for a promoted v2 during recovery");
+}
+
+static string SnapshotFilesJson(string directory, bool omitOwnerMarker = false)
+{
+    var files = SecureWindowsFileSystem.CaptureStableTreeSnapshot(directory).Entries
+        .Where(entry => !entry.IsDirectory && !entry.IsReparsePoint &&
+                        (!omitOwnerMarker || entry.RelativePath != ".qing-transaction-owner"))
+        .OrderBy(entry => entry.RelativePath, StringComparer.Ordinal)
+        .Select(entry => $"{{\"relativePath\":\"{entry.RelativePath.Replace('\\', '/')}\",\"size\":{entry.Length},\"sha256\":\"{entry.Sha256}\"}}")
+        .ToArray();
+    return "[" + string.Join(',', files) + "]";
+}
+
 static void HandleBoundRenameRaces(string root)
 {
+    var layout = SecureWindowsFileSystem.RenameLayoutForTest();
+    var fixedLayouts = SecureWindowsFileSystem.FixedArchitectureRenameLayoutsForTest();
+    Require(IntPtr.Size == 8
+            ? layout == (0, 8, 16, 20)
+            : layout == (0, 4, 8, 12), "FILE_RENAME_INFORMATION ABI layout is explicit");
+    Require(fixedLayouts.X86 == (0, 4, 8, 12) && fixedLayouts.X64 == (0, 8, 16, 20),
+        "FILE_RENAME_INFORMATION x86 and x64 offsets are both explicit");
     foreach (var operation in new[] { "installed-backup", "candidate-installed", "installed-failed", "backup-installed" })
     {
         var boundary = Path.Combine(root, "rename-" + operation);
@@ -621,6 +918,79 @@ static void HandleBoundRenameRaces(string root)
             operation + " never overwrites unknown destination");
     }
 
+    var parentBoundary = Path.Combine(root, "rename-destination-parent");
+    var parentSource = Path.Combine(parentBoundary, "source");
+    var parent = Path.Combine(parentBoundary, "parent");
+    var stolenParent = Path.Combine(parentBoundary, "stolen-parent");
+    Directory.CreateDirectory(parentSource);
+    Directory.CreateDirectory(parent);
+    File.WriteAllText(Path.Combine(parentSource, "owned.txt"), "owned");
+    var parentReplacementSucceeded = false;
+    SecureWindowsFileSystem.RenameDirectoryByIdentity(parentSource,
+        SecureWindowsFileSystem.DirectoryIdentity(parentSource), Path.Combine(parent, "destination"),
+        SecureWindowsFileSystem.PhysicalDirectory(parentBoundary),
+        SecureWindowsFileSystem.DirectoryIdentity(parent), testHook: stage =>
+        {
+            if (stage != SecureDirectoryRenameStage.DestinationParentHandleAttested) return;
+            try
+            {
+                Directory.Move(parent, stolenParent);
+                Directory.CreateDirectory(parent);
+                File.WriteAllText(Path.Combine(parent, "external.txt"), "keep");
+                parentReplacementSucceeded = true;
+            }
+            catch (IOException) { }
+        });
+    Require(!parentReplacementSucceeded &&
+            File.ReadAllText(Path.Combine(parent, "destination", "owned.txt")) == "owned",
+        "destination parent handle blocks replacement before relative rename");
+
+    foreach (var boundaryName in new[] { "user-modules", "work-root", "journal-root" })
+    {
+        var boundaryRoot = Path.Combine(root, "ancestor-" + boundaryName);
+        var source = Path.Combine(boundaryRoot, "source");
+        var ancestor = Path.Combine(boundaryRoot, "ancestor");
+        var destinationParent = Path.Combine(ancestor, "parent");
+        var movedAncestor = Path.Combine(boundaryRoot, "moved-ancestor");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(destinationParent);
+        File.WriteAllText(Path.Combine(source, "owned.txt"), boundaryName);
+        var ancestorMoved = false;
+        SecureWindowsFileSystem.RenameDirectoryByIdentity(source,
+            SecureWindowsFileSystem.DirectoryIdentity(source), Path.Combine(destinationParent, "destination"),
+            SecureWindowsFileSystem.PhysicalDirectory(boundaryRoot),
+            SecureWindowsFileSystem.DirectoryIdentity(destinationParent), testHook: stage =>
+            {
+                if (stage != SecureDirectoryRenameStage.DestinationParentHandleAttested) return;
+                try
+                {
+                    Directory.Move(ancestor, movedAncestor);
+                    Directory.CreateDirectory(destinationParent);
+                    File.WriteAllText(Path.Combine(destinationParent, "external.txt"), "keep");
+                    ancestorMoved = true;
+                }
+                catch (IOException) { }
+            });
+        if (ancestorMoved)
+        {
+            Require(File.ReadAllText(Path.Combine(movedAncestor, "parent", "destination", "owned.txt")) == boundaryName &&
+                    File.ReadAllText(Path.Combine(destinationParent, "external.txt")) == "keep" &&
+                    !Directory.Exists(Path.Combine(destinationParent, "destination")),
+                boundaryName + " ancestor replacement cannot redirect a parent-relative rename");
+        }
+        else
+        {
+            Require(File.ReadAllText(Path.Combine(destinationParent, "destination", "owned.txt")) == boundaryName,
+                boundaryName + " ancestor replacement is blocked while the parent lease is held");
+        }
+    }
+
+    foreach (var invalidLeaf in new[] { "..", "CON", "bad:name", "bad ", "bad.", "e\u0301" })
+    {
+        try { _ = SecureWindowsFileSystem.ValidateSafeLeafName(invalidLeaf); throw new Exception("unsafe leaf accepted"); }
+        catch (IOException) { }
+    }
+
 
     var changingTree = Path.Combine(root, "changing-tree");
     Directory.CreateDirectory(Path.Combine(changingTree, "child"));
@@ -645,6 +1015,69 @@ static void HandleBoundRenameRaces(string root)
         throw new Exception("tree directory replacement was accepted");
     }
     catch (IOException) { }
+
+    var heldTree = Path.Combine(root, "held-tree");
+    Directory.CreateDirectory(Path.Combine(heldTree, "child"));
+    File.WriteAllText(Path.Combine(heldTree, "module.json"), "{}");
+    File.WriteAllText(Path.Combine(heldTree, "payload.dll"), "payload");
+    File.WriteAllText(Path.Combine(heldTree, "child", "nested.txt"), "nested");
+    using (var lease = SecureWindowsFileSystem.AcquireStableTreeLease(heldTree))
+    {
+        var blocked = 0;
+        foreach (var action in new Action[]
+        {
+            () => File.WriteAllText(Path.Combine(heldTree, "payload.dll"), "changed"),
+            () => File.Delete(Path.Combine(heldTree, "module.json")),
+            () => Directory.Move(Path.Combine(heldTree, "child"), Path.Combine(heldTree, "moved-child"))
+        })
+        {
+            try { action(); } catch (IOException) { blocked++; }
+        }
+        Require(blocked == 3, "tree lease blocks file and directory mutation");
+    }
+    File.WriteAllText(Path.Combine(heldTree, "payload.dll"), "released");
+    Directory.Delete(heldTree, true);
+
+    var afterPassTree = Path.Combine(root, "after-pass-tree");
+    Directory.CreateDirectory(afterPassTree);
+    File.WriteAllText(Path.Combine(afterPassTree, "module.json"), "{}");
+    try
+    {
+        using var lease = SecureWindowsFileSystem.AcquireStableTreeLease(afterPassTree,
+            afterSecondPass: () => File.WriteAllText(Path.Combine(afterPassTree, "extra.dll"), "extra"));
+        throw new Exception("post-second-pass tree growth accepted");
+    }
+    catch (IOException) { }
+    File.Delete(Path.Combine(afterPassTree, "extra.dll"));
+    File.WriteAllText(Path.Combine(afterPassTree, "module.json"), "released");
+    Directory.Delete(afterPassTree, true);
+
+    var limitedTree = Path.Combine(root, "limited-tree");
+    Directory.CreateDirectory(limitedTree);
+    File.WriteAllText(Path.Combine(limitedTree, "module.json"), "{}");
+    File.WriteAllText(Path.Combine(limitedTree, "two.dll"), "two");
+    try
+    {
+        using var lease = SecureWindowsFileSystem.AcquireStableTreeLease(limitedTree,
+            limits: new SecureTreeLeaseLimits(MaximumFiles: 1));
+        throw new Exception("tree handle limit accepted");
+    }
+    catch (IOException) { }
+    File.WriteAllText(Path.Combine(limitedTree, "two.dll"), "released");
+    Directory.Delete(limitedTree, true);
+
+    var limitedDirectories = Path.Combine(root, "limited-directories");
+    Directory.CreateDirectory(Path.Combine(limitedDirectories, "one", "two"));
+    File.WriteAllText(Path.Combine(limitedDirectories, "one", "two", "payload.dll"), "payload");
+    try
+    {
+        using var lease = SecureWindowsFileSystem.AcquireStableTreeLease(limitedDirectories,
+            limits: new SecureTreeLeaseLimits(MaximumDirectories: 1));
+        throw new Exception("tree directory handle limit accepted");
+    }
+    catch (IOException) { }
+    Directory.Move(Path.Combine(limitedDirectories, "one"), Path.Combine(limitedDirectories, "released"));
+    Directory.Delete(limitedDirectories, true);
 }
 
 static async Task<int> RunCrashWorkerAsync(Fixture fixture, ModuleUpdateTransactionCrashPoint point)
@@ -694,34 +1127,66 @@ static void Require(bool condition, string message) { if (!condition) throw new 
 sealed class FakeCoordinator(ModuleUpdateRuntimeState state) : IModuleUpdateRuntimeCoordinator
 {
     public bool FailClose, FailDeactivate, FailUnload, StillLoaded, FailRestore;
+    public bool PartialRestoreReturnsFalse, PartialRestoreThrows;
     public bool Closed, Deactivated, Unloaded, Restored;
     public int TotalCalls;
     public int? FailUnloadOnCall;
     public int UnloadCalls;
-    public string? CurrentVersion;
+    private string? _currentVersion;
+    public string? CurrentVersion
+    {
+        get => _currentVersion;
+        set { _currentVersion = value; if (value is not null) _isLoaded = true; }
+    }
     public Func<string>? InstalledVersion;
     public List<string> Calls { get; } = [];
+    private bool _hasWindows = state.HasWindows;
+    private bool _isActive = state.IsActive;
+    private bool _isLoaded = state.IsLoaded;
     public Task<ModuleUpdateRuntimeState> GetRuntimeStateAsync(string moduleId, CancellationToken token)
-    { TotalCalls++; Calls.Add("GetState"); return Task.FromResult(state); }
+    {
+        TotalCalls++;
+        Calls.Add("GetState:" + CurrentVersion);
+        return Task.FromResult(new ModuleUpdateRuntimeState(_hasWindows, _isActive, _isLoaded,
+            state.HasStartupAuthorization));
+    }
     public Task<bool> RequestCloseWindowsAsync(string moduleId, CancellationToken token)
-    { TotalCalls++; Calls.Add("Close:" + CurrentVersion); return Task.FromResult(Closed = !FailClose); }
+    {
+        TotalCalls++; Calls.Add("Close:" + CurrentVersion); Closed = !FailClose;
+        if (Closed) _hasWindows = false;
+        return Task.FromResult(Closed);
+    }
     public Task<bool> DeactivateAsync(string moduleId, CancellationToken token)
-    { TotalCalls++; Calls.Add("Deactivate:" + CurrentVersion); return Task.FromResult(Deactivated = !FailDeactivate); }
+    {
+        TotalCalls++; Calls.Add("Deactivate:" + CurrentVersion); Deactivated = !FailDeactivate;
+        if (Deactivated) _isActive = false;
+        return Task.FromResult(Deactivated);
+    }
     public Task<bool> UnloadAsync(string moduleId, CancellationToken token)
     {
         TotalCalls++; UnloadCalls++; Calls.Add("Unload:" + CurrentVersion);
         var fail = FailUnload || FailUnloadOnCall == UnloadCalls;
-        if (!fail) CurrentVersion = null;
+        if (!fail) { CurrentVersion = null; _isLoaded = false; _hasWindows = false; _isActive = false; }
         return Task.FromResult(Unloaded = !fail);
     }
     public Task<bool> VerifyUnloadedAsync(string moduleId, CancellationToken token)
-    { TotalCalls++; Calls.Add("VerifyUnloaded"); return Task.FromResult(!StillLoaded); }
+    { TotalCalls++; Calls.Add("VerifyUnloaded"); return Task.FromResult(!StillLoaded && !_isLoaded); }
     public Task<bool> RestorePreviousRuntimeStateAsync(string moduleId, ModuleUpdateRuntimeState previous, CancellationToken token)
     {
         TotalCalls++;
-        Calls.Add("Restore:" + (InstalledVersion?.Invoke() ?? "unknown"));
+        var version = InstalledVersion?.Invoke() ?? "unknown";
+        Calls.Add("Restore:" + version);
         if (FailRestore) { FailRestore = false; return Task.FromResult(false); }
-        CurrentVersion = InstalledVersion?.Invoke();
+        if (PartialRestoreReturnsFalse || PartialRestoreThrows)
+        {
+            CurrentVersion = version; _hasWindows = previous.HasWindows;
+            _isActive = previous.IsActive; _isLoaded = previous.IsLoaded;
+            if (PartialRestoreThrows) { PartialRestoreThrows = false; throw new IOException("partial runtime restore"); }
+            PartialRestoreReturnsFalse = false;
+            return Task.FromResult(false);
+        }
+        CurrentVersion = version; _hasWindows = previous.HasWindows;
+        _isActive = previous.IsActive; _isLoaded = previous.IsLoaded;
         return Task.FromResult(Restored = true);
     }
 }

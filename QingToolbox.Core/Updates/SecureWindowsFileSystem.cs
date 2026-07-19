@@ -20,12 +20,28 @@ internal sealed record SecureTreeSnapshotEntry(string FullPath, string RelativeP
 internal sealed record SecureTreeSnapshot(SecureDirectoryIdentity RootIdentity,
     IReadOnlyList<SecureTreeSnapshotEntry> Entries);
 
-internal enum SecureDirectoryRenameStage { SourceHandleAttested, BeforeHandleRename, AfterHandleRename }
+internal enum SecureDirectoryRenameStage
+{
+    DestinationParentHandleAttested,
+    SourceHandleAttested,
+    BeforeHandleRename,
+    AfterHandleRename
+}
+
+internal sealed record SecureTreeLeaseLimits(int MaximumFiles = 2048, int MaximumDirectories = 2048,
+    int MaximumCapturedFileBytes = 64 * 1024)
+{
+    public void Validate()
+    {
+        if (MaximumFiles <= 0 || MaximumDirectories <= 0 || MaximumCapturedFileBytes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(SecureTreeLeaseLimits));
+    }
+}
 
 internal static class SecureModuleIdentity
 {
     private static readonly HashSet<string> Devices = new(StringComparer.OrdinalIgnoreCase)
-    { "CON", "PRN", "AUX", "NUL", "CLOCK$", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    { "CON", "PRN", "AUX", "NUL", "CLOCK$", "CONIN$", "CONOUT$", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
       "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9" };
 
     public static ModuleIdentityFailure Validate(string? value)
@@ -38,6 +54,8 @@ internal static class SecureModuleIdentity
             value.Split('.').Any(Devices.Contains)) return ModuleIdentityFailure.Reserved;
         return ModuleIdentityFailure.None;
     }
+
+    internal static bool IsDeviceName(string value) => Devices.Contains(value);
 }
 
 internal static class SecureWindowsFileSystem
@@ -53,12 +71,15 @@ internal static class SecureWindowsFileSystem
     private const uint ShareWrite = 2;
     private const uint OpenExisting = 3;
     private const uint OpenAlways = 4;
+    private const uint CreateNew = 1;
     private const uint Normal = 0x80;
     private const uint BackupSemantics = 0x02000000;
     private const uint OpenReparse = 0x00200000;
     private const int FileAttributeTagInfo = 9;
     private const int FileIdInfoClass = 18;
-    private const int FileRenameInfoClass = 3;
+    private const int FileRenameInformationClass = 10;
+    private const int DefaultTreeMaximumFiles = 2048;
+    private const int DefaultTreeMaximumDirectories = 2048;
 
     public static string ValidateAbsoluteNonRoot(string path)
     {
@@ -157,8 +178,10 @@ internal static class SecureWindowsFileSystem
         var source = Path.GetFullPath(sourcePath);
         var destination = Path.GetFullPath(destinationPath);
         var destinationParent = Path.GetDirectoryName(destination) ?? throw new IOException("Rename destination has no parent.");
+        var destinationLeaf = ValidateSafeLeafName(Path.GetFileName(destination));
         using var parentLease = AcquireDirectoryLease(destinationParent, expectedPhysicalAllowedRoot,
             expectedDestinationParentIdentity);
+        testHook?.Invoke(SecureDirectoryRenameStage.DestinationParentHandleAttested);
         using var sourceHandle = CreateFile(source, DeleteAccess | ReadAttributes, ShareRead | ShareWrite,
             IntPtr.Zero, OpenExisting, BackupSemantics | OpenReparse, IntPtr.Zero);
         if (sourceHandle.IsInvalid) throw Win32IOException("Rename source open");
@@ -169,12 +192,110 @@ internal static class SecureWindowsFileSystem
         if (Directory.Exists(destination) || File.Exists(destination)) throw new IOException("Rename destination exists.");
         parentLease.Verify();
         testHook?.Invoke(SecureDirectoryRenameStage.BeforeHandleRename);
-        SetRenameInformation(sourceHandle, destination);
+        SetRenameInformation(sourceHandle, parentLease, destinationLeaf, replaceIfExists: false);
         testHook?.Invoke(SecureDirectoryRenameStage.AfterHandleRename);
         parentLease.Verify();
-        if (Directory.Exists(source) || File.Exists(source) || !Directory.Exists(destination) ||
-            DirectoryIdentity(destination) != expectedSourceIdentity)
+        if (DirectoryIdentity(sourceHandle) != expectedSourceIdentity ||
+            !Path.GetFileName(FinalPath(sourceHandle)).Equals(destinationLeaf, StringComparison.OrdinalIgnoreCase))
             throw new IOException("Handle rename postcondition failed.");
+    }
+
+    public static void RenameLeasedDirectory(SecureTreeLease sourceLease, string sourcePath, string destinationPath,
+        string expectedPhysicalAllowedRoot, SecureDirectoryIdentity expectedDestinationParentIdentity,
+        Action<SecureDirectoryRenameStage>? testHook = null)
+    {
+        ArgumentNullException.ThrowIfNull(sourceLease);
+        var source = Path.GetFullPath(sourcePath);
+        var destination = Path.GetFullPath(destinationPath);
+        var destinationParent = Path.GetDirectoryName(destination) ?? throw new IOException("Rename destination has no parent.");
+        var destinationLeaf = ValidateSafeLeafName(Path.GetFileName(destination));
+        using var parentLease = AcquireDirectoryLease(destinationParent, expectedPhysicalAllowedRoot,
+            expectedDestinationParentIdentity);
+        testHook?.Invoke(SecureDirectoryRenameStage.DestinationParentHandleAttested);
+        if (Directory.Exists(destination) || File.Exists(destination)) throw new IOException("Rename destination exists.");
+        sourceLease.UseRootHandle(sourceHandle =>
+        {
+            testHook?.Invoke(SecureDirectoryRenameStage.SourceHandleAttested);
+            parentLease.Verify();
+            sourceLease.PrepareForRename(source);
+            testHook?.Invoke(SecureDirectoryRenameStage.BeforeHandleRename);
+            SetRenameInformation(sourceHandle, parentLease, destinationLeaf, replaceIfExists: false);
+            testHook?.Invoke(SecureDirectoryRenameStage.AfterHandleRename);
+        });
+        parentLease.Verify();
+        sourceLease.VerifyAtPath(destination);
+    }
+
+    public static void RenameFileByIdentity(string sourcePath, SecureDirectoryIdentity expectedSourceIdentity,
+        SecureDirectoryLease destinationParentLease, string destinationLeaf, string expectedPhysicalAllowedRoot,
+        bool replaceIfExists, Action<SecureDirectoryRenameStage>? testHook = null)
+    {
+        ArgumentNullException.ThrowIfNull(destinationParentLease);
+        var source = Path.GetFullPath(sourcePath);
+        var leaf = ValidateSafeLeafName(destinationLeaf);
+        destinationParentLease.Verify();
+        testHook?.Invoke(SecureDirectoryRenameStage.DestinationParentHandleAttested);
+        using var sourceHandle = CreateFile(source, DeleteAccess | ReadAttributes, ShareRead | ShareWrite,
+            IntPtr.Zero, OpenExisting, Normal | OpenReparse, IntPtr.Zero);
+        if (sourceHandle.IsInvalid) throw Win32IOException("Rename source file open");
+        if (IsReparse(sourceHandle) || DirectoryIdentity(sourceHandle) != expectedSourceIdentity ||
+            !IsWithin(expectedPhysicalAllowedRoot, FinalPath(sourceHandle)))
+            throw new IOException("Rename source file identity rejected.");
+        testHook?.Invoke(SecureDirectoryRenameStage.SourceHandleAttested);
+        destinationParentLease.Verify();
+        testHook?.Invoke(SecureDirectoryRenameStage.BeforeHandleRename);
+        SetRenameInformation(sourceHandle, destinationParentLease, leaf, replaceIfExists);
+        testHook?.Invoke(SecureDirectoryRenameStage.AfterHandleRename);
+        destinationParentLease.Verify();
+        if (DirectoryIdentity(sourceHandle) != expectedSourceIdentity ||
+            !Path.GetFileName(FinalPath(sourceHandle)).Equals(leaf, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Handle file rename postcondition failed.");
+    }
+
+    public static void WriteAndRenameFile(string tempPath, byte[] bytes,
+        SecureDirectoryLease destinationParentLease, string destinationLeaf,
+        string expectedPhysicalAllowedRoot, bool replaceIfExists, Action? tempWritten = null,
+        Action<SecureDirectoryRenameStage>? renameHook = null)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        ArgumentNullException.ThrowIfNull(destinationParentLease);
+        var temp = Path.GetFullPath(tempPath);
+        var leaf = ValidateSafeLeafName(destinationLeaf);
+        destinationParentLease.Verify();
+        using var handle = CreateFile(temp, GenericRead | GenericWrite | DeleteAccess, ShareRead,
+            IntPtr.Zero, CreateNew, Normal | OpenReparse, IntPtr.Zero);
+        if (handle.IsInvalid) throw Win32IOException("Journal temp create");
+        var renamed = false;
+        try
+        {
+            if (IsReparse(handle) || !IsWithin(expectedPhysicalAllowedRoot, FinalPath(handle)))
+                throw new IOException("Journal temp escaped namespace.");
+            var identity = DirectoryIdentity(handle);
+            RandomAccess.Write(handle, bytes, 0);
+            RandomAccess.FlushToDisk(handle);
+            if (RandomAccess.GetLength(handle) != bytes.LongLength)
+                throw new IOException("Journal temp length changed.");
+            var verified = new byte[bytes.Length];
+            if (RandomAccess.Read(handle, verified, 0) != verified.Length ||
+                !CryptographicOperations.FixedTimeEquals(bytes, verified))
+                throw new IOException("Journal temp content changed.");
+            tempWritten?.Invoke();
+            destinationParentLease.Verify();
+            renameHook?.Invoke(SecureDirectoryRenameStage.DestinationParentHandleAttested);
+            renameHook?.Invoke(SecureDirectoryRenameStage.SourceHandleAttested);
+            renameHook?.Invoke(SecureDirectoryRenameStage.BeforeHandleRename);
+            SetRenameInformation(handle, destinationParentLease, leaf, replaceIfExists);
+            renamed = true;
+            renameHook?.Invoke(SecureDirectoryRenameStage.AfterHandleRename);
+            destinationParentLease.Verify();
+            if (DirectoryIdentity(handle) != identity ||
+                !Path.GetFileName(FinalPath(handle)).Equals(leaf, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("Journal handle rename postcondition failed.");
+        }
+        finally
+        {
+            if (!renamed) TryDeleteByHandle(handle);
+        }
     }
 
     public static IReadOnlyList<SecureTreeEntry> WalkTreeNoFollow(string root)
@@ -212,44 +333,151 @@ internal static class SecureWindowsFileSystem
 
     public static SecureTreeSnapshot CaptureStableTreeSnapshot(string root, Action? betweenPasses = null)
     {
-        var first = CaptureTreeSnapshotOnce(root);
-        betweenPasses?.Invoke();
-        var second = CaptureTreeSnapshotOnce(root);
-        if (first.RootIdentity != second.RootIdentity || !first.Entries.SequenceEqual(second.Entries))
-            throw new IOException("Tree changed during stable snapshot.");
-        return second;
+        using var lease = AcquireStableTreeLease(root, betweenPasses);
+        return lease.Snapshot;
     }
 
-    private static SecureTreeSnapshot CaptureTreeSnapshotOnce(string root)
+    public static SecureTreeLease AcquireStableTreeLease(string root, Action? betweenPasses = null,
+        Action? afterSecondPass = null, SecureTreeLeaseLimits? limits = null)
     {
-        var physicalRoot = PhysicalDirectory(root);
-        var rootIdentity = DirectoryIdentity(root);
-        var entries = new List<SecureTreeSnapshotEntry>();
-        foreach (var entry in WalkTreeNoFollow(root).OrderBy(item => item.RelativePath, StringComparer.Ordinal))
+        limits ??= new(DefaultTreeMaximumFiles, DefaultTreeMaximumDirectories);
+        limits.Validate();
+        using var first = AcquireTreeLeaseOnce(root, limits, rootRenameAccess: false);
+        betweenPasses?.Invoke();
+        var second = AcquireTreeLeaseOnce(root, limits, rootRenameAccess: true);
+        try
         {
-            if (entry.IsReparsePoint)
-            {
-                entries.Add(new(entry.FullPath, entry.RelativePath, entry.IsDirectory, true,
-                    default, 0, string.Empty));
-                continue;
-            }
-            if (entry.IsDirectory)
-            {
-                entries.Add(new(entry.FullPath, entry.RelativePath, true, false,
-                    entry.DirectoryIdentity!.Value, 0, string.Empty));
-                continue;
-            }
-            using var handle = OpenStableRead(entry.FullPath, physicalRoot);
-            var identity = DirectoryIdentity(handle);
-            var length = RandomAccess.GetLength(handle);
-            using var stream = new FileStream(handle, FileAccess.Read, 65536, false);
-            var hash = SHA256.HashData(stream);
-            if (RandomAccess.GetLength(handle) != length) throw new IOException("Tree file changed during snapshot.");
-            entries.Add(new(entry.FullPath, entry.RelativePath, false, false, identity, length,
-                Convert.ToHexString(hash).ToLowerInvariant()));
+            if (!TreeSnapshotsEquivalent(first.Snapshot, second.Snapshot))
+                throw new IOException("Tree changed during stable snapshot.");
+            afterSecondPass?.Invoke();
+            second.VerifyAtPath(root);
+            return second;
         }
-        if (DirectoryIdentity(root) != rootIdentity) throw new IOException("Tree root changed during snapshot.");
-        return new(rootIdentity, entries);
+        catch { second.Dispose(); throw; }
+    }
+
+    internal static SecureTreeLease AcquireTreeLeaseOnce(string root, SecureTreeLeaseLimits limits,
+        bool rootRenameAccess)
+    {
+        var fullRoot = Path.GetFullPath(root);
+        var physicalRoot = PhysicalDirectory(fullRoot);
+        var handles = new List<SecureTreeLeasedHandle>();
+        SafeFileHandle? rootHandle = null;
+        try
+        {
+            rootHandle = CreateFile(fullRoot, (rootRenameAccess ? DeleteAccess : 0) | ReadAttributes,
+                ShareRead | ShareWrite,
+                IntPtr.Zero, OpenExisting, BackupSemantics | OpenReparse, IntPtr.Zero);
+            if (rootHandle.IsInvalid) throw Win32IOException("Tree root lease open");
+            if (IsReparse(rootHandle) || !IsWithin(physicalRoot, FinalPath(rootHandle)))
+                throw new IOException("Tree root lease rejected.");
+            var rootIdentity = DirectoryIdentity(rootHandle);
+            var pending = new Queue<string>();
+            var entries = new List<SecureTreeSnapshotEntry>();
+            var captured = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+            var files = 0;
+            var directories = 0;
+            pending.Enqueue(fullRoot);
+            while (pending.TryDequeue(out var current))
+            {
+                foreach (var path in Directory.EnumerateFileSystemEntries(current)
+                             .OrderBy(item => Path.GetFileName(item), StringComparer.Ordinal))
+                {
+                    var relative = Path.GetRelativePath(fullRoot, path).Replace('\\', '/');
+                    var attributes = File.GetAttributes(path);
+                    var isDirectory = (attributes & FileAttributes.Directory) != 0;
+                    var isReparse = (attributes & FileAttributes.ReparsePoint) != 0;
+                    if (isReparse)
+                    {
+                        entries.Add(new(path, relative, isDirectory, true, default, 0, string.Empty));
+                        continue;
+                    }
+                    if (isDirectory)
+                    {
+                        if (++directories > limits.MaximumDirectories)
+                            throw new IOException("Tree directory handle limit exceeded.");
+                        var handle = CreateFile(path, ReadAttributes, ShareRead | ShareWrite,
+                            IntPtr.Zero, OpenExisting, BackupSemantics | OpenReparse, IntPtr.Zero);
+                        if (handle.IsInvalid) throw Win32IOException("Tree directory lease open");
+                        try
+                        {
+                            if (IsReparse(handle) || !IsWithin(physicalRoot, FinalPath(handle)))
+                                throw new IOException("Tree directory lease escaped root.");
+                            var identity = DirectoryIdentity(handle);
+                            handles.Add(new(relative, true, handle, identity, 0, string.Empty));
+                            entries.Add(new(path, relative, true, false, identity, 0, string.Empty));
+                            pending.Enqueue(path);
+                        }
+                        catch { handle.Dispose(); throw; }
+                        continue;
+                    }
+
+                    if (++files > limits.MaximumFiles) throw new IOException("Tree file handle limit exceeded.");
+                    var fileHandle = CreateFile(path, GenericRead, ShareRead, IntPtr.Zero, OpenExisting,
+                        Normal | OpenReparse, IntPtr.Zero);
+                    if (fileHandle.IsInvalid) throw Win32IOException("Tree file lease open");
+                    try
+                    {
+                        if (IsReparse(fileHandle) || !IsWithin(physicalRoot, FinalPath(fileHandle)))
+                            throw new IOException("Tree file lease escaped root.");
+                        var identity = DirectoryIdentity(fileHandle);
+                        var capture = relative is "module.json" or ".qing-transaction-owner";
+                        var (length, hash, bytes) = ReadStableFile(fileHandle, capture,
+                            limits.MaximumCapturedFileBytes);
+                        handles.Add(new(relative, false, fileHandle, identity, length, hash));
+                        entries.Add(new(path, relative, false, false, identity, length, hash));
+                        if (bytes is not null) captured.Add(relative, bytes);
+                    }
+                    catch { fileHandle.Dispose(); throw; }
+                }
+            }
+            var snapshot = new SecureTreeSnapshot(rootIdentity,
+                entries.OrderBy(item => item.RelativePath, StringComparer.Ordinal).ToArray());
+            return new(rootHandle, fullRoot, snapshot, handles, captured, limits);
+        }
+        catch
+        {
+            foreach (var handle in handles) handle.Dispose();
+            rootHandle?.Dispose();
+            throw;
+        }
+    }
+
+    private static (long Length, string Sha256, byte[]? CapturedBytes) ReadStableFile(
+        SafeFileHandle handle, bool capture, int maximumCapturedBytes)
+    {
+        var length = RandomAccess.GetLength(handle);
+        if (length < 0 || capture && length > maximumCapturedBytes)
+            throw new IOException("Captured tree file exceeds the safe limit.");
+        byte[]? captured = capture ? new byte[checked((int)length)] : null;
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[64 * 1024];
+        long offset = 0;
+        while (offset < length)
+        {
+            var requested = (int)Math.Min(buffer.Length, length - offset);
+            var read = RandomAccess.Read(handle, buffer.AsSpan(0, requested), offset);
+            if (read <= 0) throw new IOException("Tree file ended during lease acquisition.");
+            hash.AppendData(buffer, 0, read);
+            if (captured is not null) Buffer.BlockCopy(buffer, 0, captured, checked((int)offset), read);
+            offset += read;
+        }
+        if (RandomAccess.GetLength(handle) != length) throw new IOException("Tree file changed during lease acquisition.");
+        return (length, Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant(), captured);
+    }
+
+    internal static bool TreeSnapshotsEquivalent(SecureTreeSnapshot left, SecureTreeSnapshot right)
+    {
+        if (left.RootIdentity != right.RootIdentity || left.Entries.Count != right.Entries.Count) return false;
+        for (var index = 0; index < left.Entries.Count; index++)
+        {
+            var x = left.Entries[index];
+            var y = right.Entries[index];
+            if (!x.RelativePath.Equals(y.RelativePath, StringComparison.Ordinal) || x.IsDirectory != y.IsDirectory ||
+                x.IsReparsePoint != y.IsReparsePoint || x.ObjectIdentity != y.ObjectIdentity ||
+                x.Length != y.Length || !x.Sha256.Equals(y.Sha256, StringComparison.Ordinal)) return false;
+        }
+        return true;
     }
 
     public static SafeFileHandle OpenStableRead(string path, string physicalRoot)
@@ -383,9 +611,14 @@ internal static class SecureWindowsFileSystem
         out FileIdInformation information, uint size);
     [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern uint GetFinalPathNameByHandle(SafeFileHandle file, StringBuilder path, uint length, uint flags);
+    [DllImport("ntdll.dll")]
+    private static extern int NtSetInformationFile(SafeFileHandle file, out IoStatusBlock ioStatusBlock,
+        IntPtr information, uint size, int informationClass);
+    [DllImport("ntdll.dll")]
+    private static extern uint RtlNtStatusToDosError(int status);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetFileInformationByHandle(SafeFileHandle file, int informationClass,
-        IntPtr information, uint size);
+        ref FileDispositionInformation information, uint size);
 
     private static SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security,
         uint creation, uint flags, IntPtr template) =>
@@ -429,23 +662,103 @@ internal static class SecureWindowsFileSystem
         else if (value.StartsWith("\\\\?\\", StringComparison.Ordinal)) value = value[4..];
         return Path.GetFullPath(value);
     }
-    private static void SetRenameInformation(SafeFileHandle sourceHandle, string destinationPath)
+    internal static string ValidateSafeLeafName(string value)
     {
-        var name = Encoding.Unicode.GetBytes(Path.GetFullPath(destinationPath));
-        var nameOffset = IntPtr.Size == 8 ? 20 : 12;
-        var size = checked(nameOffset + name.Length + sizeof(char));
+        if (string.IsNullOrWhiteSpace(value) || value is "." or ".." || value.Length > 255 ||
+            value != value.Normalize(NormalizationForm.FormC) || value.EndsWith('.') || value.EndsWith(' ') ||
+            value.Any(ch => char.IsControl(ch) || ch is '/' or '\\' or ':' || Path.GetInvalidFileNameChars().Contains(ch)))
+            throw new IOException("Unsafe rename leaf rejected.");
+        var deviceStem = value.Split('.', 2)[0];
+        if (SecureModuleIdentity.IsDeviceName(deviceStem)) throw new IOException("Reserved rename leaf rejected.");
+        return value;
+    }
+
+    private static void SetRenameInformation(SafeFileHandle sourceHandle, SecureDirectoryLease destinationParentLease,
+        string destinationLeaf, bool replaceIfExists)
+    {
+        var name = Encoding.Unicode.GetBytes(ValidateSafeLeafName(destinationLeaf));
+        var replaceOffset = checked((int)Marshal.OffsetOf<FileRenameInformationHeader>(
+            nameof(FileRenameInformationHeader.ReplaceIfExists)));
+        var rootOffset = checked((int)Marshal.OffsetOf<FileRenameInformationHeader>(
+            nameof(FileRenameInformationHeader.RootDirectory)));
+        var lengthOffset = checked((int)Marshal.OffsetOf<FileRenameInformationHeader>(
+            nameof(FileRenameInformationHeader.FileNameLength)));
+        var nameOffset = checked(lengthOffset + sizeof(uint));
+        ValidateRenameLayout(replaceOffset, rootOffset, lengthOffset, nameOffset);
+        var size = checked(nameOffset + name.Length);
         var buffer = Marshal.AllocHGlobal(size);
         try
         {
             Marshal.Copy(new byte[size], 0, buffer, size);
-            Marshal.WriteByte(buffer, 0, 0);
-            Marshal.WriteIntPtr(buffer, IntPtr.Size == 8 ? 8 : 4, IntPtr.Zero);
-            Marshal.WriteInt32(buffer, IntPtr.Size == 8 ? 16 : 8, name.Length);
+            Marshal.WriteByte(buffer, replaceOffset, replaceIfExists ? (byte)1 : (byte)0);
+            Marshal.WriteInt32(buffer, lengthOffset, name.Length);
             Marshal.Copy(name, 0, buffer + nameOffset, name.Length);
-            if (!SetFileInformationByHandle(sourceHandle, FileRenameInfoClass, buffer, (uint)size))
-                throw Win32IOException("Handle-bound directory rename");
+            destinationParentLease.UseHandle(parentHandle =>
+            {
+                Marshal.WriteIntPtr(buffer, rootOffset, parentHandle);
+                var status = NtSetInformationFile(sourceHandle, out _, buffer, (uint)size,
+                    FileRenameInformationClass);
+                if (status < 0)
+                    throw new IOException($"Parent-handle-relative rename failed with NTSTATUS 0x{status:x8} " +
+                                          $"(Win32 error {RtlNtStatusToDosError(status)}).");
+            });
         }
         finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static void ValidateRenameLayout(int replaceOffset, int rootOffset, int lengthOffset, int nameOffset)
+    {
+        var valid = IntPtr.Size == 8
+            ? replaceOffset == 0 && rootOffset == 8 && lengthOffset == 16 && nameOffset == 20
+            : IntPtr.Size == 4 && replaceOffset == 0 && rootOffset == 4 && lengthOffset == 8 && nameOffset == 12;
+        if (!valid) throw new PlatformNotSupportedException("Unexpected FILE_RENAME_INFO ABI layout.");
+    }
+
+    private static void TryDeleteByHandle(SafeFileHandle handle)
+    {
+        try
+        {
+            var disposition = new FileDispositionInformation { DeleteFile = true };
+            _ = SetFileInformationByHandle(handle, 4, ref disposition,
+                (uint)Marshal.SizeOf<FileDispositionInformation>());
+        }
+        catch { }
+    }
+
+    internal static (int ReplaceIfExists, int RootDirectory, int FileNameLength, int FileName) RenameLayoutForTest()
+    {
+        var replace = checked((int)Marshal.OffsetOf<FileRenameInformationHeader>(nameof(FileRenameInformationHeader.ReplaceIfExists)));
+        var root = checked((int)Marshal.OffsetOf<FileRenameInformationHeader>(nameof(FileRenameInformationHeader.RootDirectory)));
+        var length = checked((int)Marshal.OffsetOf<FileRenameInformationHeader>(nameof(FileRenameInformationHeader.FileNameLength)));
+        var name = checked(length + sizeof(uint));
+        ValidateRenameLayout(replace, root, length, name);
+        return (replace, root, length, name);
+    }
+    internal static ((int ReplaceIfExists, int RootDirectory, int FileNameLength, int FileName) X86,
+        (int ReplaceIfExists, int RootDirectory, int FileNameLength, int FileName) X64)
+        FixedArchitectureRenameLayoutsForTest()
+    {
+        var x86Length = checked((int)Marshal.OffsetOf<FileRenameInformationHeader32>(
+            nameof(FileRenameInformationHeader32.FileNameLength)));
+        var x86 = (
+            checked((int)Marshal.OffsetOf<FileRenameInformationHeader32>(
+                nameof(FileRenameInformationHeader32.ReplaceIfExists))),
+            checked((int)Marshal.OffsetOf<FileRenameInformationHeader32>(
+                nameof(FileRenameInformationHeader32.RootDirectory))),
+            x86Length,
+            x86Length + sizeof(uint));
+        var x64Length = checked((int)Marshal.OffsetOf<FileRenameInformationHeader64>(
+            nameof(FileRenameInformationHeader64.FileNameLength)));
+        var x64 = (
+            checked((int)Marshal.OffsetOf<FileRenameInformationHeader64>(
+                nameof(FileRenameInformationHeader64.ReplaceIfExists))),
+            checked((int)Marshal.OffsetOf<FileRenameInformationHeader64>(
+                nameof(FileRenameInformationHeader64.RootDirectory))),
+            x64Length,
+            x64Length + sizeof(uint));
+        if (x86 != (0, 4, 8, 12) || x64 != (0, 8, 16, 20))
+            throw new PlatformNotSupportedException("Unexpected fixed FILE_RENAME_INFORMATION ABI layout.");
+        return (x86, x64);
     }
     private static IOException Win32IOException(string action) => new($"{action} failed with Win32 error {Marshal.GetLastPInvokeError()}.");
     [StructLayout(LayoutKind.Sequential)] private struct FileAttributeTagInformation { public uint FileAttributes; public uint ReparseTag; }
@@ -454,6 +767,38 @@ internal static class SecureWindowsFileSystem
         public ulong VolumeSerialNumber;
         public ulong FileIdLow;
         public ulong FileIdHigh;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileRenameInformationHeader
+    {
+        public byte ReplaceIfExists;
+        public IntPtr RootDirectory;
+        public uint FileNameLength;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileRenameInformationHeader32
+    {
+        public byte ReplaceIfExists;
+        public int RootDirectory;
+        public uint FileNameLength;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileRenameInformationHeader64
+    {
+        public byte ReplaceIfExists;
+        public long RootDirectory;
+        public uint FileNameLength;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoStatusBlock
+    {
+        public IntPtr Status;
+        public UIntPtr Information;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileDispositionInformation
+    {
+        [MarshalAs(UnmanagedType.Bool)] public bool DeleteFile;
     }
 }
 
@@ -470,6 +815,151 @@ internal sealed class SecureDirectoryLease : IDisposable
             !SecureWindowsFileSystem.IsWithin(_physicalRoot, SecureWindowsFileSystem.FinalPath(_handle)))
             throw new IOException("Directory lease identity changed.");
     }
+    internal void UseHandle(Action<IntPtr> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        Verify();
+        var added = false;
+        try
+        {
+            _handle.DangerousAddRef(ref added);
+            action(_handle.DangerousGetHandle());
+        }
+        finally
+        {
+            if (added) _handle.DangerousRelease();
+        }
+    }
+    public void Dispose() => _handle.Dispose();
+}
+
+internal sealed class SecureTreeLease : IDisposable
+{
+    private readonly SafeFileHandle _rootHandle;
+    private readonly IReadOnlyList<SecureTreeLeasedHandle> _handles;
+    private readonly IReadOnlyDictionary<string, byte[]> _capturedFiles;
+    private readonly SecureTreeLeaseLimits _limits;
+    private int _disposed;
+    private int _contentHandlesReleased;
+
+    internal SecureTreeLease(SafeFileHandle rootHandle, string rootPath, SecureTreeSnapshot snapshot,
+        IReadOnlyList<SecureTreeLeasedHandle> handles,
+        IReadOnlyDictionary<string, byte[]> capturedFiles, SecureTreeLeaseLimits limits)
+    {
+        _rootHandle = rootHandle;
+        RootPath = rootPath;
+        Snapshot = snapshot;
+        _handles = handles;
+        _capturedFiles = capturedFiles;
+        _limits = limits;
+    }
+
+    public string RootPath { get; }
+    public SecureTreeSnapshot Snapshot { get; }
+
+    public bool TryGetVerifiedFileBytes(string relativePath, out byte[] bytes)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        if (_capturedFiles.TryGetValue(relativePath.Replace('\\', '/'), out var stored))
+        {
+            bytes = stored.ToArray();
+            return true;
+        }
+        bytes = [];
+        return false;
+    }
+
+    public bool ContainsOrdinaryFile(string relativePath)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        var normalized = relativePath.Replace('\\', '/');
+        return Snapshot.Entries.Any(entry => !entry.IsDirectory && !entry.IsReparsePoint &&
+            entry.RelativePath.Equals(normalized, StringComparison.Ordinal));
+    }
+
+    public void VerifyAtPath(string path)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        var full = Path.GetFullPath(path);
+        if (_rootHandle.IsInvalid || _rootHandle.IsClosed ||
+            SecureWindowsFileSystem.DirectoryIdentity(_rootHandle) != Snapshot.RootIdentity ||
+            !SecureWindowsFileSystem.IsWithin(full, SecureWindowsFileSystem.FinalPath(_rootHandle)) ||
+            !SecureWindowsFileSystem.FinalPath(_rootHandle).Equals(full, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Tree root lease identity changed.");
+        if (Volatile.Read(ref _contentHandlesReleased) == 0)
+            foreach (var leased in _handles) leased.Verify(full);
+        using var current = SecureWindowsFileSystem.AcquireTreeLeaseOnce(full, _limits, rootRenameAccess: false);
+        if (!SecureWindowsFileSystem.TreeSnapshotsEquivalent(Snapshot, current.Snapshot))
+            throw new IOException("Tree changed while its lease was held.");
+    }
+
+    internal void PrepareForRename(string path)
+    {
+        VerifyAtPath(path);
+        if (Interlocked.Exchange(ref _contentHandlesReleased, 1) != 0) return;
+        foreach (var handle in _handles.Reverse()) handle.Dispose();
+    }
+
+    internal void UseRootHandle(Action<SafeFileHandle> action)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        ArgumentNullException.ThrowIfNull(action);
+        action(_rootHandle);
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        if (Interlocked.Exchange(ref _contentHandlesReleased, 1) == 0)
+            foreach (var handle in _handles.Reverse()) handle.Dispose();
+        _rootHandle.Dispose();
+    }
+}
+
+internal sealed class SecureTreeLeasedHandle : IDisposable
+{
+    private readonly SafeFileHandle _handle;
+    private readonly SecureDirectoryIdentity _identity;
+    private readonly long _length;
+    private readonly string _sha256;
+    private readonly bool _isDirectory;
+
+    public SecureTreeLeasedHandle(string relativePath, bool isDirectory, SafeFileHandle handle,
+        SecureDirectoryIdentity identity, long length, string sha256)
+    {
+        RelativePath = relativePath;
+        _isDirectory = isDirectory;
+        _handle = handle;
+        _identity = identity;
+        _length = length;
+        _sha256 = sha256;
+    }
+
+    public string RelativePath { get; }
+
+    public void Verify(string physicalRoot)
+    {
+        if (_handle.IsInvalid || _handle.IsClosed ||
+            SecureWindowsFileSystem.DirectoryIdentity(_handle) != _identity ||
+            !SecureWindowsFileSystem.IsWithin(physicalRoot, SecureWindowsFileSystem.FinalPath(_handle)))
+            throw new IOException("Tree entry lease identity changed.");
+        if (_isDirectory) return;
+        if (RandomAccess.GetLength(_handle) != _length) throw new IOException("Tree file length changed.");
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[64 * 1024];
+        long offset = 0;
+        while (offset < _length)
+        {
+            var count = (int)Math.Min(buffer.Length, _length - offset);
+            var read = RandomAccess.Read(_handle, buffer.AsSpan(0, count), offset);
+            if (read <= 0) throw new IOException("Tree file ended while lease was held.");
+            hash.AppendData(buffer, 0, read);
+            offset += read;
+        }
+        if (!Convert.ToHexString(hash.GetHashAndReset()).Equals(_sha256, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Tree file content changed while lease was held.");
+    }
+
     public void Dispose() => _handle.Dispose();
 }
 

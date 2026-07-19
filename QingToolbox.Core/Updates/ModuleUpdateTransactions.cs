@@ -79,11 +79,14 @@ internal sealed record ModuleUpdateTransactionTestHooks(
     Action<ModuleUpdateTransactionState>? JournalPersistStarting = null,
     Action? JournalTempWritten = null,
     Action? LockParentLeaseAcquired = null,
+    Action<string>? TreeLeaseAcquired = null,
+    Action<ModuleUpdateTransactionService.LifecycleProgress>? JournalProgressPersistStarting = null,
     Action<Exception>? ExceptionObserved = null);
 
 public sealed class ModuleUpdateTransactionService : IAsyncDisposable
 {
-    private const int JournalSchema = 3;
+    private const int JournalSchema = 4;
+    private const int LegacyJournalSchema = 3;
     private const string OwnershipMarkerName = ".qing-transaction-owner";
     private readonly string _environmentIdentity;
     private readonly string _userModulesRoot;
@@ -204,6 +207,8 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         var candidate = Path.Combine(work, "candidate"); var backup = Path.Combine(work, "backup");
         var failed = Path.Combine(work, "failed-candidate");
         var payload = Payload(attestation); TransactionJournal journal; bool commitPersisted = false;
+        var promotedRuntimeRestoreAttempted = false;
+        var promotedRuntimeMayBeRunning = false;
         InstalledSnapshot? installedSnapshot = null;
         if (Directory.Exists(installed))
         {
@@ -228,7 +233,7 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
                 attestation.ModuleApiVersion, attestation.PackageSha256,
                 SecureWindowsFileSystem.HashIdentity(attestation.PhysicalDirectoryIdentity),
                 SecureWindowsFileSystem.HashIdentity(_physicalUserModulesRoot), ModuleUpdateTransactionState.Preparing,
-                previousRuntime, new(false, false, false, false, false, false), 1,
+                previousRuntime, new(false, false, false, false, false, false, false, false), 1,
                 ModuleUpdateTransactionFailureCode.None,
                 installedSnapshot is not null, payload, installedSnapshot?.Files ?? [],
                 installedSnapshot?.DirectoryIdentity, null, null, null, now, now);
@@ -275,22 +280,31 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
 
             if (journal.HadInstalledModule)
             {
-                if (!ValidateInstalledSnapshot(installed, journal)) return RequireRecovery(journal);
+                using var installedLease = AcquireInstalledSnapshotLease(installed, journal);
+                if (installedLease is null) return RequireRecovery(journal);
+                _hooks?.TreeLeaseAcquired?.Invoke("installed-to-backup");
+                installedLease.VerifyAtPath(installed);
                 journal = Advance(journal, ModuleUpdateTransactionState.BackupStarted);
-                Move(installed, journal.InstalledDirectoryIdentity!.Value, backup,
+                Move(installedLease, installed, backup,
                     SecureWindowsFileSystem.DirectoryIdentity(work));
                 _hooks?.CrashPoint?.Invoke(ModuleUpdateTransactionCrashPoint.BackupMovedBeforeJournal);
                 var backupIdentity = SecureWindowsFileSystem.DirectoryIdentity(backup);
                 if (backupIdentity != journal.InstalledDirectoryIdentity) return RequireRecovery(journal);
-                if (!ValidateInstalledSnapshot(backup, journal)) return RequireRecovery(journal);
+                installedLease.VerifyAtPath(backup);
                 journal = Advance(journal with { BackupDirectoryIdentity = backupIdentity },
                     ModuleUpdateTransactionState.BackupCreated);
             }
             journal = Advance(journal, ModuleUpdateTransactionState.CandidatePromotionStarted);
-            if (!IdentityMatches(candidate, journal.CandidateDirectoryIdentity) ||
-                !ValidatePayloadTree(candidate, payload, journal.ModuleId, journal.TargetVersion,
-                    journal.TransactionId)) return RequireRecovery(journal);
-            Move(candidate, journal.CandidateDirectoryIdentity!.Value, installed, _userModulesRootIdentity);
+            using (var candidateLease = AcquirePayloadTreeLease(candidate, payload, journal.ModuleId,
+                       journal.TargetVersion, journal.TransactionId))
+            {
+                if (candidateLease is null || candidateLease.Snapshot.RootIdentity != journal.CandidateDirectoryIdentity)
+                    return RequireRecovery(journal);
+                _hooks?.TreeLeaseAcquired?.Invoke("candidate-to-installed");
+                candidateLease.VerifyAtPath(candidate);
+                Move(candidateLease, candidate, installed, _userModulesRootIdentity);
+                candidateLease.VerifyAtPath(installed);
+            }
             _hooks?.CrashPoint?.Invoke(ModuleUpdateTransactionCrashPoint.CandidateMovedBeforeJournal);
             var promotedIdentity = SecureWindowsFileSystem.DirectoryIdentity(installed);
             if (promotedIdentity != journal.CandidateDirectoryIdentity) return RequireRecovery(journal);
@@ -303,11 +317,22 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
                     ModuleUpdateTransactionFailureCode.InstalledVerificationFailed, cancellationToken);
             journal = Advance(journal, ModuleUpdateTransactionState.Verified);
             journal = Advance(journal, ModuleUpdateTransactionState.RuntimeRestoring);
+            journal = UpdateProgress(journal,
+                journal.LifecycleProgress with { PromotedRuntimeRestoreStarted = true });
+            promotedRuntimeRestoreAttempted = true;
+            promotedRuntimeMayBeRunning = true;
             if (!await _runtime.RestorePreviousRuntimeStateAsync(journal.ModuleId, journal.PreviousRuntimeState, cancellationToken))
                 return await RollbackAsync(journal, installed, candidate, backup, failed, work,
-                    ModuleUpdateTransactionFailureCode.RuntimeRestoreFailed, cancellationToken);
-            journal = UpdateProgress(journal,
-                journal.LifecycleProgress with { PromotedRuntimeRestored = true });
+                    ModuleUpdateTransactionFailureCode.RuntimeRestoreFailed, cancellationToken,
+                    promotedRuntimeRestoreAttempted, promotedRuntimeMayBeRunning);
+            var restoredProgress = journal with
+            {
+                LifecycleProgress = journal.LifecycleProgress with { PromotedRuntimeRestored = true },
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            journal = restoredProgress;
+            _hooks?.JournalProgressPersistStarting?.Invoke(journal.LifecycleProgress);
+            Persist(journal);
             _hooks?.FinalInstalledVerificationStarting?.Invoke();
             if (!ValidateInstalledCandidate(installed, payload, journal.ModuleId, journal.TargetVersion, transactionId))
                 return await RollbackAsync(journal, installed, candidate, backup, failed, work,
@@ -326,7 +351,8 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
             _hooks?.ExceptionObserved?.Invoke(exception);
             if (commitPersisted) return PostCommitPending(journal);
             return await RollbackAsync(journal, installed, candidate, backup, failed, work,
-                Map(exception, journal.State), CancellationToken.None);
+                Map(exception, journal.State), CancellationToken.None,
+                promotedRuntimeRestoreAttempted, promotedRuntimeMayBeRunning);
         }
     }
 
@@ -344,16 +370,34 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
                     SecureWindowsFileSystem.PhysicalDirectory(namespaceDirectory))) { required++; continue; }
             foreach (var path in Directory.EnumerateFiles(namespaceDirectory, "*.json", SearchOption.TopDirectoryOnly).ToArray())
             {
-                TransactionJournal journal;
-                try { journal = ReadJournal(path, namespaceDirectory); }
+                JournalEnvelope envelope;
+                try { envelope = ReadJournalEnvelope(path, namespaceDirectory); }
                 catch { required++; continue; }
                 CrashRecoverableFileLock transactionLock;
-                try { transactionLock = await AcquireTransactionLockAsync(journal.ModuleId, cancellationToken); }
+                try { transactionLock = await AcquireTransactionLockAsync(envelope.ModuleId, cancellationToken); }
                 catch { required++; continue; }
                 await using var held = transactionLock;
-                var installed = InstalledPath(journal.ModuleId); var work = WorkPath(journal.TransactionId);
+                var installed = InstalledPath(envelope.ModuleId); var work = WorkPath(envelope.TransactionId);
                 var candidate = Path.Combine(work, "candidate"); var backup = Path.Combine(work, "backup");
                 var failed = Path.Combine(work, "failed-candidate");
+                TransactionJournal journal;
+                bool legacy;
+                try
+                {
+                    journal = ReadJournal(path, namespaceDirectory, out legacy);
+                    if (journal.ModuleId != envelope.ModuleId || journal.TransactionId != envelope.TransactionId)
+                        throw new JsonException();
+                    if (legacy)
+                    {
+                        if (!ValidateLegacyMigrationSite(journal, installed, candidate, backup, failed, work))
+                        {
+                            required++;
+                            continue;
+                        }
+                        Persist(journal);
+                    }
+                }
+                catch { required++; continue; }
                 ModuleUpdateTransactionResult result;
                 if (journal.State is ModuleUpdateTransactionState.Committed or ModuleUpdateTransactionState.CleanupPending)
                     result = RecoverCommitted(journal, installed, work);
@@ -401,11 +445,21 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
                 (journal.HadInstalledModule && !Directory.Exists(installed))) return RequireRecovery(journal);
             try
             {
-                if (NeedsPreviousRuntimeRestore(journal) && !await _runtime.RestorePreviousRuntimeStateAsync(
-                        journal.ModuleId, journal.PreviousRuntimeState, token)) return RequireRecovery(journal);
                 if (NeedsPreviousRuntimeRestore(journal))
+                {
                     journal = UpdateProgress(journal,
-                        journal.LifecycleProgress with { PreviousRuntimeRestoredAfterRollback = true });
+                        journal.LifecycleProgress with { PreviousRuntimeRestoreStarted = true });
+                    if (!await _runtime.RestorePreviousRuntimeStateAsync(
+                            journal.ModuleId, journal.PreviousRuntimeState, token)) return RequireRecovery(journal);
+                    journal = journal with
+                    {
+                        LifecycleProgress = journal.LifecycleProgress with
+                        { PreviousRuntimeRestoredAfterRollback = true },
+                        UpdatedAtUtc = DateTimeOffset.UtcNow
+                    };
+                    _hooks?.JournalProgressPersistStarting?.Invoke(journal.LifecycleProgress);
+                    Persist(journal);
+                }
                 journal = Advance(journal, ModuleUpdateTransactionState.RolledBack);
                 SecureWindowsFileSystem.DeleteOwnedTree(work, OwnershipMarkerName, journal.TransactionId,
                     _physicalUserModulesRoot); DeleteJournal(journal);
@@ -436,46 +490,86 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
 
     private async Task<ModuleUpdateTransactionResult> RollbackAsync(TransactionJournal journal, string installed,
         string candidate, string backup, string failed, string work, ModuleUpdateTransactionFailureCode failure,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool promotedRuntimeRestoreAttempted = false,
+        bool promotedRuntimeMayBeRunning = false)
     {
         try
         {
-            journal = Advance(journal with { LastFailureCode = failure }, ModuleUpdateTransactionState.RollbackStarted);
-            journal = await QuiescePromotedRuntimeForRollbackAsync(journal, cancellationToken);
+            journal = journal with
+            {
+                LastFailureCode = failure,
+                State = ModuleUpdateTransactionState.RollbackStarted,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            try
+            {
+                Persist(journal);
+                _hooks?.StatePersisted?.Invoke(ModuleUpdateTransactionState.RollbackStarted);
+            }
+            catch { }
+            journal = await QuiescePromotedRuntimeForRollbackAsync(journal, cancellationToken,
+                promotedRuntimeRestoreAttempted, promotedRuntimeMayBeRunning);
             if (journal.State == ModuleUpdateTransactionState.RecoveryRequired) return RequireRecovery(journal);
             if (journal.HadInstalledModule && Directory.Exists(installed) && !Directory.Exists(backup) &&
                 !IdentityMatches(installed, journal.InstalledDirectoryIdentity)) return RequireRecovery(journal);
             if (Directory.Exists(installed) && Directory.Exists(backup))
             {
-                if (!IdentityMatches(installed, journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity) ||
-                    !SecureWindowsFileSystem.HasOwnerMarker(installed, OwnershipMarkerName, journal.TransactionId) ||
-                    !IdentityMatches(backup, journal.InstalledDirectoryIdentity) ||
-                    !ValidateInstalledSnapshot(backup, journal)) return RequireRecovery(journal);
                 if (Directory.Exists(failed) || File.Exists(failed)) return RequireRecovery(journal);
-                Move(installed, (journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity)!.Value,
-                    failed, SecureWindowsFileSystem.DirectoryIdentity(work));
+                using var promotedLease = AcquireOwnedTreeLease(installed,
+                    journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity,
+                    journal.TransactionId);
+                if (promotedLease is null || promotedLease.Snapshot.RootIdentity !=
+                    (journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity))
+                    return RequireRecovery(journal);
+                _hooks?.TreeLeaseAcquired?.Invoke("installed-to-failed-candidate");
+                promotedLease.VerifyAtPath(installed);
+                Move(promotedLease, installed, failed, SecureWindowsFileSystem.DirectoryIdentity(work));
+                promotedLease.VerifyAtPath(failed);
             }
             else if (Directory.Exists(installed) && !journal.HadInstalledModule)
             {
-                if (!IdentityMatches(installed, journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity) ||
-                    !SecureWindowsFileSystem.HasOwnerMarker(installed, OwnershipMarkerName, journal.TransactionId))
+                if (Directory.Exists(failed) || File.Exists(failed)) return RequireRecovery(journal);
+                using var promotedLease = AcquireOwnedTreeLease(installed,
+                    journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity,
+                    journal.TransactionId);
+                if (promotedLease is null || promotedLease.Snapshot.RootIdentity !=
+                    (journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity))
                     return RequireRecovery(journal);
-                Move(installed, (journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity)!.Value,
-                    failed, SecureWindowsFileSystem.DirectoryIdentity(work));
+                _hooks?.TreeLeaseAcquired?.Invoke("installed-to-failed-candidate");
+                promotedLease.VerifyAtPath(installed);
+                Move(promotedLease, installed, failed, SecureWindowsFileSystem.DirectoryIdentity(work));
+                promotedLease.VerifyAtPath(failed);
             }
             if (Directory.Exists(backup))
             {
                 if (Directory.Exists(installed) || File.Exists(installed)) return RequireRecovery(journal);
-                if (!IdentityMatches(backup, journal.InstalledDirectoryIdentity) ||
-                    !ValidateInstalledSnapshot(backup, journal)) return RequireRecovery(journal);
-                Move(backup, journal.InstalledDirectoryIdentity!.Value, installed, _userModulesRootIdentity);
+                using var backupLease = AcquireInstalledSnapshotLease(backup, journal);
+                if (backupLease is null) return RequireRecovery(journal);
+                _hooks?.TreeLeaseAcquired?.Invoke("backup-to-installed");
+                backupLease.VerifyAtPath(backup);
+                Move(backupLease, backup, installed, _userModulesRootIdentity);
+                backupLease.VerifyAtPath(installed);
                 if (!IdentityMatches(installed, journal.InstalledDirectoryIdentity)) return RequireRecovery(journal);
             }
-            if (NeedsPreviousRuntimeRestore(journal) && !await _runtime.RestorePreviousRuntimeStateAsync(
-                    journal.ModuleId, journal.PreviousRuntimeState, cancellationToken)) return RequireRecovery(journal);
             if (NeedsPreviousRuntimeRestore(journal))
+            {
                 journal = UpdateProgress(journal,
-                    journal.LifecycleProgress with { PreviousRuntimeRestoredAfterRollback = true });
+                    journal.LifecycleProgress with { PreviousRuntimeRestoreStarted = true });
+                if (!await _runtime.RestorePreviousRuntimeStateAsync(
+                        journal.ModuleId, journal.PreviousRuntimeState, cancellationToken)) return RequireRecovery(journal);
+                journal = journal with
+                {
+                    LifecycleProgress = journal.LifecycleProgress with
+                    { PreviousRuntimeRestoredAfterRollback = true },
+                    UpdatedAtUtc = DateTimeOffset.UtcNow
+                };
+                try
+                {
+                    _hooks?.JournalProgressPersistStarting?.Invoke(journal.LifecycleProgress);
+                    Persist(journal);
+                }
+                catch { return RequireRecovery(journal); }
+            }
             journal = Advance(journal, ModuleUpdateTransactionState.RolledBack);
             SecureWindowsFileSystem.DeleteOwnedTree(work, OwnershipMarkerName, journal.TransactionId, _physicalUserModulesRoot);
             DeleteJournal(journal); return new(false, journal.TransactionId, journal.State, failure, RolledBack: true);
@@ -519,7 +613,7 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         IReadOnlyList<QmodStagedFile> payload)
     {
         Directory.CreateDirectory(candidate); SecureWindowsFileSystem.WriteOwnerMarker(candidate, OwnershipMarkerName, transactionId);
-        _hooks?.CrashPoint?.Invoke(ModuleUpdateTransactionCrashPoint.CandidateCopyInProgress);
+        var completedFiles = 0;
         foreach (var file in payload)
         {
             var source = SecureWindowsFileSystem.SafeCombine(attestation.Directory, file.RelativePath);
@@ -541,6 +635,8 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
             if (copied != file.Size || RandomAccess.GetLength(sourceHandle) != before ||
                 !Convert.ToHexString(hash.GetHashAndReset()).Equals(file.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("Stable source verification failed.");
+            if (++completedFiles == 1)
+                _hooks?.CrashPoint?.Invoke(ModuleUpdateTransactionCrashPoint.CandidateCopyInProgress);
         }
         if (!ValidatePayloadTree(candidate, payload, attestation.ModuleId, attestation.TargetVersion, transactionId))
             throw new IOException("Candidate verification failed.");
@@ -565,28 +661,33 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
     private bool ValidateInstalledCandidate(string installed, IReadOnlyList<QmodStagedFile> expected,
         string moduleId, string version, Guid? marker)
     {
-        try
-        {
-            return SecureWindowsFileSystem.IsWithin(_physicalUserModulesRoot,
-                       SecureWindowsFileSystem.PhysicalDirectory(installed)) &&
-                   ValidatePayloadTree(installed, expected, moduleId, version, marker);
-        }
-        catch { return false; }
+        using var lease = AcquirePayloadTreeLease(installed, expected, moduleId, version, marker);
+        return lease is not null;
     }
 
     private static bool ValidatePayloadTree(string root, IReadOnlyList<QmodStagedFile> expected, string moduleId,
         string version, Guid? marker, bool requirePackageManifest = false)
     {
+        using var lease = AcquirePayloadTreeLease(root, expected, moduleId, version, marker,
+            requirePackageManifest);
+        return lease is not null;
+    }
+
+    private static SecureTreeLease? AcquirePayloadTreeLease(string root, IReadOnlyList<QmodStagedFile> expected,
+        string moduleId, string version, Guid? marker, bool requirePackageManifest = false)
+    {
+        SecureTreeLease? lease = null;
         try
         {
-            var physicalRoot = SecureWindowsFileSystem.PhysicalDirectory(root);
+            lease = SecureWindowsFileSystem.AcquireStableTreeLease(root);
             var expectedMap = new Dictionary<string, QmodStagedFile>(StringComparer.Ordinal);
             var expectedDirectories = new HashSet<string>(StringComparer.Ordinal);
             var collision = new HashSet<string>(StringComparer.Ordinal);
             foreach (var file in expected)
             {
                 var relative = NormalizeRelative(file.RelativePath);
-                if (!expectedMap.TryAdd(relative, file) || !collision.Add(CollisionKey(relative)) || !IsSha256(file.Sha256)) return false;
+                if (!expectedMap.TryAdd(relative, file) || !collision.Add(CollisionKey(relative)) || !IsSha256(file.Sha256))
+                    return DisposeLease();
                 var parent = Path.GetDirectoryName(relative.Replace('/', Path.DirectorySeparatorChar));
                 while (!string.IsNullOrEmpty(parent))
                 {
@@ -595,36 +696,45 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
             }
             if (marker is not null) collision.Add(CollisionKey(OwnershipMarkerName));
             var foundFiles = new HashSet<string>(StringComparer.Ordinal); var foundDirs = new HashSet<string>(StringComparer.Ordinal);
-            byte[]? manifestBytes = null;
-            foreach (var treeEntry in SecureWindowsFileSystem.CaptureStableTreeSnapshot(root).Entries)
+            foreach (var treeEntry in lease.Snapshot.Entries)
             {
-                if (treeEntry.IsReparsePoint) return false;
-                var entry = treeEntry.FullPath;
+                if (treeEntry.IsReparsePoint) return DisposeLease();
                 var relative = NormalizeRelative(treeEntry.RelativePath);
-                if (!collision.Contains(CollisionKey(relative)) && !collision.Add(CollisionKey(relative))) return false;
-                if (treeEntry.IsDirectory) { if (!expectedDirectories.Contains(relative)) return false; foundDirs.Add(relative); continue; }
+                if (!collision.Contains(CollisionKey(relative)) && !collision.Add(CollisionKey(relative))) return DisposeLease();
+                if (treeEntry.IsDirectory)
+                {
+                    if (!expectedDirectories.Contains(relative)) return DisposeLease();
+                    foundDirs.Add(relative); continue;
+                }
                 if (marker is not null && relative == OwnershipMarkerName)
                 {
-                    if (!SecureWindowsFileSystem.HasOwnerMarker(root, OwnershipMarkerName, marker.Value)) return false;
+                    if (!lease.TryGetVerifiedFileBytes(OwnershipMarkerName, out var ownerBytes) ||
+                        ownerBytes.Length != 36 || ownerBytes[0] == 0xEF ||
+                        Encoding.UTF8.GetString(ownerBytes) != marker.Value.ToString("D")) return DisposeLease();
                     foundFiles.Add(relative); continue;
                 }
-                if (!expectedMap.TryGetValue(relative, out var record)) return false;
+                if (!expectedMap.TryGetValue(relative, out var record)) return DisposeLease();
                 if (treeEntry.Length != record.Size ||
-                    !treeEntry.Sha256.Equals(record.Sha256, StringComparison.OrdinalIgnoreCase)) return false;
-                if (relative == "module.json")
-                {
-                    using var handle = SecureWindowsFileSystem.OpenStableRead(entry, physicalRoot);
-                    manifestBytes = new byte[checked((int)treeEntry.Length)];
-                    if (RandomAccess.Read(handle, manifestBytes, 0) != manifestBytes.Length) return false;
-                }
+                    !treeEntry.Sha256.Equals(record.Sha256, StringComparison.OrdinalIgnoreCase)) return DisposeLease();
                 foundFiles.Add(relative);
             }
             if (!foundDirs.SetEquals(expectedDirectories) || expectedMap.Keys.Any(key => !foundFiles.Contains(key)) ||
-                (marker is not null && !foundFiles.Contains(OwnershipMarkerName))) return false;
-            if (requirePackageManifest && !expectedMap.ContainsKey(QmodPackageStagingService.PackageManifestName)) return false;
-            return ValidateManifest(manifestBytes, moduleId, version, expectedMap);
+                (marker is not null && !foundFiles.Contains(OwnershipMarkerName))) return DisposeLease();
+            if (requirePackageManifest && !expectedMap.ContainsKey(QmodPackageStagingService.PackageManifestName))
+                return DisposeLease();
+            if (!lease.TryGetVerifiedFileBytes("module.json", out var manifestBytes) ||
+                !ValidateManifest(manifestBytes, moduleId, version, expectedMap)) return DisposeLease();
+            lease.VerifyAtPath(root);
+            return lease;
         }
-        catch { return false; }
+        catch { lease?.Dispose(); return null; }
+
+        SecureTreeLease? DisposeLease()
+        {
+            lease?.Dispose();
+            lease = null;
+            return null;
+        }
     }
 
     private static bool ValidateManifest(byte[]? bytes, string moduleId, string version,
@@ -654,29 +764,21 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
 
     private static InstalledSnapshot? ReadInstalledSnapshot(string installed)
     {
+        SecureTreeLease? lease = null;
         try
         {
-            var physicalRoot = SecureWindowsFileSystem.PhysicalDirectory(installed);
-            var directoryIdentity = SecureWindowsFileSystem.DirectoryIdentity(installed);
-            var path = Path.Combine(installed, "module.json");
-            if (!File.Exists(path)) return null;
-            byte[] manifestBytes;
-            using (var handle = SecureWindowsFileSystem.OpenStableRead(path, physicalRoot))
-            {
-                var length = RandomAccess.GetLength(handle);
-                if (length is <= 0 or > 64 * 1024) return null;
-                manifestBytes = new byte[checked((int)length)];
-                if (RandomAccess.Read(handle, manifestBytes, 0) != manifestBytes.Length) return null;
-            }
+            lease = SecureWindowsFileSystem.AcquireStableTreeLease(installed);
+            if (!lease.TryGetVerifiedFileBytes("module.json", out var manifestBytes) || manifestBytes.Length == 0)
+                return null;
             using var document = JsonDocument.Parse(manifestBytes); var root = document.RootElement;
             var id = root.GetProperty("id").GetString(); var version = root.GetProperty("version").GetString();
             var entry = NormalizeRelative(root.GetProperty("entry").GetString()!);
             if (SecureModuleIdentity.Validate(id) != ModuleIdentityFailure.None ||
                 !SemanticVersion.TryParse(version!, out _) ||
-                !File.Exists(SecureWindowsFileSystem.SafeCombine(installed, entry))) return null;
+                !lease.ContainsOrdinaryFile(entry)) return null;
             var files = new List<QmodStagedFile>();
             var collisions = new HashSet<string>(StringComparer.Ordinal);
-            var treeSnapshot = SecureWindowsFileSystem.CaptureStableTreeSnapshot(installed);
+            var treeSnapshot = lease.Snapshot;
             foreach (var treeEntry in treeSnapshot.Entries)
             {
                 if (treeEntry.IsReparsePoint) return null;
@@ -687,12 +789,12 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
                 files.Add(new(relative, treeEntry.Length, treeEntry.Sha256));
             }
             if (!files.Any(file => file.RelativePath == entry)) return null;
-            if (treeSnapshot.RootIdentity != directoryIdentity ||
-                SecureWindowsFileSystem.DirectoryIdentity(installed) != directoryIdentity) return null;
-            return new(id!, version!, entry, directoryIdentity,
+            lease.VerifyAtPath(installed);
+            return new(id!, version!, entry, treeSnapshot.RootIdentity,
                 files.OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToArray());
         }
         catch { return null; }
+        finally { lease?.Dispose(); }
     }
 
     private static bool IdentityMatches(string path, SecureDirectoryIdentity? expected)
@@ -711,6 +813,61 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
                snapshot.Files.SequenceEqual(journal.InstalledFiles);
     }
 
+    private static SecureTreeLease? AcquireInstalledSnapshotLease(string path, TransactionJournal journal)
+    {
+        SecureTreeLease? lease = null;
+        try
+        {
+            lease = SecureWindowsFileSystem.AcquireStableTreeLease(path);
+            if (!lease.TryGetVerifiedFileBytes("module.json", out var manifestBytes) || manifestBytes.Length == 0)
+                return DisposeLease();
+            using var document = JsonDocument.Parse(manifestBytes);
+            var root = document.RootElement;
+            var id = root.GetProperty("id").GetString();
+            var version = root.GetProperty("version").GetString();
+            var entry = NormalizeRelative(root.GetProperty("entry").GetString()!);
+            var files = lease.Snapshot.Entries.Where(item => !item.IsDirectory && !item.IsReparsePoint)
+                .Select(item => new QmodStagedFile(NormalizeRelative(item.RelativePath), item.Length, item.Sha256))
+                .OrderBy(item => item.RelativePath, StringComparer.Ordinal).ToArray();
+            if (lease.Snapshot.Entries.Any(item => item.IsReparsePoint) || id != journal.ModuleId ||
+                version != journal.SourceVersion || !lease.ContainsOrdinaryFile(entry) ||
+                lease.Snapshot.RootIdentity != journal.InstalledDirectoryIdentity ||
+                !files.SequenceEqual(journal.InstalledFiles)) return DisposeLease();
+            lease.VerifyAtPath(path);
+            return lease;
+        }
+        catch { lease?.Dispose(); return null; }
+
+        SecureTreeLease? DisposeLease()
+        {
+            lease?.Dispose();
+            lease = null;
+            return null;
+        }
+    }
+
+    private static SecureTreeLease? AcquireOwnedTreeLease(string path, SecureDirectoryIdentity? expectedIdentity,
+        Guid transactionId)
+    {
+        SecureTreeLease? lease = null;
+        try
+        {
+            if (expectedIdentity is null) return null;
+            lease = SecureWindowsFileSystem.AcquireStableTreeLease(path);
+            if (lease.Snapshot.RootIdentity != expectedIdentity ||
+                lease.Snapshot.Entries.Any(item => item.IsReparsePoint) ||
+                !lease.TryGetVerifiedFileBytes(OwnershipMarkerName, out var bytes) || bytes.Length != 36 ||
+                bytes[0] == 0xEF || Encoding.UTF8.GetString(bytes) != transactionId.ToString("D"))
+            {
+                lease.Dispose();
+                return null;
+            }
+            lease.VerifyAtPath(path);
+            return lease;
+        }
+        catch { lease?.Dispose(); return null; }
+    }
+
     private void EnsureCandidateParents(string root, string target)
     {
         var relative = Path.GetRelativePath(root, target); var current = root;
@@ -723,7 +880,7 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         }
     }
 
-    private void Move(string source, SecureDirectoryIdentity expectedSourceIdentity, string destination,
+    private void Move(SecureTreeLease sourceLease, string source, string destination,
         SecureDirectoryIdentity expectedDestinationParentIdentity)
     {
         if (!Directory.Exists(source) || SecureWindowsFileSystem.IsReparsePath(source) ||
@@ -731,13 +888,18 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         if (!SecureWindowsFileSystem.IsWithin(_physicalUserModulesRoot, SecureWindowsFileSystem.PhysicalDirectory(source)) ||
             !SecureWindowsFileSystem.IsWithin(_physicalUserModulesRoot,
                 SecureWindowsFileSystem.PhysicalDirectory(Path.GetDirectoryName(destination)!))) throw new IOException("Move escaped root.");
-        SecureWindowsFileSystem.RenameDirectoryByIdentity(source, expectedSourceIdentity, destination,
-            _physicalUserModulesRoot, expectedDestinationParentIdentity, overwrite: false,
+        SecureWindowsFileSystem.RenameLeasedDirectory(sourceLease, source, destination,
+            _physicalUserModulesRoot, expectedDestinationParentIdentity,
             stage => _hooks?.DirectoryRename?.Invoke(source, destination, stage));
     }
 
     private TransactionJournal UpdateProgress(TransactionJournal journal, LifecycleProgress progress)
-    { var updated = journal with { LifecycleProgress = progress, UpdatedAtUtc = DateTimeOffset.UtcNow }; Persist(updated); return updated; }
+    {
+        var updated = journal with { LifecycleProgress = progress, UpdatedAtUtc = DateTimeOffset.UtcNow };
+        _hooks?.JournalProgressPersistStarting?.Invoke(progress);
+        Persist(updated);
+        return updated;
+    }
     private TransactionJournal Advance(TransactionJournal journal, ModuleUpdateTransactionState state)
     {
         var updated = journal with { State = state, UpdatedAtUtc = DateTimeOffset.UtcNow };
@@ -746,24 +908,42 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
     private static bool NeedsPreviousRuntimeRestore(TransactionJournal journal) =>
         journal.HadInstalledModule && !journal.LifecycleProgress.PreviousRuntimeRestoredAfterRollback &&
         (journal.LifecycleProgress.WindowsClosed || journal.LifecycleProgress.Deactivated ||
-         journal.LifecycleProgress.Unloaded || journal.LifecycleProgress.PromotedRuntimeRestored);
+         journal.LifecycleProgress.Unloaded || journal.LifecycleProgress.PromotedRuntimeRestoreStarted ||
+         journal.LifecycleProgress.PromotedRuntimeRestored || journal.LifecycleProgress.PreviousRuntimeRestoreStarted);
 
     private async Task<TransactionJournal> QuiescePromotedRuntimeForRollbackAsync(
-        TransactionJournal journal, CancellationToken cancellationToken)
+        TransactionJournal journal, CancellationToken cancellationToken,
+        bool promotedRuntimeRestoreAttempted, bool promotedRuntimeMayBeRunning)
     {
-        if (!journal.LifecycleProgress.PromotedRuntimeRestored ||
-            journal.LifecycleProgress.PromotedRuntimeQuiescedForRollback) return journal;
+        var shouldInspect = !journal.LifecycleProgress.PreviousRuntimeRestoredAfterRollback &&
+                            (promotedRuntimeRestoreAttempted || promotedRuntimeMayBeRunning ||
+                            journal.LifecycleProgress.PromotedRuntimeRestoreStarted ||
+                            journal.LifecycleProgress.PromotedRuntimeRestored ||
+                            journal.State == ModuleUpdateTransactionState.RuntimeRestoring);
+        if (!shouldInspect) return journal;
         try
         {
-            if (journal.PreviousRuntimeState.HasWindows &&
+            var current = await _runtime.GetRuntimeStateAsync(journal.ModuleId, cancellationToken);
+            if (current.HasWindows &&
                 !await _runtime.RequestCloseWindowsAsync(journal.ModuleId, cancellationToken)) return Recovery(journal);
-            if (journal.PreviousRuntimeState.IsActive &&
+            if (current.IsActive &&
                 !await _runtime.DeactivateAsync(journal.ModuleId, cancellationToken)) return Recovery(journal);
-            if (journal.PreviousRuntimeState.IsLoaded &&
+            if (current.IsLoaded &&
                 !await _runtime.UnloadAsync(journal.ModuleId, cancellationToken)) return Recovery(journal);
             if (!await _runtime.VerifyUnloadedAsync(journal.ModuleId, cancellationToken)) return Recovery(journal);
-            return UpdateProgress(journal,
-                journal.LifecycleProgress with { PromotedRuntimeQuiescedForRollback = true });
+            journal = journal with
+            {
+                LifecycleProgress = journal.LifecycleProgress with
+                { PromotedRuntimeQuiescedForRollback = true },
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            try
+            {
+                _hooks?.JournalProgressPersistStarting?.Invoke(journal.LifecycleProgress);
+                Persist(journal);
+            }
+            catch { }
+            return journal;
         }
         catch { return Recovery(journal); }
     }
@@ -774,6 +954,67 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         catch { return journal with { State = ModuleUpdateTransactionState.RecoveryRequired }; }
     }
 
+    private bool ValidateLegacyMigrationSite(TransactionJournal journal, string installed, string candidate,
+        string backup, string failed, string work)
+    {
+        try
+        {
+            if (journal.State is ModuleUpdateTransactionState.RecoveryRequired or ModuleUpdateTransactionState.Failed)
+                return false;
+            var workExists = Directory.Exists(work);
+            if (File.Exists(work) || workExists &&
+                (SecureWindowsFileSystem.IsReparsePath(work) ||
+                 !SecureWindowsFileSystem.IsWithin(_physicalUserModulesRoot,
+                     SecureWindowsFileSystem.PhysicalDirectory(work)) ||
+                 !SecureWindowsFileSystem.HasOwnerMarker(work, OwnershipMarkerName, journal.TransactionId)))
+                return false;
+            if (!workExists && (Directory.Exists(candidate) || Directory.Exists(backup) || Directory.Exists(failed)))
+                return false;
+            if (Directory.Exists(candidate) && !OwnedIdentityMatches(candidate,
+                    journal.CandidateDirectoryIdentity, journal.TransactionId)) return false;
+            if (Directory.Exists(failed) && !OwnedIdentityMatches(failed,
+                    journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity,
+                    journal.TransactionId)) return false;
+            if (Directory.Exists(backup) &&
+                (!IdentityMatches(backup, journal.InstalledDirectoryIdentity) ||
+                 !ValidateInstalledSnapshot(backup, journal))) return false;
+
+            var early = journal.State is ModuleUpdateTransactionState.Preparing or
+                ModuleUpdateTransactionState.Prepared or ModuleUpdateTransactionState.Quiescing or
+                ModuleUpdateTransactionState.Quiesced;
+            if (early)
+            {
+                if (Directory.Exists(backup) || Directory.Exists(failed)) return false;
+                return journal.HadInstalledModule
+                    ? IdentityMatches(installed, journal.InstalledDirectoryIdentity) &&
+                      ValidateInstalledSnapshot(installed, journal)
+                    : !Directory.Exists(installed) && !File.Exists(installed);
+            }
+
+            if (journal.State is ModuleUpdateTransactionState.Committed or
+                ModuleUpdateTransactionState.CleanupPending)
+                return IdentityMatches(installed,
+                           journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity) &&
+                       ValidateInstalledCandidate(installed, journal.PayloadFiles, journal.ModuleId,
+                           journal.TargetVersion,
+                           SecureWindowsFileSystem.HasOwnerMarker(installed, OwnershipMarkerName,
+                               journal.TransactionId) ? journal.TransactionId : null);
+
+            if (!Directory.Exists(installed)) return Directory.Exists(backup);
+            if (Directory.Exists(backup) || !journal.HadInstalledModule)
+                return OwnedIdentityMatches(installed,
+                    journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity,
+                    journal.TransactionId);
+            return IdentityMatches(installed, journal.InstalledDirectoryIdentity) &&
+                   ValidateInstalledSnapshot(installed, journal);
+        }
+        catch { return false; }
+
+        static bool OwnedIdentityMatches(string path, SecureDirectoryIdentity? identity, Guid transactionId) =>
+            identity is not null && SecureWindowsFileSystem.DirectoryIdentity(path) == identity &&
+            SecureWindowsFileSystem.HasOwnerMarker(path, OwnershipMarkerName, transactionId);
+    }
+
     private void Persist(TransactionJournal journal)
     {
         _hooks?.JournalPersistStarting?.Invoke(journal.State);
@@ -782,45 +1023,15 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         using var namespaceLease = SecureWindowsFileSystem.AcquireDirectoryLease(
             directory, _physicalJournalRoot, namespaceIdentity);
         var final = JournalPath(journal.ModuleId, journal.TransactionId);
-        var temp = final + ".tmp-" + Guid.NewGuid().ToString("N"); var bytes = JsonSerializer.SerializeToUtf8Bytes(journal, JournalOptions);
-        try
-        {
-            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
-            { stream.Write(bytes); stream.Flush(true); }
-            _hooks?.JournalTempWritten?.Invoke();
-            using (var handle = SecureWindowsFileSystem.OpenStableRead(temp, _physicalJournalRoot))
-                if (RandomAccess.GetLength(handle) != bytes.Length) throw new IOException("Journal temp changed.");
-            if (SecureWindowsFileSystem.DirectoryIdentity(directory) != namespaceIdentity)
-                throw new IOException("Journal namespace changed.");
-            namespaceLease.Verify();
-            File.Move(temp, final, true);
-            using var finalHandle = SecureWindowsFileSystem.OpenStableRead(final, _physicalJournalRoot);
-            if (SecureWindowsFileSystem.DirectoryIdentity(directory) != namespaceIdentity)
-                throw new IOException("Journal namespace changed.");
-            namespaceLease.Verify();
-        }
-        finally { if (File.Exists(temp)) try { File.Delete(temp); } catch { } }
+        var temp = final + ".tmp-" + Guid.NewGuid().ToString("N");
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(journal, JournalOptions);
+        SecureWindowsFileSystem.WriteAndRenameFile(temp, bytes, namespaceLease, Path.GetFileName(final),
+            _physicalJournalRoot, replaceIfExists: true, _hooks?.JournalTempWritten);
     }
 
-    private TransactionJournal ReadJournal(string path, string namespaceDirectory)
+    private TransactionJournal ReadJournal(string path, string namespaceDirectory, out bool legacy)
     {
-        ValidateJournalRoot();
-        var namespaceIdentity = SecureWindowsFileSystem.DirectoryIdentity(namespaceDirectory);
-        using var namespaceLease = SecureWindowsFileSystem.AcquireDirectoryLease(
-            namespaceDirectory, _physicalJournalRoot, namespaceIdentity);
-        if (SecureWindowsFileSystem.IsReparsePath(path) || !Path.GetDirectoryName(Path.GetFullPath(path))!.Equals(
-                Path.GetFullPath(namespaceDirectory), StringComparison.OrdinalIgnoreCase)) throw new JsonException();
-        byte[] bytes;
-        using (var handle = SecureWindowsFileSystem.OpenStableRead(path, _physicalJournalRoot))
-        {
-            var length = RandomAccess.GetLength(handle); if (length is <= 0 or > 4 * 1024 * 1024) throw new JsonException();
-            bytes = new byte[checked((int)length)];
-            if (RandomAccess.Read(handle, bytes, 0) != bytes.Length || RandomAccess.GetLength(handle) != length)
-                throw new JsonException();
-        }
-        if (SecureWindowsFileSystem.DirectoryIdentity(namespaceDirectory) != namespaceIdentity) throw new JsonException();
-        namespaceLease.Verify();
-        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) throw new JsonException();
+        var bytes = ReadJournalBytes(path, namespaceDirectory);
         using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Disallow, AllowTrailingCommas = false });
         ValidateObject(document.RootElement,
         ["schemaVersion", "transactionId", "environmentIdentity", "moduleId", "sourceVersion", "targetVersion",
@@ -830,9 +1041,39 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
           "backupDirectoryIdentity", "promotedDirectoryIdentity", "startedAtUtc", "updatedAtUtc"]);
         ValidateObject(document.RootElement.GetProperty("previousRuntimeState"),
             ["hasWindows", "isActive", "isLoaded", "hasStartupAuthorization"]);
-        ValidateObject(document.RootElement.GetProperty("lifecycleProgress"),
-            ["windowsClosed", "deactivated", "unloaded", "promotedRuntimeRestored",
-             "promotedRuntimeQuiescedForRollback", "previousRuntimeRestoredAfterRollback"]);
+        var schema = document.RootElement.GetProperty("schemaVersion").GetInt32();
+        TransactionJournal journal;
+        if (schema == JournalSchema)
+        {
+            ValidateObject(document.RootElement.GetProperty("lifecycleProgress"),
+                ["windowsClosed", "deactivated", "unloaded", "promotedRuntimeRestoreStarted",
+                 "promotedRuntimeRestored", "promotedRuntimeQuiescedForRollback",
+                 "previousRuntimeRestoreStarted", "previousRuntimeRestoredAfterRollback"]);
+            journal = JsonSerializer.Deserialize<TransactionJournal>(document.RootElement, JournalOptions) ??
+                      throw new JsonException();
+            legacy = false;
+        }
+        else if (schema == LegacyJournalSchema)
+        {
+            ValidateObject(document.RootElement.GetProperty("lifecycleProgress"),
+                ["windowsClosed", "deactivated", "unloaded", "runtimeRestored"]);
+            var old = JsonSerializer.Deserialize<LegacyTransactionJournal>(document.RootElement, JournalOptions) ??
+                      throw new JsonException();
+            var restoreStarted = old.LifecycleProgress.RuntimeRestored ||
+                                 old.State == ModuleUpdateTransactionState.RuntimeRestoring ||
+                                 old.State == ModuleUpdateTransactionState.RollbackStarted;
+            journal = new(old.TransactionId, old.EnvironmentIdentity, old.ModuleId, old.SourceVersion,
+                old.TargetVersion, old.ModuleApiVersion, old.PackageSha256, old.VerifiedStagingIdentity,
+                old.UserModulesRootIdentity, old.State, old.PreviousRuntimeState,
+                new(old.LifecycleProgress.WindowsClosed, old.LifecycleProgress.Deactivated,
+                    old.LifecycleProgress.Unloaded, restoreStarted, old.LifecycleProgress.RuntimeRestored,
+                    false, false, false), old.Attempt, old.LastFailureCode, old.HadInstalledModule,
+                old.PayloadFiles, old.InstalledFiles, old.InstalledDirectoryIdentity,
+                old.CandidateDirectoryIdentity, old.BackupDirectoryIdentity, old.PromotedDirectoryIdentity,
+                old.StartedAtUtc, old.UpdatedAtUtc);
+            legacy = true;
+        }
+        else throw new JsonException();
         foreach (var file in document.RootElement.GetProperty("payloadFiles").EnumerateArray())
             ValidateObject(file, ["relativePath", "size", "sha256"]);
         foreach (var file in document.RootElement.GetProperty("installedFiles").EnumerateArray())
@@ -841,7 +1082,6 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
                      "backupDirectoryIdentity", "promotedDirectoryIdentity" })
             if (document.RootElement.GetProperty(name).ValueKind != JsonValueKind.Null)
                 ValidateObject(document.RootElement.GetProperty(name), ["volumeSerialNumber", "fileId"]);
-        var journal = JsonSerializer.Deserialize<TransactionJournal>(document.RootElement, JournalOptions) ?? throw new JsonException();
         var fileId = Path.GetFileNameWithoutExtension(path);
         if (journal.SchemaVersion != JournalSchema || journal.TransactionId.ToString("N") != fileId ||
             journal.EnvironmentIdentity != _environmentIdentity || SecureModuleIdentity.Validate(journal.ModuleId) != ModuleIdentityFailure.None ||
@@ -870,6 +1110,48 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
             if (file.Size < 0 || !IsSha256(file.Sha256) || NormalizeRelative(file.RelativePath) != file.RelativePath.Replace('\\', '/'))
                 throw new JsonException();
         return journal;
+    }
+
+    private JournalEnvelope ReadJournalEnvelope(string path, string namespaceDirectory)
+    {
+        var bytes = ReadJournalBytes(path, namespaceDirectory);
+        using var document = JsonDocument.Parse(bytes,
+            new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Disallow, AllowTrailingCommas = false });
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object) throw new JsonException();
+        var schema = root.GetProperty("schemaVersion").GetInt32();
+        var transactionId = root.GetProperty("transactionId").GetGuid();
+        var moduleId = root.GetProperty("moduleId").GetString() ?? throw new JsonException();
+        if (schema is not (JournalSchema or LegacyJournalSchema) ||
+            SecureModuleIdentity.Validate(moduleId) != ModuleIdentityFailure.None ||
+            transactionId.ToString("N") != Path.GetFileNameWithoutExtension(path) ||
+            !Path.GetFileName(namespaceDirectory).Equals(JournalNamespaceName(moduleId), StringComparison.Ordinal))
+            throw new JsonException();
+        return new(transactionId, moduleId);
+    }
+
+    private byte[] ReadJournalBytes(string path, string namespaceDirectory)
+    {
+        ValidateJournalRoot();
+        var namespaceIdentity = SecureWindowsFileSystem.DirectoryIdentity(namespaceDirectory);
+        using var namespaceLease = SecureWindowsFileSystem.AcquireDirectoryLease(
+            namespaceDirectory, _physicalJournalRoot, namespaceIdentity);
+        if (SecureWindowsFileSystem.IsReparsePath(path) || !Path.GetDirectoryName(Path.GetFullPath(path))!.Equals(
+                Path.GetFullPath(namespaceDirectory), StringComparison.OrdinalIgnoreCase)) throw new JsonException();
+        byte[] bytes;
+        using (var handle = SecureWindowsFileSystem.OpenStableRead(path, _physicalJournalRoot))
+        {
+            var length = RandomAccess.GetLength(handle);
+            if (length is <= 0 or > 4 * 1024 * 1024) throw new JsonException();
+            bytes = new byte[checked((int)length)];
+            if (RandomAccess.Read(handle, bytes, 0) != bytes.Length || RandomAccess.GetLength(handle) != length)
+                throw new JsonException();
+        }
+        if (SecureWindowsFileSystem.DirectoryIdentity(namespaceDirectory) != namespaceIdentity) throw new JsonException();
+        namespaceLease.Verify();
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            throw new JsonException();
+        return bytes;
     }
 
     private static bool ValidDirectoryIdentity(SecureDirectoryIdentity? identity) =>
@@ -976,8 +1258,22 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
 
     private sealed record InstalledSnapshot(string ModuleId, string Version, string Entry,
         SecureDirectoryIdentity DirectoryIdentity, IReadOnlyList<QmodStagedFile> Files);
+    private sealed record JournalEnvelope(Guid TransactionId, string ModuleId);
+    private sealed record LegacyLifecycleProgress(bool WindowsClosed, bool Deactivated, bool Unloaded,
+        bool RuntimeRestored);
+    private sealed record LegacyTransactionJournal(int SchemaVersion, Guid TransactionId,
+        string EnvironmentIdentity, string ModuleId, string SourceVersion, string TargetVersion,
+        string ModuleApiVersion, string PackageSha256, string VerifiedStagingIdentity,
+        string UserModulesRootIdentity, ModuleUpdateTransactionState State,
+        ModuleUpdateRuntimeState PreviousRuntimeState, LegacyLifecycleProgress LifecycleProgress, int Attempt,
+        ModuleUpdateTransactionFailureCode LastFailureCode, bool HadInstalledModule,
+        IReadOnlyList<QmodStagedFile> PayloadFiles, IReadOnlyList<QmodStagedFile> InstalledFiles,
+        SecureDirectoryIdentity? InstalledDirectoryIdentity, SecureDirectoryIdentity? CandidateDirectoryIdentity,
+        SecureDirectoryIdentity? BackupDirectoryIdentity, SecureDirectoryIdentity? PromotedDirectoryIdentity,
+        DateTimeOffset StartedAtUtc, DateTimeOffset UpdatedAtUtc);
     internal sealed record LifecycleProgress(bool WindowsClosed, bool Deactivated, bool Unloaded,
-        bool PromotedRuntimeRestored, bool PromotedRuntimeQuiescedForRollback,
+        bool PromotedRuntimeRestoreStarted, bool PromotedRuntimeRestored,
+        bool PromotedRuntimeQuiescedForRollback, bool PreviousRuntimeRestoreStarted,
         bool PreviousRuntimeRestoredAfterRollback);
     internal sealed record TransactionJournal(Guid TransactionId, string EnvironmentIdentity, string ModuleId,
         string SourceVersion, string TargetVersion, string ModuleApiVersion, string PackageSha256,

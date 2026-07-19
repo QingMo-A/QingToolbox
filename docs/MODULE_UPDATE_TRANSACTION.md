@@ -44,7 +44,7 @@ Ownership markers are required before transaction-owned recursive cleanup.
 
 ## Journal and commit point
 
-Schema 3 of the versioned, strict JSON journal records safe identities rather than private absolute
+Schema 4 of the versioned, strict JSON journal records safe identities rather than private absolute
 paths. It contains the schema and transaction IDs, environment and module IDs, source and
 target versions, module API and package SHA256, hashed Verified/UserModules physical
 identities, previous runtime state, attempt, state, failure code, timestamps, the old
@@ -52,9 +52,19 @@ program-tree fingerprint, and the volume serial plus 128-bit File ID of the inst
 candidate, backup, and promoted directory objects.
 Unknown, duplicate, missing, or invalid fields are rejected.
 
-Each transition is serialized to a temporary file, flushed to disk, and atomically moved
-over the journal on the same volume. States distinguish preparation, quiescing, backup,
-promotion, verification, runtime restoration, commit, cleanup, rollback, and recovery.
+Each transition is serialized to a uniquely named temporary file. One non-write/non-delete-shared
+handle writes, flushes, rereads, and atomically renames that same object over the journal. The
+rename uses the held Journal Namespace handle plus a validated relative leaf; it does not close
+the temp and resolve `File.Move(temp, final)` by path. States distinguish preparation, quiescing,
+backup, promotion, verification, runtime restoration, commit, cleanup, rollback, and recovery.
+
+The previous incompatible journal shape retains its real schema number 3 and has a separate,
+strict legacy reader. Recovery uses only a minimal validated envelope to select the module lock,
+rereads the complete journal and validates its owned on-disk site under that lock, then atomically
+persists schema 4 before continuing. The old `runtimeRestored` field and an uncertain
+`RollbackStarted` state are mapped conservatively. An ambiguous or unsafe legacy journal is
+preserved rather than guessed or deleted. A transitional schema 3 document carrying the schema 4
+lifecycle shape is rejected instead of accepting two formats under one number.
 
 The transaction ownership marker and backup remain present while the promoted directory is
 verified and the previous runtime intent is restored. The engine verifies the payload and
@@ -83,19 +93,43 @@ directory is restored when present, and prior runtime intent is requested again.
 ownership or restoration cannot be proven, the journal and backup are preserved as
 `RecoveryRequired`; the engine does not pretend success.
 
-All four security-critical directory transitions now use a source-directory handle opened
-with `DELETE`, directory semantics, and `FILE_FLAG_OPEN_REPARSE_POINT`, followed by
-`SetFileInformationByHandle(FileRenameInfo)`. The destination parent remains open through
-the operation. Source File ID, destination-parent File ID, physical-root membership, target
-absence, and the post-rename File ID are verified around the single handle-bound rename.
+All four security-critical directory transitions use a source-directory handle opened with
+`DELETE`, directory semantics, and `FILE_FLAG_OPEN_REPARSE_POINT`. The native rename receives
+the held destination-parent handle in `FILE_RENAME_INFORMATION.RootDirectory` and only a
+validated relative leaf name. The parent handle is add-referenced for the complete synchronous
+native call. Source File ID, destination-parent File ID, physical-root membership, target
+absence, and the source handle's post-rename File ID/name are checked around the operation.
+Replacing a string-path ancestor therefore cannot redirect the rename into a substitute parent.
 There is no `Directory.Move` fallback for installed-to-backup, candidate-to-installed,
 installed-to-failed-candidate, or backup-to-installed.
 
-Runtime progress distinguishes the promoted runtime from the restored previous runtime.
-If the promoted runtime was restored but `Committed` was not durable, rollback first closes,
-deactivates, unloads, and verifies that runtime. Only then does it restore the old directory
-and reapply the previous runtime intent. A failure to quiesce preserves installed v2, the
-backup, and the journal as `RecoveryRequired`, preventing disk-v1/runtime-v2 divergence.
+Installed, candidate, promoted, and backup validation uses `SecureTreeLease`. Both passes record
+the exact entry set, object File IDs, lengths, and SHA256 values. The retained lease owns the root,
+ordinary child-directory, and ordinary-file handles; ordinary files deny write/delete sharing,
+directories deny delete sharing, and all opens use `FILE_FLAG_OPEN_REPARSE_POINT`. The bytes used
+to parse `module.json` and the transaction owner marker are captured while hashing those same
+handles, so manifest identity and the recorded tree cannot come from different reads. File and
+directory counts are bounded and partial construction always releases acquired handles.
+
+Windows does not permit renaming a directory while descendant handles deny delete sharing. At
+the final rename boundary the engine therefore verifies the entire held lease once more, releases
+only descendant handles, retains the identity-bound root handle, performs the parent-relative
+atomic rename, and immediately reacquires and compares the exact snapshot at the new name. A
+mutation attempted before that boundary is blocked; a namespace addition in the unavoidable
+native rename interval is detected by the post-rename comparison and cannot be committed as a
+trusted payload. This is the implementable Windows boundary; this document does not claim that
+mutually incompatible descendant share modes remain open during the directory rename.
+
+Runtime progress distinguishes restore-started, promoted-restored, promoted-quiesced,
+previous-restore-started, and previous-restored states. Process-local
+`promotedRuntimeRestoreAttempted`/`promotedRuntimeMayBeRunning` flags are set before invoking
+the runtime coordinator and are not contingent on a progress-journal write succeeding. If a
+restore returns false, throws after a partial side effect, or succeeds before its progress write
+fails, rollback queries the actual current runtime, closes/deactivates/unloads what is present,
+and verifies it is unloaded before moving program directories. Only then does it restore the old
+directory and reapply previous runtime intent. Once previous-runtime restoration is durably
+complete, recovery does not mistake v1 for promoted v2. A failure to prove quiescence preserves
+installed v2, the backup, and the journal as `RecoveryRequired`.
 
 Journals are isolated below a namespace hash of physical UserModules root, environment, and
 module ID, so a corrupt journal for one module cannot block another. Journal filenames are
@@ -118,12 +152,13 @@ is opened and identified before recursion and checked again afterwards. Reparse 
 are removed as links, and every ordinary child remains bounded by the attested work root.
 Transaction and staging locks are checked against the constructor-attested physical
 LocksRoot and its File ID after opening. Journal reads use one stable handle; writes use
-`CreateNew`, flush, atomic replacement, and namespace/root File-ID checks before and after.
-Exact verification takes two complete snapshots. Each entry records type, reparse state,
-object File ID, length, and SHA256; any entry addition, removal, type change, child-directory
-replacement, or file change between passes rejects the tree before rename. LocksRoot and
-Journal namespace child operations retain stable parent-directory leases for their entire
-create/write/replace interval.
+`CreateNew`, same-handle flush/content verification, parent-handle-relative atomic replacement,
+and namespace/root File-ID checks before and after. Exact verification takes two complete
+snapshots and retains the second pass as a bounded tree lease. Each entry records type, reparse
+state, object File ID, length, and SHA256; any entry addition, removal, type change,
+child-directory replacement, or file change rejects the tree. LocksRoot and Journal namespace
+child operations retain stable parent-directory leases for their entire create/write/replace
+interval.
 Module identities share a strict lower-case Windows path-segment validator and reject device
 names plus the `.qing-` host namespace, including `.qing-transactions`.
 
@@ -133,16 +168,21 @@ names plus the `.qing-` host namespace, including `.qing-transactions`.
 installed modules at runtime. It covers successful update/new install, lifecycle and file
 failure injection, exact-tree and marker attacks, reserved identities, root overlap,
 rogue Verified roots, File-ID-preserving rename and replacement, module-isolated journal
-corruption, live lock/journal namespace replacement, deterministic source-path replacement,
-early installed-tree rejection, post-runtime commit-write rollback, promoted-runtime unload
-failure, cancellation after runtime restoration, exact-tree mutation,
+corruption, live lock/journal temp and namespace replacement, destination-parent/ancestor
+replacement, deterministic source-path replacement, early installed-tree rejection,
+post-runtime commit-write rollback, promoted-runtime unload failure, cancellation after runtime
+restoration, post-second-pass exact-tree mutation and handle-capacity cleanup,
+progress-persistence failure, partial runtime restore, strict schema 3 migration,
 lock/link boundaries, external cleanup sentinels,
 committed cleanup failures, and data/cache isolation. Five real child processes fail fast
-during candidate copy, after backup move, after candidate move, after runtime restoration, and after durable
+during a genuinely started candidate copy, after backup move, after candidate move, after runtime restoration, and after durable
 commit. The candidate-move crash case corrupts the promoted payload before recovery and
-still restores v1 by directory identity. The first three recover v1; the committed window keeps v2 and only cleans ownership
+still restores v1 by directory identity. The first four recover v1; the committed window keeps v2 and only cleans ownership
 state. Windows CI runs this required step without `continue-on-error`.
 
-Phase A remains **Engineering Complete**. Phase B has started and only the B1 transaction
-core described here is complete. Preview 2 manual acceptance items that were not run remain
-`Not Run`; this work is not evidence that those checks passed.
+Phase A remains **Engineering Complete**. The B1 transaction core described here is
+**Engineering Complete — Frozen**: it is not extended further unless a concrete security defect
+is found. B1 remains restricted to Development/ModuleTest. The next work is B2: the Production
+lifecycle adapter plus a Development-only TextTools canary. Neither has started. Preview 2 manual
+acceptance items that were not run remain `Not Run`; this work is not evidence that those checks
+passed.
