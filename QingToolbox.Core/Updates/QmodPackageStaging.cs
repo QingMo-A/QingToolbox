@@ -8,6 +8,7 @@ using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 
 [assembly: InternalsVisibleTo("QingToolbox.DevTools.ModulePackageStagingSmokeTest")]
+[assembly: InternalsVisibleTo("QingToolbox.DevTools.ModuleUpdateTransactionSmokeTest")]
 
 namespace QingToolbox.Core.Updates;
 
@@ -79,6 +80,33 @@ public enum QmodStagingFailureCode
 }
 
 public sealed record QmodStagedFile(string RelativePath, long Size, string Sha256);
+
+public sealed class QmodVerifiedStagingAttestation
+{
+    internal QmodVerifiedStagingAttestation(string directory, string physicalDirectoryIdentity,
+        string physicalVerifiedRootIdentity, string officialReleaseIdentityHash,
+        string moduleId, string targetVersion, string moduleApiVersion, string packageSha256,
+        Guid transactionId, string environmentIdentity, IReadOnlyList<QmodStagedFile> files)
+    {
+        Directory = directory; PhysicalDirectoryIdentity = physicalDirectoryIdentity;
+        PhysicalVerifiedRootIdentity = physicalVerifiedRootIdentity;
+        OfficialReleaseIdentityHash = officialReleaseIdentityHash; ModuleId = moduleId;
+        TargetVersion = targetVersion; ModuleApiVersion = moduleApiVersion; PackageSha256 = packageSha256;
+        TransactionId = transactionId; EnvironmentIdentity = environmentIdentity;
+        Files = Array.AsReadOnly(files.ToArray());
+    }
+    public string Directory { get; }
+    public string PhysicalDirectoryIdentity { get; }
+    public string PhysicalVerifiedRootIdentity { get; }
+    public string OfficialReleaseIdentityHash { get; }
+    public string ModuleId { get; }
+    public string TargetVersion { get; }
+    public string ModuleApiVersion { get; }
+    public string PackageSha256 { get; }
+    public Guid TransactionId { get; }
+    public string EnvironmentIdentity { get; }
+    public IReadOnlyList<QmodStagedFile> Files { get; }
+}
 
 public sealed record QmodStagingResult(
     bool Succeeded,
@@ -201,6 +229,32 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             if (_inflight.TryGetValue(key, out var operation)) operation.Cancellation.Cancel();
         }
         catch (Exception exception) when (exception is StagingException or ObjectDisposedException) { }
+    }
+
+    public async Task<QmodVerifiedStagingAttestation?> AttestVerifiedStagingAsync(
+        QmodStagingInput input, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        _ = ValidateStaticInputAndCreateKey(input);
+        lock (_lifecycleSync) ObjectDisposedException.ThrowIf(_disposeState != 0, this);
+        EnsureRootChain();
+        await using var packageStream = OpenAndAttestPackage(Path.GetFullPath(input.VerifiedPackage.FilePath));
+        if (packageStream.Length != input.ReleaseIdentity.ExpectedSize) return null;
+        var hash = await SHA256.HashDataAsync(packageStream, cancellationToken);
+        if (!CryptographicOperations.FixedTimeEquals(hash, Convert.FromHexString(input.ReleaseIdentity.Sha256))) return null;
+        packageStream.Position = 0;
+        await using var publicationLock = await AcquirePublicationLockAsync(input, cancellationToken);
+        var final = BuildFinalPath(input);
+        if (!Directory.Exists(final)) return null;
+        var result = await ValidateExistingStagingAsync(final, input, packageStream, cancellationToken);
+        if (!result.Succeeded) return null;
+        var metadata = await ReadAndValidateStagingMetadataAsync(
+            Path.Combine(final, StagingMetadataName), input, cancellationToken);
+        return new(final, GetPhysicalDirectoryPath(final), GetPhysicalDirectoryPath(_verifiedRoot),
+            HashOfficialReleaseIdentity(input.ReleaseIdentity.OfficialUrl), input.ReleaseIdentity.ModuleId,
+            input.ReleaseIdentity.TargetVersion, input.ModuleApiVersion,
+            input.ReleaseIdentity.Sha256.ToLowerInvariant(), metadata.TransactionId,
+            _environmentIdentity, metadata.Files.ToArray());
     }
 
     private async Task<QmodStagingResult> RunAndRemoveAsync(QmodStagingOperationKey key, QmodStagingInput input, StagingOperation operation)

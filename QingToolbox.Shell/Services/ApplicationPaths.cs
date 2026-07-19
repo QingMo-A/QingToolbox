@@ -28,6 +28,10 @@ public sealed class ApplicationPaths
         LogsDirectory = Path.Combine(LocalRoot, "logs");
         CacheDirectory = Path.Combine(LocalRoot, "cache");
         QmodStagingDirectory = Path.Combine(CacheDirectory, "ModulePackages", "Staging");
+        ModuleTransactionsDirectory = Path.Combine(CacheDirectory, "ModuleTransactions");
+        ModuleTransactionJournalDirectory = Path.Combine(ModuleTransactionsDirectory, "Journal");
+        ModuleTransactionLocksDirectory = Path.Combine(ModuleTransactionsDirectory, "Locks");
+        ModuleTransactionWorkDirectory = Path.Combine(UserModulesDirectory, ".qing-transactions");
         TempDirectory = environment.IsProduction ? Path.Combine(LocalRoot, "Temp") : Path.Combine(environment.SandboxRoot!, "temp");
         StartupDirectory = Path.Combine(LocalRoot, "Startup");
         StartupHealthPath = Path.Combine(StartupDirectory, "startup-health.json");
@@ -46,6 +50,10 @@ public sealed class ApplicationPaths
     public string LogsDirectory { get; }
     public string CacheDirectory { get; }
     public string QmodStagingDirectory { get; }
+    public string ModuleTransactionsDirectory { get; }
+    public string ModuleTransactionJournalDirectory { get; }
+    public string ModuleTransactionLocksDirectory { get; }
+    public string ModuleTransactionWorkDirectory { get; }
     public string TempDirectory { get; }
     public string StartupDirectory { get; }
     public string StartupHealthPath { get; }

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added the Development/ModuleTest-only recoverable module update transaction core with strict durable journals, physical-root locks, same-volume candidates, atomic directory promotion, rollback, and crash recovery.
+- Added immutable Verified Staging attestations bound to the physical Verified root and official release identity, with exact re-attestation before transaction mutation.
+- Added deterministic lifecycle/filesystem failure coverage and a real child-process crash recovery smoke test required by Windows CI.
 - Added strict offline `.qmod` validation and environment-isolated atomic Verified Staging without installing, replacing, loading, or activating modules.
 - Bound staging work to complete package identity, serialized publication per module/version across service instances, and added strict metadata/tree tamper detection without automatic deletion or overwrite.
 - Replaced named staging semaphores with crash-recoverable exclusive file handles, added real child-process contention/crash tests, stable-handle path attestation, Release identity binding, and disposal/capacity scheduling contracts.
