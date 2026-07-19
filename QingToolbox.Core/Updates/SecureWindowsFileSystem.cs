@@ -8,6 +8,14 @@ namespace QingToolbox.Core.Updates;
 
 internal enum ModuleIdentityFailure { None, Invalid, Reserved }
 
+internal readonly record struct SecureDirectoryIdentity(ulong VolumeSerialNumber, string FileId)
+{
+    public override string ToString() => $"{VolumeSerialNumber:x16}:{FileId}";
+}
+
+internal readonly record struct SecureTreeEntry(string FullPath, string RelativePath, bool IsDirectory,
+    bool IsReparsePoint, SecureDirectoryIdentity? DirectoryIdentity);
+
 internal static class SecureModuleIdentity
 {
     private static readonly HashSet<string> Devices = new(StringComparer.OrdinalIgnoreCase)
@@ -42,6 +50,7 @@ internal static class SecureWindowsFileSystem
     private const uint BackupSemantics = 0x02000000;
     private const uint OpenReparse = 0x00200000;
     private const int FileAttributeTagInfo = 9;
+    private const int FileIdInfoClass = 18;
 
     public static string ValidateAbsoluteNonRoot(string path)
     {
@@ -108,6 +117,47 @@ internal static class SecureWindowsFileSystem
         return FinalPath(handle);
     }
 
+    public static SecureDirectoryIdentity DirectoryIdentity(string path)
+    {
+        using var handle = OpenDirectory(path);
+        if (handle.IsInvalid) throw Win32IOException("Directory identity open");
+        if (IsReparse(handle)) throw new IOException("Reparse directory rejected.");
+        return DirectoryIdentity(handle);
+    }
+
+    public static IReadOnlyList<SecureTreeEntry> WalkTreeNoFollow(string root)
+    {
+        var fullRoot = Path.GetFullPath(root);
+        var physicalRoot = PhysicalDirectory(fullRoot);
+        var rootIdentity = DirectoryIdentity(fullRoot);
+        var pending = new Queue<(string Path, SecureDirectoryIdentity Identity)>();
+        var result = new List<SecureTreeEntry>();
+        pending.Enqueue((fullRoot, rootIdentity));
+        while (pending.TryDequeue(out var current))
+        {
+            if (DirectoryIdentity(current.Path) != current.Identity) throw new IOException("Directory changed during traversal.");
+            foreach (var entry in Directory.EnumerateFileSystemEntries(current.Path))
+            {
+                if (!IsWithin(physicalRoot, Path.GetFullPath(entry))) throw new IOException("Tree entry escaped root.");
+                var attributes = File.GetAttributes(entry);
+                var isDirectory = (attributes & FileAttributes.Directory) != 0;
+                var isReparse = (attributes & FileAttributes.ReparsePoint) != 0;
+                SecureDirectoryIdentity? identity = null;
+                if (isDirectory && !isReparse)
+                {
+                    var physical = PhysicalDirectory(entry);
+                    if (!IsWithin(physicalRoot, physical)) throw new IOException("Tree directory escaped root.");
+                    identity = DirectoryIdentity(entry);
+                    pending.Enqueue((entry, identity.Value));
+                }
+                result.Add(new(entry, Path.GetRelativePath(fullRoot, entry), isDirectory, isReparse, identity));
+            }
+            if (DirectoryIdentity(current.Path) != current.Identity) throw new IOException("Directory changed during traversal.");
+        }
+        if (DirectoryIdentity(fullRoot) != rootIdentity) throw new IOException("Tree root changed during traversal.");
+        return result;
+    }
+
     public static SafeFileHandle OpenStableRead(string path, string physicalRoot)
     {
         EnsureNoReparseAncestors(Path.GetDirectoryName(path)!);
@@ -121,9 +171,14 @@ internal static class SecureWindowsFileSystem
         catch { handle.Dispose(); throw; }
     }
 
-    public static async Task<CrashRecoverableFileLock> AcquireLockAsync(string path, CancellationToken token)
+    public static async Task<CrashRecoverableFileLock> AcquireLockAsync(string path,
+        string expectedPhysicalLockRoot, SecureDirectoryIdentity expectedLockRootIdentity, CancellationToken token)
     {
-        EnsureNoReparseAncestors(Path.GetDirectoryName(path)!);
+        var parent = Path.GetDirectoryName(path)!;
+        EnsureNoReparseAncestors(parent);
+        if (DirectoryIdentity(parent) != expectedLockRootIdentity ||
+            !PhysicalDirectory(parent).Equals(expectedPhysicalLockRoot, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Lock root identity changed.");
         while (true)
         {
             token.ThrowIfCancellationRequested();
@@ -133,7 +188,9 @@ internal static class SecureWindowsFileSystem
             {
                 try
                 {
-                    if (IsReparse(handle)) throw new IOException("Reparse lock rejected.");
+                    if (IsReparse(handle) || !IsWithin(expectedPhysicalLockRoot, FinalPath(handle)) ||
+                        DirectoryIdentity(parent) != expectedLockRootIdentity)
+                        throw new IOException("Lock escaped physical root.");
                     var recovered = RandomAccess.GetLength(handle) != 0;
                     RandomAccess.SetLength(handle, 0);
                     RandomAccess.Write(handle, Encoding.ASCII.GetBytes(Environment.ProcessId.ToString(CultureInfo.InvariantCulture)), 0);
@@ -195,22 +252,22 @@ internal static class SecureWindowsFileSystem
 
     private static void DeleteTreeCore(string directory, string physicalRoot)
     {
-        EnsureOrdinaryDirectory(directory);
-        foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+        var rootIdentity = DirectoryIdentity(directory);
+        var entries = WalkTreeNoFollow(directory)
+            .OrderByDescending(entry => entry.RelativePath.Count(ch => ch is '/' or '\\'))
+            .ThenByDescending(entry => entry.RelativePath.Length)
+            .ToArray();
+        foreach (var entry in entries)
         {
-            var attributes = File.GetAttributes(entry);
-            if ((attributes & FileAttributes.ReparsePoint) != 0)
+            if (entry.IsReparsePoint)
             {
-                if ((attributes & FileAttributes.Directory) != 0) Directory.Delete(entry, false); else File.Delete(entry);
+                if (entry.IsDirectory) Directory.Delete(entry.FullPath, false); else File.Delete(entry.FullPath);
                 continue;
             }
-            if ((attributes & FileAttributes.Directory) != 0)
-            {
-                if (!IsWithin(physicalRoot, PhysicalDirectory(entry))) throw new IOException("Delete traversal escaped root.");
-                DeleteTreeCore(entry, physicalRoot);
-            }
-            else File.Delete(entry);
+            if (entry.IsDirectory) Directory.Delete(entry.FullPath, false); else File.Delete(entry.FullPath);
         }
+        if (DirectoryIdentity(directory) != rootIdentity || !IsWithin(physicalRoot, PhysicalDirectory(directory)))
+            throw new IOException("Delete root identity changed.");
         Directory.Delete(directory, false);
     }
 
@@ -223,6 +280,9 @@ internal static class SecureWindowsFileSystem
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int infoClass,
         out FileAttributeTagInformation information, uint size);
+    [DllImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx", SetLastError = true)]
+    private static extern bool GetFileIdInformationByHandle(SafeFileHandle file, int infoClass,
+        out FileIdInformation information, uint size);
     [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern uint GetFinalPathNameByHandle(SafeFileHandle file, StringBuilder path, uint length, uint flags);
 
@@ -247,6 +307,13 @@ internal static class SecureWindowsFileSystem
                 (uint)Marshal.SizeOf<FileAttributeTagInformation>())) throw Win32IOException("Handle attribute query");
         return (info.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0;
     }
+    private static SecureDirectoryIdentity DirectoryIdentity(SafeFileHandle handle)
+    {
+        if (!GetFileIdInformationByHandle(handle, FileIdInfoClass, out FileIdInformation info,
+                (uint)Marshal.SizeOf<FileIdInformation>())) throw Win32IOException("Directory file ID query");
+        return new(info.VolumeSerialNumber,
+            $"{info.FileIdHigh:x16}{info.FileIdLow:x16}");
+    }
     private static string FinalPath(SafeFileHandle handle)
     {
         var buffer = new StringBuilder(512); var length = GetFinalPathNameByHandle(handle, buffer, 512, 0);
@@ -263,6 +330,12 @@ internal static class SecureWindowsFileSystem
     }
     private static IOException Win32IOException(string action) => new($"{action} failed with Win32 error {Marshal.GetLastPInvokeError()}.");
     [StructLayout(LayoutKind.Sequential)] private struct FileAttributeTagInformation { public uint FileAttributes; public uint ReparseTag; }
+    [StructLayout(LayoutKind.Sequential)] private struct FileIdInformation
+    {
+        public ulong VolumeSerialNumber;
+        public ulong FileIdLow;
+        public ulong FileIdHigh;
+    }
 }
 
 internal sealed class CrashRecoverableFileLock : IAsyncDisposable

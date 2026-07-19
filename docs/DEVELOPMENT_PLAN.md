@@ -352,6 +352,14 @@ Staging→candidate 使用同一稳定句柄完成物理边界认证、Hash 与 
 Reparse。四个真实子进程覆盖 backup/promotion/runtime-restore/commit 窗口。因此阶段 B1 事务核心
 保持 **Engineering Complete**，但完整阶段 B、Production UI 和真实 TextTools 金丝雀仍未完成。
 
+B1 最终可信边界进一步要求事务注入宿主配置的 `IQmodVerifiedStagingAttestor`，不能信任 Attestation
+自报的 root/environment。Verified、Locks、Journal 根均绑定构造时认证的物理目录和 Windows File ID；
+schema 3 Journal 记录 installed/candidate/backup/promoted 目录身份以及旧程序树指纹。内容 Hash 与目录
+所有权分别证明：同一 candidate 目录内容损坏时可隔离并恢复经过指纹验证的旧版本，目录对象被外部替换
+时则保持现场并进入 `RecoveryRequired`。树验证和清理统一逐层枚举且不跟随 Reparse，旧模块完整预检
+早于任何生命周期调用。下一步 B2 仍是 Production 生命周期适配器和 Development-only TextTools
+金丝雀；本轮没有开始它们，也没有开始宿主自更新。
+
 目标流程：
 
 `Verified qmod → Staging → 关闭旧模块 → 卸载 → 原子替换 → 启动验证 → 失败回滚`

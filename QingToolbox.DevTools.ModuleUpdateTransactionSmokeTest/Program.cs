@@ -80,6 +80,14 @@ static async Task ValidationAndLifecycleAsync(string root)
         Require((await service.ExecuteAsync(new(tampered.Attestation))).FailureCode ==
             ModuleUpdateTransactionFailureCode.VerifiedStagingInvalid, "staging tamper rejected before mutation");
 
+    var trustedRoot = await Fixture.CreateAsync(root, "trusted-root", "qing.root-bound", "2.0.0", "1.0.0");
+    var rogueRoot = await Fixture.CreateAsync(root, "rogue-root", "qing.root-bound", "2.0.0", "1.0.0");
+    var rootCoordinator = new FakeCoordinator(new(true, true, true, false));
+    await using (var service = trustedRoot.Service(rootCoordinator))
+        Require((await service.ExecuteAsync(new(rogueRoot.Attestation))).FailureCode ==
+                ModuleUpdateTransactionFailureCode.VerifiedStagingInvalid && rootCoordinator.TotalCalls == 0,
+            "rogue verified root attestation rejected before runtime coordination");
+
     var corrupt = await Fixture.CreateAsync(root, "corrupt", "qing.corrupt", "2.0.0", "1.0.0");
     await File.WriteAllTextAsync(Path.Combine(corrupt.Installed, "module.json"), "{}");
     await using (var service = corrupt.Service(new FakeCoordinator(new(false, false, false, false))))
@@ -143,10 +151,29 @@ static async Task FailureRollbackAsync(string root)
     await using (var service = verify.Service(new FakeCoordinator(new(false, false, false, false)), verifyHooks))
     {
         var result = await service.ExecuteAsync(new(verify.Attestation));
-        Require(result.FailureCode == ModuleUpdateTransactionFailureCode.RecoveryRequired && !result.RolledBack,
-            "tampered installed directory is preserved for recovery instead of being moved");
+        Require(result.FailureCode == ModuleUpdateTransactionFailureCode.InstalledVerificationFailed && result.RolledBack,
+            "transaction-owned candidate corruption rolls back by directory identity");
     }
-    Require(Fixture.Version(verify.Installed) == "2.0.0", "unknown installed replacement is not overwritten");
+    Require(Fixture.Version(verify.Installed) == "1.0.0", "corrupt transaction candidate restores verified v1");
+
+    var corruptBackup = await Fixture.CreateAsync(root, "corrupt-backup", "qing.corrupt-backup", "2.0.0", "1.0.0");
+    var corruptBackupHooks = new ModuleUpdateTransactionTestHooks(
+        DirectoryMove: (source, destination) =>
+        {
+            Directory.Move(source, destination);
+            if (Path.GetFileName(destination) == "backup")
+                File.WriteAllText(Path.Combine(destination, "payload.dll"), "tampered-old-program");
+        },
+        InstalledVerificationStarting: () =>
+            File.WriteAllText(Path.Combine(corruptBackup.Installed, "payload.dll"), "force-rollback"));
+    await using (var service = corruptBackup.Service(
+                     new FakeCoordinator(new(false, false, false, false)), corruptBackupHooks))
+    {
+        var result = await service.ExecuteAsync(new(corruptBackup.Attestation));
+        Require(result.FailureCode == ModuleUpdateTransactionFailureCode.RecoveryRequired &&
+                Directory.Exists(corruptBackup.Installed),
+            "corrupt backup is never restored as trusted old program");
+    }
 
     var restore = await Fixture.CreateAsync(root, "restore-failure", "qing.restore", "2.0.0", "1.0.0");
     var restoreCoordinator = new FakeCoordinator(new(false, false, true, false)) { FailRestore = true };
@@ -195,6 +222,18 @@ static async Task SecurityHardeningAsync(string root)
     using (var handle = SecureWindowsFileSystem.OpenStableRead(longFile,
                SecureWindowsFileSystem.PhysicalDirectory(longRoot)))
         Require(RandomAccess.GetLength(handle) == 6, "extended-length stable handle opens beyond MAX_PATH");
+
+    var identitySource = Path.Combine(root, "identity-source");
+    var identityDestination = Path.Combine(root, "identity-destination");
+    Directory.CreateDirectory(identitySource);
+    var identityBefore = SecureWindowsFileSystem.DirectoryIdentity(identitySource);
+    Directory.Move(identitySource, identityDestination);
+    Require(SecureWindowsFileSystem.DirectoryIdentity(identityDestination) == identityBefore,
+        "directory identity survives same-volume rename");
+    Directory.Delete(identityDestination);
+    Directory.CreateDirectory(identityDestination);
+    Require(SecureWindowsFileSystem.DirectoryIdentity(identityDestination) != identityBefore,
+        "directory replacement changes file identity");
 
     foreach (var (name, hooks) in new (string, ModuleUpdateTransactionTestHooks)[]
     {
@@ -263,7 +302,8 @@ static async Task SecurityHardeningAsync(string root)
     try
     {
         _ = new ModuleUpdateTransactionService("ModuleTest", overlapRoot, Path.Combine(overlapRoot, "cache"),
-            "experimental-0.1", new FakeCoordinator(new(false, false, false, false)));
+            "experimental-0.1", new TestAttestor("ModuleTest", overlapRoot),
+            new FakeCoordinator(new(false, false, false, false)));
         throw new Exception("overlapping roots accepted");
     }
     catch (ModuleUpdateTransactionConfigurationException exception)
@@ -323,6 +363,37 @@ static async Task SecurityHardeningAsync(string root)
         Require(await File.ReadAllTextAsync(sentinel) == "keep", "lock directory target unchanged");
     }
 
+    var journalDirectoryLink = await Fixture.CreateAsync(root, "journal-directory-link", "qing.journal-directory-link", "2.0.0", "1.0.0");
+    await using (var service = journalDirectoryLink.Service(new FakeCoordinator(new(false, false, false, false))))
+    {
+        var journalNamespace = service.GetJournalNamespaceForTest(journalDirectoryLink.ModuleId);
+        Directory.CreateDirectory(journalNamespace);
+        var externalJournal = Path.Combine(journalDirectoryLink.Root, "external-journal");
+        Directory.CreateDirectory(externalJournal);
+        var sentinel = Path.Combine(externalJournal, "sentinel.txt");
+        await File.WriteAllTextAsync(sentinel, "keep");
+        Directory.Delete(journalNamespace, false);
+        Require(TryCreateJunction(journalNamespace, externalJournal), "journal namespace junction created");
+        var result = await service.ExecuteAsync(new(journalDirectoryLink.Attestation));
+        Require(result.FailureCode == ModuleUpdateTransactionFailureCode.JournalInvalid &&
+                await File.ReadAllTextAsync(sentinel) == "keep",
+            "journal namespace replacement is rejected without external writes");
+    }
+
+    var precheck = await Fixture.CreateAsync(root, "precheck-reparse", "qing.precheck", "2.0.0", "1.0.0");
+    var externalModule = Path.Combine(precheck.Root, "external-module");
+    Fixture.WriteModule(externalModule, precheck.ModuleId, "1.0.0", "external");
+    var precheckCoordinator = new FakeCoordinator(new(true, true, true, false));
+    await using (var service = precheck.Service(precheckCoordinator))
+    {
+        Directory.Delete(precheck.Installed, true);
+        Require(TryCreateJunction(precheck.Installed, externalModule), "installed module junction created");
+        var result = await service.ExecuteAsync(new(precheck.Attestation));
+        Require(result.FailureCode == ModuleUpdateTransactionFailureCode.InstalledManifestInvalid &&
+                precheckCoordinator.TotalCalls == 0,
+            "installed tree precheck rejects reparse before lifecycle calls");
+    }
+
     var orphan = await Fixture.CreateAsync(root, "orphan-temp", "qing.orphan-temp", "2.0.0", "1.0.0");
     await using (var service = orphan.Service(new FakeCoordinator(new(false, false, false, false))))
     {
@@ -372,7 +443,8 @@ static async Task SecurityHardeningAsync(string root)
     try
     {
         _ = new ModuleUpdateTransactionService("ModuleTest", Path.Combine(nestedCache, "user"), nestedCache,
-            "experimental-0.1", new FakeCoordinator(new(false, false, false, false)));
+            "experimental-0.1", new TestAttestor("ModuleTest", nestedCache),
+            new FakeCoordinator(new(false, false, false, false)));
         throw new Exception("user root nested in cache accepted");
     }
     catch (ModuleUpdateTransactionConfigurationException exception)
@@ -388,6 +460,8 @@ static async Task CrashRecoveryAsync(string root)
             "2.0.0", "1.0.0");
         var exitCode = await RunCrashWorkerAsync(fixture, point);
         Require(exitCode != 0, $"worker terminated at {point}");
+        if (point == ModuleUpdateTransactionCrashPoint.CandidateMovedBeforeJournal)
+            await File.WriteAllTextAsync(Path.Combine(fixture.Installed, "payload.dll"), "corrupt-after-crash");
         await using var recovery = fixture.Service(new FakeCoordinator(new(false, false, false, false)));
         var result = await recovery.RecoverAsync();
         var committed = point == ModuleUpdateTransactionCrashPoint.CommittedBeforeCleanup;
@@ -446,16 +520,27 @@ sealed class FakeCoordinator(ModuleUpdateRuntimeState state) : IModuleUpdateRunt
 {
     public bool FailClose, FailDeactivate, FailUnload, StillLoaded, FailRestore;
     public bool Closed, Deactivated, Unloaded, Restored;
-    public Task<ModuleUpdateRuntimeState> GetRuntimeStateAsync(string moduleId, CancellationToken token) => Task.FromResult(state);
-    public Task<bool> RequestCloseWindowsAsync(string moduleId, CancellationToken token) => Task.FromResult(Closed = !FailClose);
-    public Task<bool> DeactivateAsync(string moduleId, CancellationToken token) => Task.FromResult(Deactivated = !FailDeactivate);
-    public Task<bool> UnloadAsync(string moduleId, CancellationToken token) => Task.FromResult(Unloaded = !FailUnload);
-    public Task<bool> VerifyUnloadedAsync(string moduleId, CancellationToken token) => Task.FromResult(!StillLoaded);
+    public int TotalCalls;
+    public Task<ModuleUpdateRuntimeState> GetRuntimeStateAsync(string moduleId, CancellationToken token) { TotalCalls++; return Task.FromResult(state); }
+    public Task<bool> RequestCloseWindowsAsync(string moduleId, CancellationToken token) { TotalCalls++; return Task.FromResult(Closed = !FailClose); }
+    public Task<bool> DeactivateAsync(string moduleId, CancellationToken token) { TotalCalls++; return Task.FromResult(Deactivated = !FailDeactivate); }
+    public Task<bool> UnloadAsync(string moduleId, CancellationToken token) { TotalCalls++; return Task.FromResult(Unloaded = !FailUnload); }
+    public Task<bool> VerifyUnloadedAsync(string moduleId, CancellationToken token) { TotalCalls++; return Task.FromResult(!StillLoaded); }
     public Task<bool> RestorePreviousRuntimeStateAsync(string moduleId, ModuleUpdateRuntimeState previous, CancellationToken token)
     {
+        TotalCalls++;
         if (FailRestore) { FailRestore = false; return Task.FromResult(false); }
         return Task.FromResult(Restored = true);
     }
+}
+
+sealed class TestAttestor(string environment, string physicalRoot) : IQmodVerifiedStagingAttestor
+{
+    public string EnvironmentIdentity => environment;
+    public string PhysicalVerifiedRootIdentity => Path.GetFullPath(physicalRoot);
+    public Task<QmodVerifiedStagingAttestation?> ReattestAsync(
+        QmodVerifiedStagingAttestation attestation, CancellationToken cancellationToken) =>
+        Task.FromResult<QmodVerifiedStagingAttestation?>(attestation.EnvironmentIdentity == environment ? attestation : null);
 }
 
 sealed class Fixture
@@ -463,8 +548,9 @@ sealed class Fixture
     private const string Api = "experimental-0.1";
     public required string Root, ModuleId, PackagePath, Installed, Journal, UserModules, CacheRoot;
     public required QmodVerifiedStagingAttestation Attestation;
+    public required QmodPackageStagingService Staging;
     public ModuleUpdateTransactionService Service(FakeCoordinator coordinator, ModuleUpdateTransactionTestHooks? hooks = null) =>
-        new("ModuleTest", UserModules, CacheRoot, Api, coordinator, null, hooks);
+        new("ModuleTest", UserModules, CacheRoot, Api, Staging, coordinator, null, hooks);
 
     public static async Task<Fixture> CreateAsync(string root, string name, string moduleId, string targetVersion,
         string? installedVersion, string moduleApi = Api)
@@ -482,14 +568,14 @@ sealed class Fixture
         var user = Path.Combine(root, "UserModules"); var cache = Path.Combine(root, "cache", "ModuleTransactions");
         Directory.CreateDirectory(user);
         var input = Input(package, moduleId, version, moduleApi);
-        await using var staging = new QmodPackageStagingService(Path.Combine(root, "cache", "Staging"),
+        var staging = new QmodPackageStagingService(Path.Combine(root, "cache", "Staging"),
             TimeProvider.System, "ModuleTest", user);
         var staged = await staging.StageAsync(input);
         if (!staged.Succeeded) throw new Exception("Assertion failed: fixture staged");
         var attestation = await staging.AttestVerifiedStagingAsync(input) ?? throw new Exception("fixture attestation failed");
         return new Fixture { Root = root, ModuleId = moduleId, PackagePath = package,
             Installed = Path.Combine(user, moduleId), Journal = Path.Combine(cache, "Journal"),
-            UserModules = user, CacheRoot = cache, Attestation = attestation };
+            UserModules = user, CacheRoot = cache, Attestation = attestation, Staging = staging };
     }
 
     private static string CreatePackage(string root, string moduleId, string version, string moduleApi)

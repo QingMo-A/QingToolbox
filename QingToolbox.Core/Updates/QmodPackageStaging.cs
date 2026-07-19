@@ -111,6 +111,14 @@ public sealed class QmodVerifiedStagingAttestation
     public QmodStagedFile StagingMetadataFile { get; }
 }
 
+public interface IQmodVerifiedStagingAttestor
+{
+    string EnvironmentIdentity { get; }
+    string PhysicalVerifiedRootIdentity { get; }
+    Task<QmodVerifiedStagingAttestation?> ReattestAsync(
+        QmodVerifiedStagingAttestation attestation, CancellationToken cancellationToken);
+}
+
 public sealed record QmodStagingResult(
     bool Succeeded,
     bool Reused,
@@ -127,7 +135,7 @@ public sealed record QmodStagingLogEvent(
     QmodStagingFailureCode FailureCode = QmodStagingFailureCode.None,
     int EntryCount = 0, long TotalUncompressedBytes = 0);
 
-public sealed class QmodPackageStagingService : IAsyncDisposable
+public sealed class QmodPackageStagingService : IAsyncDisposable, IQmodVerifiedStagingAttestor
 {
     public const string PackageManifestName = "qmod.json";
     public const string StagingMetadataName = "qmod-staging.json";
@@ -137,6 +145,10 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     private readonly string _locksRoot;
     private readonly string? _userModulesRoot;
     private readonly string _environmentIdentity;
+    private readonly string _physicalVerifiedRoot;
+    private readonly SecureDirectoryIdentity _verifiedRootIdentity;
+    private readonly string _physicalLocksRoot;
+    private readonly SecureDirectoryIdentity _locksRootIdentity;
     private readonly QmodStagingLimits _limits;
     private readonly TimeProvider _timeProvider;
     private readonly Action<QmodStagingLogEvent>? _log;
@@ -186,6 +198,37 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         _log = log;
         _parallelism = new(maximumParallelism, maximumParallelism);
         _testHooks = testHooks;
+        EnsureRootChain();
+        _physicalVerifiedRoot = SecureWindowsFileSystem.PhysicalDirectory(_verifiedRoot);
+        _verifiedRootIdentity = SecureWindowsFileSystem.DirectoryIdentity(_verifiedRoot);
+        _physicalLocksRoot = SecureWindowsFileSystem.PhysicalDirectory(_locksRoot);
+        _locksRootIdentity = SecureWindowsFileSystem.DirectoryIdentity(_locksRoot);
+    }
+
+    public string EnvironmentIdentity => _environmentIdentity;
+    public string PhysicalVerifiedRootIdentity => _physicalVerifiedRoot;
+
+    public Task<QmodVerifiedStagingAttestation?> ReattestAsync(
+        QmodVerifiedStagingAttestation attestation, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            if (attestation.EnvironmentIdentity != _environmentIdentity ||
+                !attestation.PhysicalVerifiedRootIdentity.Equals(_physicalVerifiedRoot, StringComparison.OrdinalIgnoreCase) ||
+                !SecureWindowsFileSystem.PhysicalDirectory(_verifiedRoot).Equals(_physicalVerifiedRoot, StringComparison.OrdinalIgnoreCase) ||
+                SecureWindowsFileSystem.DirectoryIdentity(_verifiedRoot) != _verifiedRootIdentity ||
+                !SecureWindowsFileSystem.IsWithin(_physicalVerifiedRoot,
+                    SecureWindowsFileSystem.PhysicalDirectory(attestation.Directory)) ||
+                !SecureWindowsFileSystem.PhysicalDirectory(attestation.Directory).Equals(
+                    attestation.PhysicalDirectoryIdentity, StringComparison.OrdinalIgnoreCase))
+                return Task.FromResult<QmodVerifiedStagingAttestation?>(null);
+            return Task.FromResult<QmodVerifiedStagingAttestation?>(attestation);
+        }
+        catch
+        {
+            return Task.FromResult<QmodVerifiedStagingAttestation?>(null);
+        }
     }
 
     public Task<QmodStagingResult> StageAsync(QmodStagingInput input, CancellationToken callerToken = default)
@@ -905,7 +948,8 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         {
             var lockPath = BuildPublicationLockPath(key);
             EnsureSafeParents(_stagingRoot, _locksRoot);
-            var crossProcess = await SecureWindowsFileSystem.AcquireLockAsync(lockPath, token);
+            var crossProcess = await SecureWindowsFileSystem.AcquireLockAsync(
+                lockPath, _physicalLocksRoot, _locksRootIdentity, token);
             if (crossProcess.Recovered) Log("Publication lock recovered after process exit", input);
             return new(local, crossProcess, _testHooks?.PublicationLockMarkerCleanup,
                 () => Log("Publication lock marker cleanup failed", input, failure: QmodStagingFailureCode.IoFailure));

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 namespace QingToolbox.Core.Updates;
 
@@ -78,7 +79,7 @@ internal sealed record ModuleUpdateTransactionTestHooks(
 
 public sealed class ModuleUpdateTransactionService : IAsyncDisposable
 {
-    private const int JournalSchema = 2;
+    private const int JournalSchema = 3;
     private const string OwnershipMarkerName = ".qing-transaction-owner";
     private readonly string _environmentIdentity;
     private readonly string _userModulesRoot;
@@ -87,7 +88,14 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
     private readonly string _workRoot;
     private readonly string _physicalUserModulesRoot;
     private readonly string _physicalCacheRoot;
+    private readonly string _physicalJournalRoot;
+    private readonly string _physicalLocksRoot;
+    private readonly SecureDirectoryIdentity _journalRootIdentity;
+    private readonly SecureDirectoryIdentity _locksRootIdentity;
+    private readonly ConcurrentDictionary<string, SecureDirectoryIdentity> _journalNamespaceIdentities =
+        new(StringComparer.Ordinal);
     private readonly string _moduleApiVersion;
+    private readonly IQmodVerifiedStagingAttestor _stagingAttestor;
     private readonly IModuleUpdateRuntimeCoordinator _runtime;
     private readonly Action<ModuleUpdateTransactionLogEvent>? _log;
     private readonly ModuleUpdateTransactionTestHooks? _hooks;
@@ -96,17 +104,21 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
     { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     public ModuleUpdateTransactionService(string environmentIdentity, string userModulesRoot,
-        string transactionCacheRoot, string moduleApiVersion, IModuleUpdateRuntimeCoordinator runtime,
+        string transactionCacheRoot, string moduleApiVersion, IQmodVerifiedStagingAttestor stagingAttestor,
+        IModuleUpdateRuntimeCoordinator runtime,
         Action<ModuleUpdateTransactionLogEvent>? log = null)
-        : this(environmentIdentity, userModulesRoot, transactionCacheRoot, moduleApiVersion, runtime, log, null) { }
+        : this(environmentIdentity, userModulesRoot, transactionCacheRoot, moduleApiVersion, stagingAttestor,
+            runtime, log, null) { }
 
     internal ModuleUpdateTransactionService(string environmentIdentity, string userModulesRoot,
-        string transactionCacheRoot, string moduleApiVersion, IModuleUpdateRuntimeCoordinator runtime,
+        string transactionCacheRoot, string moduleApiVersion, IQmodVerifiedStagingAttestor stagingAttestor,
+        IModuleUpdateRuntimeCoordinator runtime,
         Action<ModuleUpdateTransactionLogEvent>? log, ModuleUpdateTransactionTestHooks? hooks)
     {
         if (environmentIdentity is not ("Development" or "ModuleTest"))
             throw Configuration(ModuleUpdateTransactionConfigurationFailureCode.UnsupportedEnvironment);
         ArgumentNullException.ThrowIfNull(runtime);
+        ArgumentNullException.ThrowIfNull(stagingAttestor);
         try { _userModulesRoot = SecureWindowsFileSystem.ValidateAbsoluteNonRoot(userModulesRoot); }
         catch { throw Configuration(ModuleUpdateTransactionConfigurationFailureCode.InvalidUserModulesRoot); }
         string cache;
@@ -117,19 +129,26 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         _workRoot = Path.Combine(_userModulesRoot, ".qing-transactions");
         if (string.IsNullOrWhiteSpace(moduleApiVersion))
             throw Configuration(ModuleUpdateTransactionConfigurationFailureCode.InvalidModuleApiVersion);
-        _moduleApiVersion = moduleApiVersion; _runtime = runtime; _log = log; _hooks = hooks;
+        _moduleApiVersion = moduleApiVersion; _stagingAttestor = stagingAttestor;
+        _runtime = runtime; _log = log; _hooks = hooks;
         try
         {
             foreach (var root in new[] { _userModulesRoot, cache, _journalRoot, _locksRoot, _workRoot })
                 SecureWindowsFileSystem.CreateOrdinaryDirectoryTree(root);
             _physicalUserModulesRoot = SecureWindowsFileSystem.PhysicalDirectory(_userModulesRoot);
             _physicalCacheRoot = SecureWindowsFileSystem.PhysicalDirectory(cache);
+            _physicalJournalRoot = SecureWindowsFileSystem.PhysicalDirectory(_journalRoot);
+            _physicalLocksRoot = SecureWindowsFileSystem.PhysicalDirectory(_locksRoot);
+            _journalRootIdentity = SecureWindowsFileSystem.DirectoryIdentity(_journalRoot);
+            _locksRootIdentity = SecureWindowsFileSystem.DirectoryIdentity(_locksRoot);
             if (SecureWindowsFileSystem.IsWithin(_physicalUserModulesRoot, _physicalCacheRoot) ||
                 SecureWindowsFileSystem.IsWithin(_physicalCacheRoot, _physicalUserModulesRoot))
                 throw Configuration(ModuleUpdateTransactionConfigurationFailureCode.OverlappingRoots);
             if (!Path.GetPathRoot(_physicalUserModulesRoot)!.Equals(
                     Path.GetPathRoot(SecureWindowsFileSystem.PhysicalDirectory(_workRoot)), StringComparison.OrdinalIgnoreCase))
                 throw Configuration(ModuleUpdateTransactionConfigurationFailureCode.InvalidUserModulesRoot);
+            if (_stagingAttestor.EnvironmentIdentity != _environmentIdentity)
+                throw Configuration(ModuleUpdateTransactionConfigurationFailureCode.UnsupportedEnvironment);
         }
         catch (ModuleUpdateTransactionConfigurationException) { throw; }
         catch { throw Configuration(ModuleUpdateTransactionConfigurationFailureCode.ReparseRoot); }
@@ -157,26 +176,55 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         catch (UnauthorizedAccessException) { return Failure(transactionId, ModuleUpdateTransactionFailureCode.Unauthorized); }
         catch (IOException) { return Failure(transactionId, ModuleUpdateTransactionFailureCode.IoFailure); }
         await using var heldLock = transactionLock;
-        if (!ReattestVerifiedStaging(attestation)) return Failure(transactionId,
+        QmodVerifiedStagingAttestation? trustedAttestation;
+        try { trustedAttestation = await _stagingAttestor.ReattestAsync(attestation, cancellationToken); }
+        catch (OperationCanceledException) { return Failure(transactionId, ModuleUpdateTransactionFailureCode.Cancelled); }
+        catch { trustedAttestation = null; }
+        if (trustedAttestation is null || !ReattestVerifiedStaging(trustedAttestation)) return Failure(transactionId,
             ModuleUpdateTransactionFailureCode.VerifiedStagingInvalid);
-        if (ModuleJournalEntries(attestation.ModuleId).Any()) return Failure(transactionId,
-            ModuleUpdateTransactionFailureCode.RecoveryRequired, ModuleUpdateTransactionState.RecoveryRequired);
+        attestation = trustedAttestation;
+        try
+        {
+            if (ModuleJournalEntries(attestation.ModuleId).Any()) return Failure(transactionId,
+                ModuleUpdateTransactionFailureCode.RecoveryRequired, ModuleUpdateTransactionState.RecoveryRequired);
+        }
+        catch
+        {
+            return Failure(transactionId, ModuleUpdateTransactionFailureCode.JournalInvalid,
+                ModuleUpdateTransactionState.RecoveryRequired);
+        }
 
         var installed = InstalledPath(attestation.ModuleId); var work = WorkPath(transactionId);
         var candidate = Path.Combine(work, "candidate"); var backup = Path.Combine(work, "backup");
         var failed = Path.Combine(work, "failed-candidate");
         var payload = Payload(attestation); TransactionJournal journal; bool commitPersisted = false;
+        InstalledSnapshot? installedSnapshot = null;
+        if (Directory.Exists(installed))
+        {
+            installedSnapshot = ReadInstalledSnapshot(installed);
+            if (installedSnapshot is null) return Failure(transactionId,
+                ModuleUpdateTransactionFailureCode.InstalledManifestInvalid);
+            if (installedSnapshot.ModuleId != attestation.ModuleId) return Failure(transactionId,
+                ModuleUpdateTransactionFailureCode.ModuleIdentityMismatch);
+            if (SemanticVersion.Parse(attestation.TargetVersion).CompareTo(
+                    SemanticVersion.Parse(installedSnapshot.Version)) <= 0)
+                return Failure(transactionId, ModuleUpdateTransactionFailureCode.VersionNotNewer);
+        }
+        else if (File.Exists(installed)) return Failure(transactionId,
+            ModuleUpdateTransactionFailureCode.InstalledManifestInvalid);
         try
         {
             Directory.CreateDirectory(work); SecureWindowsFileSystem.WriteOwnerMarker(work, OwnershipMarkerName, transactionId);
             var previousRuntime = await _runtime.GetRuntimeStateAsync(attestation.ModuleId, cancellationToken);
             var now = DateTimeOffset.UtcNow;
-            journal = new(transactionId, _environmentIdentity, attestation.ModuleId, "", attestation.TargetVersion,
+            journal = new(transactionId, _environmentIdentity, attestation.ModuleId,
+                installedSnapshot?.Version ?? "", attestation.TargetVersion,
                 attestation.ModuleApiVersion, attestation.PackageSha256,
                 SecureWindowsFileSystem.HashIdentity(attestation.PhysicalDirectoryIdentity),
                 SecureWindowsFileSystem.HashIdentity(_physicalUserModulesRoot), ModuleUpdateTransactionState.Preparing,
                 previousRuntime, new(false, false, false, false), 1, ModuleUpdateTransactionFailureCode.None,
-                false, payload, now, now);
+                installedSnapshot is not null, payload, installedSnapshot?.Files ?? [],
+                installedSnapshot?.DirectoryIdentity, null, null, null, now, now);
             Persist(journal); Log("Module update transaction started", journal); Log("Verified staging attested", journal);
         }
         catch (Exception exception) when (exception is OperationCanceledException or IOException or UnauthorizedAccessException)
@@ -187,22 +235,10 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (Directory.Exists(installed))
-            {
-                var current = ReadInstalledIdentity(installed);
-                if (current is null) return await RejectAsync(journal, work,
-                    ModuleUpdateTransactionFailureCode.InstalledManifestInvalid);
-                journal = journal with { SourceVersion = current.Version, HadInstalledModule = true };
-                if (current.ModuleId != attestation.ModuleId) return await RejectAsync(journal, work,
-                    ModuleUpdateTransactionFailureCode.ModuleIdentityMismatch);
-                if (SemanticVersion.Parse(attestation.TargetVersion).CompareTo(SemanticVersion.Parse(current.Version)) <= 0)
-                    return await RejectAsync(journal, work, ModuleUpdateTransactionFailureCode.VersionNotNewer);
-            }
-            else if (File.Exists(installed)) return await RejectAsync(journal, work,
-                ModuleUpdateTransactionFailureCode.InstalledManifestInvalid);
-
             _hooks?.CandidateCopyStarting?.Invoke(); BuildCandidate(attestation, candidate, transactionId, payload);
-            journal = Advance(journal, ModuleUpdateTransactionState.Prepared);
+            journal = Advance(journal with
+            { CandidateDirectoryIdentity = SecureWindowsFileSystem.DirectoryIdentity(candidate) },
+                ModuleUpdateTransactionState.Prepared);
             journal = Advance(journal, ModuleUpdateTransactionState.Quiescing);
             if (journal.PreviousRuntimeState.HasWindows)
             {
@@ -234,11 +270,18 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
             {
                 journal = Advance(journal, ModuleUpdateTransactionState.BackupStarted);
                 Move(installed, backup); _hooks?.CrashPoint?.Invoke(ModuleUpdateTransactionCrashPoint.BackupMovedBeforeJournal);
-                journal = Advance(journal, ModuleUpdateTransactionState.BackupCreated);
+                var backupIdentity = SecureWindowsFileSystem.DirectoryIdentity(backup);
+                if (backupIdentity != journal.InstalledDirectoryIdentity) return RequireRecovery(journal);
+                journal = Advance(journal with { BackupDirectoryIdentity = backupIdentity },
+                    ModuleUpdateTransactionState.BackupCreated);
             }
             journal = Advance(journal, ModuleUpdateTransactionState.CandidatePromotionStarted);
+            if (!IdentityMatches(candidate, journal.CandidateDirectoryIdentity)) return RequireRecovery(journal);
             Move(candidate, installed); _hooks?.CrashPoint?.Invoke(ModuleUpdateTransactionCrashPoint.CandidateMovedBeforeJournal);
-            journal = Advance(journal, ModuleUpdateTransactionState.CandidatePromoted);
+            var promotedIdentity = SecureWindowsFileSystem.DirectoryIdentity(installed);
+            if (promotedIdentity != journal.CandidateDirectoryIdentity) return RequireRecovery(journal);
+            journal = Advance(journal with { PromotedDirectoryIdentity = promotedIdentity },
+                ModuleUpdateTransactionState.CandidatePromoted);
             journal = Advance(journal, ModuleUpdateTransactionState.Verifying);
             _hooks?.InstalledVerificationStarting?.Invoke();
             if (!ValidateInstalledCandidate(installed, payload, journal.ModuleId, journal.TargetVersion, transactionId))
@@ -273,10 +316,14 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         var results = new List<ModuleUpdateTransactionResult>(); int recovered = 0, cleaned = 0, required = 0;
+        try { ValidateJournalRoot(); }
+        catch { return new(0, 0, 1, results); }
         foreach (var namespaceDirectory in Directory.EnumerateDirectories(_journalRoot))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (SecureWindowsFileSystem.IsReparsePath(namespaceDirectory)) { required++; continue; }
+            if (SecureWindowsFileSystem.IsReparsePath(namespaceDirectory) ||
+                !SecureWindowsFileSystem.IsWithin(_physicalJournalRoot,
+                    SecureWindowsFileSystem.PhysicalDirectory(namespaceDirectory))) { required++; continue; }
             foreach (var path in Directory.EnumerateFiles(namespaceDirectory, "*.json", SearchOption.TopDirectoryOnly).ToArray())
             {
                 TransactionJournal journal;
@@ -314,7 +361,8 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
 
     private ModuleUpdateTransactionResult RecoverCommitted(TransactionJournal journal, string installed, string work)
     {
-        if (!ValidateInstalledCandidate(installed, journal.PayloadFiles, journal.ModuleId, journal.TargetVersion,
+        if (!IdentityMatches(installed, journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity) ||
+            !ValidateInstalledCandidate(installed, journal.PayloadFiles, journal.ModuleId, journal.TargetVersion,
                 SecureWindowsFileSystem.HasOwnerMarker(installed, OwnershipMarkerName, journal.TransactionId)
                     ? journal.TransactionId : null))
         {
@@ -335,7 +383,7 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
                 (journal.HadInstalledModule && !Directory.Exists(installed))) return RequireRecovery(journal);
             try
             {
-                if (!await _runtime.RestorePreviousRuntimeStateAsync(journal.ModuleId,
+                if (NeedsRuntimeRestore(journal) && !await _runtime.RestorePreviousRuntimeStateAsync(journal.ModuleId,
                         journal.PreviousRuntimeState, token)) return RequireRecovery(journal);
                 journal = Advance(journal, ModuleUpdateTransactionState.RolledBack);
                 SecureWindowsFileSystem.DeleteOwnedTree(work, OwnershipMarkerName, journal.TransactionId,
@@ -351,8 +399,14 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
             ModuleUpdateTransactionState.RuntimeRestoring or ModuleUpdateTransactionState.RollbackStarted)
         {
             if (Directory.Exists(installed) && Directory.Exists(backup) &&
-                !ValidateInstalledCandidate(installed, journal.PayloadFiles, journal.ModuleId, journal.TargetVersion, journal.TransactionId))
+                !IdentityMatches(installed, journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity))
                 return RequireRecovery(journal);
+            if (Directory.Exists(backup) &&
+                (!IdentityMatches(backup, journal.InstalledDirectoryIdentity) || !ValidateInstalledSnapshot(backup, journal)))
+                return RequireRecovery(journal);
+            if (Directory.Exists(installed) && !Directory.Exists(backup) && journal.HadInstalledModule &&
+                journal.State == ModuleUpdateTransactionState.BackupStarted &&
+                !IdentityMatches(installed, journal.InstalledDirectoryIdentity)) return RequireRecovery(journal);
             return await RollbackAsync(journal, installed, candidate, backup, failed, work,
                 ModuleUpdateTransactionFailureCode.RecoveryRequired, token);
         }
@@ -366,26 +420,34 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         try
         {
             journal = Advance(journal with { LastFailureCode = failure }, ModuleUpdateTransactionState.RollbackStarted);
+            if (journal.HadInstalledModule && Directory.Exists(installed) && !Directory.Exists(backup) &&
+                !IdentityMatches(installed, journal.InstalledDirectoryIdentity)) return RequireRecovery(journal);
             if (Directory.Exists(installed) && Directory.Exists(backup))
             {
-                if (!ValidateInstalledCandidate(installed, journal.PayloadFiles, journal.ModuleId, journal.TargetVersion,
-                        journal.TransactionId)) return RequireRecovery(journal);
+                if (!IdentityMatches(installed, journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity) ||
+                    !SecureWindowsFileSystem.HasOwnerMarker(installed, OwnershipMarkerName, journal.TransactionId) ||
+                    !IdentityMatches(backup, journal.InstalledDirectoryIdentity) ||
+                    !ValidateInstalledSnapshot(backup, journal)) return RequireRecovery(journal);
                 if (Directory.Exists(failed) || File.Exists(failed)) return RequireRecovery(journal);
                 Move(installed, failed);
             }
             else if (Directory.Exists(installed) && !journal.HadInstalledModule)
             {
-                if (!ValidateInstalledCandidate(installed, journal.PayloadFiles, journal.ModuleId, journal.TargetVersion,
-                        journal.TransactionId)) return RequireRecovery(journal);
+                if (!IdentityMatches(installed, journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity) ||
+                    !SecureWindowsFileSystem.HasOwnerMarker(installed, OwnershipMarkerName, journal.TransactionId))
+                    return RequireRecovery(journal);
                 Move(installed, failed);
             }
             if (Directory.Exists(backup))
             {
                 if (Directory.Exists(installed) || File.Exists(installed)) return RequireRecovery(journal);
+                if (!IdentityMatches(backup, journal.InstalledDirectoryIdentity) ||
+                    !ValidateInstalledSnapshot(backup, journal)) return RequireRecovery(journal);
                 Move(backup, installed);
+                if (!IdentityMatches(installed, journal.InstalledDirectoryIdentity)) return RequireRecovery(journal);
             }
-            if (!await _runtime.RestorePreviousRuntimeStateAsync(journal.ModuleId, journal.PreviousRuntimeState,
-                    cancellationToken)) return RequireRecovery(journal);
+            if (NeedsRuntimeRestore(journal) && !await _runtime.RestorePreviousRuntimeStateAsync(
+                    journal.ModuleId, journal.PreviousRuntimeState, cancellationToken)) return RequireRecovery(journal);
             journal = Advance(journal, ModuleUpdateTransactionState.RolledBack);
             SecureWindowsFileSystem.DeleteOwnedTree(work, OwnershipMarkerName, journal.TransactionId, _physicalUserModulesRoot);
             DeleteJournal(journal); return new(false, journal.TransactionId, journal.State, failure, RolledBack: true);
@@ -398,6 +460,8 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         Log("Post-commit cleanup started", journal);
         try
         {
+            if (!IdentityMatches(installed, journal.PromotedDirectoryIdentity ?? journal.CandidateDirectoryIdentity))
+                return PostCommitPending(journal);
             if (SecureWindowsFileSystem.HasOwnerMarker(installed, OwnershipMarkerName, journal.TransactionId))
             {
                 _hooks?.MarkerDeleteStarting?.Invoke();
@@ -503,12 +567,13 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
             if (marker is not null) collision.Add(CollisionKey(OwnershipMarkerName));
             var foundFiles = new HashSet<string>(StringComparer.Ordinal); var foundDirs = new HashSet<string>(StringComparer.Ordinal);
             byte[]? manifestBytes = null;
-            foreach (var entry in Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories))
+            foreach (var treeEntry in SecureWindowsFileSystem.WalkTreeNoFollow(root))
             {
-                if (SecureWindowsFileSystem.IsReparsePath(entry)) return false;
-                var relative = NormalizeRelative(Path.GetRelativePath(root, entry));
+                if (treeEntry.IsReparsePoint) return false;
+                var entry = treeEntry.FullPath;
+                var relative = NormalizeRelative(treeEntry.RelativePath);
                 if (!collision.Contains(CollisionKey(relative)) && !collision.Add(CollisionKey(relative))) return false;
-                if (Directory.Exists(entry)) { if (!expectedDirectories.Contains(relative)) return false; foundDirs.Add(relative); continue; }
+                if (treeEntry.IsDirectory) { if (!expectedDirectories.Contains(relative)) return false; foundDirs.Add(relative); continue; }
                 if (marker is not null && relative == OwnershipMarkerName)
                 {
                     if (!SecureWindowsFileSystem.HasOwnerMarker(root, OwnershipMarkerName, marker.Value)) return false;
@@ -553,7 +618,9 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
     {
         var original = value.Replace('\\', '/'); var normalized = original.Normalize(NormalizationForm.FormC);
         if (original != normalized) throw new IOException("Non-canonical Unicode path rejected.");
-        if (string.IsNullOrWhiteSpace(normalized) || normalized.StartsWith('/') || normalized.Split('/').Any(x => x is "" or "." or ".."))
+        if (string.IsNullOrWhiteSpace(normalized) || normalized.StartsWith('/') ||
+            normalized.Any(ch => char.IsControl(ch) || ch == ':') ||
+            normalized.Split('/').Any(x => x is "" or "." or ".." || x.EndsWith('.') || x.EndsWith(' ')))
             throw new IOException("Unsafe relative path.");
         return normalized;
     }
@@ -561,21 +628,66 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
     private static IReadOnlyList<QmodStagedFile> Payload(QmodVerifiedStagingAttestation attestation) =>
         attestation.Files.Where(file => file.RelativePath is not QmodPackageStagingService.PackageManifestName).ToArray();
 
-    private static InstalledIdentity? ReadInstalledIdentity(string installed)
+    private static InstalledSnapshot? ReadInstalledSnapshot(string installed)
     {
         try
         {
+            var physicalRoot = SecureWindowsFileSystem.PhysicalDirectory(installed);
+            var directoryIdentity = SecureWindowsFileSystem.DirectoryIdentity(installed);
             var path = Path.Combine(installed, "module.json");
-            if (!File.Exists(path) || SecureWindowsFileSystem.IsReparsePath(path)) return null;
-            using var document = JsonDocument.Parse(File.ReadAllBytes(path)); var root = document.RootElement;
+            if (!File.Exists(path)) return null;
+            byte[] manifestBytes;
+            using (var handle = SecureWindowsFileSystem.OpenStableRead(path, physicalRoot))
+            {
+                var length = RandomAccess.GetLength(handle);
+                if (length is <= 0 or > 64 * 1024) return null;
+                manifestBytes = new byte[checked((int)length)];
+                if (RandomAccess.Read(handle, manifestBytes, 0) != manifestBytes.Length) return null;
+            }
+            using var document = JsonDocument.Parse(manifestBytes); var root = document.RootElement;
             var id = root.GetProperty("id").GetString(); var version = root.GetProperty("version").GetString();
-            var entry = root.GetProperty("entry").GetString();
+            var entry = NormalizeRelative(root.GetProperty("entry").GetString()!);
             if (SecureModuleIdentity.Validate(id) != ModuleIdentityFailure.None ||
-                !SemanticVersion.TryParse(version!, out _) || string.IsNullOrWhiteSpace(entry) ||
+                !SemanticVersion.TryParse(version!, out _) ||
                 !File.Exists(SecureWindowsFileSystem.SafeCombine(installed, entry))) return null;
-            return new(id!, version!);
+            var files = new List<QmodStagedFile>();
+            var collisions = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var treeEntry in SecureWindowsFileSystem.WalkTreeNoFollow(installed))
+            {
+                if (treeEntry.IsReparsePoint) return null;
+                var relative = NormalizeRelative(treeEntry.RelativePath);
+                if (relative.Equals(OwnershipMarkerName, StringComparison.OrdinalIgnoreCase)) return null;
+                if (!collisions.Add(CollisionKey(relative))) return null;
+                if (treeEntry.IsDirectory) continue;
+                using var handle = SecureWindowsFileSystem.OpenStableRead(treeEntry.FullPath, physicalRoot);
+                var length = RandomAccess.GetLength(handle);
+                using var stream = new FileStream(handle, FileAccess.Read, 65536, false);
+                var hash = SHA256.HashData(stream);
+                if (RandomAccess.GetLength(handle) != length) return null;
+                files.Add(new(relative, length, Convert.ToHexString(hash).ToLowerInvariant()));
+            }
+            if (!files.Any(file => file.RelativePath == entry)) return null;
+            if (SecureWindowsFileSystem.DirectoryIdentity(installed) != directoryIdentity) return null;
+            return new(id!, version!, entry, directoryIdentity,
+                files.OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToArray());
         }
         catch { return null; }
+    }
+
+    private static bool IdentityMatches(string path, SecureDirectoryIdentity? expected)
+    {
+        if (expected is null || !Directory.Exists(path)) return false;
+        try { return SecureWindowsFileSystem.DirectoryIdentity(path) == expected.Value; }
+        catch { return false; }
+    }
+
+    private static bool ValidateInstalledSnapshot(string path, TransactionJournal journal)
+    {
+        var snapshot = ReadInstalledSnapshot(path);
+        return snapshot is not null && snapshot.ModuleId == journal.ModuleId &&
+               snapshot.Version == journal.SourceVersion &&
+               snapshot.DirectoryIdentity == journal.InstalledDirectoryIdentity &&
+               snapshot.Files.SequenceEqual(journal.InstalledFiles);
     }
 
     private void EnsureCandidateParents(string root, string target)
@@ -607,39 +719,69 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         var updated = journal with { State = state, UpdatedAtUtc = DateTimeOffset.UtcNow };
         Persist(updated); _hooks?.StatePersisted?.Invoke(state); return updated;
     }
+    private static bool NeedsRuntimeRestore(TransactionJournal journal) =>
+        !journal.LifecycleProgress.RuntimeRestored &&
+        (journal.LifecycleProgress.WindowsClosed || journal.LifecycleProgress.Deactivated ||
+         journal.LifecycleProgress.Unloaded);
 
     private void Persist(TransactionJournal journal)
     {
         _hooks?.JournalPersistStarting?.Invoke(journal.State);
-        var directory = JournalNamespace(journal.ModuleId); SecureWindowsFileSystem.CreateOrdinaryDirectoryTree(directory);
+        var directory = JournalNamespace(journal.ModuleId);
+        var namespaceIdentity = EnsureJournalNamespace(directory);
         var final = JournalPath(journal.ModuleId, journal.TransactionId);
         var temp = final + ".tmp-" + Guid.NewGuid().ToString("N"); var bytes = JsonSerializer.SerializeToUtf8Bytes(journal, JournalOptions);
         try
         {
             using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
             { stream.Write(bytes); stream.Flush(true); }
+            using (var handle = SecureWindowsFileSystem.OpenStableRead(temp, _physicalJournalRoot))
+                if (RandomAccess.GetLength(handle) != bytes.Length) throw new IOException("Journal temp changed.");
+            if (SecureWindowsFileSystem.DirectoryIdentity(directory) != namespaceIdentity)
+                throw new IOException("Journal namespace changed.");
             File.Move(temp, final, true);
+            using var finalHandle = SecureWindowsFileSystem.OpenStableRead(final, _physicalJournalRoot);
+            if (SecureWindowsFileSystem.DirectoryIdentity(directory) != namespaceIdentity)
+                throw new IOException("Journal namespace changed.");
         }
         finally { if (File.Exists(temp)) try { File.Delete(temp); } catch { } }
     }
 
     private TransactionJournal ReadJournal(string path, string namespaceDirectory)
     {
+        ValidateJournalRoot();
+        var namespaceIdentity = SecureWindowsFileSystem.DirectoryIdentity(namespaceDirectory);
         if (SecureWindowsFileSystem.IsReparsePath(path) || !Path.GetDirectoryName(Path.GetFullPath(path))!.Equals(
                 Path.GetFullPath(namespaceDirectory), StringComparison.OrdinalIgnoreCase)) throw new JsonException();
-        var bytes = File.ReadAllBytes(path); if (bytes.Length == 0 || (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)) throw new JsonException();
+        byte[] bytes;
+        using (var handle = SecureWindowsFileSystem.OpenStableRead(path, _physicalJournalRoot))
+        {
+            var length = RandomAccess.GetLength(handle); if (length is <= 0 or > 4 * 1024 * 1024) throw new JsonException();
+            bytes = new byte[checked((int)length)];
+            if (RandomAccess.Read(handle, bytes, 0) != bytes.Length || RandomAccess.GetLength(handle) != length)
+                throw new JsonException();
+        }
+        if (SecureWindowsFileSystem.DirectoryIdentity(namespaceDirectory) != namespaceIdentity) throw new JsonException();
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) throw new JsonException();
         using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Disallow, AllowTrailingCommas = false });
         ValidateObject(document.RootElement,
         ["schemaVersion", "transactionId", "environmentIdentity", "moduleId", "sourceVersion", "targetVersion",
          "moduleApiVersion", "packageSha256", "verifiedStagingIdentity", "userModulesRootIdentity", "state",
          "previousRuntimeState", "lifecycleProgress", "attempt", "lastFailureCode", "hadInstalledModule",
-         "payloadFiles", "startedAtUtc", "updatedAtUtc"]);
+          "payloadFiles", "installedFiles", "installedDirectoryIdentity", "candidateDirectoryIdentity",
+          "backupDirectoryIdentity", "promotedDirectoryIdentity", "startedAtUtc", "updatedAtUtc"]);
         ValidateObject(document.RootElement.GetProperty("previousRuntimeState"),
             ["hasWindows", "isActive", "isLoaded", "hasStartupAuthorization"]);
         ValidateObject(document.RootElement.GetProperty("lifecycleProgress"),
             ["windowsClosed", "deactivated", "unloaded", "runtimeRestored"]);
         foreach (var file in document.RootElement.GetProperty("payloadFiles").EnumerateArray())
             ValidateObject(file, ["relativePath", "size", "sha256"]);
+        foreach (var file in document.RootElement.GetProperty("installedFiles").EnumerateArray())
+            ValidateObject(file, ["relativePath", "size", "sha256"]);
+        foreach (var name in new[] { "installedDirectoryIdentity", "candidateDirectoryIdentity",
+                     "backupDirectoryIdentity", "promotedDirectoryIdentity" })
+            if (document.RootElement.GetProperty(name).ValueKind != JsonValueKind.Null)
+                ValidateObject(document.RootElement.GetProperty(name), ["volumeSerialNumber", "fileId"]);
         var journal = JsonSerializer.Deserialize<TransactionJournal>(document.RootElement, JournalOptions) ?? throw new JsonException();
         var fileId = Path.GetFileNameWithoutExtension(path);
         if (journal.SchemaVersion != JournalSchema || journal.TransactionId.ToString("N") != fileId ||
@@ -652,13 +794,28 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
             (journal.SourceVersion.Length != 0 && (!SemanticVersion.TryParse(journal.SourceVersion, out var source) || target!.CompareTo(source!) <= 0)) ||
             journal.HadInstalledModule != (journal.SourceVersion.Length != 0) ||
             !Enum.IsDefined(journal.State) || !Enum.IsDefined(journal.LastFailureCode) || journal.Attempt < 1 ||
-            journal.StartedAtUtc == default || journal.UpdatedAtUtc < journal.StartedAtUtc || journal.PayloadFiles.Count == 0)
+             journal.StartedAtUtc == default || journal.UpdatedAtUtc < journal.StartedAtUtc || journal.PayloadFiles.Count == 0 ||
+             journal.HadInstalledModule != (journal.InstalledDirectoryIdentity is not null) ||
+             (journal.HadInstalledModule && journal.InstalledFiles.Count == 0) ||
+             !ValidDirectoryIdentity(journal.InstalledDirectoryIdentity) ||
+             !ValidDirectoryIdentity(journal.CandidateDirectoryIdentity) ||
+             !ValidDirectoryIdentity(journal.BackupDirectoryIdentity) ||
+             !ValidDirectoryIdentity(journal.PromotedDirectoryIdentity) ||
+             (journal.State >= ModuleUpdateTransactionState.Prepared && journal.CandidateDirectoryIdentity is null) ||
+             (journal.State is >= ModuleUpdateTransactionState.BackupCreated and < ModuleUpdateTransactionState.RollbackStarted &&
+              journal.HadInstalledModule && journal.BackupDirectoryIdentity is null) ||
+             (journal.State is >= ModuleUpdateTransactionState.CandidatePromoted and < ModuleUpdateTransactionState.RollbackStarted &&
+              journal.PromotedDirectoryIdentity is null))
             throw new JsonException();
-        foreach (var file in journal.PayloadFiles)
+        foreach (var file in journal.PayloadFiles.Concat(journal.InstalledFiles))
             if (file.Size < 0 || !IsSha256(file.Sha256) || NormalizeRelative(file.RelativePath) != file.RelativePath.Replace('\\', '/'))
                 throw new JsonException();
         return journal;
     }
+
+    private static bool ValidDirectoryIdentity(SecureDirectoryIdentity? identity) =>
+        identity is null || identity.Value.VolumeSerialNumber != 0 && identity.Value.FileId is { Length: 32 } &&
+        identity.Value.FileId.All(char.IsAsciiHexDigit);
 
     private static void ValidateObject(JsonElement element, IReadOnlyCollection<string> names)
     {
@@ -670,8 +827,27 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
 
     private IEnumerable<string> ModuleJournalEntries(string moduleId)
     {
+        ValidateJournalRoot();
         var directory = JournalNamespace(moduleId); if (!Directory.Exists(directory)) return [];
+        _ = EnsureJournalNamespace(directory);
         return Directory.EnumerateFileSystemEntries(directory).ToArray();
+    }
+    private void ValidateJournalRoot()
+    {
+        if (SecureWindowsFileSystem.DirectoryIdentity(_journalRoot) != _journalRootIdentity ||
+            !SecureWindowsFileSystem.PhysicalDirectory(_journalRoot).Equals(_physicalJournalRoot, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Journal root identity changed.");
+    }
+    private SecureDirectoryIdentity EnsureJournalNamespace(string directory)
+    {
+        ValidateJournalRoot();
+        SecureWindowsFileSystem.CreateOrdinaryDirectoryTree(directory);
+        var identity = SecureWindowsFileSystem.DirectoryIdentity(directory);
+        var expected = _journalNamespaceIdentities.GetOrAdd(Path.GetFileName(directory), identity);
+        if (identity != expected) throw new IOException("Journal namespace identity changed.");
+        if (!SecureWindowsFileSystem.IsWithin(_physicalJournalRoot, SecureWindowsFileSystem.PhysicalDirectory(directory)))
+            throw new IOException("Journal namespace escaped root.");
+        return identity;
     }
     private string JournalNamespace(string moduleId) => Path.Combine(_journalRoot, JournalNamespaceName(moduleId));
     private string JournalNamespaceName(string moduleId) => SecureWindowsFileSystem.HashIdentity(
@@ -683,7 +859,8 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
     private async Task<CrashRecoverableFileLock> AcquireTransactionLockAsync(string moduleId, CancellationToken token)
     {
         var identity = SecureWindowsFileSystem.HashIdentity($"{_physicalUserModulesRoot.ToUpperInvariant()}\0{_environmentIdentity}\0{moduleId}");
-        return await SecureWindowsFileSystem.AcquireLockAsync(Path.Combine(_locksRoot, identity + ".transaction.lock"), token);
+        return await SecureWindowsFileSystem.AcquireLockAsync(Path.Combine(_locksRoot, identity + ".transaction.lock"),
+            _physicalLocksRoot, _locksRootIdentity, token);
     }
     internal string GetTransactionLockPathForTest(string moduleId)
     {
@@ -694,8 +871,15 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
     private void DeleteJournal(TransactionJournal journal)
     {
         _hooks?.JournalDeleteStarting?.Invoke(); var path = JournalPath(journal.ModuleId, journal.TransactionId);
-        if (File.Exists(path)) File.Delete(path);
-        var directory = JournalNamespace(journal.ModuleId); if (!Directory.EnumerateFileSystemEntries(directory).Any()) Directory.Delete(directory, false);
+        var directory = JournalNamespace(journal.ModuleId); var identity = EnsureJournalNamespace(directory);
+        if (File.Exists(path))
+        {
+            using var handle = SecureWindowsFileSystem.OpenStableRead(path, _physicalJournalRoot);
+            if (SecureWindowsFileSystem.DirectoryIdentity(directory) != identity) throw new IOException("Journal namespace changed.");
+            handle.Dispose(); File.Delete(path);
+        }
+        if (!Directory.EnumerateFileSystemEntries(directory).Any() &&
+            SecureWindowsFileSystem.DirectoryIdentity(directory) == identity) Directory.Delete(directory, false);
     }
     private void TryDeleteWork(string work, Guid id)
     { try { SecureWindowsFileSystem.DeleteOwnedTree(work, OwnershipMarkerName, id, _physicalUserModulesRoot); } catch { } }
@@ -731,13 +915,17 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
     private static ModuleUpdateTransactionConfigurationException Configuration(ModuleUpdateTransactionConfigurationFailureCode code) => new(code, code.ToString());
     public ValueTask DisposeAsync() { Interlocked.Exchange(ref _disposed, 1); return ValueTask.CompletedTask; }
 
-    private sealed record InstalledIdentity(string ModuleId, string Version);
+    private sealed record InstalledSnapshot(string ModuleId, string Version, string Entry,
+        SecureDirectoryIdentity DirectoryIdentity, IReadOnlyList<QmodStagedFile> Files);
     internal sealed record LifecycleProgress(bool WindowsClosed, bool Deactivated, bool Unloaded, bool RuntimeRestored);
     internal sealed record TransactionJournal(Guid TransactionId, string EnvironmentIdentity, string ModuleId,
         string SourceVersion, string TargetVersion, string ModuleApiVersion, string PackageSha256,
         string VerifiedStagingIdentity, string UserModulesRootIdentity, ModuleUpdateTransactionState State,
         ModuleUpdateRuntimeState PreviousRuntimeState, LifecycleProgress LifecycleProgress, int Attempt,
         ModuleUpdateTransactionFailureCode LastFailureCode, bool HadInstalledModule,
-        IReadOnlyList<QmodStagedFile> PayloadFiles, DateTimeOffset StartedAtUtc, DateTimeOffset UpdatedAtUtc)
+        IReadOnlyList<QmodStagedFile> PayloadFiles, IReadOnlyList<QmodStagedFile> InstalledFiles,
+        SecureDirectoryIdentity? InstalledDirectoryIdentity, SecureDirectoryIdentity? CandidateDirectoryIdentity,
+        SecureDirectoryIdentity? BackupDirectoryIdentity, SecureDirectoryIdentity? PromotedDirectoryIdentity,
+        DateTimeOffset StartedAtUtc, DateTimeOffset UpdatedAtUtc)
     { public int SchemaVersion { get; init; } = JournalSchema; }
 }

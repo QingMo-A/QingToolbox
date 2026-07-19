@@ -1,5 +1,9 @@
 # Changelog
 
+- Bound Development/ModuleTest update transactions to the host-configured Verified Staging attestor, upgraded journals to schema 3 directory identities, and rejected rogue staging roots.
+- Added Windows volume/File-ID ownership across candidate promotion and backup recovery, stable-handle journal I/O, physical LocksRoot binding, and shared no-follow tree traversal.
+- Added rogue-root, directory replacement, journal/lock junction, pre-lifecycle reparse, and corrupt-promoted-candidate crash recovery coverage.
+
 ## Unreleased
 
 - Preserved installed ownership markers and backups until the committed journal is durable, and made every post-commit cleanup failure non-rollbackable and recoverable.
