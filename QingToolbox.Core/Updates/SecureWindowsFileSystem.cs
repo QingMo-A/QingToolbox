@@ -218,7 +218,7 @@ internal static class SecureWindowsFileSystem
     public static string HashIdentity(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
     [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security,
+    private static extern SafeFileHandle CreateFileNative(string name, uint access, uint share, IntPtr security,
         uint creation, uint flags, IntPtr template);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int infoClass,
@@ -226,6 +226,17 @@ internal static class SecureWindowsFileSystem
     [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern uint GetFinalPathNameByHandle(SafeFileHandle file, StringBuilder path, uint length, uint flags);
 
+    private static SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security,
+        uint creation, uint flags, IntPtr template) =>
+        CreateFileNative(ToExtendedPath(path), access, share, security, creation, flags, template);
+    private static string ToExtendedPath(string path)
+    {
+        var full = Path.GetFullPath(path);
+        if (full.StartsWith("\\\\?\\", StringComparison.Ordinal)) return full;
+        return full.StartsWith("\\\\", StringComparison.Ordinal)
+            ? "\\\\?\\UNC\\" + full[2..]
+            : "\\\\?\\" + full;
+    }
     private static SafeFileHandle OpenDirectory(string path) => CreateFile(path, ReadAttributes, ShareRead | ShareWrite,
         IntPtr.Zero, OpenExisting, BackupSemantics | OpenReparse, IntPtr.Zero);
     private static bool IsReparse(SafeFileHandle handle)

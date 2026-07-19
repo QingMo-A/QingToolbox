@@ -188,6 +188,14 @@ static async Task CleanupAndConcurrencyAsync(string root)
 
 static async Task SecurityHardeningAsync(string root)
 {
+    var longRoot = Path.Combine(root, "long-handles", new string('x', 70), new string('y', 70), new string('z', 70));
+    Directory.CreateDirectory(longRoot);
+    var longFile = Path.Combine(longRoot, "payload.bin");
+    await File.WriteAllTextAsync(longFile, "stable");
+    using (var handle = SecureWindowsFileSystem.OpenStableRead(longFile,
+               SecureWindowsFileSystem.PhysicalDirectory(longRoot)))
+        Require(RandomAccess.GetLength(handle) == 6, "extended-length stable handle opens beyond MAX_PATH");
+
     foreach (var (name, hooks) in new (string, ModuleUpdateTransactionTestHooks)[]
     {
         ("marker-cleanup", new(MarkerDeleteStarting: () => throw new IOException("marker"))),
