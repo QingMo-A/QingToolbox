@@ -51,37 +51,57 @@ Each transition is serialized to a temporary file, flushed to disk, and atomical
 over the journal on the same volume. States distinguish preparation, quiescing, backup,
 promotion, verification, runtime restoration, commit, cleanup, rollback, and recovery.
 
-The commit point is reached only after the promoted directory passes exact static
-verification and the previous runtime intent is restored. The transaction ownership
-marker is then removed, the exact installed tree is verified again, and `Committed` is
-persisted. Backup cleanup failure becomes `CleanupPending`; it does not rewrite a committed
-update as failed.
+The transaction ownership marker and backup remain present while the promoted directory is
+verified and the previous runtime intent is restored. The engine verifies the payload and
+marker again, atomically persists `Committed`, and only then removes the marker and cleans
+the backup/work tree. Once `Committed` is durable, no exception can enter rollback. Marker,
+work, journal, or even `CleanupPending` journal-write failures return committed success with
+cleanup pending; recovery retries cleanup without replacing the new module.
 
 ## Replacement and recovery
 
-The candidate is copied from stable, re-attested staging files with `CreateNew`, per-file
-SHA256 checks, exact-tree verification, and no `qmod.json` or `qmod-staging.json` in the
-installed payload. An existing module directory is atomically renamed to `backup`, then
-the candidate is atomically renamed into its place.
+The candidate is copied from stable, re-attested staging handles. Source files are opened
+once with `OPEN_REPARSE_POINT`, cannot be written or deleted while open, have their final
+physical paths checked against the Verified root, and are hashed while the same handle is
+copied. Destinations use `CreateNew`, `FileShare.None`, `WriteThrough`, and `Flush(true)`.
+Strict tree verification rejects additional files or empty directories, case/Unicode
+collisions, reparse entries, and manifest/entry mismatches. `qmod.json` and
+`qmod-staging.json` do not enter the installed payload.
 
 Failures before `Committed` attempt rollback. A promoted candidate is isolated, the old
 directory is restored when present, and prior runtime intent is requested again. If safe
 ownership or restoration cannot be proven, the journal and backup are preserved as
 `RecoveryRequired`; the engine does not pretend success.
 
-Recovery scans only the current environment journal directory and takes the same
-physical-root/environment/module lock. Incomplete work is rolled back, committed cleanup
-is retried, and an explicit `RecoveryRequired` journal is preserved for diagnosis. No
-recovery path loads a DLL.
+Journals are isolated below a namespace hash of physical UserModules root, environment, and
+module ID, so a corrupt journal for one module cannot block another. Journal filenames are
+bound to their transaction IDs; strict UTF-8 JSON rejects BOM, missing/duplicate/unknown
+fields, invalid hashes, versions, times, state, and namespace identity. Writes use unique
+temporary files, disk flush, and same-volume atomic replacement.
+
+Recovery takes the same crash-recoverable exclusive Windows file-handle lock used by
+Verified Staging. It follows an explicit state/layout matrix. Moving an installed candidate
+during rollback requires the exact transaction marker, expected payload hashes, ordinary
+physical-root membership, and owned backup/work layout; journal state alone never proves
+ownership. Unknown installed directories and ambiguous orphan temp journals are preserved
+as `RecoveryRequired`. Committed recovery only validates the target and performs safe
+cleanup; it never rolls back.
+
+Owned cleanup walks ordinary directories without following reparse targets. Reparse entries
+are removed as links, and every ordinary child remains bounded by the attested work root.
+Module identities share a strict lower-case Windows path-segment validator and reject device
+names plus the `.qing-` host namespace, including `.qing-transactions`.
 
 ## Verification
 
 `QingToolbox.DevTools.ModuleUpdateTransactionSmokeTest` builds disposable packages and
-installed modules at runtime. It covers successful update and new install, lifecycle and
-filesystem failure injection, exact-tree tamper rejection, rollback, cleanup recovery,
-same-module contention, data/cache isolation, and a real child-process crash after the old
-module has been backed up followed by recovery. The Windows CI workflow runs this test as
-a required step without `continue-on-error`.
+installed modules at runtime. It covers successful update/new install, lifecycle and file
+failure injection, exact-tree and marker attacks, reserved identities, root overlap,
+module-isolated journal corruption, lock/link boundaries, external cleanup sentinels,
+committed cleanup failures, and data/cache isolation. Four real child processes fail fast
+after backup move, after candidate move, after runtime restoration, and after durable
+commit. The first three recover v1; the committed window keeps v2 and only cleans ownership
+state. Windows CI runs this required step without `continue-on-error`.
 
 Phase A remains **Engineering Complete**. Phase B has started and only the B1 transaction
 core described here is complete. Preview 2 manual acceptance items that were not run remain

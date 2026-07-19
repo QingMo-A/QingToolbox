@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Preserved installed ownership markers and backups until the committed journal is durable, and made every post-commit cleanup failure non-rollbackable and recoverable.
+- Unified staging and transaction locks on crash-recoverable exclusive Windows handles, added stable-handle staging-to-candidate copying, strict tree verification, reserved module identities, and physically isolated roots.
+- Isolated strict journals per physical root/environment/module, replaced fixed temp files and recursive deletion, and covered four real promotion/commit crash windows plus hostile ownership and journal cases.
 - Added the Development/ModuleTest-only recoverable module update transaction core with strict durable journals, physical-root locks, same-volume candidates, atomic directory promotion, rollback, and crash recovery.
 - Added immutable Verified Staging attestations bound to the physical Verified root and official release identity, with exact re-attestation before transaction mutation.
 - Added deterministic lifecycle/filesystem failure coverage and a real child-process crash recovery smoke test required by Windows CI.

@@ -86,7 +86,8 @@ public sealed class QmodVerifiedStagingAttestation
     internal QmodVerifiedStagingAttestation(string directory, string physicalDirectoryIdentity,
         string physicalVerifiedRootIdentity, string officialReleaseIdentityHash,
         string moduleId, string targetVersion, string moduleApiVersion, string packageSha256,
-        Guid transactionId, string environmentIdentity, IReadOnlyList<QmodStagedFile> files)
+        Guid transactionId, string environmentIdentity, IReadOnlyList<QmodStagedFile> files,
+        QmodStagedFile stagingMetadataFile)
     {
         Directory = directory; PhysicalDirectoryIdentity = physicalDirectoryIdentity;
         PhysicalVerifiedRootIdentity = physicalVerifiedRootIdentity;
@@ -94,6 +95,7 @@ public sealed class QmodVerifiedStagingAttestation
         TargetVersion = targetVersion; ModuleApiVersion = moduleApiVersion; PackageSha256 = packageSha256;
         TransactionId = transactionId; EnvironmentIdentity = environmentIdentity;
         Files = Array.AsReadOnly(files.ToArray());
+        StagingMetadataFile = stagingMetadataFile;
     }
     public string Directory { get; }
     public string PhysicalDirectoryIdentity { get; }
@@ -106,6 +108,7 @@ public sealed class QmodVerifiedStagingAttestation
     public Guid TransactionId { get; }
     public string EnvironmentIdentity { get; }
     public IReadOnlyList<QmodStagedFile> Files { get; }
+    public QmodStagedFile StagingMetadataFile { get; }
 }
 
 public sealed record QmodStagingResult(
@@ -250,11 +253,19 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         if (!result.Succeeded) return null;
         var metadata = await ReadAndValidateStagingMetadataAsync(
             Path.Combine(final, StagingMetadataName), input, cancellationToken);
+        var metadataPath = Path.Combine(final, StagingMetadataName);
+        using var metadataHandle = SecureWindowsFileSystem.OpenStableRead(metadataPath, GetPhysicalDirectoryPath(final));
+        await using var metadataStream = new FileStream(metadataHandle, FileAccess.Read, 65536, false);
+        var metadataLength = metadataStream.Length;
+        var metadataHash = await SHA256.HashDataAsync(metadataStream, cancellationToken);
+        if (metadataStream.Length != metadataLength) return null;
+        var metadataFile = new QmodStagedFile(StagingMetadataName, metadataLength,
+            Convert.ToHexString(metadataHash).ToLowerInvariant());
         return new(final, GetPhysicalDirectoryPath(final), GetPhysicalDirectoryPath(_verifiedRoot),
             HashOfficialReleaseIdentity(input.ReleaseIdentity.OfficialUrl), input.ReleaseIdentity.ModuleId,
             input.ReleaseIdentity.TargetVersion, input.ModuleApiVersion,
             input.ReleaseIdentity.Sha256.ToLowerInvariant(), metadata.TransactionId,
-            _environmentIdentity, metadata.Files.ToArray());
+            _environmentIdentity, metadata.Files.ToArray(), metadataFile);
     }
 
     private async Task<QmodStagingResult> RunAndRemoveAsync(QmodStagingOperationKey key, QmodStagingInput input, StagingOperation operation)
@@ -893,48 +904,17 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         try
         {
             var lockPath = BuildPublicationLockPath(key);
-            while (true)
-            {
-                token.ThrowIfCancellationRequested();
-                EnsureSafeParents(_stagingRoot, _locksRoot);
-                var handle = NativeMethods.CreateLockFile(lockPath);
-                if (!handle.IsInvalid)
-                {
-                    bool recovered;
-                    try
-                    {
-                        if (NativeMethods.IsReparseHandle(handle))
-                            throw new StagingException(QmodStagingFailureCode.UnsupportedEntryType);
-                        recovered = MarkLockOwned(handle);
-                    }
-                    catch { handle.Dispose(); throw; }
-                    if (recovered) Log("Publication lock recovered after process exit", input);
-                    return new(local, handle, _testHooks?.PublicationLockMarkerCleanup,
-                        () => Log("Publication lock marker cleanup failed", input, failure: QmodStagingFailureCode.IoFailure));
-                }
-                var error = Marshal.GetLastPInvokeError();
-                handle.Dispose();
-                if (error is NativeMethods.ErrorSharingViolation or NativeMethods.ErrorLockViolation)
-                { await Task.Delay(40, token); continue; }
-                if (error == NativeMethods.ErrorAccessDenied) throw new UnauthorizedAccessException();
-                throw new IOException($"Publication lock open failed with Win32 error {error}.");
-            }
+            EnsureSafeParents(_stagingRoot, _locksRoot);
+            var crossProcess = await SecureWindowsFileSystem.AcquireLockAsync(lockPath, token);
+            if (crossProcess.Recovered) Log("Publication lock recovered after process exit", input);
+            return new(local, crossProcess, _testHooks?.PublicationLockMarkerCleanup,
+                () => Log("Publication lock marker cleanup failed", input, failure: QmodStagingFailureCode.IoFailure));
         }
         catch
         {
             await local.DisposeAsync();
             throw;
         }
-    }
-
-    private static bool MarkLockOwned(SafeFileHandle handle)
-    {
-        var recovered = RandomAccess.GetLength(handle) != 0;
-        RandomAccess.SetLength(handle, 0);
-        RandomAccess.Write(handle, Encoding.ASCII.GetBytes(Environment.ProcessId.ToString(
-            System.Globalization.CultureInfo.InvariantCulture)), 0);
-        RandomAccess.FlushToDisk(handle);
-        return recovered;
     }
 
     private QmodModuleVersionKey BuildModuleVersionKey(string moduleId, string targetVersion) =>
@@ -1210,8 +1190,7 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     private static string SafeHashPrefix(string hash) => hash.Length >= 12 && hash.All(Uri.IsHexDigit) ? hash[..12].ToLowerInvariant() : "invalid";
     private static bool IsSafeFileName(string value) => !string.IsNullOrWhiteSpace(value) &&
         value == Path.GetFileName(value) && IsSafeSegment(value);
-    private static bool IsSafeModuleId(string value) => !string.IsNullOrEmpty(value) && value.Length <= 128 &&
-        value.All(ch => char.IsAsciiLetterOrDigit(ch) && !char.IsUpper(ch) || ch is '.' or '-' or '_');
+    private static bool IsSafeModuleId(string value) => SecureModuleIdentity.Validate(value) == ModuleIdentityFailure.None;
     private static string RequiredText(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
             ? value.GetString()! : throw new StagingException(QmodStagingFailureCode.ManifestInvalid);
@@ -1266,17 +1245,10 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         IReadOnlyList<QmodStagedFile> Files);
     private static class NativeMethods
     {
-        public const int ErrorAccessDenied = 5;
-        public const int ErrorSharingViolation = 32;
-        public const int ErrorLockViolation = 33;
-        private const uint GenericRead = 0x80000000;
-        private const uint GenericWrite = 0x40000000;
         private const uint FileReadAttributes = 0x80;
         private const uint FileShareRead = 0x1;
         private const uint FileShareWrite = 0x2;
         private const uint OpenExisting = 3;
-        private const uint OpenAlways = 4;
-        private const uint FileAttributeNormal = 0x80;
         private const uint FileFlagBackupSemantics = 0x02000000;
         private const uint FileFlagOpenReparsePoint = 0x00200000;
         private const int FileAttributeTagInfo = 9;
@@ -1292,9 +1264,6 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern uint GetFinalPathNameByHandle(SafeFileHandle file, StringBuilder path,
             uint pathLength, uint flags);
-
-        public static SafeFileHandle CreateLockFile(string path) => CreateFile(path, GenericRead | GenericWrite, 0,
-            IntPtr.Zero, OpenAlways, FileAttributeNormal | FileFlagOpenReparsePoint, IntPtr.Zero);
 
         public static SafeFileHandle OpenDirectory(string path) => CreateFile(path, FileReadAttributes,
             FileShareRead | FileShareWrite, IntPtr.Zero, OpenExisting,
@@ -1394,7 +1363,7 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
             }
         }
     }
-    private sealed class PublicationLease(PublicationGate.GateLease local, SafeFileHandle crossProcess,
+    private sealed class PublicationLease(PublicationGate.GateLease local, CrashRecoverableFileLock crossProcess,
         Action? markerCleanupHook, Action markerCleanupWarning) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()
@@ -1404,14 +1373,14 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
                 try
                 {
                     markerCleanupHook?.Invoke();
-                    RandomAccess.SetLength(crossProcess, 0);
-                    RandomAccess.FlushToDisk(crossProcess);
+                    RandomAccess.SetLength(crossProcess.Handle, 0);
+                    RandomAccess.FlushToDisk(crossProcess.Handle);
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
                     markerCleanupWarning();
                 }
-                finally { crossProcess.Dispose(); }
+                finally { await crossProcess.DisposeAsync(); }
             }
             finally { await local.DisposeAsync(); }
         }

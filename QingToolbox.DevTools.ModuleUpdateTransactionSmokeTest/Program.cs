@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 using QingToolbox.Core.Updates;
 
 if (args.Length > 0)
@@ -18,8 +19,9 @@ try
     await ValidationAndLifecycleAsync(root);
     await FailureRollbackAsync(root);
     await CleanupAndConcurrencyAsync(root);
+    await SecurityHardeningAsync(root);
     await CrashRecoveryAsync(root);
-    Console.WriteLine("Module update transaction smoke test passed: atomic promotion, rollback, recovery and isolation.");
+    Console.WriteLine("Module update transaction smoke test passed: stable copy, strict ownership, four crash windows, committed cleanup and isolation.");
 }
 finally { try { Directory.Delete(root, true); } catch { } }
 
@@ -141,10 +143,10 @@ static async Task FailureRollbackAsync(string root)
     await using (var service = verify.Service(new FakeCoordinator(new(false, false, false, false)), verifyHooks))
     {
         var result = await service.ExecuteAsync(new(verify.Attestation));
-        Require(result.FailureCode == ModuleUpdateTransactionFailureCode.InstalledVerificationFailed && result.RolledBack,
-            "installed verification failure rolls back");
+        Require(result.FailureCode == ModuleUpdateTransactionFailureCode.RecoveryRequired && !result.RolledBack,
+            "tampered installed directory is preserved for recovery instead of being moved");
     }
-    Require(Fixture.Version(verify.Installed) == "1.0.0", "verification rollback restores v1");
+    Require(Fixture.Version(verify.Installed) == "2.0.0", "unknown installed replacement is not overwritten");
 
     var restore = await Fixture.CreateAsync(root, "restore-failure", "qing.restore", "2.0.0", "1.0.0");
     var restoreCoordinator = new FakeCoordinator(new(false, false, true, false)) { FailRestore = true };
@@ -184,34 +186,247 @@ static async Task CleanupAndConcurrencyAsync(string root)
     release.Set(); Require((await firstTask).Succeeded, "first transaction completes after contender cancellation");
 }
 
+static async Task SecurityHardeningAsync(string root)
+{
+    foreach (var (name, hooks) in new (string, ModuleUpdateTransactionTestHooks)[]
+    {
+        ("marker-cleanup", new(MarkerDeleteStarting: () => throw new IOException("marker"))),
+        ("work-cleanup", new(WorkDeleteStarting: () => throw new IOException("work"))),
+        ("journal-cleanup", new(JournalDeleteStarting: () => throw new IOException("journal"))),
+        ("commit-callback", new(StatePersisted: state =>
+            { if (state == ModuleUpdateTransactionState.Committed) throw new IOException("callback"); })),
+        ("cleanup-journal-write", new(MarkerDeleteStarting: () => throw new IOException("marker"),
+            JournalPersistStarting: state => { if (state == ModuleUpdateTransactionState.CleanupPending) throw new IOException("journal"); }))
+    })
+    {
+        var fixture = await Fixture.CreateAsync(root, name, "qing." + name, "2.0.0", "1.0.0");
+        await using (var service = fixture.Service(new FakeCoordinator(new(false, false, false, false)), hooks))
+        {
+            var result = await service.ExecuteAsync(new(fixture.Attestation));
+            Require(result.Succeeded && result.CleanupPending && Fixture.Version(fixture.Installed) == "2.0.0",
+                name + " cannot roll back a persisted commit");
+        }
+        await using var recovery = fixture.Service(new FakeCoordinator(new(false, false, false, false)));
+        Require((await recovery.RecoverAsync()).CleanupCompleted == 1 && Fixture.Version(fixture.Installed) == "2.0.0",
+            name + " cleanup is recoverable and preserves v2");
+    }
+
+    foreach (var (name, mutate) in new (string, Action<string>)[]
+    {
+        ("marker-missing", File.Delete),
+        ("marker-wrong", path => File.WriteAllText(path, Guid.NewGuid().ToString("D"), new UTF8Encoding(false))),
+        ("marker-bom", path => File.WriteAllText(path, Guid.NewGuid().ToString("D"), new UTF8Encoding(true)))
+    })
+    {
+        var fixture = await Fixture.CreateAsync(root, name, "qing." + name, "2.0.0", "1.0.0");
+        var hooks = new ModuleUpdateTransactionTestHooks(InstalledVerificationStarting: () =>
+            mutate(Path.Combine(fixture.Installed, ".qing-transaction-owner")));
+        await using var service = fixture.Service(new FakeCoordinator(new(false, false, false, false)), hooks);
+        var result = await service.ExecuteAsync(new(fixture.Attestation));
+        Require(result.FailureCode == ModuleUpdateTransactionFailureCode.RecoveryRequired &&
+                Fixture.Version(fixture.Installed) == "2.0.0", name + " preserves unknown installed and backup");
+    }
+
+    var reserved = await Fixture.CreateAsync(root, "reserved", "qing.reserved", "2.0.0", "1.0.0");
+    reserved.Attestation = Fixture.WithModuleId(reserved.Attestation, ".qing-transactions");
+    await using (var service = reserved.Service(new FakeCoordinator(new(false, false, false, false))))
+        Require((await service.ExecuteAsync(new(reserved.Attestation))).FailureCode ==
+            ModuleUpdateTransactionFailureCode.ReservedModuleIdentity, "host-reserved module identity rejected");
+
+    foreach (var device in new[] { "con", "nul", "com1" })
+    {
+        var fixture = await Fixture.CreateAsync(root, "device-" + device, "qing.device-" + device, "2.0.0", "1.0.0");
+        fixture.Attestation = Fixture.WithModuleId(fixture.Attestation, device);
+        await using var service = fixture.Service(new FakeCoordinator(new(false, false, false, false)));
+        Require((await service.ExecuteAsync(new(fixture.Attestation))).FailureCode ==
+            ModuleUpdateTransactionFailureCode.ReservedModuleIdentity, device + " device identity rejected");
+    }
+
+    var isolated = await Fixture.CreateAsync(root, "journal-isolation", "qing.journal-isolation", "2.0.0", "1.0.0");
+    await using (var service = isolated.Service(new FakeCoordinator(new(false, false, false, false))))
+    {
+        var unrelated = Path.Combine(isolated.Journal, new string('a', 64)); Directory.CreateDirectory(unrelated);
+        await File.WriteAllTextAsync(Path.Combine(unrelated, "broken.json"), "{");
+        Require((await service.ExecuteAsync(new(isolated.Attestation))).Succeeded,
+            "corrupt journal namespace does not block another module");
+    }
+
+    var overlapRoot = Path.Combine(root, "overlap"); Directory.CreateDirectory(overlapRoot);
+    try
+    {
+        _ = new ModuleUpdateTransactionService("ModuleTest", overlapRoot, Path.Combine(overlapRoot, "cache"),
+            "experimental-0.1", new FakeCoordinator(new(false, false, false, false)));
+        throw new Exception("overlapping roots accepted");
+    }
+    catch (ModuleUpdateTransactionConfigurationException exception)
+    { Require(exception.FailureCode == ModuleUpdateTransactionConfigurationFailureCode.OverlappingRoots, "root overlap structured"); }
+
+    var linked = await Fixture.CreateAsync(root, "junction-cleanup", "qing.junction-cleanup", "2.0.0", "1.0.0");
+    var outside = Path.Combine(linked.Root, "outside"); Directory.CreateDirectory(outside);
+    await File.WriteAllTextAsync(Path.Combine(outside, "sentinel.txt"), "keep");
+    var linkedCreated = false;
+    var linkHooks = new ModuleUpdateTransactionTestHooks(WorkDeleteStarting: () =>
+    {
+        var transaction = Directory.EnumerateDirectories(Path.Combine(linked.UserModules, ".qing-transactions")).Single();
+        linkedCreated = TryCreateJunction(Path.Combine(transaction, "external-link"), outside);
+    });
+    await using (var service = linked.Service(new FakeCoordinator(new(false, false, false, false)), linkHooks))
+        Require((await service.ExecuteAsync(new(linked.Attestation))).Succeeded, "safe cleanup completes with link entry");
+    Require(linkedCreated && await File.ReadAllTextAsync(Path.Combine(outside, "sentinel.txt")) == "keep",
+        "safe cleanup never follows a directory link");
+
+    var markerLink = await Fixture.CreateAsync(root, "marker-link", "qing.marker-link", "2.0.0", "1.0.0");
+    var markerTarget = Path.Combine(markerLink.Root, "marker-target"); await File.WriteAllTextAsync(markerTarget, "external");
+    var markerLinkCreated = false;
+    var markerLinkHooks = new ModuleUpdateTransactionTestHooks(InstalledVerificationStarting: () =>
+    {
+        var marker = Path.Combine(markerLink.Installed, ".qing-transaction-owner"); File.Delete(marker);
+        try { File.CreateSymbolicLink(marker, markerTarget); markerLinkCreated = true; } catch { }
+    });
+    await using (var service = markerLink.Service(new FakeCoordinator(new(false, false, false, false)), markerLinkHooks))
+    {
+        var result = await service.ExecuteAsync(new(markerLink.Attestation));
+        if (markerLinkCreated) Require(result.FailureCode == ModuleUpdateTransactionFailureCode.RecoveryRequired,
+            "marker symlink prevents ownership proof");
+    }
+    Require(await File.ReadAllTextAsync(markerTarget) == "external", "marker symlink target unchanged");
+
+    var lockLink = await Fixture.CreateAsync(root, "lock-link", "qing.lock-link", "2.0.0", "1.0.0");
+    await using (var service = lockLink.Service(new FakeCoordinator(new(false, false, false, false))))
+    {
+        var lockPath = service.GetTransactionLockPathForTest(lockLink.ModuleId); var target = Path.Combine(lockLink.Root, "lock-target");
+        await File.WriteAllTextAsync(target, "external"); var created = false;
+        try { File.CreateSymbolicLink(lockPath, target); created = true; } catch { }
+        if (created) Require((await service.ExecuteAsync(new(lockLink.Attestation))).FailureCode ==
+            ModuleUpdateTransactionFailureCode.IoFailure, "reparse transaction lock rejected");
+        Require(await File.ReadAllTextAsync(target) == "external", "lock link target unchanged");
+    }
+
+    var lockDirectoryLink = await Fixture.CreateAsync(root, "lock-directory-link", "qing.lock-directory-link", "2.0.0", "1.0.0");
+    await using (var service = lockDirectoryLink.Service(new FakeCoordinator(new(false, false, false, false))))
+    {
+        var locks = Path.GetDirectoryName(service.GetTransactionLockPathForTest(lockDirectoryLink.ModuleId))!;
+        var externalLocks = Path.Combine(lockDirectoryLink.Root, "external-locks"); Directory.CreateDirectory(externalLocks);
+        var sentinel = Path.Combine(externalLocks, "sentinel.txt"); await File.WriteAllTextAsync(sentinel, "keep");
+        Directory.Delete(locks, false);
+        Require(TryCreateJunction(locks, externalLocks), "lock directory junction created");
+        Require((await service.ExecuteAsync(new(lockDirectoryLink.Attestation))).FailureCode ==
+            ModuleUpdateTransactionFailureCode.IoFailure, "reparse lock directory rejected");
+        Require(await File.ReadAllTextAsync(sentinel) == "keep", "lock directory target unchanged");
+    }
+
+    var orphan = await Fixture.CreateAsync(root, "orphan-temp", "qing.orphan-temp", "2.0.0", "1.0.0");
+    await using (var service = orphan.Service(new FakeCoordinator(new(false, false, false, false))))
+    {
+        var journalNamespace = service.GetJournalNamespaceForTest(orphan.ModuleId); Directory.CreateDirectory(journalNamespace);
+        var temp = Path.Combine(journalNamespace, Guid.NewGuid().ToString("N") + ".json.tmp-" + Guid.NewGuid().ToString("N"));
+        await File.WriteAllTextAsync(temp, "{}");
+        Require((await service.RecoverAsync()).RecoveryRequired == 1 && File.Exists(temp),
+            "orphan journal temp is reported and preserved");
+    }
+
+    var unknown = await Fixture.CreateAsync(root, "unknown-installed", "qing.unknown-installed", "2.0.0", "1.0.0");
+    var unknownHooks = new ModuleUpdateTransactionTestHooks(InstalledVerificationStarting: () =>
+    {
+        Directory.Delete(unknown.Installed, true); Directory.CreateDirectory(unknown.Installed);
+        File.WriteAllText(Path.Combine(unknown.Installed, "unknown.txt"), "preserve");
+    });
+    await using (var service = unknown.Service(new FakeCoordinator(new(false, false, false, false)), unknownHooks))
+    {
+        var result = await service.ExecuteAsync(new(unknown.Attestation));
+        Require(result.FailureCode == ModuleUpdateTransactionFailureCode.RecoveryRequired &&
+                await File.ReadAllTextAsync(Path.Combine(unknown.Installed, "unknown.txt")) == "preserve",
+            "unknown installed replacement is neither moved nor deleted");
+    }
+
+    foreach (var mutation in new[] { "filename", "hash", "time" })
+    {
+        var fixture = await Fixture.CreateAsync(root, "journal-" + mutation, "qing.journal-" + mutation,
+            "2.0.0", "1.0.0");
+        Require(await RunCrashWorkerAsync(fixture, ModuleUpdateTransactionCrashPoint.BackupMovedBeforeJournal) != 0,
+            mutation + " journal fixture crashed");
+        await using var service = fixture.Service(new FakeCoordinator(new(false, false, false, false)));
+        var journal = Directory.EnumerateFiles(service.GetJournalNamespaceForTest(fixture.ModuleId), "*.json").Single();
+        if (mutation == "filename") File.Move(journal, Path.Combine(Path.GetDirectoryName(journal)!, Guid.NewGuid().ToString("N") + ".json"));
+        else
+        {
+            var node = JsonNode.Parse(await File.ReadAllTextAsync(journal))!.AsObject();
+            if (mutation == "hash") node["packageSha256"] = new string('z', 64);
+            else node["updatedAtUtc"] = "not-a-date";
+            await File.WriteAllTextAsync(journal, node.ToJsonString(), new UTF8Encoding(false));
+        }
+        var recovery = await service.RecoverAsync();
+        Require(recovery.RecoveryRequired == 1 && !Directory.Exists(fixture.Installed),
+            mutation + " journal rejected without guessing at backup ownership");
+    }
+
+    var nestedCache = Path.Combine(root, "nested-cache"); Directory.CreateDirectory(nestedCache);
+    try
+    {
+        _ = new ModuleUpdateTransactionService("ModuleTest", Path.Combine(nestedCache, "user"), nestedCache,
+            "experimental-0.1", new FakeCoordinator(new(false, false, false, false)));
+        throw new Exception("user root nested in cache accepted");
+    }
+    catch (ModuleUpdateTransactionConfigurationException exception)
+    { Require(exception.FailureCode == ModuleUpdateTransactionConfigurationFailureCode.OverlappingRoots, "reverse root overlap structured"); }
+}
+
 static async Task CrashRecoveryAsync(string root)
 {
-    var fixture = await Fixture.CreateAsync(root, "crash", "qing.crash", "2.0.0", "1.0.0");
+    foreach (var point in Enum.GetValues<ModuleUpdateTransactionCrashPoint>())
+    {
+        var suffix = ((int)point).ToString();
+        var fixture = await Fixture.CreateAsync(root, "crash-" + suffix, "qing.crash-" + suffix,
+            "2.0.0", "1.0.0");
+        var exitCode = await RunCrashWorkerAsync(fixture, point);
+        Require(exitCode != 0, $"worker terminated at {point}");
+        await using var recovery = fixture.Service(new FakeCoordinator(new(false, false, false, false)));
+        var result = await recovery.RecoverAsync();
+        var committed = point == ModuleUpdateTransactionCrashPoint.CommittedBeforeCleanup;
+        Require((committed ? result.CleanupCompleted : result.Recovered) == 1,
+            $"recovery classified {point}");
+        Require(Fixture.Version(fixture.Installed) == (committed ? "2.0.0" : "1.0.0"),
+            $"recovery selected correct version at {point}");
+    }
+}
+
+static async Task<int> RunCrashWorkerAsync(Fixture fixture, ModuleUpdateTransactionCrashPoint point)
+{
     var executable = Environment.ProcessPath!; var start = new ProcessStartInfo(executable)
     { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
     if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
         start.ArgumentList.Add(typeof(Fixture).Assembly.Location);
-    foreach (var value in new[] { "--worker-crash", fixture.Root, fixture.PackagePath, fixture.ModuleId }) start.ArgumentList.Add(value);
+    foreach (var value in new[] { "--worker-crash", fixture.Root, fixture.PackagePath, fixture.ModuleId, point.ToString() })
+        start.ArgumentList.Add(value);
     using var worker = Process.Start(start) ?? throw new Exception("worker unavailable");
-    var output = worker.StandardOutput.ReadToEndAsync();
-    var error = worker.StandardError.ReadToEndAsync();
-    await worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
-    _ = await output; _ = await error;
-    Require(worker.ExitCode != 0, "worker was terminated at BackupCreated");
-    await using var recovery = fixture.Service(new FakeCoordinator(new(false, false, false, false)));
-    var result = await recovery.RecoverAsync();
-    Require(result.Recovered == 1 && Fixture.Version(fixture.Installed) == "1.0.0",
-        "new process recovers BackupCreated journal and v1");
+    var output = worker.StandardOutput.ReadToEndAsync(); var error = worker.StandardError.ReadToEndAsync();
+    await worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30)); _ = await output; _ = await error;
+    return worker.ExitCode;
+}
+
+static bool TryCreateJunction(string link, string target)
+{
+    try
+    {
+        var start = new ProcessStartInfo("cmd.exe")
+        { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        start.ArgumentList.Add("/c"); start.ArgumentList.Add("mklink"); start.ArgumentList.Add("/J");
+        start.ArgumentList.Add(link); start.ArgumentList.Add(target);
+        using var process = Process.Start(start); if (process is null) return false;
+        process.WaitForExit(); return process.ExitCode == 0 && Directory.Exists(link);
+    }
+    catch { return false; }
 }
 
 static async Task WorkerAsync(string[] args)
 {
-    if (args.Length != 4 || args[0] != "--worker-crash" || !args[1].Contains("QingToolbox-transaction-smoke-"))
-        Environment.Exit(90);
+    if (args.Length != 5 || args[0] != "--worker-crash" || !args[1].Contains("QingToolbox-transaction-smoke-") ||
+        !Enum.TryParse<ModuleUpdateTransactionCrashPoint>(args[4], out var crashPoint))
+        throw new InvalidOperationException("Invalid crash worker arguments.");
     var root = args[1]; var package = args[2]; var moduleId = args[3];
     var fixture = await Fixture.FromExistingAsync(root, package, moduleId, "2.0.0");
-    var hooks = new ModuleUpdateTransactionTestHooks(StatePersisted: state =>
-    { if (state == ModuleUpdateTransactionState.BackupCreated) Environment.FailFast("transaction crash probe"); });
+    var hooks = new ModuleUpdateTransactionTestHooks(CrashPoint: point =>
+    { if (point == crashPoint) Environment.FailFast("transaction crash probe: " + point); });
     await using var service = fixture.Service(new FakeCoordinator(new(false, false, false, false)), hooks);
     await service.ExecuteAsync(new(fixture.Attestation));
     Environment.Exit(91);
@@ -298,7 +513,13 @@ sealed class Fixture
     public static QmodVerifiedStagingAttestation WithModuleApi(QmodVerifiedStagingAttestation source, string moduleApi) =>
         new(source.Directory, source.PhysicalDirectoryIdentity, source.PhysicalVerifiedRootIdentity,
             source.OfficialReleaseIdentityHash, source.ModuleId, source.TargetVersion, moduleApi,
-            source.PackageSha256, source.TransactionId, source.EnvironmentIdentity, source.Files);
+            source.PackageSha256, source.TransactionId, source.EnvironmentIdentity, source.Files,
+            source.StagingMetadataFile);
+    public static QmodVerifiedStagingAttestation WithModuleId(QmodVerifiedStagingAttestation source, string moduleId) =>
+        new(source.Directory, source.PhysicalDirectoryIdentity, source.PhysicalVerifiedRootIdentity,
+            source.OfficialReleaseIdentityHash, moduleId, source.TargetVersion, source.ModuleApiVersion,
+            source.PackageSha256, source.TransactionId, source.EnvironmentIdentity, source.Files,
+            source.StagingMetadataFile);
     private static string Manifest(string id, string version) =>
         $"{{\"id\":\"{id}\",\"name\":\"Probe\",\"description\":\"Probe\",\"version\":\"{version}\",\"entry\":\"payload.dll\",\"runtimeType\":\"InProcess\",\"loadMode\":\"Manual\"}}";
     private static void Add(ZipArchive archive, string name, string text)

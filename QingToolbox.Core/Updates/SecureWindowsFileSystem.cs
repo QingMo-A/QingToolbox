@@ -1,0 +1,267 @@
+using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+
+namespace QingToolbox.Core.Updates;
+
+internal enum ModuleIdentityFailure { None, Invalid, Reserved }
+
+internal static class SecureModuleIdentity
+{
+    private static readonly HashSet<string> Devices = new(StringComparer.OrdinalIgnoreCase)
+    { "CON", "PRN", "AUX", "NUL", "CLOCK$", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+      "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9" };
+
+    public static ModuleIdentityFailure Validate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 128 || value != value.Normalize(NormalizationForm.FormC) ||
+            value != value.ToLowerInvariant() || value is "." or ".." || value.EndsWith('.') || value.EndsWith(' ') ||
+            value.Any(ch => char.IsControl(ch) || ch is '/' or '\\' or ':') ||
+            !value.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '.' or '-' or '_')) return ModuleIdentityFailure.Invalid;
+        if (value.StartsWith(".qing-", StringComparison.Ordinal) || Devices.Contains(value) ||
+            value.Split('.').Any(Devices.Contains)) return ModuleIdentityFailure.Reserved;
+        return ModuleIdentityFailure.None;
+    }
+}
+
+internal static class SecureWindowsFileSystem
+{
+    public const int ErrorAccessDenied = 5;
+    public const int ErrorSharingViolation = 32;
+    public const int ErrorLockViolation = 33;
+    private const uint GenericRead = 0x80000000;
+    private const uint GenericWrite = 0x40000000;
+    private const uint ReadAttributes = 0x80;
+    private const uint ShareRead = 1;
+    private const uint ShareWrite = 2;
+    private const uint OpenExisting = 3;
+    private const uint OpenAlways = 4;
+    private const uint Normal = 0x80;
+    private const uint BackupSemantics = 0x02000000;
+    private const uint OpenReparse = 0x00200000;
+    private const int FileAttributeTagInfo = 9;
+
+    public static string ValidateAbsoluteNonRoot(string path)
+    {
+        if (!Path.IsPathFullyQualified(path)) throw new ArgumentException("Absolute path required.");
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        if (full.Equals(Path.TrimEndingDirectorySeparator(Path.GetPathRoot(full)!), StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Volume root forbidden.");
+        return full;
+    }
+
+    public static bool IsWithin(string root, string path)
+    {
+        var normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        var normalizedPath = Path.GetFullPath(path);
+        return normalizedPath.Equals(normalizedRoot, StringComparison.OrdinalIgnoreCase) ||
+               normalizedPath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static string SafeCombine(string root, string relative)
+    {
+        if (Path.IsPathRooted(relative)) throw new IOException("Rooted relative path rejected.");
+        var path = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
+        if (!IsWithin(root, path) || path.Equals(Path.GetFullPath(root), StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Path escaped root.");
+        return path;
+    }
+
+    public static void CreateOrdinaryDirectoryTree(string path)
+    {
+        var missing = new Stack<string>(); var current = Path.GetFullPath(path);
+        while (!Directory.Exists(current))
+        {
+            if (File.Exists(current)) throw new IOException("Directory path collides with file.");
+            missing.Push(current); current = Path.GetDirectoryName(current) ?? throw new IOException("Invalid directory root.");
+        }
+        EnsureNoReparseAncestors(current);
+        while (missing.TryPop(out var item)) { Directory.CreateDirectory(item); EnsureOrdinaryDirectory(item); }
+    }
+
+    public static void EnsureNoReparseAncestors(string path)
+    {
+        var current = Path.GetFullPath(path);
+        while (true)
+        {
+            if (Directory.Exists(current)) EnsureOrdinaryDirectory(current);
+            var parent = Path.GetDirectoryName(current);
+            if (string.IsNullOrEmpty(parent) || parent.Equals(current, StringComparison.OrdinalIgnoreCase)) break;
+            current = parent;
+        }
+    }
+
+    public static void EnsureOrdinaryDirectory(string path)
+    {
+        using var handle = OpenDirectory(path);
+        if (handle.IsInvalid) throw Win32IOException("Directory open");
+        if (IsReparse(handle)) throw new IOException("Reparse directory rejected.");
+    }
+
+    public static string PhysicalDirectory(string path)
+    {
+        using var handle = OpenDirectory(path);
+        if (handle.IsInvalid) throw Win32IOException("Directory open");
+        if (IsReparse(handle)) throw new IOException("Reparse directory rejected.");
+        return FinalPath(handle);
+    }
+
+    public static SafeFileHandle OpenStableRead(string path, string physicalRoot)
+    {
+        EnsureNoReparseAncestors(Path.GetDirectoryName(path)!);
+        var handle = CreateFile(path, GenericRead, ShareRead, IntPtr.Zero, OpenExisting, Normal | OpenReparse, IntPtr.Zero);
+        if (handle.IsInvalid) throw Win32IOException("Stable file open");
+        try
+        {
+            if (IsReparse(handle) || !IsWithin(physicalRoot, FinalPath(handle))) throw new IOException("File escaped attested root.");
+            return handle;
+        }
+        catch { handle.Dispose(); throw; }
+    }
+
+    public static async Task<CrashRecoverableFileLock> AcquireLockAsync(string path, CancellationToken token)
+    {
+        EnsureNoReparseAncestors(Path.GetDirectoryName(path)!);
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            var handle = CreateFile(path, GenericRead | GenericWrite, 0, IntPtr.Zero, OpenAlways,
+                Normal | OpenReparse, IntPtr.Zero);
+            if (!handle.IsInvalid)
+            {
+                try
+                {
+                    if (IsReparse(handle)) throw new IOException("Reparse lock rejected.");
+                    var recovered = RandomAccess.GetLength(handle) != 0;
+                    RandomAccess.SetLength(handle, 0);
+                    RandomAccess.Write(handle, Encoding.ASCII.GetBytes(Environment.ProcessId.ToString(CultureInfo.InvariantCulture)), 0);
+                    RandomAccess.FlushToDisk(handle);
+                    return new(handle, recovered);
+                }
+                catch { handle.Dispose(); throw; }
+            }
+            var error = Marshal.GetLastPInvokeError(); handle.Dispose();
+            if (error is ErrorSharingViolation or ErrorLockViolation) { await Task.Delay(40, token); continue; }
+            if (error == ErrorAccessDenied) throw new UnauthorizedAccessException();
+            throw new IOException($"Lock open failed with Win32 error {error}.");
+        }
+    }
+
+    public static void WriteOwnerMarker(string directory, string name, Guid transactionId)
+    {
+        EnsureOrdinaryDirectory(directory);
+        var path = SafeCombine(directory, name); var bytes = Encoding.UTF8.GetBytes(transactionId.ToString("D"));
+        try
+        {
+            using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough);
+            stream.Write(bytes); stream.Flush(true);
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            if (!HasOwnerMarker(directory, name, transactionId)) throw;
+        }
+    }
+
+    public static bool HasOwnerMarker(string directory, string name, Guid transactionId)
+    {
+        try
+        {
+            if (!Directory.Exists(directory)) return false;
+            var physical = PhysicalDirectory(directory); var path = SafeCombine(directory, name);
+            using var handle = OpenStableRead(path, physical);
+            var length = RandomAccess.GetLength(handle); if (length != 36) return false;
+            Span<byte> bytes = stackalloc byte[36]; if (RandomAccess.Read(handle, bytes, 0) != 36) return false;
+            return bytes[0] != 0xEF && Encoding.UTF8.GetString(bytes) == transactionId.ToString("D");
+        }
+        catch { return false; }
+    }
+
+    public static void DeleteOwnerMarker(string directory, string name, Guid transactionId)
+    {
+        if (!HasOwnerMarker(directory, name, transactionId)) throw new IOException("Owner marker rejected.");
+        File.Delete(SafeCombine(directory, name));
+    }
+
+    public static void DeleteOwnedTree(string directory, string markerName, Guid transactionId, string physicalAllowedRoot)
+    {
+        if (!Directory.Exists(directory)) return;
+        if (!HasOwnerMarker(directory, markerName, transactionId)) throw new IOException("Tree ownership rejected.");
+        var physical = PhysicalDirectory(directory);
+        if (!IsWithin(physicalAllowedRoot, physical)) throw new IOException("Owned tree escaped root.");
+        DeleteTreeCore(directory, physical);
+    }
+
+    private static void DeleteTreeCore(string directory, string physicalRoot)
+    {
+        EnsureOrdinaryDirectory(directory);
+        foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+        {
+            var attributes = File.GetAttributes(entry);
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                if ((attributes & FileAttributes.Directory) != 0) Directory.Delete(entry, false); else File.Delete(entry);
+                continue;
+            }
+            if ((attributes & FileAttributes.Directory) != 0)
+            {
+                if (!IsWithin(physicalRoot, PhysicalDirectory(entry))) throw new IOException("Delete traversal escaped root.");
+                DeleteTreeCore(entry, physicalRoot);
+            }
+            else File.Delete(entry);
+        }
+        Directory.Delete(directory, false);
+    }
+
+    public static bool IsReparsePath(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+    public static string HashIdentity(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security,
+        uint creation, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int infoClass,
+        out FileAttributeTagInformation information, uint size);
+    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandle(SafeFileHandle file, StringBuilder path, uint length, uint flags);
+
+    private static SafeFileHandle OpenDirectory(string path) => CreateFile(path, ReadAttributes, ShareRead | ShareWrite,
+        IntPtr.Zero, OpenExisting, BackupSemantics | OpenReparse, IntPtr.Zero);
+    private static bool IsReparse(SafeFileHandle handle)
+    {
+        if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfo, out var info,
+                (uint)Marshal.SizeOf<FileAttributeTagInformation>())) throw Win32IOException("Handle attribute query");
+        return (info.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0;
+    }
+    private static string FinalPath(SafeFileHandle handle)
+    {
+        var buffer = new StringBuilder(512); var length = GetFinalPathNameByHandle(handle, buffer, 512, 0);
+        if (length == 0) throw Win32IOException("Final path query");
+        if (length >= buffer.Capacity)
+        {
+            buffer.EnsureCapacity(checked((int)length + 1)); length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+            if (length == 0 || length >= buffer.Capacity) throw Win32IOException("Final path query");
+        }
+        var value = buffer.ToString();
+        if (value.StartsWith("\\\\?\\UNC\\", StringComparison.OrdinalIgnoreCase)) value = "\\\\" + value[8..];
+        else if (value.StartsWith("\\\\?\\", StringComparison.Ordinal)) value = value[4..];
+        return Path.GetFullPath(value);
+    }
+    private static IOException Win32IOException(string action) => new($"{action} failed with Win32 error {Marshal.GetLastPInvokeError()}.");
+    [StructLayout(LayoutKind.Sequential)] private struct FileAttributeTagInformation { public uint FileAttributes; public uint ReparseTag; }
+}
+
+internal sealed class CrashRecoverableFileLock : IAsyncDisposable
+{
+    private readonly SafeFileHandle _handle;
+    public CrashRecoverableFileLock(SafeFileHandle handle, bool recovered)
+    { _handle = handle; Recovered = recovered; }
+    public bool Recovered { get; }
+    public SafeFileHandle Handle => _handle;
+    public ValueTask DisposeAsync()
+    {
+        try { RandomAccess.SetLength(_handle, 0); RandomAccess.FlushToDisk(_handle); } catch { }
+        _handle.Dispose(); return ValueTask.CompletedTask;
+    }
+}
