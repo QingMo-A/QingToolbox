@@ -6,6 +6,7 @@
 - Bound staging work to complete package identity, serialized publication per module/version across service instances, and added strict metadata/tree tamper detection without automatic deletion or overwrite.
 - Replaced named staging semaphores with crash-recoverable exclusive file handles, added real child-process contention/crash tests, stable-handle path attestation, Release identity binding, and disposal/capacity scheduling contracts.
 - Made the atomic Verified directory move the sole publication commit point: Incoming candidates now pass full stable-handle attestation before the move, while post-commit cancellation and diagnostic lock-marker cleanup cannot rewrite success.
+- Linearized caller cancellation with the synchronous Verified move, bound publication locks to the attested physical Staging root, and added distinct unsafe user-module-root configuration failures.
 - Added hostile archive, ZIP bomb, manifest identity, concurrency, cancellation, and no-DLL-execution staging smoke coverage.
 - Added a lightweight per-session log viewer with persistent, privacy-conscious log files and environment-aware sidebar visibility.
 

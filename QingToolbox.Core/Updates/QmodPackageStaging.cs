@@ -48,13 +48,15 @@ internal sealed record QmodStagingTestHooks(
     Func<QmodStagingInput, CancellationToken, Task>? PublicationLockAcquired = null,
     Func<QmodStagingInput, CancellationToken, Task>? ExtractionCapacityAcquired = null,
     Func<QmodStagingInput, string, CancellationToken, Task>? CandidateAttestationStarting = null,
-    Func<string, string, Task>? PublicationMove = null,
+    Action<string, string>? PublicationMove = null,
+    Action? CallerCancellationObserved = null,
     Func<QmodStagingInput, Task>? PublicationMoveCompleted = null,
     Action? PublicationLockMarkerCleanup = null);
 
 public enum QmodStagingConfigurationFailureCode
 {
     UnsafeStagingRoot,
+    UnsafeUserModulesRoot,
     OverlappingRoots,
     UnsupportedEnvironment
 }
@@ -138,8 +140,14 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         _environmentIdentity = environmentIdentity is "Production" or "Development" or "ModuleTest"
             ? environmentIdentity : throw new QmodStagingConfigurationException(
                 QmodStagingConfigurationFailureCode.UnsupportedEnvironment, "Unsupported execution environment.");
+        if (!string.IsNullOrWhiteSpace(userModulesRoot) && !Path.IsPathFullyQualified(userModulesRoot))
+            throw new QmodStagingConfigurationException(QmodStagingConfigurationFailureCode.UnsafeUserModulesRoot,
+                "User modules root must be absolute.");
         _userModulesRoot = string.IsNullOrWhiteSpace(userModulesRoot)
             ? null : Path.TrimEndingDirectorySeparator(Path.GetFullPath(userModulesRoot));
+        if (_userModulesRoot is not null && Path.GetPathRoot(_userModulesRoot) == _userModulesRoot)
+            throw new QmodStagingConfigurationException(QmodStagingConfigurationFailureCode.UnsafeUserModulesRoot,
+                "User modules root cannot be a volume root.");
         ValidateRootIsolation();
         _timeProvider = timeProvider;
         _limits = limits ?? new();
@@ -172,13 +180,15 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         return callerToken.CanBeCanceled ? AwaitWithCommitSemanticsAsync(operation, callerToken) : operation.Task;
     }
 
-    private static async Task<QmodStagingResult> AwaitWithCommitSemanticsAsync(
+    private async Task<QmodStagingResult> AwaitWithCommitSemanticsAsync(
         StagingOperation operation, CancellationToken callerToken)
     {
         try { return await operation.Task.WaitAsync(callerToken); }
-        catch (OperationCanceledException) when (callerToken.IsCancellationRequested && operation.IsCommitted)
+        catch (OperationCanceledException) when (callerToken.IsCancellationRequested)
         {
-            return await operation.Task;
+            _testHooks?.CallerCancellationObserved?.Invoke();
+            if (await operation.ObserveCommitAtCancellationBoundaryAsync()) return await operation.Task;
+            throw;
         }
     }
 
@@ -298,15 +308,17 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
                     return Reject(QmodStagingFailureCode.StagingConflict, input);
                 try
                 {
-                    if (_testHooks?.PublicationMove is { } moveHook) await moveHook(partial, final);
-                    else Directory.Move(partial, final);
+                    operation.CommitPublication(() =>
+                    {
+                        if (_testHooks?.PublicationMove is { } moveHook) moveHook(partial, final);
+                        else Directory.Move(partial, final);
+                    });
                 }
                 catch (IOException) when (Directory.Exists(final) || HasConflictingVersionContent(versionRoot, final))
                 {
                     return Reject(QmodStagingFailureCode.StagingConflict, input);
                 }
                 partial = null;
-                operation.MarkCommitted();
                 Log("Publication move completed", input, files.Count, actualTotal);
                 if (_testHooks?.PublicationMoveCompleted is { } committedHook)
                 {
@@ -872,7 +884,7 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     }
 
     private QmodModuleVersionKey BuildModuleVersionKey(string moduleId, string targetVersion) =>
-        new(Path.TrimEndingDirectorySeparator(Path.GetFullPath(_stagingRoot)).ToUpperInvariant(),
+        new(GetPhysicalDirectoryPath(_stagingRoot).ToUpperInvariant(),
             _environmentIdentity, moduleId, targetVersion);
 
     private string BuildPublicationLockPath(QmodModuleVersionKey key)
@@ -884,7 +896,14 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     }
 
     internal string GetPublicationLockPathForTest(string moduleId, string targetVersion) =>
-        BuildPublicationLockPath(BuildModuleVersionKey(moduleId, targetVersion));
+        GetPublicationLockPathForTestCore(moduleId, targetVersion);
+
+    private string GetPublicationLockPathForTestCore(string moduleId, string targetVersion)
+    {
+        CreateOrdinaryDirectoryTree(_stagingRoot);
+        CreateOrdinaryDirectoryTree(_locksRoot);
+        return BuildPublicationLockPath(BuildModuleVersionKey(moduleId, targetVersion));
+    }
 
     private static bool HasConflictingVersionContent(string versionRoot, string final)
     {
@@ -977,12 +996,26 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
         try
         {
             EnsureNoReparseAncestorsIfPresent(_stagingRoot);
-            if (_userModulesRoot is not null) EnsureNoReparseAncestorsIfPresent(_userModulesRoot);
         }
         catch (StagingException exception) when (exception.Code == QmodStagingFailureCode.UnsupportedEntryType)
         {
             throw new QmodStagingConfigurationException(QmodStagingConfigurationFailureCode.UnsafeStagingRoot,
-                "Staging and user module roots must not contain reparse points.");
+                "Staging root must not contain reparse points.");
+        }
+        if (_userModulesRoot is null) return;
+        try { EnsureNoReparseAncestorsIfPresent(_userModulesRoot); }
+        catch (StagingException exception) when (exception.Code == QmodStagingFailureCode.UnsupportedEntryType)
+        {
+            throw new QmodStagingConfigurationException(QmodStagingConfigurationFailureCode.UnsafeUserModulesRoot,
+                "User modules root must not contain reparse points.");
+        }
+        if (Directory.Exists(_stagingRoot) && Directory.Exists(_userModulesRoot))
+        {
+            var physicalStaging = GetPhysicalDirectoryPath(_stagingRoot);
+            var physicalUserModules = GetPhysicalDirectoryPath(_userModulesRoot);
+            if (IsWithin(physicalStaging, physicalUserModules) || IsWithin(physicalUserModules, physicalStaging))
+                throw new QmodStagingConfigurationException(QmodStagingConfigurationFailureCode.OverlappingRoots,
+                    "Staging and user module roots must be physically disjoint.");
         }
     }
 
@@ -1331,12 +1364,43 @@ public sealed class QmodPackageStagingService : IAsyncDisposable
     }
     private sealed class StagingOperation(CancellationTokenSource cancellation, Func<Task<QmodStagingResult>> factory) : IDisposable
     {
-        private int _committed;
+        private readonly object _commitSync = new();
+        private readonly TaskCompletionSource<bool> _commitDecision =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private CommitState _commitState;
         public CancellationTokenSource Cancellation { get; } = cancellation;
-        public bool IsCommitted => Volatile.Read(ref _committed) != 0;
         private readonly Lazy<Task<QmodStagingResult>> _task = new(factory, LazyThreadSafetyMode.ExecutionAndPublication);
         public Task<QmodStagingResult> Task => _task.Value;
-        public void MarkCommitted() => Volatile.Write(ref _committed, 1);
+        public void CommitPublication(Action move)
+        {
+            lock (_commitSync)
+            {
+                _commitState = CommitState.Committing;
+                try
+                {
+                    move();
+                    _commitState = CommitState.Committed;
+                    _commitDecision.TrySetResult(true);
+                }
+                catch
+                {
+                    _commitState = CommitState.Failed;
+                    _commitDecision.TrySetResult(false);
+                    throw;
+                }
+            }
+        }
+        public async Task<bool> ObserveCommitAtCancellationBoundaryAsync()
+        {
+            Task<bool>? pending = null;
+            lock (_commitSync)
+            {
+                if (_commitState == CommitState.Committed) return true;
+                if (_commitState == CommitState.Committing) pending = _commitDecision.Task;
+            }
+            return pending is not null && await pending;
+        }
         public void Dispose() => Cancellation.Dispose();
+        private enum CommitState { NotStarted, Committing, Committed, Failed }
     }
 }

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -120,6 +121,7 @@ static class StagingSmoke
             await BombLimitsAsync(root);
             await ManifestFailuresAsync(root);
             await IdentityAndConcurrencyAsync(root);
+            await PhysicalRootLockIdentityAsync(root);
             await CrossProcessPublicationAsync(root);
             await FailedPublicationCommitAsync(root);
             await ServiceDisposalAsync(root);
@@ -200,6 +202,21 @@ static class StagingSmoke
             Assert(exception.FailureCode == QmodStagingConfigurationFailureCode.UnsupportedEnvironment,
                 "unsupported environment reports the precise configuration failure");
         }
+        AssertConfigurationFailure(() => new QmodPackageStagingService(
+                Path.Combine(root, "relative-user-root", "Staging"), TimeProvider.System, "ModuleTest", "relative"),
+            QmodStagingConfigurationFailureCode.UnsafeUserModulesRoot, "relative user modules root");
+        AssertConfigurationFailure(() => new QmodPackageStagingService(
+                Path.Combine(root, "volume-user-root", "Staging"), TimeProvider.System, "ModuleTest",
+                Path.GetPathRoot(Path.GetFullPath(root))),
+            QmodStagingConfigurationFailureCode.UnsafeUserModulesRoot, "volume user modules root");
+    }
+
+    private static void AssertConfigurationFailure(Func<QmodPackageStagingService> factory,
+        QmodStagingConfigurationFailureCode expected, string name)
+    {
+        try { _ = factory(); throw new Exception(name + " accepted"); }
+        catch (QmodStagingConfigurationException exception)
+        { Assert(exception.FailureCode == expected, name + " reports " + expected); }
     }
 
     private static void AssertConstructorRejected(string root, bool same, bool nestedUser, bool nestedStaging)
@@ -291,6 +308,14 @@ static class StagingSmoke
         }
         Assert(await File.ReadAllTextAsync(sentinel) == "keep", "filesystem reparse target untouched");
         Directory.Delete(staging, false);
+
+        var userRoot = Case(root, "filesystem-user-reparse");
+        var externalUser = Path.Combine(userRoot, "external-user"); Directory.CreateDirectory(externalUser);
+        var userLink = Path.Combine(userRoot, "UserModules"); Directory.CreateSymbolicLink(userLink, externalUser);
+        AssertConfigurationFailure(() => new QmodPackageStagingService(Path.Combine(userRoot, "Staging"),
+                TimeProvider.System, "ModuleTest", userLink),
+            QmodStagingConfigurationFailureCode.UnsafeUserModulesRoot, "user modules root reparse");
+        Directory.Delete(userLink, false);
     }
 
     private static async Task PackageSourceReparseAsync(string root)
@@ -749,11 +774,24 @@ static class StagingSmoke
         Assert(await File.ReadAllTextAsync(sentinel) == "keep", "candidate failure never modifies UserModules");
 
         var moveRoot = Case(root, "failed-publication-move"); var moveInput = CreatePackage(moveRoot);
+        using var moveCallerCancellation = new CancellationTokenSource();
+        using var moveCancellationObserved = new ManualResetEventSlim(false);
         var moveHooks = new QmodStagingTestHooks(PublicationMove: (_, _) =>
-            Task.FromException(new IOException("Injected atomic move failure.")));
+        {
+            moveCallerCancellation.Cancel();
+            Assert(moveCancellationObserved.Wait(TimeSpan.FromSeconds(10)),
+                "move-failure caller cancellation reached the commit boundary");
+            throw new IOException("Injected atomic move failure.");
+        }, CallerCancellationObserved: () => moveCancellationObserved.Set());
         await using (var service = Service(moveRoot, hooks: moveHooks))
-            Assert((await service.StageAsync(moveInput)).FailureCode == QmodStagingFailureCode.IoFailure,
+        {
+            var survivingMoveWait = service.StageAsync(moveInput);
+            var cancelledMoveWait = service.StageAsync(moveInput, moveCallerCancellation.Token);
+            try { await cancelledMoveWait; throw new Exception("failed move converted caller cancellation to success"); }
+            catch (OperationCanceledException) { }
+            Assert((await survivingMoveWait).FailureCode == QmodStagingFailureCode.IoFailure,
                 "ordinary move IO failure is not misreported as a conflict");
+        }
         Assert(!Directory.Exists(Path.Combine(moveRoot, "Staging", "Verified", ModuleId, Version,
             moveInput.ReleaseIdentity.Sha256)), "failed move produces no final directory");
         AssertNoPartial(moveRoot, "move failure");
@@ -779,15 +817,55 @@ static class StagingSmoke
         AssertNoPartial(cleanupRoot, "marker cleanup failure");
 
         var cancelRoot = Case(root, "post-commit-cancellation"); var cancelInput = CreatePackage(cancelRoot);
+        var cancelUserModules = Path.Combine(cancelRoot, "UserModules"); Directory.CreateDirectory(cancelUserModules);
+        var cancelSentinel = Path.Combine(cancelUserModules, "keep.txt"); await File.WriteAllTextAsync(cancelSentinel, "keep");
         using var callerCancellation = new CancellationTokenSource();
-        var cancelHooks = new QmodStagingTestHooks(PublicationMoveCompleted: _ =>
+        using var cancellationObserved = new ManualResetEventSlim(false);
+        var cancelEvents = new List<QmodStagingLogEvent>();
+        var cancelHooks = new QmodStagingTestHooks(PublicationMove: (source, destination) =>
         {
+            Directory.Move(source, destination);
             callerCancellation.Cancel();
-            return Task.CompletedTask;
-        });
-        await using (var service = Service(cancelRoot, hooks: cancelHooks))
-            Assert((await service.StageAsync(cancelInput, callerCancellation.Token)).Succeeded,
+            Assert(cancellationObserved.Wait(TimeSpan.FromSeconds(10)),
+                "caller cancellation reached the in-progress commit boundary");
+        }, CallerCancellationObserved: () => cancellationObserved.Set());
+        await using (var service = Service(cancelRoot, log: cancelEvents.Add, hooks: cancelHooks))
+        {
+            var committedResult = await service.StageAsync(cancelInput, callerCancellation.Token);
+            Assert(committedResult.Succeeded,
                 "caller cancellation after atomic move cannot rewrite committed success");
+        }
+        var cancelFinal = Path.Combine(cancelRoot, "Staging", "Verified", ModuleId, Version,
+            cancelInput.ReleaseIdentity.Sha256);
+        Assert(Directory.Exists(cancelFinal), "linearized commit leaves a final directory");
+        Assert(cancelEvents.Count(item => item.EventName == "Verified directory published") == 1,
+            "linearized commit logs publication exactly once");
+        await using (var reuse = Service(cancelRoot))
+            Assert((await reuse.StageAsync(cancelInput)).Reused, "linearized commit is strictly reusable");
+        Assert(await File.ReadAllTextAsync(cancelSentinel) == "keep",
+            "linearized commit cancellation never modifies UserModules");
+        AssertNoPartial(cancelRoot, "linearized commit cancellation"); AssertNoLocks(cancelRoot, "linearized commit cancellation");
+
+        var preCommitRoot = Case(root, "pre-commit-caller-cancellation"); var preCommitInput = CreatePackage(preCommitRoot);
+        var preCommitReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePreCommit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var preCommitHooks = new QmodStagingTestHooks(CandidateAttestationStarting: async (_, _, _) =>
+        {
+            preCommitReached.TrySetResult();
+            await releasePreCommit.Task;
+        });
+        await using (var service = Service(preCommitRoot, hooks: preCommitHooks))
+        {
+            using var preCommitCaller = new CancellationTokenSource();
+            var cancelledWait = service.StageAsync(preCommitInput, preCommitCaller.Token);
+            var survivingWait = service.StageAsync(preCommitInput);
+            await preCommitReached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            preCommitCaller.Cancel();
+            try { await cancelledWait; throw new Exception("pre-commit caller cancellation was converted to success"); }
+            catch (OperationCanceledException) { }
+            releasePreCommit.TrySetResult();
+            Assert((await survivingWait).Succeeded, "pre-commit caller cancellation leaves shared transaction running");
+        }
 
         var disposeRoot = Case(root, "post-commit-dispose"); var disposeInput = CreatePackage(disposeRoot);
         QmodPackageStagingService? disposeService = null; Task? disposal = null;
@@ -810,6 +888,33 @@ static class StagingSmoke
             Assert((await service.StageAsync(diagnosticInput)).Succeeded,
                 "post-commit hooks and logging cannot rewrite committed success");
     }
+
+    private static async Task PhysicalRootLockIdentityAsync(string root)
+    {
+        var caseRoot = Case(root, "physical-root-lock-identity");
+        var staging = Path.Combine(caseRoot, "Staging"); var userModules = Path.Combine(caseRoot, "UserModules");
+        Directory.CreateDirectory(staging); Directory.CreateDirectory(userModules);
+        await using var canonical = new QmodPackageStagingService(staging, TimeProvider.System, "ModuleTest", userModules);
+        await using var caseAlias = new QmodPackageStagingService(staging.ToUpperInvariant(), TimeProvider.System,
+            "ModuleTest", userModules.ToUpperInvariant());
+        var canonicalLock = canonical.GetPublicationLockPathForTest(ModuleId, Version);
+        Assert(canonicalLock.Equals(caseAlias.GetPublicationLockPathForTest(ModuleId, Version),
+            StringComparison.OrdinalIgnoreCase), "case aliases share the physical staging lock identity");
+
+        var buffer = new StringBuilder(1024);
+        var length = GetShortPathName(staging, buffer, buffer.Capacity);
+        if (length == 0 || length >= buffer.Capacity || buffer.ToString().Equals(staging, StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine("Short-path staging lock identity check skipped because no distinct short path is available.");
+            return;
+        }
+        await using var shortAlias = new QmodPackageStagingService(buffer.ToString(), TimeProvider.System, "ModuleTest", userModules);
+        Assert(canonicalLock.Equals(shortAlias.GetPublicationLockPathForTest(ModuleId, Version),
+            StringComparison.OrdinalIgnoreCase), "long and short aliases share the physical staging lock identity");
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "GetShortPathNameW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetShortPathName(string longPath, StringBuilder shortPath, int bufferLength);
 
     private static async Task ServiceDisposalAsync(string root)
     {
