@@ -5,6 +5,7 @@ using QingToolbox.Core.Runtime;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Core.Updates;
 using QingToolbox.Shell.Startup;
+using QingToolbox.Shell.Services;
 
 namespace QingToolbox.Shell.ViewModels;
 
@@ -214,6 +215,18 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     {
         RuntimeState = record?.State.ToString() ?? State;
         RuntimeError = record?.LastError ?? string.Empty;
+    }
+
+    public void UpdateOutOfProcessRuntimeState(ModuleProcessRuntimeState? state)
+    {
+        RuntimeState = state switch
+        {
+            null => "NotLoaded",
+            { IsActive: true } => "Running",
+            { ModuleLoaded: true } => "Loaded",
+            _ => "Unloaded"
+        };
+        RuntimeError = string.Empty;
     }
 
     public void UpdateExecutionReadiness(ModuleExecutionReadiness readiness)

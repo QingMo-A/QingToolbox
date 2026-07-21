@@ -122,7 +122,7 @@ jobs:
           --no-tags
           --depth=1
           origin
-          bc0e57b5a77e3526de157d92a3d300bf3d267e8b:refs/remotes/origin/modules
+          +bc0e57b5a77e3526de157d92a3d300bf3d267e8b:refs/qingtoolbox/canary/texttools/bc0e57b5a77e3526de157d92a3d300bf3d267e8b
 
       - name: Run Development TextTools update canary
         shell: powershell

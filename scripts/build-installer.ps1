@@ -231,6 +231,7 @@ try {
         "Resources\Localization\en-US.json",
         "Resources\Localization\zh-CN.json",
         "QingToolbox.StartupMaintenance.exe",
+        "QingToolbox.ModuleHost.exe",
         "host-payload.manifest.json"
     )
     foreach ($relativePath in $requiredPayloadFiles) {

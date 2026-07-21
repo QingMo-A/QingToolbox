@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Windows;
@@ -100,34 +101,28 @@ internal static class Program
         Require(await fixture.Coordinator.RestorePreviousRuntimeStateAsync(
             ModuleAlpha, unloadedIntent, CancellationToken.None), "Repeated unloaded restore failed.");
 
-        Console.WriteLine("Restoring two independent runtimes and host-owned WPF windows...");
+        Console.WriteLine("Restoring two independent UI-free service runtimes...");
         var desiredAlpha = new ModuleUpdateRuntimeState(false, true, true, true);
         var desiredBeta = new ModuleUpdateRuntimeState(false, true, true, false);
         Require(await fixture.Coordinator.RestorePreviousRuntimeStateAsync(
-            ModuleAlpha, desiredAlpha, CancellationToken.None), "Alpha window restore failed.");
+            ModuleAlpha, desiredAlpha, CancellationToken.None), "Alpha runtime restore failed.");
         Require(await fixture.Coordinator.RestorePreviousRuntimeStateAsync(
-            ModuleBeta, desiredBeta, CancellationToken.None), "Beta window restore failed.");
+            ModuleBeta, desiredBeta, CancellationToken.None), "Beta runtime restore failed.");
         var alphaWindowGeneration = RequireSnapshot(
             await fixture.Runtime.GetSnapshotAsync(ModuleAlpha), ModuleAlpha);
         var betaWindowGeneration = RequireSnapshot(
             await fixture.Runtime.GetSnapshotAsync(ModuleBeta), ModuleBeta);
         Require(await fixture.Coordinator.RestorePreviousRuntimeStateAsync(
-            ModuleAlpha, desiredAlpha, CancellationToken.None), "Repeated alpha window restore failed.");
+            ModuleAlpha, desiredAlpha, CancellationToken.None), "Repeated alpha runtime restore failed.");
         Require(RequireSnapshot(await fixture.Runtime.GetSnapshotAsync(ModuleAlpha), ModuleAlpha)
                     .LoadContextGeneration == alphaWindowGeneration.LoadContextGeneration,
-            "Repeated window restore created another alpha runtime generation.");
-        fixture.Windows.OpenWindow(
-            ModuleAlpha, "Runtime Alpha", new Border { Child = new TextBlock { Text = "alpha" } },
-            fixture.HostWindow);
-        fixture.Windows.OpenWindow(
-            ModuleBeta, "Runtime Beta", new Border { Child = new TextBlock { Text = "beta" } },
-            fixture.HostWindow);
-        await RequireStateAsync(fixture.Coordinator, ModuleAlpha, desiredAlpha with { HasWindows = true });
-        await RequireStateAsync(fixture.Coordinator, ModuleBeta, desiredBeta with { HasWindows = true });
+            "Repeated restore created another alpha runtime generation.");
+        await RequireStateAsync(fixture.Coordinator, ModuleAlpha, desiredAlpha);
+        await RequireStateAsync(fixture.Coordinator, ModuleBeta, desiredBeta);
         await RequireVersionConsistencyAsync(fixture, ModuleAlpha, alphaWindowGeneration);
         await RequireVersionConsistencyAsync(fixture, ModuleBeta, betaWindowGeneration);
 
-        Console.WriteLine("Closing alpha from a background thread through the Dispatcher...");
+        Console.WriteLine("Verifying UI-free close is idempotent from a background thread...");
         var backgroundThreadId = 0;
         var closed = await Task.Run(async () =>
         {
@@ -135,9 +130,9 @@ internal static class Program
             return await fixture.Coordinator.RequestCloseWindowsAsync(ModuleAlpha, CancellationToken.None);
         });
         Require(backgroundThreadId != uiThreadId && closed,
-            "Background Dispatcher window close failed.");
+            "Background UI-free close failed.");
         Require(await fixture.Coordinator.RequestCloseWindowsAsync(ModuleAlpha, CancellationToken.None),
-            "Repeated alpha window close was not idempotent.");
+            "Repeated alpha close was not idempotent.");
         await RequireBetaUnchangedAsync(fixture, betaWindowGeneration);
         Require(await fixture.Coordinator.DeactivateAsync(ModuleAlpha, CancellationToken.None),
             "Window generation deactivation failed.");
@@ -146,6 +141,9 @@ internal static class Program
 
         Console.WriteLine("Verifying recovery gate ordering and module-scoped blocking...");
         await VerifyRecoveryGateAsync();
+
+        Console.WriteLine("Verifying ModuleHost IPC authentication, allowlist, and kill fallback...");
+        await VerifyModuleProcessContractsAsync();
 
         Console.WriteLine("Verifying startup authorization bytes remained unchanged...");
         var finalSettingsBytes = await File.ReadAllBytesAsync(fixture.SettingsPath);
@@ -181,6 +179,89 @@ internal static class Program
             Require(exception.ModuleId == ModuleAlpha, "The wrong module was blocked.");
         }
         await using (var betaLease = await scopedGate.Consumer.EnterExecutionAsync(ModuleBeta)) { }
+
+        var maintenanceGate = new ModuleTransactionRecoveryGate();
+        maintenanceGate.CompleteRecovery([], false);
+        await using (var updateLease = await maintenanceGate.EnterModuleUpdateAsync(ModuleAlpha))
+        {
+            using var blockedDiscovery = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+            await RequireCanceledAsync(
+                maintenanceGate.EnterDiscoveryAsync(blockedDiscovery.Token).AsTask(),
+                "Discovery overlapped a module update transaction.");
+            await using var unrelatedExecution =
+                await maintenanceGate.Consumer.EnterExecutionAsync(ModuleBeta);
+        }
+
+        await using (var discoveryLease = await maintenanceGate.EnterDiscoveryAsync())
+        {
+            using var blockedUpdate = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+            await RequireCanceledAsync(
+                maintenanceGate.EnterModuleUpdateAsync(ModuleAlpha, blockedUpdate.Token).AsTask(),
+                "A module update overlapped discovery.");
+            Require(await maintenanceGate.BeginShutdownAsync(TimeSpan.FromMilliseconds(100)) is null,
+                "Shutdown did not fail closed while discovery owned maintenance.");
+        }
+
+        await using var shutdownLease = await maintenanceGate.BeginShutdownAsync(TimeSpan.FromSeconds(1))
+            ?? throw new InvalidOperationException("Shutdown could not acquire released maintenance.");
+        await RequireRejectedAsync(
+            maintenanceGate.EnterDiscoveryAsync().AsTask(),
+            "Discovery was admitted after shutdown publication.");
+        await RequireRejectedAsync(
+            maintenanceGate.Consumer.EnterExecutionAsync(ModuleBeta).AsTask(),
+            "Module execution was admitted after shutdown publication.");
+    }
+
+    private static async Task RequireCanceledAsync(Task task, string message)
+    {
+        try { await task; }
+        catch (OperationCanceledException) { return; }
+        throw new InvalidOperationException(message);
+    }
+
+    private static async Task RequireRejectedAsync(Task task, string message)
+    {
+        try { await task; }
+        catch (InvalidOperationException) { return; }
+        throw new InvalidOperationException(message);
+    }
+
+    private static async Task VerifyModuleProcessContractsAsync()
+    {
+        var request = new ModuleUpdateRuntimeRestoreRequest(
+            ModuleAlpha,
+            new(false, true, true, false),
+            new(ProbeVersion, "experimental-0.1", "TREE", []),
+            ModuleRuntimeRestoreRole.Promoted);
+        Require(ModuleProcessBroker.IsValidHandshake(
+                1, "nonce", ModuleAlpha, ProbeVersion, "experimental-0.1", "TREE", 42,
+                "nonce", request, 42),
+            "Valid ModuleHost handshake was rejected.");
+        Require(!ModuleProcessBroker.IsValidHandshake(
+                2, "nonce", ModuleAlpha, ProbeVersion, "experimental-0.1", "TREE", 42,
+                "nonce", request, 42) &&
+                !ModuleProcessBroker.IsValidHandshake(
+                    1, "wrong", ModuleAlpha, ProbeVersion, "experimental-0.1", "TREE", 42,
+                    "nonce", request, 42) &&
+                !ModuleProcessBroker.IsValidHandshake(
+                    1, "nonce", ModuleAlpha, ProbeVersion, "experimental-0.1", "TREE", 41,
+                    "nonce", request, 42),
+            "Protocol, nonce, or process-handle identity was not authenticated.");
+        Require(ModuleProcessBroker.IsAllowedCommand("OpenWindow") &&
+                ModuleProcessBroker.IsAllowedCommand("Shutdown") &&
+                !ModuleProcessBroker.IsAllowedCommand("Execute") &&
+                !ModuleProcessBroker.IsAllowedCommand("LoadPath"),
+            "ModuleHost command allowlist is not fail closed.");
+
+        var start = new ProcessStartInfo("powershell.exe") { UseShellExecute = false, CreateNoWindow = true };
+        start.ArgumentList.Add("-NoProfile");
+        start.ArgumentList.Add("-Command");
+        start.ArgumentList.Add("Start-Sleep -Seconds 30");
+        using var process = Process.Start(start)
+            ?? throw new InvalidOperationException("Kill-fallback probe process did not start.");
+        Require(await ModuleProcessBroker.WaitForExitOrKillAsync(
+                process, TimeSpan.FromMilliseconds(100), CancellationToken.None) && process.HasExited,
+            "Bounded process-exit fallback did not terminate the worker process tree.");
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -315,13 +396,19 @@ internal static class Program
             ?? throw new InvalidOperationException($"No diagnostic exists for '{moduleId}'.");
         Require(snapshot.Version == ProbeVersion,
             $"{moduleId} runtime manifest version mismatch: {snapshot.Version}.");
-        Require(snapshot.RuntimeAssemblyInformationalVersion == ProbeVersion,
-            $"{moduleId} runtime assembly version mismatch: {snapshot.RuntimeAssemblyInformationalVersion}.");
+        Require(snapshot.LoadedManifestVersion == ProbeVersion,
+            $"{moduleId} loaded manifest version mismatch: {snapshot.LoadedManifestVersion}.");
+        Require(!string.IsNullOrWhiteSpace(snapshot.LoadedAssemblyInformationalVersion),
+            $"{moduleId} loaded assembly informational version was not observed.");
+        Require(!string.IsNullOrWhiteSpace(snapshot.LoadedModuleType),
+            $"{moduleId} loaded module type was not observed.");
         Require(diagnostic.Version == snapshot.Version &&
-                diagnostic.RuntimeAssemblyInformationalVersion == snapshot.RuntimeAssemblyInformationalVersion,
+                diagnostic.LoadedManifestVersion == snapshot.LoadedManifestVersion &&
+                diagnostic.LoadedAssemblyInformationalVersion == snapshot.LoadedAssemblyInformationalVersion &&
+                diagnostic.LoadedModuleType == snapshot.LoadedModuleType,
             $"{moduleId} diagnostic version did not match the live runtime.");
-        Require(await fixture.Windows.IsWindowOpenAsync(moduleId),
-            $"{moduleId} runtime-version check did not have its real WPF window open.");
+        Require(!await fixture.Windows.IsWindowOpenAsync(moduleId),
+            $"{moduleId} UI-free service unexpectedly created a WPF window.");
         Require(diagnostic.ProgramDirectoryIdentity.Length == 64 &&
                 diagnostic.ProgramDirectoryIdentity.All(char.IsAsciiHexDigit),
             $"{moduleId} program directory identity was not a SHA256 value.");
@@ -454,6 +541,7 @@ internal static class Program
             var runtime = new ModuleRuntimeManager(new InProcessModuleLoader(localization));
             var windows = new ModuleWindowManager(localization);
             var sessionLog = new SessionLogService(paths, TimeProvider.System);
+            var processBroker = new ModuleProcessBroker(paths, sessionLog);
             var hostWindow = new Window
             {
                 Title = "Runtime adapter smoke-test host",
@@ -476,7 +564,8 @@ internal static class Program
                 fingerprint,
                 paths,
                 localization,
-                sessionLog);
+                sessionLog,
+                processBroker);
 
             var alphaModule = await ReadDiscoveredModuleAsync(
                 userModulesRoot, ModuleAlpha, manifestReader, manifestValidator);
@@ -616,6 +705,8 @@ internal static class Program
                 version = ProbeVersion,
                 entry = ProbeAssemblyName,
                 runtimeType = "InProcess",
+                runtimeIsolation = "InProcessCollectible",
+                uiKind = "None",
                 loadMode = "Manual"
             };
             await File.WriteAllTextAsync(

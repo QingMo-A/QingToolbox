@@ -90,6 +90,8 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader) : IAsyncD
                 handle is not null && record.State == ModuleState.Running,
                 record.LoadContextGeneration,
                 handle?.Manifest.Version,
+                handle?.LoadedAssemblyInformationalVersion,
+                handle?.LoadedModuleType,
                 handle?.LoadContextWeakReference,
                 record.LastUnloadedLoadContext);
         }
@@ -151,7 +153,9 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader) : IAsyncD
         try
         {
             record = GetRequiredRecord(moduleId);
-            return GetRequiredHandle(record).Module.CreateView();
+            return GetRequiredHandle(record).ViewFactory?.CreateView()
+                ?? throw new ModuleRuntimeException(
+                    $"Module '{moduleId}' does not expose an in-process view.");
         }
         catch (Exception exception)
         {
@@ -189,6 +193,13 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader) : IAsyncD
             {
                 throw new ModuleRuntimeException(
                     $"Cannot load invalid module manifest: {moduleId}");
+            }
+
+            if (ModuleRuntimeCapabilities.Resolve(record.Manifest).RuntimeIsolation ==
+                ModuleRuntimeIsolation.OutOfProcess)
+            {
+                throw new ModuleRuntimeException(
+                    $"Module '{moduleId}' must be started by the out-of-process broker.");
             }
 
             record.State = ModuleState.Loading;

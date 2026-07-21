@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Collections.Concurrent;
+using QingToolbox.Abstractions.Modules;
 
 namespace QingToolbox.Core.Updates;
 
@@ -21,7 +22,7 @@ public enum ModuleUpdateTransactionFailureCode
     UnloadFailed, ModuleStillLoaded, CandidateCopyFailed, CandidateVerificationFailed,
     BackupMoveFailed, PromotionFailed, InstalledVerificationFailed, RuntimeRestoreFailed,
     RollbackFailed, RecoveryRequired, TransactionConflict, JournalInvalid, Cancelled,
-    Unauthorized, IoFailure, Unexpected, UnsupportedEnvironment
+    Unauthorized, IoFailure, Unexpected, UnsupportedEnvironment, RuntimeIsolationUnsupported
 }
 
 public enum ModuleUpdateTransactionConfigurationFailureCode
@@ -38,6 +39,35 @@ public sealed class ModuleUpdateTransactionConfigurationException(
 
 public sealed record ModuleUpdateRuntimeState(bool HasWindows, bool IsActive, bool IsLoaded, bool HasStartupAuthorization);
 
+public enum ModuleRuntimeRestoreRole { Promoted, Previous }
+
+public sealed record ModuleProgramRuntimeIdentity(
+    string ManifestVersion,
+    string ModuleApiVersion,
+    string ProgramTreeIdentity,
+    IReadOnlyList<QmodStagedFile> Files);
+
+public static class ModuleProgramRuntimeIdentityHash
+{
+    public static string Compute(IEnumerable<QmodStagedFile> files)
+    {
+        using var aggregate = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var file in files.OrderBy(item => item.RelativePath, StringComparer.Ordinal))
+        {
+            var record = Encoding.UTF8.GetBytes(
+                $"{file.RelativePath.Replace('\\', '/')}\0{file.Size}\0{file.Sha256.ToUpperInvariant()}\n");
+            aggregate.AppendData(record);
+        }
+        return Convert.ToHexString(aggregate.GetHashAndReset());
+    }
+}
+
+public sealed record ModuleUpdateRuntimeRestoreRequest(
+    string ModuleId,
+    ModuleUpdateRuntimeState DesiredRuntimeState,
+    ModuleProgramRuntimeIdentity ExpectedProgram,
+    ModuleRuntimeRestoreRole RestoreRole);
+
 public interface IModuleUpdateRuntimeCoordinator
 {
     Task<ModuleUpdateRuntimeState> GetRuntimeStateAsync(string moduleId, CancellationToken cancellationToken);
@@ -47,6 +77,9 @@ public interface IModuleUpdateRuntimeCoordinator
     Task<bool> VerifyUnloadedAsync(string moduleId, CancellationToken cancellationToken);
     Task<bool> RestorePreviousRuntimeStateAsync(string moduleId, ModuleUpdateRuntimeState previousState,
         CancellationToken cancellationToken);
+    Task<bool> RestoreRuntimeStateAsync(ModuleUpdateRuntimeRestoreRequest request,
+        CancellationToken cancellationToken) => RestorePreviousRuntimeStateAsync(
+            request.ModuleId, request.DesiredRuntimeState, cancellationToken);
 }
 
 public sealed record ModuleUpdateTransactionInput(QmodVerifiedStagingAttestation VerifiedStaging);
@@ -236,6 +269,9 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         }
         else if (File.Exists(installed)) return Failure(transactionId,
             ModuleUpdateTransactionFailureCode.InstalledManifestInvalid);
+        var targetCapabilities = ReadRuntimeCapabilities(attestation.Directory);
+        if (targetCapabilities?.UpdateCapability != ModuleUpdateCapability.LiveTransaction)
+            return Failure(transactionId, ModuleUpdateTransactionFailureCode.RuntimeIsolationUnsupported);
         try
         {
             Directory.CreateDirectory(work); SecureWindowsFileSystem.WriteOwnerMarker(work, OwnershipMarkerName, transactionId);
@@ -334,7 +370,17 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
                 journal.LifecycleProgress with { PromotedRuntimeRestoreStarted = true });
             promotedRuntimeRestoreAttempted = true;
             promotedRuntimeMayBeRunning = true;
-            if (!await _runtime.RestorePreviousRuntimeStateAsync(journal.ModuleId, journal.PreviousRuntimeState, cancellationToken))
+            bool promotedRestored;
+            using (var runtimeLease = AcquirePayloadTreeLease(installed, payload, journal.ModuleId,
+                       journal.TargetVersion, journal.TransactionId))
+            {
+                if (runtimeLease is null) return RequireRecovery(journal);
+                var restore = RestoreRequest(journal, payload, journal.TargetVersion,
+                    ModuleRuntimeRestoreRole.Promoted);
+                promotedRestored = await _runtime.RestoreRuntimeStateAsync(restore, cancellationToken);
+                runtimeLease.VerifyAtPath(installed);
+            }
+            if (!promotedRestored)
                 return await RollbackAsync(journal, installed, candidate, backup, failed, work,
                     ModuleUpdateTransactionFailureCode.RuntimeRestoreFailed, cancellationToken,
                     promotedRuntimeRestoreAttempted, promotedRuntimeMayBeRunning);
@@ -528,8 +574,11 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
                 {
                     journal = UpdateProgress(journal,
                         journal.LifecycleProgress with { PreviousRuntimeRestoreStarted = true });
-                    if (!await _runtime.RestorePreviousRuntimeStateAsync(
-                            journal.ModuleId, journal.PreviousRuntimeState, token)) return RequireRecovery(journal);
+                    using var runtimeLease = AcquireInstalledSnapshotLease(installed, journal);
+                    if (runtimeLease is null || !await _runtime.RestoreRuntimeStateAsync(
+                            RestoreRequest(journal, journal.InstalledFiles, journal.SourceVersion,
+                                ModuleRuntimeRestoreRole.Previous), token)) return RequireRecovery(journal);
+                    runtimeLease.VerifyAtPath(installed);
                     journal = journal with
                     {
                         LifecycleProgress = journal.LifecycleProgress with
@@ -634,8 +683,11 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
             {
                 journal = UpdateProgress(journal,
                     journal.LifecycleProgress with { PreviousRuntimeRestoreStarted = true });
-                if (!await _runtime.RestorePreviousRuntimeStateAsync(
-                        journal.ModuleId, journal.PreviousRuntimeState, cancellationToken)) return RequireRecovery(journal);
+                using var runtimeLease = AcquireInstalledSnapshotLease(installed, journal);
+                if (runtimeLease is null || !await _runtime.RestoreRuntimeStateAsync(
+                        RestoreRequest(journal, journal.InstalledFiles, journal.SourceVersion,
+                            ModuleRuntimeRestoreRole.Previous), cancellationToken)) return RequireRecovery(journal);
+                runtimeLease.VerifyAtPath(installed);
                 journal = journal with
                 {
                     LifecycleProgress = journal.LifecycleProgress with
@@ -840,6 +892,32 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
     private static string CollisionKey(string relative) => relative.Normalize(NormalizationForm.FormC).ToUpperInvariant();
     private static IReadOnlyList<QmodStagedFile> Payload(QmodVerifiedStagingAttestation attestation) =>
         attestation.Files.Where(file => file.RelativePath is not QmodPackageStagingService.PackageManifestName).ToArray();
+
+    private ModuleUpdateRuntimeRestoreRequest RestoreRequest(TransactionJournal journal,
+        IReadOnlyList<QmodStagedFile> files, string version, ModuleRuntimeRestoreRole role) =>
+        new(journal.ModuleId, journal.PreviousRuntimeState,
+            new(version, journal.ModuleApiVersion, ModuleProgramRuntimeIdentityHash.Compute(files), files), role);
+
+    private static ModuleRuntimeCapabilities? ReadRuntimeCapabilities(string root)
+    {
+        try
+        {
+            using var lease = SecureWindowsFileSystem.AcquireStableTreeLease(root);
+            if (!lease.TryGetVerifiedFileBytes("module.json", out var bytes)) return null;
+            using var document = JsonDocument.Parse(bytes);
+            var element = document.RootElement;
+            if (!element.TryGetProperty("runtimeIsolation", out var isolationElement) ||
+                !element.TryGetProperty("uiKind", out var uiElement) ||
+                !Enum.TryParse<ModuleRuntimeIsolation>(isolationElement.GetString(), true, out var isolation) ||
+                !Enum.TryParse<ModuleUiKind>(uiElement.GetString(), true, out var ui)) return null;
+            return ModuleRuntimeCapabilities.Resolve(new ModuleManifest
+            {
+                Id = "capability", Name = "capability", Version = "0.0.0", Entry = "capability.dll",
+                RuntimeIsolation = isolation, UiKind = ui
+            });
+        }
+        catch { return null; }
+    }
 
     private static InstalledSnapshot? ReadInstalledSnapshot(string installed)
     {

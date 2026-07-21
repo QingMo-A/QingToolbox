@@ -41,6 +41,8 @@ public sealed record ModuleRuntimeSnapshot(
     bool HasRuntimeRegistration,
     bool IsActive,
     long LoadContextGeneration,
-    string? RuntimeAssemblyInformationalVersion,
+    string? LoadedManifestVersion,
+    string? LoadedAssemblyInformationalVersion,
+    string? LoadedModuleType,
     WeakReference? CurrentLoadContext,
     WeakReference? LastUnloadedLoadContext);

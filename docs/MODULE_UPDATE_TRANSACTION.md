@@ -164,6 +164,16 @@ names plus the `.qing-` host namespace, including `.qing-transactions`.
 
 ## Verification
 
+Before any runtime or disk mutation, the transaction resolves the verified target manifest's
+runtime/UI capability. Only `InProcessCollectible + None` and `OutOfProcess + Wpf` may enter a live
+transaction. Legacy or in-process WPF targets return `RuntimeIsolationUnsupported`; deterministic
+coverage verifies the installed bytes remain unchanged and no runtime coordinator method is called.
+
+For WPF targets, physical unload means the dedicated ModuleHost process handle is signaled and the
+Broker session/window state is gone. Graceful timeout uses a bounded process-tree termination
+fallback. The trusted installed-tree lease spans worker read/load/activate/view/handshake, preventing
+external write, delete, rename, or replacement until runtime identity is verified.
+
 `QingToolbox.DevTools.ModuleUpdateTransactionSmokeTest` builds disposable packages and
 installed modules at runtime. It covers successful update/new install, lifecycle and file
 failure injection, exact-tree and marker attacks, reserved identities, root overlap,

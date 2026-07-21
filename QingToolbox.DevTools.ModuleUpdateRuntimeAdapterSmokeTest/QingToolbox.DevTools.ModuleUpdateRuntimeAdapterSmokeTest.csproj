@@ -20,7 +20,7 @@
 
   <Target Name="CopyRuntimeAdapterProbe" AfterTargets="Build">
     <PropertyGroup>
-      <RuntimeAdapterProbeAssembly>$(MSBuildProjectDirectory)\..\QingToolbox.DevTools.ModuleUpdateRuntimeAdapterProbe\bin\$(Configuration)\$(TargetFramework)\QingToolbox.DevTools.ModuleUpdateRuntimeAdapterProbe.dll</RuntimeAdapterProbeAssembly>
+      <RuntimeAdapterProbeAssembly>$(MSBuildProjectDirectory)\..\QingToolbox.DevTools.ModuleUpdateRuntimeAdapterProbe\bin\$(Configuration)\net10.0\QingToolbox.DevTools.ModuleUpdateRuntimeAdapterProbe.dll</RuntimeAdapterProbeAssembly>
       <RuntimeAdapterProbeDestination>$(OutDir)ProbePayload\QingToolbox.DevTools.ModuleUpdateRuntimeAdapterProbe.dll</RuntimeAdapterProbeDestination>
     </PropertyGroup>
     <Error Condition="!Exists('$(RuntimeAdapterProbeAssembly)')"

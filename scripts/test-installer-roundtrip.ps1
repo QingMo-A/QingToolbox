@@ -139,6 +139,7 @@ try {
     $shellExe = Join-Path $installDirectory "QingToolbox.Shell.exe"
     $requiredFiles = @(
         $shellExe,
+        (Join-Path $installDirectory "QingToolbox.ModuleHost.exe"),
         (Join-Path $installDirectory "QingToolbox.StartupMaintenance.exe"),
         (Join-Path $installDirectory "LICENSE"),
         (Join-Path $installDirectory "CHANGELOG.md"),

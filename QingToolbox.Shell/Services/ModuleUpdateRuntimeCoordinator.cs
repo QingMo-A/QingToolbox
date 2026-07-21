@@ -20,7 +20,9 @@ public sealed record ModuleUpdateRuntimeDiagnostic(
     string ProgramDirectoryIdentity,
     string PayloadFingerprint,
     long LoadContextGeneration,
-    string? RuntimeAssemblyInformationalVersion,
+    string? LoadedManifestVersion,
+    string? LoadedAssemblyInformationalVersion,
+    string? LoadedModuleType,
     bool IsLoaded,
     bool LoadContextCollected);
 
@@ -51,11 +53,13 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
     private readonly string _moduleDataRoot;
     private readonly Action<DiscoveredModule>? _registerLocalization;
     private readonly Action<ModuleUpdateRuntimeLogEvent>? _log;
+    private readonly ModuleProcessBroker? _processBroker;
     private readonly ConcurrentDictionary<string, ModuleUpdateRuntimeDiagnostic> _diagnostics =
         new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, ModuleUpdateRuntimeState> _deferredRuntimeIntents =
+    private readonly ConcurrentDictionary<string, ModuleUpdateRuntimeRestoreRequest> _deferredRuntimeIntents =
         new(StringComparer.Ordinal);
     private int _deferRuntimeRestore;
+    public string? LastRestoreFailureCode { get; private set; }
 
     public ModuleUpdateRuntimeCoordinator(
         ModuleRuntimeManager runtimeManager,
@@ -66,7 +70,8 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
         ModuleStartupFingerprintService fingerprintService,
         ApplicationPaths paths,
         LocalizationManager localization,
-        SessionLogService sessionLog)
+        SessionLogService sessionLog,
+        ModuleProcessBroker processBroker)
         : this(
             runtimeManager,
             windowManager,
@@ -94,7 +99,7 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
                 {
                     sessionLog.Warning("ModuleUpdateRuntime", message);
                 }
-            })
+            }, processBroker)
     {
     }
 
@@ -108,7 +113,8 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
         string userModulesRoot,
         string moduleDataRoot,
         Action<DiscoveredModule>? registerLocalization,
-        Action<ModuleUpdateRuntimeLogEvent>? log)
+        Action<ModuleUpdateRuntimeLogEvent>? log,
+        ModuleProcessBroker? processBroker = null)
     {
         _runtimeManager = runtimeManager;
         _windowManager = windowManager;
@@ -120,6 +126,7 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
         _moduleDataRoot = NormalizeRoot(moduleDataRoot, nameof(moduleDataRoot));
         _registerLocalization = registerLocalization;
         _log = log;
+        _processBroker = processBroker;
     }
 
     public ModuleUpdateRuntimeDiagnostic? GetDiagnostic(string moduleId)
@@ -138,14 +145,14 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
         return new RestoreDeferralScope(this);
     }
 
-    internal IReadOnlyDictionary<string, ModuleUpdateRuntimeState> DrainDeferredRuntimeIntents()
+    internal IReadOnlyDictionary<string, ModuleUpdateRuntimeRestoreRequest> DrainDeferredRuntimeIntents()
     {
         if (Volatile.Read(ref _deferRuntimeRestore) != 0)
         {
             throw new InvalidOperationException("Runtime restore deferral is still active.");
         }
 
-        var drained = new Dictionary<string, ModuleUpdateRuntimeState>(StringComparer.Ordinal);
+        var drained = new Dictionary<string, ModuleUpdateRuntimeRestoreRequest>(StringComparer.Ordinal);
         foreach (var pair in _deferredRuntimeIntents.ToArray())
         {
             if (_deferredRuntimeIntents.TryRemove(pair.Key, out var intent))
@@ -162,6 +169,7 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(moduleId);
+        var process = _processBroker?.GetState(moduleId);
         var runtime = await _runtimeManager.GetSnapshotAsync(moduleId, cancellationToken)
             .ConfigureAwait(false);
         var hasWindows = await _windowManager.IsWindowOpenAsync(moduleId, cancellationToken)
@@ -178,9 +186,9 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
         Log("Runtime state captured", moduleId, runtime?.Version, runtime?.State.ToString(),
             "None", runtime?.LoadContextGeneration ?? 0);
         return new(
-            hasWindows,
-            runtime?.IsActive == true,
-            runtime?.HasRuntimeRegistration == true,
+            process?.HasWindows ?? hasWindows,
+            process?.IsActive ?? runtime?.IsActive == true,
+            process?.ModuleLoaded ?? runtime?.HasRuntimeRegistration == true,
             hasAuthorization);
     }
 
@@ -189,6 +197,8 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(moduleId);
+        if (_processBroker?.GetState(moduleId) is not null)
+            return await _processBroker.CommandAsync(moduleId, "CloseWindow", cancellationToken);
         var closed = await _windowManager.CloseWindowAsync(
                 moduleId, WindowOperationTimeout, cancellationToken)
             .ConfigureAwait(false);
@@ -203,6 +213,8 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
     {
         try
         {
+            if (_processBroker?.GetState(moduleId) is { } processState)
+                return !processState.IsActive || await _processBroker.CommandAsync(moduleId, "Deactivate", cancellationToken);
             var before = await _runtimeManager.GetSnapshotAsync(moduleId, cancellationToken)
                 .ConfigureAwait(false);
             if (before is null || !before.HasRuntimeRegistration || !before.IsActive)
@@ -239,6 +251,8 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
     {
         try
         {
+            if (_processBroker?.GetState(moduleId) is not null)
+                return await _processBroker.ShutdownAsync(moduleId, cancellationToken);
             if (await _windowManager.IsWindowOpenAsync(moduleId, cancellationToken).ConfigureAwait(false) &&
                 !await RequestCloseWindowsAsync(moduleId, cancellationToken).ConfigureAwait(false))
             {
@@ -292,6 +306,8 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
     {
         try
         {
+            if (_processBroker is not null && _processBroker.GetState(moduleId) is not null)
+                return _processBroker.VerifyExited(moduleId);
             var before = await _runtimeManager.GetSnapshotAsync(moduleId, cancellationToken)
                 .ConfigureAwait(false);
             if (before?.HasRuntimeRegistration == true || before?.IsActive == true ||
@@ -304,6 +320,7 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
             }
 
             var weakReference = before?.LastUnloadedLoadContext;
+            await DrainDispatcherReferencesAsync(cancellationToken).ConfigureAwait(false);
             var collected = weakReference is null || await WaitForUnloadAsync(
                     weakReference, cancellationToken)
                 .WaitAsync(UnloadVerificationTimeout, cancellationToken)
@@ -352,9 +369,32 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
         ModuleUpdateRuntimeState previousState,
         CancellationToken cancellationToken)
     {
+        var prepared = await DiscoverInstalledModuleAsync(moduleId, cancellationToken).ConfigureAwait(false);
+        var files = await SnapshotProgramFilesAsync(prepared.Module.ModuleDirectory, cancellationToken)
+            .ConfigureAwait(false);
+        return await RestoreRuntimeStateAsync(new(moduleId, previousState,
+            new(prepared.Module.Manifest.Version, ModuleUpdateIdentity.ModuleApiVersion,
+                ModuleProgramRuntimeIdentityHash.Compute(files), files), ModuleRuntimeRestoreRole.Previous),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task DrainDispatcherReferencesAsync(CancellationToken cancellationToken)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished) return;
+        await dispatcher.InvokeAsync(static () => { }, DispatcherPriority.ApplicationIdle, cancellationToken);
+    }
+
+    public async Task<bool> RestoreRuntimeStateAsync(
+        ModuleUpdateRuntimeRestoreRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var moduleId = request.ModuleId;
+        var previousState = request.DesiredRuntimeState;
         if (Volatile.Read(ref _deferRuntimeRestore) != 0)
         {
-            _deferredRuntimeIntents[moduleId] = previousState;
+            _deferredRuntimeIntents[moduleId] = request;
             Log("Previous runtime intent deferred", moduleId, null,
                 "RecoveryPending", "None", 0);
             return true;
@@ -388,6 +428,33 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
 
             var prepared = await DiscoverInstalledModuleAsync(moduleId, cancellationToken)
                 .ConfigureAwait(false);
+            var actualFiles = await SnapshotProgramFilesAsync(prepared.Module.ModuleDirectory, cancellationToken)
+                .ConfigureAwait(false);
+            var identityFailure = !string.Equals(prepared.Module.Manifest.Version,
+                    request.ExpectedProgram.ManifestVersion, StringComparison.Ordinal) ? "ManifestVersion" :
+                !string.Equals(ModuleUpdateIdentity.ModuleApiVersion,
+                    request.ExpectedProgram.ModuleApiVersion, StringComparison.Ordinal) ? "ModuleApiVersion" :
+                !string.Equals(ModuleProgramRuntimeIdentityHash.Compute(actualFiles),
+                    request.ExpectedProgram.ProgramTreeIdentity, StringComparison.Ordinal) ? "ProgramTreeIdentity" :
+                !ProgramFilesEqual(actualFiles, request.ExpectedProgram.Files) ? "ProgramFiles" : null;
+            if (identityFailure is not null)
+            {
+                LastRestoreFailureCode = identityFailure;
+                Log("Previous runtime intent restored", moduleId, prepared.Module.Manifest.Version,
+                    "Rejected", "VerifiedProgramIdentityMismatch", 0);
+                return false;
+            }
+
+            var capabilities = ModuleRuntimeCapabilities.Resolve(prepared.Module.Manifest);
+            if (capabilities is { RuntimeIsolation: ModuleRuntimeIsolation.OutOfProcess, UiKind: ModuleUiKind.Wpf })
+            {
+                if (_processBroker is null) return false;
+                return await _processBroker.RestoreAsync(request, prepared.Module.ModuleDirectory,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            if (capabilities is not { RuntimeIsolation: ModuleRuntimeIsolation.InProcessCollectible,
+                    UiKind: ModuleUiKind.None, UpdateCapability: ModuleUpdateCapability.LiveTransaction })
+            { LastRestoreFailureCode = "RuntimeCapability"; return false; }
             var currentRuntime = await _runtimeManager.GetSnapshotAsync(moduleId, cancellationToken)
                 .ConfigureAwait(false);
             if (currentRuntime?.HasRuntimeRegistration == true &&
@@ -470,6 +537,35 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
                 exception.GetType().Name, 0);
             return false;
         }
+    }
+
+    private static async Task<IReadOnlyList<QmodStagedFile>> SnapshotProgramFilesAsync(
+        string root, CancellationToken cancellationToken)
+    {
+        var result = new List<QmodStagedFile>();
+        foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                     .OrderBy(path => Path.GetRelativePath(root, path), StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+            if (relative.Equals(".qing-transaction-owner", StringComparison.Ordinal)) continue;
+            var info = new FileInfo(path);
+            var hash = await ModuleStartupFingerprintService.HashFileAsync(path, cancellationToken)
+                .ConfigureAwait(false);
+            result.Add(new(relative, info.Length, hash.ToLowerInvariant()));
+        }
+        return result;
+    }
+
+    private static bool ProgramFilesEqual(IEnumerable<QmodStagedFile> left,
+        IEnumerable<QmodStagedFile> right)
+    {
+        var x = left.OrderBy(item => item.RelativePath, StringComparer.Ordinal).ToArray();
+        var y = right.OrderBy(item => item.RelativePath, StringComparer.Ordinal).ToArray();
+        return x.Length == y.Length && x.Zip(y).All(pair =>
+            pair.First.RelativePath.Replace('\\', '/') == pair.Second.RelativePath.Replace('\\', '/') &&
+            pair.First.Size == pair.Second.Size &&
+            pair.First.Sha256.Equals(pair.Second.Sha256, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task<(DiscoveredModule Module, string PayloadFingerprint)> DiscoverInstalledModuleAsync(
@@ -597,7 +693,9 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
             HashIdentity(runtime.ModuleDirectory),
             fingerprint,
             runtime.LoadContextGeneration,
-            runtime.RuntimeAssemblyInformationalVersion,
+            runtime.LoadedManifestVersion,
+            runtime.LoadedAssemblyInformationalVersion,
+            runtime.LoadedModuleType,
             true,
             false);
     }

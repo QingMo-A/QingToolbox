@@ -11,6 +11,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $pinnedCommit = 'bc0e57b5a77e3526de157d92a3d300bf3d267e8b'
+$canaryRef = "refs/qingtoolbox/canary/texttools/$pinnedCommit"
 $repositoryRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $projectPath = Join-Path $repositoryRoot 'QingToolbox.DevTools.TextToolsModuleUpdateCanary\QingToolbox.DevTools.TextToolsModuleUpdateCanary.csproj'
 $runId = [Guid]::NewGuid().ToString('N').Substring(0, 12)
@@ -50,6 +51,13 @@ using System.Reflection;
     [IO.File]::WriteAllText(
         (Join-Path $SourceDirectory 'CanaryMarker.g.cs'),
         $marker,
+        [Text.UTF8Encoding]::new($false))
+
+    $manifestPath = Join-Path $SourceDirectory 'module.json'
+    $manifest = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
+    $manifest | Add-Member -NotePropertyName 'runtimeIsolation' -NotePropertyValue 'OutOfProcess' -Force
+    $manifest | Add-Member -NotePropertyName 'uiKind' -NotePropertyValue 'Wpf' -Force
+    [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 16),
         [Text.UTF8Encoding]::new($false))
 }
 
@@ -91,13 +99,8 @@ try {
         throw "Canary project is missing: $projectPath"
     }
 
-    $originModules = (& git -C $repositoryRoot rev-parse --verify refs/remotes/origin/modules).Trim()
-    if ($LASTEXITCODE -ne 0) {
-        throw 'The origin/modules remote-tracking ref is unavailable.'
-    }
-    if ($originModules -cne $pinnedCommit) {
-        throw "origin/modules must equal the pinned commit $pinnedCommit; actual: $originModules"
-    }
+    Invoke-Checked 'git' @('-C', $repositoryRoot, 'fetch', '--no-tags', '--depth=1',
+        'origin', "+$pinnedCommit`:$canaryRef")
     Invoke-Checked 'git' @(
         '-C', $repositoryRoot,
         'cat-file', '-e', "$pinnedCommit`^{commit}"
@@ -108,7 +111,7 @@ try {
     Invoke-Checked 'git' @(
         '-C', $repositoryRoot,
         'archive', '--format=tar', "--output=$archivePath",
-        $pinnedCommit, '--', 'modules/TextTools'
+        $canaryRef, '--', 'modules/TextTools'
     )
 
     $v1Export = Join-Path $temporaryRoot 'source-v1'
@@ -154,6 +157,7 @@ try {
     Write-Host "TextTools module-update canary completed for: $($environments -join ', ')."
 }
 finally {
+    & git -C $repositoryRoot update-ref -d $canaryRef 2>$null
     $trimSeparators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
     $normalizedTemp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd($trimSeparators)
     $normalizedWork = [IO.Path]::GetFullPath($temporaryRoot).TrimEnd($trimSeparators)

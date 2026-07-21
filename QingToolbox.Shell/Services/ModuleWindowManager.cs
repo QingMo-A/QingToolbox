@@ -154,7 +154,8 @@ public sealed class ModuleWindowManager(ILocalizationService localization)
 
             return window.HostedContent.GetType().Assembly
                 .GetCustomAttributes<AssemblyMetadataAttribute>()
-                .FirstOrDefault(attribute => attribute.Key == "QingToolboxCanaryVersion")?
+                .FirstOrDefault(attribute => attribute.Key is "QingToolboxCanaryVersion" or
+                    "QingToolbox.TextToolsCanary.Variant")?
                 .Value;
         }, DispatcherPriority.Send, cancellationToken);
     }

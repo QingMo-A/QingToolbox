@@ -1,14 +1,12 @@
 using System.Reflection;
 using System.IO;
-using System.Windows;
-using System.Windows.Controls;
 using QingToolbox.Abstractions.Modules;
 
 [assembly: AssemblyMetadata("QingToolboxCanaryVersion", "1.0.0")]
 
 namespace QingToolbox.DevTools.ModuleUpdateRuntimeAdapterProbe;
 
-public sealed class RuntimeAdapterProbeModule : IToolModule
+public sealed class RuntimeAdapterProbeModule : IInProcessServiceModule
 {
     private const string ProbeVersion = "1.0.0";
     private const string LifecycleFileName = "runtime-adapter-lifecycle.tsv";
@@ -19,7 +17,7 @@ public sealed class RuntimeAdapterProbeModule : IToolModule
 
     public string Name => "Runtime Adapter Probe";
 
-    public string Description => "A collectible WPF lifecycle probe used only by the runtime adapter smoke test.";
+    public string Description => "A collectible UI-free lifecycle probe used only by the runtime adapter smoke test.";
 
     public Task OnLoadAsync(
         ModuleContext context,
@@ -51,21 +49,6 @@ public sealed class RuntimeAdapterProbeModule : IToolModule
         cancellationToken.ThrowIfCancellationRequested();
         AppendLifecycle("Unload");
         return Task.CompletedTask;
-    }
-
-    public object? CreateView()
-    {
-        var context = _context ?? throw new InvalidOperationException("Probe module is not loaded.");
-        AppendLifecycle("CreateView");
-        return new Border
-        {
-            Padding = new Thickness(12),
-            Child = new TextBlock
-            {
-                Text = $"{context.ModuleId} runtime adapter probe {ProbeVersion}",
-                TextWrapping = TextWrapping.Wrap
-            }
-        };
     }
 
     public ValueTask DisposeAsync()

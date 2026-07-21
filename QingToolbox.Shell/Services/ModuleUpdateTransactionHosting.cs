@@ -146,8 +146,8 @@ public sealed class ModuleTransactionRecoveryCoordinator(
             {
                 await using var lease = await gate.Consumer.EnterExecutionAsync(
                     pair.Key, cancellationToken).ConfigureAwait(false);
-                if (await runtimeAdapter.RestorePreviousRuntimeStateAsync(
-                        pair.Key, pair.Value, cancellationToken).ConfigureAwait(false))
+                if (await runtimeAdapter.RestoreRuntimeStateAsync(
+                        pair.Value, cancellationToken).ConfigureAwait(false))
                 {
                     restored++;
                     continue;

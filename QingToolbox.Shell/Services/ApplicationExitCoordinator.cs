@@ -19,7 +19,9 @@ public sealed class ApplicationExitCoordinator(
     INotificationAreaIcon notificationArea,
     FloatingBadgeManager floatingBadgeManager,
     ModuleWindowManager moduleWindowManager,
-    ModuleRuntimeManager runtimeManager)
+    ModuleRuntimeManager runtimeManager,
+    ModuleTransactionRecoveryGate maintenanceGate,
+    ModuleProcessBroker processBroker)
 {
     private readonly object _sync = new();
     private Task? _exitTask;
@@ -60,6 +62,13 @@ public sealed class ApplicationExitCoordinator(
 
     private async Task ExitCoreAsync(ApplicationExitReason reason)
     {
+        await using var maintenance = await maintenanceGate.BeginShutdownAsync(TimeSpan.FromSeconds(8));
+        if (maintenance is null)
+        {
+            Debug.WriteLine("Exit maintenance gate timed out; runtime cleanup skipped fail-closed.");
+            Application.Current.Shutdown();
+            return;
+        }
         var stages = new List<ExitCleanupStage>
         {
             SyncStage("startup session", startupSession.PrepareForExit),
@@ -71,6 +80,7 @@ public sealed class ApplicationExitCoordinator(
                 var failed = moduleWindowManager.CloseAllSafely();
                 if (failed > 0) Debug.WriteLine($"Exit stage module windows failed: {failed} window(s)");
             }),
+            new("module processes", async () => await processBroker.DisposeAsync()),
             new("module runtime", async () =>
             {
                 await runtimeManager.DisposeAsync();

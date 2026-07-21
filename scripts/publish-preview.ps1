@@ -111,6 +111,7 @@ try {
     & (Join-Path $PSScriptRoot "write-host-payload-manifest.ps1") -PayloadDirectory $publishDirectory
     $requiredFiles = @(
         'QingToolbox.Shell.exe',
+        'QingToolbox.ModuleHost.exe',
         'QingToolbox.StartupMaintenance.exe',
         'Resources\Localization\en-US.json',
         'Resources\Localization\zh-CN.json',

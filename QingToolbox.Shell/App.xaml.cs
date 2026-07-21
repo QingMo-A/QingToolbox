@@ -159,6 +159,7 @@ public partial class App : Application
             services.AddSingleton<ApplicationExitCoordinator>();
             services.AddSingleton(applicationPaths);
             services.AddSingleton<SessionLogService>();
+            services.AddSingleton<ModuleProcessBroker>();
             services.AddSingleton(provider => new ModuleTransactionRecoveryGate(entry =>
             {
                 provider.GetRequiredService<SessionLogService>().Warning(

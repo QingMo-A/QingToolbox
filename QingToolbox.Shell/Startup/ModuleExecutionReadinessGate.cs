@@ -62,9 +62,11 @@ public sealed class ModuleTransactionRecoveryGate
         new(StringComparer.Ordinal);
     private readonly TaskCompletionSource _recoveryInspected =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly SemaphoreSlim _maintenance = new(1, 1);
     private readonly Action<ModuleExecutionGateLogEvent>? _log;
     private bool _hasUnattributedRecoveryFailure;
     private bool _recoveryCompleted;
+    private bool _shutdownRequested;
 
     public ModuleTransactionRecoveryGate(Action<ModuleExecutionGateLogEvent>? log = null)
     {
@@ -136,7 +138,47 @@ public sealed class ModuleTransactionRecoveryGate
     {
         await WaitForRecoveryInspectionAsync(cancellationToken).ConfigureAwait(false);
         ThrowIfBlocked(moduleId);
-        return await EnterSerializedOperationAsync(moduleId, cancellationToken).ConfigureAwait(false);
+        var maintenance = await EnterMaintenanceAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ThrowIfBlocked(moduleId);
+            var module = await EnterSerializedOperationAsync(moduleId, cancellationToken).ConfigureAwait(false);
+            return new CompositeLease(module, maintenance);
+        }
+        catch { await maintenance.DisposeAsync(); throw; }
+    }
+
+    internal async ValueTask<IAsyncDisposable> EnterDiscoveryAsync(CancellationToken cancellationToken = default)
+    {
+        await WaitForRecoveryInspectionAsync(cancellationToken).ConfigureAwait(false);
+        return await EnterMaintenanceAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<IAsyncDisposable?> BeginShutdownAsync(TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_stateSync) _shutdownRequested = true;
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+        try
+        {
+            await _maintenance.WaitAsync(timeoutSource.Token).ConfigureAwait(false);
+            return new SemaphoreLease(_maintenance);
+        }
+        catch (OperationCanceledException) { return null; }
+    }
+
+    private async ValueTask<IAsyncDisposable> EnterMaintenanceAsync(CancellationToken cancellationToken)
+    {
+        lock (_stateSync)
+            if (_shutdownRequested) throw new InvalidOperationException("Application shutdown has started.");
+        await _maintenance.WaitAsync(cancellationToken).ConfigureAwait(false);
+        lock (_stateSync)
+        {
+            if (!_shutdownRequested) return new SemaphoreLease(_maintenance);
+        }
+        _maintenance.Release();
+        throw new InvalidOperationException("Application shutdown has started.");
     }
 
     private async ValueTask<IAsyncDisposable> EnterExecutionAsync(
@@ -197,6 +239,8 @@ public sealed class ModuleTransactionRecoveryGate
 
     private void ThrowIfBlocked(string moduleId)
     {
+        lock (_stateSync)
+            if (_shutdownRequested) throw new InvalidOperationException("Application shutdown has started.");
         var readiness = GetReadiness(moduleId);
         if (readiness.CanExecute)
         {
@@ -209,6 +253,15 @@ public sealed class ModuleTransactionRecoveryGate
             readiness.Status,
             readiness.Status.ToString()));
         throw new ModuleExecutionBlockedException(moduleId, readiness.Status);
+    }
+
+    private sealed class CompositeLease(IAsyncDisposable first, IAsyncDisposable second) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            await first.DisposeAsync();
+            await second.DisposeAsync();
+        }
     }
 
     private sealed class ConsumerView(ModuleTransactionRecoveryGate owner)

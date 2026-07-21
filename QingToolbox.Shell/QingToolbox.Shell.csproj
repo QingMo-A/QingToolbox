@@ -4,6 +4,10 @@
     <ProjectReference Include="..\QingToolbox.Core\QingToolbox.Core.csproj" />
     <ProjectReference Include="..\QingToolbox.Abstractions\QingToolbox.Abstractions.csproj" />
     <ProjectReference Include="..\QingToolbox.ModuleLoader\QingToolbox.ModuleLoader.csproj" />
+    <ProjectReference Include="..\QingToolbox.ModuleHost\QingToolbox.ModuleHost.csproj"
+                      ReferenceOutputAssembly="false"
+                      OutputItemType="Content"
+                      CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

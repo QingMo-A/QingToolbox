@@ -38,7 +38,9 @@ public sealed partial class MainWindowViewModel(
     TimeProvider timeProvider,
     StartupHealthJournal startupHealthJournal,
     IModuleExecutionReadinessGate executionGate,
-    SessionLogService sessionLog) : ObservableObject
+    SessionLogService sessionLog,
+    ModuleUpdateRuntimeCoordinator updateRuntimeCoordinator,
+    ModuleProcessBroker moduleProcessBroker) : ObservableObject
 {
     public void ApplyNotificationAvailability(NotificationAvailabilityChangedEventArgs change)
     {
@@ -632,6 +634,13 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand]
     private Task LoadModuleAsync(string moduleId)
     {
+        if (IsOutOfProcessWpf(moduleId))
+            return ExecuteLifecycleAsync(moduleId, "load", async () =>
+            {
+                if (!await updateRuntimeCoordinator.RestorePreviousRuntimeStateAsync(moduleId,
+                        new(false, false, true, false), CancellationToken.None))
+                    throw new ModuleRuntimeException("The module worker could not be started.");
+            });
         return ExecuteLifecycleAsync(
             moduleId,
             "load",
@@ -643,6 +652,14 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand]
     private Task ActivateModuleAsync(string moduleId)
     {
+        if (IsOutOfProcessWpf(moduleId))
+            return ExecuteLifecycleAsync(moduleId, "activate", async () =>
+            {
+                if (moduleProcessBroker.GetState(moduleId) is null)
+                    await LoadOutOfProcessAsync(moduleId);
+                if (!await moduleProcessBroker.CommandAsync(moduleId, "Activate", CancellationToken.None))
+                    throw new ModuleRuntimeException("The module worker could not be activated.");
+            });
         return ExecuteLifecycleAsync(
             moduleId,
             "activate",
@@ -652,6 +669,12 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand]
     private Task DeactivateModuleAsync(string moduleId)
     {
+        if (IsOutOfProcessWpf(moduleId))
+            return ExecuteLifecycleAsync(moduleId, "deactivate", async () =>
+            {
+                if (!await updateRuntimeCoordinator.DeactivateAsync(moduleId, CancellationToken.None))
+                    throw new ModuleRuntimeException("The module worker could not be deactivated.");
+            });
         return ExecuteLifecycleAsync(
             moduleId,
             "deactivate",
@@ -661,6 +684,13 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand]
     private Task UnloadModuleAsync(string moduleId)
     {
+        if (IsOutOfProcessWpf(moduleId))
+            return ExecuteLifecycleAsync(moduleId, "unload", async () =>
+            {
+                if (!await updateRuntimeCoordinator.UnloadAsync(moduleId, CancellationToken.None) ||
+                    !await updateRuntimeCoordinator.VerifyUnloadedAsync(moduleId, CancellationToken.None))
+                    throw new ModuleRuntimeException("The module worker did not exit.");
+            });
         return ExecuteLifecycleAsync(
             moduleId,
             "unload",
@@ -696,6 +726,14 @@ public sealed partial class MainWindowViewModel(
         try
         {
             await using var executionLease = await executionGate.EnterExecutionAsync(moduleId);
+            if (IsOutOfProcessWpf(moduleId))
+            {
+                if (!await moduleProcessBroker.CommandAsync(moduleId, "OpenWindow", CancellationToken.None))
+                    throw new ModuleRuntimeException("The module window could not be opened.");
+                moduleViewModel.UpdateOutOfProcessRuntimeState(moduleProcessBroker.GetState(moduleId));
+                StatusMessage = localization.GetString("status.moduleOpened", moduleViewModel.DisplayName);
+                return;
+            }
             if (moduleWindowManager.IsWindowOpen(moduleId))
             {
                 moduleWindowManager.ActivateWindow(moduleId);
@@ -784,7 +822,10 @@ public sealed partial class MainWindowViewModel(
         {
             await using var executionLease = await executionGate.EnterExecutionAsync(moduleId);
             await action();
-            moduleViewModel.UpdateRuntimeState(runtimeManager.GetRecord(moduleId));
+            if (IsOutOfProcessWpf(moduleId))
+                moduleViewModel.UpdateOutOfProcessRuntimeState(moduleProcessBroker.GetState(moduleId));
+            else
+                moduleViewModel.UpdateRuntimeState(runtimeManager.GetRecord(moduleId));
             StatusMessage = localization.GetString(
                 "status.moduleOperationCompleted",
                 moduleViewModel.DisplayName,
@@ -820,6 +861,20 @@ public sealed partial class MainWindowViewModel(
             moduleViewModel.IsBusy = false;
             UpdateStatistics();
         }
+    }
+
+    private bool IsOutOfProcessWpf(string moduleId)
+    {
+        var module = Modules.FirstOrDefault(item => item.Id == moduleId);
+        return module is not null && ModuleRuntimeCapabilities.Resolve(module.Module.Manifest) is
+            { RuntimeIsolation: ModuleRuntimeIsolation.OutOfProcess, UiKind: ModuleUiKind.Wpf };
+    }
+
+    private async Task LoadOutOfProcessAsync(string moduleId)
+    {
+        if (!await updateRuntimeCoordinator.RestorePreviousRuntimeStateAsync(moduleId,
+                new(false, false, true, false), CancellationToken.None))
+            throw new ModuleRuntimeException("The module worker could not be started.");
     }
 
     private void UpdateStatistics()
@@ -1135,9 +1190,19 @@ public sealed partial class MainWindowViewModel(
                     skipped++;
                     continue;
                 }
-                await runtimeManager.LoadAsync(module.Id, applicationPaths.ModuleDataDirectory, cancellationToken);
-                if (authorization.ActivateOnStartup) await runtimeManager.ActivateAsync(module.Id, cancellationToken);
-                module.UpdateRuntimeState(runtimeManager.GetRecord(module.Id));
+                if (IsOutOfProcessWpf(module.Id))
+                {
+                    if (!await updateRuntimeCoordinator.RestorePreviousRuntimeStateAsync(module.Id,
+                            new(false, authorization.ActivateOnStartup, true, true), cancellationToken))
+                        throw new ModuleRuntimeException("The startup module worker could not be restored.");
+                    module.UpdateOutOfProcessRuntimeState(moduleProcessBroker.GetState(module.Id));
+                }
+                else
+                {
+                    await runtimeManager.LoadAsync(module.Id, applicationPaths.ModuleDataDirectory, cancellationToken);
+                    if (authorization.ActivateOnStartup) await runtimeManager.ActivateAsync(module.Id, cancellationToken);
+                    module.UpdateRuntimeState(runtimeManager.GetRecord(module.Id));
+                }
                 succeeded++;
             }
             catch (OperationCanceledException) { throw; }

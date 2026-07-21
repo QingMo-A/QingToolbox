@@ -1,5 +1,14 @@
 # Changelog
 
+- Added a manifest-declared hybrid module runtime: collectible in-process services and dedicated
+  trusted ModuleHost processes for real WPF views.
+- Bound ModuleHost IPC to protocol, nonce, process handle, module/API/tree identity, command
+  allowlisting, bounded messages, graceful exit, and process-tree kill fallback.
+- Extended the real TextTools canary across distinct v1/v2 processes, real WPF windows, success,
+  rollback, RecoveryRequired, trusted tree leases, and Development/ModuleTest profiles.
+- Serialized discovery, update, and shutdown maintenance while preserving unrelated module
+  execution and rejecting in-process WPF live updates before disk mutation.
+
 - Started B2.1 with a real Shell module-update runtime adapter, per-module recovery gate, deferred cold-start runtime intent, and version-aware ALC diagnostics.
 - Added real pinned TextTools Development/ModuleTest commit, rollback, and RecoveryRequired canaries without enabling Production installation.
 - Added module-attributed recovery issues so known failures block only their module while unattributed journals fail closed globally.

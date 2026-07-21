@@ -18,6 +18,10 @@ public sealed class ModuleManifest
 
     public ModuleRuntimeType RuntimeType { get; init; } = ModuleRuntimeType.InProcess;
 
+    public ModuleRuntimeIsolation? RuntimeIsolation { get; init; }
+
+    public ModuleUiKind? UiKind { get; init; }
+
     public ModuleLoadMode LoadMode { get; init; } = ModuleLoadMode.Manual;
 
     public IReadOnlyList<ModulePermission> Permissions { get; init; }

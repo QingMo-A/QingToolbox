@@ -39,7 +39,7 @@ public sealed class InProcessModuleLoader(ILocalizationService localization)
         try
         {
             var assembly = loadContext.LoadFromAssemblyPath(entryPath);
-            var moduleType = FindModuleType(assembly, manifest.Id);
+            var moduleType = FindModuleType(assembly, manifest);
             var module = CreateModule(moduleType, manifest.Id);
 
             var dataDirectory = Path.GetFullPath(
@@ -69,13 +69,25 @@ public sealed class InProcessModuleLoader(ILocalizationService localization)
         }
     }
 
-    private static Type FindModuleType(Assembly assembly, string moduleId)
+    private static Type FindModuleType(Assembly assembly, ModuleManifest manifest)
     {
+        var capabilities = ModuleRuntimeCapabilities.Resolve(manifest);
+        var contractType = capabilities switch
+        {
+            { RuntimeIsolation: ModuleRuntimeIsolation.InProcessCollectible, UiKind: ModuleUiKind.None }
+                => typeof(IInProcessServiceModule),
+            { RuntimeIsolation: ModuleRuntimeIsolation.OutOfProcess, UiKind: ModuleUiKind.Wpf }
+                => typeof(IToolModule),
+            { RuntimeIsolation: ModuleRuntimeIsolation.LegacyInProcess }
+                => typeof(IToolModule),
+            _ => throw new ModuleLoadException(
+                $"Module '{manifest.Id}' declares an unsupported runtime/UI capability combination.")
+        };
         var moduleTypes = assembly.GetTypes()
             .Where(type =>
                 !type.IsAbstract &&
                 !type.IsInterface &&
-                typeof(IToolModule).IsAssignableFrom(type) &&
+                contractType.IsAssignableFrom(type) &&
                 type.GetConstructor(Type.EmptyTypes) is not null)
             .ToArray();
 
@@ -83,17 +95,17 @@ public sealed class InProcessModuleLoader(ILocalizationService localization)
         {
             1 => moduleTypes[0],
             0 => throw new ModuleLoadException(
-                $"No IToolModule implementation was found in module '{moduleId}'."),
+                $"No {contractType.Name} implementation was found in module '{manifest.Id}'."),
             _ => throw new ModuleLoadException(
-                $"Multiple IToolModule implementations were found in module '{moduleId}'.")
+                $"Multiple {contractType.Name} implementations were found in module '{manifest.Id}'.")
         };
     }
 
-    private static IToolModule CreateModule(Type moduleType, string moduleId)
+    private static IModuleLifecycle CreateModule(Type moduleType, string moduleId)
     {
         try
         {
-            return (IToolModule)Activator.CreateInstance(moduleType)!;
+            return (IModuleLifecycle)Activator.CreateInstance(moduleType)!;
         }
         catch (Exception exception)
         {

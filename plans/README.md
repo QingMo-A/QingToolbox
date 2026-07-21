@@ -19,6 +19,10 @@ Read these plans in order unless the user says otherwise:
    - Establish Qing Design System, Qing Surface System, Qing Bridge, and Qing Contracts boundaries.
    - Plan staged migration without replacing the frozen B1 transaction core or bypassing B2 lifecycle integration.
 
+4. [`004-close-b2-1-runtime-trust-and-gate-boundary.md`](004-close-b2-1-runtime-trust-and-gate-boundary.md)
+   - Close the B2.1 verified runtime identity, tree lease, discovery, gate, and shutdown boundaries.
+   - Freeze B2.1 before UI-1 begins.
+
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 
 ## Branch rule

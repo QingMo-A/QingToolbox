@@ -386,6 +386,12 @@ pinned real TextTools canary for Development/ModuleTest. Cold-start recovery def
 until recovery has been inspected and discovery has completed, so recovery does not execute module
 DLLs early.
 
+Real TextTools WPF/BAML testing proved that closing the view and completing logical unload does not
+reliably release a collectible ALC. ADR-001 therefore fixes the runtime boundary: UI-free service
+modules use `InProcessCollectible + None`; real WPF view modules use one trusted out-of-process
+ModuleHost per module; legacy in-process WPF remains compatible but cannot use a live transaction.
+The capability is verified from the manifest, never guessed by creating a view.
+
 This does not complete all of B2. Production transaction execution, a Production update button,
 automatic qmod installation, and host self-update remain unavailable. Preview 2 manual acceptance
 items that were not executed remain `Not Run`.

@@ -1,33 +1,55 @@
 # Module update runtime adapter
 
-Phase B2.1 connects the frozen B1 transaction contract to the existing Shell runtime. The adapter
-is `QingToolbox.Shell.Services.ModuleUpdateRuntimeCoordinator`; it reuses `ModuleRuntimeManager`,
-`ModuleWindowManager`, settings, manifest validation, localization, and the existing collectible
-load context. Core does not reference WPF and Shell does not reference a concrete module.
+Phase B2.1 uses a capability-declared hybrid runtime boundary. A verified manifest, rather than
+probing a view at runtime, selects one of these paths:
 
-The adapter reads window, loaded, active, and startup-authorization state without loading a DLL.
-Window close is targeted, Dispatcher-bound, cancellable, bounded, and idempotent. Deactivate and
-Unload reuse the existing lifecycle. Unload verification requires no runtime registration, no
-active state, no module window, and a collected ALC weak reference; failure returns `false` and
-prevents B1 from replacing the program directory.
+| Runtime isolation | UI kind | Live update |
+| --- | --- | --- |
+| `InProcessCollectible` | `None` | Supported; collectible ALC reclamation must be proven |
+| `OutOfProcess` | `Wpf` | Supported; the dedicated worker process must be proven exited |
+| `InProcessCollectible` | `Wpf` | Rejected before disk mutation (`RuntimeIsolationUnsupported`) |
+| legacy/unspecified | legacy WPF | Load-compatible, but update requires restart |
 
-Restore is idempotent and re-reads the installed manifest. An unloaded module stays unloaded; a
-loaded inactive module is loaded only; an active module is loaded and activated. A single window is
-restored only when requested. Startup authorization is never created, deleted, or re-signed by a
-transaction. Diagnostics contain module ID, version, hashed directory identity, payload fingerprint,
-and load-context generation—not private paths or module content.
+The common lifecycle contract does not reference WPF. `IInProcessServiceModule` cannot export a
+plugin-defined UI object. `IModuleWpfViewFactory` is consumed only inside the trusted
+`QingToolbox.ModuleHost` executable; Shell never receives a plugin `Type`, `UserControl`, resource
+dictionary, data template, or instance across the process boundary.
 
-## Startup recovery gate
+## Out-of-process WPF runtime
 
-After first presentation, Development and ModuleTest run transaction recovery before discovery and
-startup-authorized DLL execution. Recovery-time runtime restores are deferred, so recovery itself
-cannot execute module DLLs. The gate is published, discovery runs, and safe deferred intent is then
-restored before normal startup authorization.
+`ModuleProcessBroker` starts exactly one trusted ModuleHost process per WPF module. Each session
+uses a current-user-only named pipe, random session name, one-time 256-bit nonce, protocol version,
+a fixed command allowlist, a 16 KiB message limit, cancellation, and bounded timeouts. Handshake
+validation binds the process handle and PID to module ID, manifest version, Module API version, and
+the exact program-tree identity. A PID by itself is never treated as identity.
 
-Known `RecoveryRequired` journals block only their module ID. An unattributed journal problem fails
-closed for all module execution while keeping Shell visible. Lifecycle commands and the Development
-transaction coordinator share the same per-module lease, closing the VerifyUnloaded-to-rename race.
-Production registers the adapter and gate but does not register executable update transactions.
+ModuleHost loads only the path supplied by the trusted Shell startup contract, verifies the same
+manifest and tree identity, invokes lifecycle methods, and owns the real top-level WPF window.
+`OpenWindow` creates and activates the real module view inside that process. Shutdown closes the
+window, deactivates and disposes the module, and exits. If graceful exit times out, Broker terminates
+that module's process tree and waits for the real process handle. IPC disconnect alone is not proof
+of unload. Process isolation is a lifecycle and crash boundary, not a permissions sandbox.
 
-This is B2.1 infrastructure, not a Production update feature. There is no Production update button,
-automatic qmod installation, background updater, host self-update, tag, or release.
+## Transaction restore identity
+
+Promoted, previous, and deferred restore use a typed request containing the desired runtime intent,
+manifest version, Module API version, exact file snapshot, aggregate program-tree identity, and
+restore role. The adapter re-reads and validates the installed manifest and exact files while the
+transaction retains its trusted tree lease. For out-of-process WPF, the lease remains held through
+worker startup, module load, activation, optional real view creation, versioned handshake, and host
+identity verification. Only then may the transaction perform its final disk verification.
+
+Diagnostics distinguish manifest version, loaded assembly informational version, loaded module
+type, runtime generation, and process state without recording private paths or module content.
+Startup authorization is never created, removed, or re-signed by a transaction.
+
+## Discovery, execution, and shutdown gate
+
+Recovery is inspected before discovery or module execution. Discovery and module updates share a
+global maintenance lease, while normal execution and updates also share the existing per-module
+lease. Unrelated modules remain executable during a module-scoped recovery failure. Shutdown first
+publishes a no-new-work boundary, then waits a bounded interval for maintenance; timeout fails
+closed instead of racing runtime disposal with directory replacement.
+
+Production update execution and automatic qmod installation remain disabled. This infrastructure
+does not add a Production update button, host self-update, tag, or release.

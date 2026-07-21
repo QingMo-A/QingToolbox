@@ -15,7 +15,8 @@ public sealed class ModuleDiscoveryCoordinator(
     ApplicationPaths applicationPaths,
     UserSettingsService settingsService,
     ModuleStartupFingerprintService fingerprintService,
-    IModuleExecutionReadinessGate executionGate)
+    IModuleExecutionReadinessGate executionGate,
+    ModuleTransactionRecoveryGate maintenanceGate)
 {
     public sealed record AuthorizationEvaluation(
         string ModuleId, bool AuthorizationPresent, bool FingerprintMatches, string? FailureDiagnostic);
@@ -45,6 +46,8 @@ public sealed class ModuleDiscoveryCoordinator(
     private Task<Snapshot> RunCoreAsync(long generation, CancellationToken cancellationToken) =>
         Task.Run(async () =>
         {
+            await using var maintenance = await maintenanceGate.EnterDiscoveryAsync(cancellationToken)
+                .ConfigureAwait(false);
             var scans = new List<DiscoveredModule>();
             try
             {

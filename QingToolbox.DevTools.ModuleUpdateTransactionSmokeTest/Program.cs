@@ -80,6 +80,20 @@ static async Task ValidationAndLifecycleAsync(string root)
         Require((await service.ExecuteAsync(new(incompatible.Attestation))).FailureCode ==
             ModuleUpdateTransactionFailureCode.ModuleApiIncompatible, "module API mismatch rejected");
 
+    var legacyWpf = await Fixture.CreateAsync(root, "legacy-wpf", "qing.legacy-wpf", "2.0.0", "1.0.0",
+        runtimeIsolation: "InProcessCollectible", uiKind: "Wpf");
+    var beforeLegacyManifest = await File.ReadAllBytesAsync(Path.Combine(legacyWpf.Installed, "module.json"));
+    var legacyCoordinator = new FakeCoordinator(new(true, true, true, true));
+    await using (var service = legacyWpf.Service(legacyCoordinator))
+    {
+        var result = await service.ExecuteAsync(new(legacyWpf.Attestation));
+        var afterLegacyManifest = await File.ReadAllBytesAsync(Path.Combine(legacyWpf.Installed, "module.json"));
+        Require(result.FailureCode == ModuleUpdateTransactionFailureCode.RuntimeIsolationUnsupported &&
+                legacyCoordinator.TotalCalls == 0 &&
+                beforeLegacyManifest.SequenceEqual(afterLegacyManifest),
+            "in-process WPF live transaction rejected before runtime or disk mutation");
+    }
+
     var tampered = await Fixture.CreateAsync(root, "staging-tamper", "qing.tamper", "2.0.0", "1.0.0");
     await File.WriteAllTextAsync(Path.Combine(tampered.Attestation.Directory, "payload.dll"), "tampered");
     await using (var service = tampered.Service(new FakeCoordinator(new(false, false, false, false))))
@@ -1232,10 +1246,11 @@ sealed class Fixture
         new("ModuleTest", UserModules, CacheRoot, Api, Staging, coordinator, null, hooks);
 
     public static async Task<Fixture> CreateAsync(string root, string name, string moduleId, string targetVersion,
-        string? installedVersion, string moduleApi = Api)
+        string? installedVersion, string moduleApi = Api,
+        string runtimeIsolation = "InProcessCollectible", string uiKind = "None")
     {
         var fixtureRoot = Path.Combine(root, name); Directory.CreateDirectory(fixtureRoot);
-        var package = CreatePackage(fixtureRoot, moduleId, targetVersion, moduleApi);
+        var package = CreatePackage(fixtureRoot, moduleId, targetVersion, moduleApi, runtimeIsolation, uiKind);
         var fixture = await FromExistingAsync(fixtureRoot, package, moduleId, targetVersion, moduleApi);
         if (installedVersion is not null) WriteModule(fixture.Installed, moduleId, installedVersion, "old");
         return fixture;
@@ -1257,13 +1272,14 @@ sealed class Fixture
             UserModules = user, CacheRoot = cache, Attestation = attestation, Staging = staging };
     }
 
-    private static string CreatePackage(string root, string moduleId, string version, string moduleApi)
+    private static string CreatePackage(string root, string moduleId, string version, string moduleApi,
+        string runtimeIsolation, string uiKind)
     {
         var path = Path.Combine(root, "update.qmod");
         using (var archive = ZipFile.Open(path, ZipArchiveMode.Create))
         {
             Add(archive, "qmod.json", $"{{\"schemaVersion\":1,\"moduleId\":\"{moduleId}\",\"version\":\"{version}\",\"moduleApiVersion\":\"{moduleApi}\",\"entryManifest\":\"module.json\"}}");
-            Add(archive, "module.json", Manifest(moduleId, version));
+            Add(archive, "module.json", Manifest(moduleId, version, runtimeIsolation, uiKind));
             Add(archive, "payload.dll", "new-payload-" + version);
             Add(archive, "i18n/en-US.json", "{}");
         }
@@ -1293,8 +1309,9 @@ sealed class Fixture
             source.OfficialReleaseIdentityHash, moduleId, source.TargetVersion, source.ModuleApiVersion,
             source.PackageSha256, source.TransactionId, source.EnvironmentIdentity, source.Files,
             source.StagingMetadataFile);
-    private static string Manifest(string id, string version) =>
-        $"{{\"id\":\"{id}\",\"name\":\"Probe\",\"description\":\"Probe\",\"version\":\"{version}\",\"entry\":\"payload.dll\",\"runtimeType\":\"InProcess\",\"loadMode\":\"Manual\"}}";
+    private static string Manifest(string id, string version,
+        string runtimeIsolation = "InProcessCollectible", string uiKind = "None") =>
+        $"{{\"id\":\"{id}\",\"name\":\"Probe\",\"description\":\"Probe\",\"version\":\"{version}\",\"entry\":\"payload.dll\",\"runtimeType\":\"InProcess\",\"runtimeIsolation\":\"{runtimeIsolation}\",\"uiKind\":\"{uiKind}\",\"loadMode\":\"Manual\"}}";
     private static void Add(ZipArchive archive, string name, string text)
     { var entry = archive.CreateEntry(name); using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false)); writer.Write(text); }
 }

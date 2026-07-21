@@ -120,6 +120,9 @@ internal static class Program
                 item => Console.WriteLine(
                     $"[{options.EnvironmentKind}/{scenario}] " +
                     $"tx={item.TransactionIdPrefix} state={item.State} event={item.EventName}"));
+            var gate = new ModuleTransactionRecoveryGate();
+            gate.CompleteRecovery([], false);
+            var gatedTransactions = new GatedModuleUpdateTransactionCoordinator(transactions, gate);
 
             await InstallAndRunVersionOneAsync(
                 paths,
@@ -133,7 +136,7 @@ internal static class Program
                         paths,
                         coordinator,
                         staging,
-                        transactions,
+                        gatedTransactions,
                         versionTwoPackage);
                     break;
                 case CanaryScenario.Rollback:
@@ -141,7 +144,7 @@ internal static class Program
                         paths,
                         coordinator,
                         staging,
-                        transactions,
+                        gatedTransactions,
                         versionTwoPackage);
                     break;
                 case CanaryScenario.RecoveryRequired:
@@ -149,7 +152,9 @@ internal static class Program
                         paths,
                         coordinator,
                         staging,
+                        gatedTransactions,
                         transactions,
+                        gate,
                         versionTwoPackage);
                     break;
                 default:
@@ -198,7 +203,7 @@ internal static class Program
         ApplicationPaths paths,
         CanaryRuntimeCoordinator coordinator,
         QmodPackageStagingService staging,
-        ModuleUpdateTransactionService transactions,
+        GatedModuleUpdateTransactionCoordinator transactions,
         PackageArtifact package)
     {
         var result = await ExecuteAsync(staging, transactions, package, VersionOne);
@@ -217,7 +222,7 @@ internal static class Program
         ApplicationPaths paths,
         CanaryRuntimeCoordinator coordinator,
         QmodPackageStagingService staging,
-        ModuleUpdateTransactionService transactions,
+        GatedModuleUpdateTransactionCoordinator transactions,
         PackageArtifact package)
     {
         coordinator.ArmPromotedRestoreFailure(blockPromotedUnload: false);
@@ -238,7 +243,9 @@ internal static class Program
         ApplicationPaths paths,
         CanaryRuntimeCoordinator coordinator,
         QmodPackageStagingService staging,
-        ModuleUpdateTransactionService transactions,
+        GatedModuleUpdateTransactionCoordinator transactions,
+        ModuleUpdateTransactionService recoveryTransactions,
+        ModuleTransactionRecoveryGate gate,
         PackageArtifact package)
     {
         coordinator.ArmPromotedRestoreFailure(blockPromotedUnload: true);
@@ -251,19 +258,18 @@ internal static class Program
             $"v2 update did not enter RecoveryRequired: {Describe(result)}");
 
         AssertInstalledVersion(paths, VersionTwo);
-        await coordinator.AssertRuntimeAsync(ModuleId, VersionTwo, "v2", active: false);
+        await coordinator.AssertRuntimeAsync(ModuleId, VersionTwo, "v2", active: false, hasWindows: false);
         AssertRecoveryArtifacts(paths, result.TransactionId);
 
-        var recovery = await transactions.RecoverAsync();
+        var recovery = await recoveryTransactions.RecoverAsync();
         Require(
             recovery.RecoveryRequired == 1 &&
             recovery.RecoveryRequiredModuleIds.SequenceEqual([ModuleId], StringComparer.Ordinal) &&
             recovery.Results.Count == 1 &&
             recovery.Results[0].State == ModuleUpdateTransactionState.RecoveryRequired,
             "Recovery scan did not preserve and report the module-scoped RecoveryRequired state.");
-        var gate = new ModuleTransactionRecoveryGate();
-        gate.CompleteRecovery(recovery.RecoveryRequiredModuleIds,
-            recovery.HasUnattributedRecoveryFailure);
+        foreach (var blockedModuleId in recovery.RecoveryRequiredModuleIds)
+            gate.BlockModule(blockedModuleId, "RecoveryRequired");
         Require(!gate.Consumer.GetReadiness(ModuleId).CanExecute &&
                 gate.Consumer.GetReadiness("qing.canary-neighbor").CanExecute,
             "RecoveryRequired did not block only the affected TextTools module.");
@@ -272,7 +278,7 @@ internal static class Program
 
     private static async Task<ModuleUpdateTransactionResult> ExecuteAsync(
         QmodPackageStagingService staging,
-        ModuleUpdateTransactionService transactions,
+        GatedModuleUpdateTransactionCoordinator transactions,
         PackageArtifact package,
         string localVersion)
     {
@@ -775,9 +781,11 @@ internal static class Program
         private readonly ModuleRuntimeManager _runtime;
         private readonly ModuleWindowManager _windows;
         private readonly ModuleUpdateRuntimeCoordinator _adapter;
+        private readonly ModuleProcessBroker _broker;
         private readonly SessionLogService _sessionLog;
         private bool _failPromotedRestoreOnce;
         private bool _blockPromotedUnload;
+        private readonly HashSet<int> _observedProcesses = [];
 
         public CanaryRuntimeCoordinator(ApplicationPaths paths, string expectedSourceCommit)
         {
@@ -788,6 +796,7 @@ internal static class Program
             _runtime = new ModuleRuntimeManager(new InProcessModuleLoader(localization));
             _windows = new ModuleWindowManager(localization);
             _sessionLog = new SessionLogService(paths, TimeProvider.System);
+            _broker = new ModuleProcessBroker(paths, _sessionLog);
             _adapter = new ModuleUpdateRuntimeCoordinator(
                 _runtime,
                 _windows,
@@ -797,7 +806,8 @@ internal static class Program
                 new ModuleStartupFingerprintService(),
                 paths,
                 localization,
-                _sessionLog);
+                _sessionLog,
+                _broker);
         }
 
         public void ArmPromotedRestoreFailure(bool blockPromotedUnload)
@@ -812,7 +822,7 @@ internal static class Program
             CancellationToken cancellationToken = default)
         {
             var desired = new ModuleUpdateRuntimeState(
-                HasWindows: false,
+                HasWindows: true,
                 IsActive: true,
                 IsLoaded: true,
                 HasStartupAuthorization: false);
@@ -826,36 +836,23 @@ internal static class Program
             string expectedManifestVersion,
             string expectedVariant,
             bool active,
+            bool hasWindows = true,
             CancellationToken cancellationToken = default)
         {
-            var snapshot = await _runtime.GetSnapshotAsync(moduleId, cancellationToken)
-                ?? throw new InvalidOperationException($"Runtime record for {moduleId} is missing.");
+            var process = _broker.GetState(moduleId)
+                ?? throw new InvalidOperationException($"ModuleHost session for {moduleId} is missing.");
             var state = await _adapter.GetRuntimeStateAsync(moduleId, cancellationToken);
             Require(
-                snapshot.HasRuntimeRegistration &&
-                snapshot.IsActive == active &&
-                snapshot.Version == expectedManifestVersion &&
-                !state.HasWindows &&
-                SamePath(snapshot.ModuleDirectory, Path.Combine(_paths.UserModulesDirectory, moduleId)),
+                process.ProcessRunning && process.HandshakeCompleted && process.ModuleLoaded &&
+                process.IsActive == active &&
+                process.ManifestVersion == expectedManifestVersion &&
+                state.HasWindows == hasWindows &&
+                process.RuntimeVariant == expectedVariant,
                 $"Runtime state mismatch for {moduleId}: " +
-                $"version={snapshot.Version}; loaded={snapshot.HasRuntimeRegistration}; " +
-                $"active={snapshot.IsActive}; windows={state.HasWindows}.");
-
-            var identity = ReadLoadedAssemblyIdentity(_runtime, moduleId)
-                ?? throw new InvalidOperationException("Loaded TextTools assembly identity was unavailable.");
-            Require(
-                identity.AssemblyName == "QingToolbox.Modules.TextTools" &&
-                identity.ModuleType == "QingToolbox.Modules.TextTools.TextToolsModule" &&
-                identity.Variant == expectedVariant &&
-                identity.SourceCommit == _expectedSourceCommit,
-                "Runtime did not load the expected real, pinned TextTools canary assembly: " +
-                $"assembly={identity.AssemblyName}; type={identity.ModuleType}; " +
-                $"variant={identity.Variant}; commit={identity.SourceCommit}.");
-            var diagnostic = _adapter.GetDiagnostic(moduleId);
-            Require(diagnostic is not null &&
-                    diagnostic.Version == expectedManifestVersion &&
-                    diagnostic.LoadContextGeneration == snapshot.LoadContextGeneration,
-                "The real adapter diagnostic did not match the installed runtime generation.");
+                $"version={process.ManifestVersion}; loaded={process.ModuleLoaded}; " +
+                $"active={process.IsActive}; windows={state.HasWindows}.");
+            Require(_observedProcesses.Add(process.ProcessId!.Value),
+                "A retired ModuleHost process identity was unexpectedly reused in one scenario.");
         }
 
         public Task<ModuleUpdateRuntimeState> GetRuntimeStateAsync(
@@ -877,8 +874,7 @@ internal static class Program
             string moduleId,
             CancellationToken cancellationToken)
         {
-            if (_blockPromotedUnload &&
-                ReadLoadedAssemblyIdentity(_runtime, moduleId)?.Variant == "v2")
+            if (_blockPromotedUnload && _broker.GetState(moduleId)?.RuntimeVariant == "v2")
             {
                 Console.WriteLine("Canary intentionally refused promoted v2 unload.");
                 return Task.FromResult(false);
@@ -911,9 +907,27 @@ internal static class Program
             return restored;
         }
 
+        public async Task<bool> RestoreRuntimeStateAsync(
+            ModuleUpdateRuntimeRestoreRequest request,
+            CancellationToken cancellationToken)
+        {
+            var restored = await _adapter.RestoreRuntimeStateAsync(request, cancellationToken);
+            if (!restored) Console.WriteLine($"ModuleHost restore failure: {_broker.LastFailureCode ?? _adapter.LastRestoreFailureCode ?? "identity-rejected"}.");
+            if (restored && _failPromotedRestoreOnce &&
+                _broker.GetState(request.ModuleId)?.RuntimeVariant == "v2")
+            {
+                _failPromotedRestoreOnce = false;
+                Console.WriteLine(
+                    "Canary intentionally reported promoted v2 restore failure after real window creation.");
+                return false;
+            }
+            return restored;
+        }
+
         public async ValueTask DisposeAsync()
         {
             _windows.CloseAllSafely();
+            await _broker.DisposeAsync();
             await _runtime.DisposeAsync();
             _sessionLog.Dispose();
         }
