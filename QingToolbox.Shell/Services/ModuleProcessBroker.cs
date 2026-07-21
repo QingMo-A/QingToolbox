@@ -129,6 +129,7 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
         private readonly string _nonce;
         private readonly string _moduleId;
         private readonly SemaphoreSlim _commands = new(1, 1);
+        private int _disposed;
         public ModuleProcessRuntimeState State { get; private set; }
         public bool HasExited => _process.HasExited;
 
@@ -186,7 +187,19 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
             if (line is null || line.Length > 16 * 1024) throw new InvalidDataException("Invalid ModuleHost message.");
             return JsonSerializer.Deserialize<Message>(line) ?? throw new InvalidDataException("Invalid ModuleHost JSON.");
         }
-        public ValueTask DisposeAsync() { _reader.Dispose(); _writer.Dispose(); _pipe.Dispose(); _process.Dispose(); return ValueTask.CompletedTask; }
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
+            // A worker normally closes its pipe before exiting. StreamWriter.Dispose may
+            // attempt a final flush and report the expected broken pipe; cleanup must still
+            // release every handle and allow the broker session to be removed.
+            try { _writer.Dispose(); } catch (IOException) { } catch (ObjectDisposedException) { }
+            try { _reader.Dispose(); } catch (IOException) { } catch (ObjectDisposedException) { }
+            try { _pipe.Dispose(); } catch (IOException) { } catch (ObjectDisposedException) { }
+            try { _process.Dispose(); } catch (InvalidOperationException) { }
+            _commands.Dispose();
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed record Message(int ProtocolVersion, string Type, string Nonce, string ModuleId, string ManifestVersion,
