@@ -36,6 +36,8 @@ UI-free services and restart-only compatibility for legacy in-process WPF module
 
 ## Completion condition
 
-B1 remains **Engineering Complete — Frozen**. B2.1 becomes **Engineering Complete — Frozen** only
-after the complete local matrix and exact final-HEAD workflow pass. Next is
-**UI-1 Development-only Web Shell Foundation**.
+B1 remains **Engineering Complete — Frozen**. B2.1 is **Engineering Complete — Frozen**. The full
+local matrix passed, and implementation commit `1293402ac2c13964b55cbdf488d7582c752036ba` passed
+Preview validation run `29865749109`, including real TextTools process transactions, packaging,
+installer roundtrip, and Preview upgrade. The documentation HEAD must retain an exact successful
+final gate before handoff. Next is **UI-1 Development-only Web Shell Foundation**.
