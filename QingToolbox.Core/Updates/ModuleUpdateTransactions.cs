@@ -53,8 +53,21 @@ public sealed record ModuleUpdateTransactionInput(QmodVerifiedStagingAttestation
 public sealed record ModuleUpdateTransactionResult(bool Succeeded, Guid TransactionId,
     ModuleUpdateTransactionState State, ModuleUpdateTransactionFailureCode FailureCode,
     bool RolledBack = false, bool CleanupPending = false);
+public sealed record ModuleUpdateRecoveryIssue(string? ModuleId, Guid? TransactionId,
+    ModuleUpdateTransactionFailureCode FailureCode, bool IsUnattributed);
 public sealed record ModuleUpdateRecoveryResult(int Recovered, int CleanupCompleted, int RecoveryRequired,
-    IReadOnlyList<ModuleUpdateTransactionResult> Results);
+    IReadOnlyList<ModuleUpdateTransactionResult> Results)
+{
+    public IReadOnlyList<ModuleUpdateRecoveryIssue> Issues { get; init; } = [];
+
+    public IReadOnlyCollection<string> RecoveryRequiredModuleIds => Issues
+        .Where(issue => !issue.IsUnattributed && issue.ModuleId is not null)
+        .Select(issue => issue.ModuleId!)
+        .Distinct(StringComparer.Ordinal)
+        .ToArray();
+
+    public bool HasUnattributedRecoveryFailure => Issues.Any(issue => issue.IsUnattributed);
+}
 public sealed record ModuleUpdateTransactionLogEvent(string EventName, string ModuleId, string SourceVersion,
     string TargetVersion, string TransactionIdPrefix, ModuleUpdateTransactionState State,
     ModuleUpdateTransactionFailureCode FailureCode = ModuleUpdateTransactionFailureCode.None);
@@ -360,22 +373,56 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         var results = new List<ModuleUpdateTransactionResult>(); int recovered = 0, cleaned = 0, required = 0;
-        try { ValidateJournalRoot(); }
-        catch { return new(0, 0, 1, results); }
-        foreach (var namespaceDirectory in Directory.EnumerateDirectories(_journalRoot))
+        var issues = new List<ModuleUpdateRecoveryIssue>();
+        string[] namespaceDirectories;
+        try
+        {
+            ValidateJournalRoot();
+            namespaceDirectories = Directory.EnumerateDirectories(_journalRoot).ToArray();
+        }
+        catch
+        {
+            issues.Add(new(null, null, ModuleUpdateTransactionFailureCode.JournalInvalid, true));
+            return new(0, 0, 1, results) { Issues = issues };
+        }
+        foreach (var namespaceDirectory in namespaceDirectories)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (SecureWindowsFileSystem.IsReparsePath(namespaceDirectory) ||
-                !SecureWindowsFileSystem.IsWithin(_physicalJournalRoot,
-                    SecureWindowsFileSystem.PhysicalDirectory(namespaceDirectory))) { required++; continue; }
-            foreach (var path in Directory.EnumerateFiles(namespaceDirectory, "*.json", SearchOption.TopDirectoryOnly).ToArray())
+            string[] journalPaths;
+            try
+            {
+                if (SecureWindowsFileSystem.IsReparsePath(namespaceDirectory) ||
+                    !SecureWindowsFileSystem.IsWithin(_physicalJournalRoot,
+                        SecureWindowsFileSystem.PhysicalDirectory(namespaceDirectory)))
+                    throw new IOException("Journal namespace escaped its trusted root.");
+                journalPaths = Directory.EnumerateFiles(
+                    namespaceDirectory, "*.json", SearchOption.TopDirectoryOnly).ToArray();
+            }
+            catch
+            {
+                required++;
+                issues.Add(new(null, null, ModuleUpdateTransactionFailureCode.JournalInvalid, true));
+                continue;
+            }
+            foreach (var path in journalPaths)
             {
                 JournalEnvelope envelope;
                 try { envelope = ReadJournalEnvelope(path, namespaceDirectory); }
-                catch { required++; continue; }
+                catch
+                {
+                    required++;
+                    issues.Add(new(null, null, ModuleUpdateTransactionFailureCode.JournalInvalid, true));
+                    continue;
+                }
                 CrashRecoverableFileLock transactionLock;
                 try { transactionLock = await AcquireTransactionLockAsync(envelope.ModuleId, cancellationToken); }
-                catch { required++; continue; }
+                catch
+                {
+                    required++;
+                    issues.Add(new(envelope.ModuleId, envelope.TransactionId,
+                        ModuleUpdateTransactionFailureCode.TransactionConflict, false));
+                    continue;
+                }
                 await using var held = transactionLock;
                 var installed = InstalledPath(envelope.ModuleId); var work = WorkPath(envelope.TransactionId);
                 var candidate = Path.Combine(work, "candidate"); var backup = Path.Combine(work, "backup");
@@ -392,12 +439,20 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
                         if (!ValidateLegacyMigrationSite(journal, installed, candidate, backup, failed, work))
                         {
                             required++;
+                            issues.Add(new(envelope.ModuleId, envelope.TransactionId,
+                                ModuleUpdateTransactionFailureCode.RecoveryRequired, false));
                             continue;
                         }
                         Persist(journal);
                     }
                 }
-                catch { required++; continue; }
+                catch
+                {
+                    required++;
+                    issues.Add(new(envelope.ModuleId, envelope.TransactionId,
+                        ModuleUpdateTransactionFailureCode.JournalInvalid, false));
+                    continue;
+                }
                 ModuleUpdateTransactionResult result;
                 if (journal.State is ModuleUpdateTransactionState.Committed or ModuleUpdateTransactionState.CleanupPending)
                     result = RecoverCommitted(journal, installed, work);
@@ -408,17 +463,41 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
                 results.Add(result);
                 if (result.Succeeded && !result.CleanupPending) cleaned++;
                 else if (result.RolledBack) recovered++;
-                else required++;
+                else
+                {
+                    required++;
+                    issues.Add(new(journal.ModuleId, journal.TransactionId,
+                        result.FailureCode == ModuleUpdateTransactionFailureCode.None
+                            ? ModuleUpdateTransactionFailureCode.IoFailure
+                            : result.FailureCode,
+                        false));
+                }
             }
-            foreach (var temp in Directory.Exists(namespaceDirectory)
-                         ? Directory.EnumerateFiles(namespaceDirectory, "*.tmp-*") : [])
+            string[] tempPaths;
+            try
+            {
+                tempPaths = Directory.Exists(namespaceDirectory)
+                    ? Directory.EnumerateFiles(namespaceDirectory, "*.tmp-*").ToArray()
+                    : [];
+            }
+            catch
+            {
+                required++;
+                issues.Add(new(null, null, ModuleUpdateTransactionFailureCode.JournalInvalid, true));
+                continue;
+            }
+            foreach (var temp in tempPaths)
             {
                 var corresponding = Path.Combine(namespaceDirectory, Path.GetFileName(temp).Split(".tmp-", 2)[0]);
                 if (File.Exists(corresponding)) try { File.Delete(temp); } catch { }
-                else required++;
+                else
+                {
+                    required++;
+                    issues.Add(new(null, null, ModuleUpdateTransactionFailureCode.JournalInvalid, true));
+                }
             }
         }
-        return new(recovered, cleaned, required, results);
+        return new(recovered, cleaned, required, results) { Issues = issues };
     }
 
     private ModuleUpdateTransactionResult RecoverCommitted(TransactionJournal journal, string installed, string work)

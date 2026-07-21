@@ -1,5 +1,9 @@
 # Changelog
 
+- Started B2.1 with a real Shell module-update runtime adapter, per-module recovery gate, deferred cold-start runtime intent, and version-aware ALC diagnostics.
+- Added real pinned TextTools Development/ModuleTest commit, rollback, and RecoveryRequired canaries without enabling Production installation.
+- Added module-attributed recovery issues so known failures block only their module while unattributed journals fail closed globally.
+
 - Bound every transaction destination to a leased parent handle plus validated relative leaf, including same-handle Journal temp replacement, with no path-move fallback.
 - Added bounded secure tree leases, same-read manifest capture, post-snapshot mutation rejection, and immediate exact post-rename verification around the Windows descendant-handle rename constraint.
 - Upgraded transaction journals to schema 4 with a strict legacy schema 3 migration path and fail-closed handling for ambiguous shapes and sites.

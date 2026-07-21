@@ -14,7 +14,8 @@ public sealed class ModuleDiscoveryCoordinator(
     ModuleManifestScanner scanner,
     ApplicationPaths applicationPaths,
     UserSettingsService settingsService,
-    ModuleStartupFingerprintService fingerprintService)
+    ModuleStartupFingerprintService fingerprintService,
+    IModuleExecutionReadinessGate executionGate)
 {
     public sealed record AuthorizationEvaluation(
         string ModuleId, bool AuthorizationPresent, bool FingerprintMatches, string? FailureDiagnostic);
@@ -30,24 +31,26 @@ public sealed class ModuleDiscoveryCoordinator(
 
     public async Task<Snapshot> DiscoverAsync(CancellationToken cancellationToken = default)
     {
+        await executionGate.WaitForRecoveryInspectionAsync(cancellationToken).ConfigureAwait(false);
         Task<Snapshot> run;
         lock (_sync)
         {
             if (_activeRun is null || _activeRun.IsCompleted)
-                _activeRun = RunCoreAsync(Interlocked.Increment(ref _generation));
+                _activeRun = RunCoreAsync(Interlocked.Increment(ref _generation), cancellationToken);
             run = _activeRun;
         }
         return await run.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private Task<Snapshot> RunCoreAsync(long generation) => Task.Run(async () =>
+    private Task<Snapshot> RunCoreAsync(long generation, CancellationToken cancellationToken) =>
+        Task.Run(async () =>
         {
             var scans = new List<DiscoveredModule>();
             try
             {
                 foreach (var directory in applicationPaths.ModuleDiscoveryDirectories)
                 {
-                    scans.AddRange(await scanner.ScanAsync(directory).ConfigureAwait(false));
+                    scans.AddRange(await scanner.ScanAsync(directory, cancellationToken).ConfigureAwait(false));
                 }
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -57,7 +60,7 @@ public sealed class ModuleDiscoveryCoordinator(
                 .GroupBy(module => module.Manifest.Id, StringComparer.Ordinal)
                 .Select(group => group.First())
                 .ToArray();
-            var settings = await settingsService.ReadAsync().ConfigureAwait(false);
+            var settings = await settingsService.ReadAsync(cancellationToken).ConfigureAwait(false);
             var configured = settings.StartupModules.ToDictionary(item => item.ModuleId, StringComparer.Ordinal);
             var evaluations = new Dictionary<string, AuthorizationEvaluation>(StringComparer.Ordinal);
             foreach (var module in modules)
@@ -69,7 +72,7 @@ public sealed class ModuleDiscoveryCoordinator(
                 }
                 try
                 {
-                    var matches = await fingerprintService.MatchesAsync(module, authorization)
+                    var matches = await fingerprintService.MatchesAsync(module, authorization, cancellationToken)
                         .ConfigureAwait(false);
                     evaluations[module.Manifest.Id] = new(module.Manifest.Id, true, matches,
                         matches ? null : "startup.moduleChanged");
@@ -81,5 +84,5 @@ public sealed class ModuleDiscoveryCoordinator(
                 }
             }
             return new Snapshot(modules, settings, evaluations, generation);
-        });
+        }, cancellationToken);
 }

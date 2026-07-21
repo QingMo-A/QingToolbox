@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\QingToolbox.Abstractions\QingToolbox.Abstractions.csproj" />
+    <ProjectReference Include="..\QingToolbox.ModuleLoader\QingToolbox.ModuleLoader.csproj" />
+    <ProjectReference Include="..\QingToolbox.Core\QingToolbox.Core.csproj" />
+    <ProjectReference Include="..\QingToolbox.Shell\QingToolbox.Shell.csproj" />
+  </ItemGroup>
+
+</Project>

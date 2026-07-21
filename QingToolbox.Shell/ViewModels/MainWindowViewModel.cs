@@ -37,6 +37,7 @@ public sealed partial class MainWindowViewModel(
     ModulePackageDownloadCoordinator modulePackageDownloadCoordinator,
     TimeProvider timeProvider,
     StartupHealthJournal startupHealthJournal,
+    IModuleExecutionReadinessGate executionGate,
     SessionLogService sessionLog) : ObservableObject
 {
     public void ApplyNotificationAvailability(NotificationAvailabilityChangedEventArgs change)
@@ -575,6 +576,8 @@ public sealed partial class MainWindowViewModel(
                     _downloadResults.Remove(module.Manifest.Id);
                 moduleViewModel.UpdateRuntimeState(
                     runtimeManager.GetRecord(module.Manifest.Id));
+                moduleViewModel.UpdateExecutionReadiness(
+                    executionGate.GetReadiness(module.Manifest.Id));
                 if (authorizations.ContainsKey(module.Manifest.Id) &&
                     discovery.Authorizations.TryGetValue(module.Manifest.Id, out var evaluation))
                 {
@@ -658,31 +661,33 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand]
     private Task UnloadModuleAsync(string moduleId)
     {
-        moduleWindowManager.CloseWindow(moduleId);
-
         return ExecuteLifecycleAsync(
             moduleId,
             "unload",
-            () => runtimeManager.UnloadAsync(moduleId));
+            async () =>
+            {
+                moduleWindowManager.CloseWindow(moduleId);
+                await runtimeManager.UnloadAsync(moduleId);
+            });
     }
 
     [RelayCommand]
-    private Task OpenModuleAsync(string moduleId)
+    private async Task OpenModuleAsync(string moduleId)
     {
         var moduleViewModel = Modules.FirstOrDefault(
             module => string.Equals(module.Id, moduleId, StringComparison.Ordinal));
 
         if (moduleViewModel is null || moduleViewModel.IsBusy)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         if (!moduleViewModel.CanOpen)
         {
-            StatusMessage = localization.GetString(
-                "status.moduleLoadBeforeOpen",
-                moduleViewModel.DisplayName);
-            return Task.CompletedTask;
+            StatusMessage = moduleViewModel.IsExecutionBlocked
+                ? localization.GetString("status.moduleBlockedByRecovery", moduleViewModel.DisplayName)
+                : localization.GetString("status.moduleLoadBeforeOpen", moduleViewModel.DisplayName);
+            return;
         }
 
         moduleViewModel.IsBusy = true;
@@ -690,13 +695,14 @@ public sealed partial class MainWindowViewModel(
 
         try
         {
+            await using var executionLease = await executionGate.EnterExecutionAsync(moduleId);
             if (moduleWindowManager.IsWindowOpen(moduleId))
             {
                 moduleWindowManager.ActivateWindow(moduleId);
                 StatusMessage = localization.GetString(
                     "status.moduleFocused",
                     moduleViewModel.DisplayName);
-                return Task.CompletedTask;
+                return;
             }
 
             var view = runtimeManager.CreateView(moduleId);
@@ -707,7 +713,7 @@ public sealed partial class MainWindowViewModel(
                 StatusMessage = localization.GetString(
                     "status.moduleNoView",
                     moduleViewModel.DisplayName);
-                return Task.CompletedTask;
+                return;
             }
 
             moduleWindowManager.OpenWindow(
@@ -718,6 +724,15 @@ public sealed partial class MainWindowViewModel(
             StatusMessage = localization.GetString(
                 "status.moduleOpened",
                 moduleViewModel.DisplayName);
+        }
+        catch (ModuleExecutionBlockedException exception)
+        {
+            moduleViewModel.UpdateExecutionReadiness(executionGate.GetReadiness(moduleId));
+            StatusMessage = localization.GetString(
+                "status.moduleBlockedByRecovery",
+                moduleViewModel.DisplayName);
+            sessionLog.Warning("ModuleRecovery",
+                $"Module execution blocked by recovery; module={moduleId}; state={exception.Status}.");
         }
         catch (Exception exception)
         {
@@ -738,7 +753,6 @@ public sealed partial class MainWindowViewModel(
             UpdateStatistics();
         }
 
-        return Task.CompletedTask;
     }
 
     public void CloseModuleWindows() => moduleWindowManager.CloseAll();
@@ -768,6 +782,7 @@ public sealed partial class MainWindowViewModel(
 
         try
         {
+            await using var executionLease = await executionGate.EnterExecutionAsync(moduleId);
             await action();
             moduleViewModel.UpdateRuntimeState(runtimeManager.GetRecord(moduleId));
             StatusMessage = localization.GetString(
@@ -775,6 +790,15 @@ public sealed partial class MainWindowViewModel(
                 moduleViewModel.DisplayName,
                 localizedOperation);
             sessionLog.Information("Module", $"{operation} completed for module '{moduleId}'.");
+        }
+        catch (ModuleExecutionBlockedException exception)
+        {
+            moduleViewModel.UpdateExecutionReadiness(executionGate.GetReadiness(moduleId));
+            StatusMessage = localization.GetString(
+                "status.moduleBlockedByRecovery",
+                moduleViewModel.DisplayName);
+            sessionLog.Warning("ModuleRecovery",
+                $"Module execution blocked by recovery; module={moduleId}; state={exception.Status}.");
         }
         catch (Exception exception)
         {
@@ -839,6 +863,7 @@ public sealed partial class MainWindowViewModel(
         module.IsBusy = true;
         try
         {
+            await using var executionLease = await executionGate.EnterExecutionAsync(moduleId);
             moduleWindowManager.CloseWindow(moduleId);
             var record = runtimeManager.GetRecord(moduleId);
             if (record?.State.ToString() == "Running")
@@ -859,6 +884,13 @@ public sealed partial class MainWindowViewModel(
             SelectedModule = null;
             await RefreshModulesAsync();
             StatusMessage = localization.GetString("status.moduleRemoved", module.DisplayName);
+        }
+        catch (ModuleExecutionBlockedException)
+        {
+            module.UpdateExecutionReadiness(executionGate.GetReadiness(moduleId));
+            StatusMessage = localization.GetString(
+                "status.moduleBlockedByRecovery",
+                module.DisplayName);
         }
         catch (Exception exception)
         {
@@ -1071,6 +1103,8 @@ public sealed partial class MainWindowViewModel(
             module.IsStartupAuthorizationBusy = true;
             try
             {
+                await using var executionLease = await executionGate.EnterExecutionAsync(
+                    module.Id, cancellationToken);
                 // One final payload read immediately before execution minimizes the
                 // filesystem TOCTOU window without duplicating restore-time hashing.
                 bool matches;
@@ -1107,6 +1141,11 @@ public sealed partial class MainWindowViewModel(
                 succeeded++;
             }
             catch (OperationCanceledException) { throw; }
+            catch (ModuleExecutionBlockedException)
+            {
+                module.UpdateExecutionReadiness(executionGate.GetReadiness(module.Id));
+                skipped++;
+            }
             catch (Exception exception)
             {
                 module.UpdateRuntimeState(runtimeManager.GetRecord(module.Id));
@@ -1118,6 +1157,14 @@ public sealed partial class MainWindowViewModel(
         UpdateStatistics();
         if (settings.StartupModules.Count > 0)
             StatusMessage = localization.GetString("startup.restoreSummary", succeeded, skipped, failed);
+    }
+
+    public void RefreshModuleExecutionReadiness()
+    {
+        foreach (var module in Modules)
+        {
+            module.UpdateExecutionReadiness(executionGate.GetReadiness(module.Id));
+        }
     }
 
     [RelayCommand]

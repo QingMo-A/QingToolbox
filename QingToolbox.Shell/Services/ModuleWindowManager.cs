@@ -1,6 +1,8 @@
 using System.Windows;
+using System.Windows.Threading;
 using QingToolbox.Shell.Views;
 using QingToolbox.Abstractions.Localization;
+using System.Reflection;
 
 namespace QingToolbox.Shell.Services;
 
@@ -12,6 +14,23 @@ public sealed class ModuleWindowManager(ILocalizationService localization)
         new(StringComparer.Ordinal);
 
     public bool IsWindowOpen(string moduleId) => _windows.ContainsKey(moduleId);
+
+    public async Task<bool> IsWindowOpenAsync(
+        string moduleId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(moduleId);
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            return IsWindowOpen(moduleId);
+        }
+
+        return await dispatcher.InvokeAsync(
+            () => IsWindowOpen(moduleId),
+            DispatcherPriority.Send,
+            cancellationToken);
+    }
 
     public void OpenWindow(
         string moduleId,
@@ -62,6 +81,82 @@ public sealed class ModuleWindowManager(ILocalizationService localization)
         {
             window.Close();
         }
+    }
+
+    public async Task<bool> CloseWindowAsync(
+        string moduleId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(moduleId);
+        if (timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout));
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
+        {
+            return !IsWindowOpen(moduleId);
+        }
+
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _ = dispatcher.BeginInvoke(DispatcherPriority.Send, () =>
+        {
+            try
+            {
+                if (!_windows.TryGetValue(moduleId, out var window))
+                {
+                    completion.TrySetResult(true);
+                    return;
+                }
+
+                window.ReleaseModuleContent();
+                window.Close();
+                _ = dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
+                    completion.TrySetResult(!_windows.ContainsKey(moduleId)));
+            }
+            catch
+            {
+                completion.TrySetResult(false);
+            }
+        });
+
+        try
+        {
+            return await completion.Task.WaitAsync(timeout, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            return false;
+        }
+    }
+
+    internal async Task<string?> GetOpenViewCanaryVersionAsync(
+        string moduleId,
+        CancellationToken cancellationToken = default)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
+        {
+            return null;
+        }
+
+        return await dispatcher.InvokeAsync(() =>
+        {
+            if (!_windows.TryGetValue(moduleId, out var window) ||
+                window.HostedContent is null)
+            {
+                return null;
+            }
+
+            return window.HostedContent.GetType().Assembly
+                .GetCustomAttributes<AssemblyMetadataAttribute>()
+                .FirstOrDefault(attribute => attribute.Key == "QingToolboxCanaryVersion")?
+                .Value;
+        }, DispatcherPriority.Send, cancellationToken);
     }
 
     public void RefreshOpenWindowLocalization(Func<string, string?> titleResolver)

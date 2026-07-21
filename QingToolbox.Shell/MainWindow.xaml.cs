@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private readonly StartupPreferenceSnapshot _startupPreferences;
     private readonly StartupHealthJournal _startupJournal;
     private readonly StartupPipelineCoordinator _startupPipeline;
+    private readonly ModuleTransactionRecoveryCoordinator _moduleRecovery;
     private readonly SessionLogService _sessionLog;
     private Task? _backgroundStartupTask;
     private int _closeRequestPending;
@@ -43,6 +44,7 @@ public partial class MainWindow : Window
         StartupPreferenceSnapshot startupPreferences,
         StartupHealthJournal startupJournal,
         StartupPipelineCoordinator startupPipeline,
+        ModuleTransactionRecoveryCoordinator moduleRecovery,
         SessionLogService sessionLog)
     {
         InitializeComponent();
@@ -58,6 +60,7 @@ public partial class MainWindow : Window
         _startupPreferences = startupPreferences;
         _startupJournal = startupJournal;
         _startupPipeline = startupPipeline;
+        _moduleRecovery = moduleRecovery;
         _sessionLog = sessionLog;
         _startupSession.Attach(this, floatingBadgeManager);
         _floatingBadgeManager.Attach(this);
@@ -141,8 +144,14 @@ public partial class MainWindow : Window
             if (settings is not null) _viewModel.InitializeLogSettings(settings);
 
             var startupSettings = settings;
+            ModuleTransactionRecoveryOutcome? recoveryOutcome = null;
             var results = await _startupPipeline.RunAsync(
             [
+                new("ModuleRecovery", async ct =>
+                {
+                    _startupSession.BeginModuleRecovery();
+                    recoveryOutcome = await _moduleRecovery.RecoverAsync(ct);
+                }),
                 new("Registration", async ct =>
                 {
                     if (startupSettings is null) throw new IOException("Startup settings unavailable.");
@@ -157,12 +166,16 @@ public partial class MainWindow : Window
                 new("Restore", async ct =>
                 {
                     _startupSession.BeginModuleRestore();
+                    await _moduleRecovery.RestoreDeferredRuntimeIntentsAsync(ct);
+                    _viewModel.RefreshModuleExecutionReadiness();
                     await _viewModel.RestoreAuthorizedStartupModulesAsync(ct);
                 })
             ], token);
-            ApplyPipelineResult(results[0], StartupPhase.RegistrationHealthReady, "startup.registrationHealthDegraded");
-            ApplyPipelineResult(results[1], StartupPhase.ModuleDiscoveryComplete, "startup.discoveryDegraded");
-            ApplyPipelineResult(results[2], StartupPhase.AuthorizedModulesRestored, "startup.restoreDegraded");
+            if (recoveryOutcome?.IsDegraded == true)
+                _viewModel.StatusMessage = _viewModel.Strings["status.moduleRecoveryDegraded"];
+            ApplyPipelineResult(results[1], StartupPhase.RegistrationHealthReady, "startup.registrationHealthDegraded");
+            ApplyPipelineResult(results[2], StartupPhase.ModuleDiscoveryComplete, "startup.discoveryDegraded");
+            ApplyPipelineResult(results[3], StartupPhase.AuthorizedModulesRestored, "startup.restoreDegraded");
 
             if (_startupSession.State != StartupSessionState.Exiting)
             {

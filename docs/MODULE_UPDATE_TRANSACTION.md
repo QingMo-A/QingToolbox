@@ -182,7 +182,8 @@ state. Windows CI runs this required step without `continue-on-error`.
 
 Phase A remains **Engineering Complete**. The B1 transaction core described here is
 **Engineering Complete — Frozen**: it is not extended further unless a concrete security defect
-is found. B1 remains restricted to Development/ModuleTest. The next work is B2: the Production
-lifecycle adapter plus a Development-only TextTools canary. Neither has started. Preview 2 manual
-acceptance items that were not run remain `Not Run`; this work is not evidence that those checks
-passed.
+is found. B1 remains restricted to Development/ModuleTest. B2.1 now connects the real Shell
+lifecycle adapter, startup recovery gate, and pinned Development/ModuleTest TextTools canary.
+Production transaction execution, automatic installation, and update UI remain disabled. Preview 2
+manual acceptance items that were not run remain `Not Run`; this work is not evidence that those
+checks passed.

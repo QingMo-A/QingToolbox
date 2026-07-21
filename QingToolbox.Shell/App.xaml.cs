@@ -159,6 +159,18 @@ public partial class App : Application
             services.AddSingleton<ApplicationExitCoordinator>();
             services.AddSingleton(applicationPaths);
             services.AddSingleton<SessionLogService>();
+            services.AddSingleton(provider => new ModuleTransactionRecoveryGate(entry =>
+            {
+                provider.GetRequiredService<SessionLogService>().Warning(
+                    "ModuleRecovery",
+                    $"{entry.EventName}; module={entry.ModuleId}; state={entry.State}; " +
+                    $"failure={entry.FailureCode}.");
+            }));
+            services.AddSingleton<IModuleExecutionReadinessGate>(provider =>
+                provider.GetRequiredService<ModuleTransactionRecoveryGate>().Consumer);
+            services.AddSingleton<ModuleUpdateRuntimeCoordinator>();
+            services.AddSingleton<IModuleUpdateRuntimeCoordinator>(provider =>
+                provider.GetRequiredService<ModuleUpdateRuntimeCoordinator>());
             services.AddSingleton(provider => new QmodPackageStagingService(
                 provider.GetRequiredService<ApplicationPaths>().QmodStagingDirectory,
                 provider.GetRequiredService<TimeProvider>(),
@@ -173,6 +185,32 @@ public partial class App : Application
                     if (entry.FailureCode == QmodStagingFailureCode.None) logger.Information("QmodStaging", message);
                     else logger.Warning("QmodStaging", message);
                 }));
+            services.AddSingleton<IQmodVerifiedStagingAttestor>(provider =>
+                provider.GetRequiredService<QmodPackageStagingService>());
+            if (!environment.IsProduction)
+            {
+                services.AddSingleton(provider => new ModuleUpdateTransactionService(
+                    environment.Kind.ToString(),
+                    provider.GetRequiredService<ApplicationPaths>().UserModulesDirectory,
+                    provider.GetRequiredService<ApplicationPaths>().ModuleTransactionsDirectory,
+                    ModuleUpdateIdentity.ModuleApiVersion,
+                    provider.GetRequiredService<IQmodVerifiedStagingAttestor>(),
+                    provider.GetRequiredService<IModuleUpdateRuntimeCoordinator>(),
+                    entry =>
+                    {
+                        var message = $"{entry.EventName}; module={entry.ModuleId}; " +
+                                      $"source={entry.SourceVersion}; target={entry.TargetVersion}; " +
+                                      $"transaction={entry.TransactionIdPrefix}; state={entry.State}; " +
+                                      $"failure={entry.FailureCode}.";
+                        var logger = provider.GetRequiredService<SessionLogService>();
+                        if (entry.FailureCode == ModuleUpdateTransactionFailureCode.None)
+                            logger.Information("ModuleTransaction", message);
+                        else
+                            logger.Warning("ModuleTransaction", message);
+                    }));
+                services.AddSingleton<GatedModuleUpdateTransactionCoordinator>();
+            }
+            services.AddSingleton<ModuleTransactionRecoveryCoordinator>();
             services.AddSingleton(provider => new StartupHealthJournal(
                 provider.GetRequiredService<ApplicationPaths>().StartupHealthPath,
                 provider.GetRequiredService<TimeProvider>(), processStartedAt, monotonicOrigin,

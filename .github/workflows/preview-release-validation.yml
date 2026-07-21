@@ -107,6 +107,30 @@ jobs:
           -c Release
           --no-build
 
+      - name: Run module update runtime adapter smoke test
+        shell: pwsh
+        run: >-
+          dotnet run
+          --project QingToolbox.DevTools.ModuleUpdateRuntimeAdapterSmokeTest
+          -c Release
+          --no-build
+
+      - name: Fetch pinned TextTools canary source
+        shell: pwsh
+        run: >-
+          git fetch
+          --no-tags
+          --depth=1
+          origin
+          bc0e57b5a77e3526de157d92a3d300bf3d267e8b:refs/remotes/origin/modules
+
+      - name: Run Development TextTools update canary
+        shell: powershell
+        run: >-
+          ./scripts/test-texttools-module-update-canary.ps1
+          -Configuration Release
+          -TargetEnvironment Both
+
       - name: Deploy development module for smoke test
         shell: pwsh
         run: ./scripts/deploy-dev-modules.ps1 -Configuration Release

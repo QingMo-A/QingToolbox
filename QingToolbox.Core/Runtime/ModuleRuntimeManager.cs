@@ -10,6 +10,7 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader) : IAsyncD
     private readonly Dictionary<string, ModuleRuntimeRecord> _records =
         new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _sync = new(1, 1);
+    private long _nextLoadContextGeneration;
     private bool _isDisposed;
 
     public IReadOnlyCollection<ModuleRuntimeRecord> Records => _records.Values;
@@ -62,6 +63,77 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader) : IAsyncD
         ThrowIfDisposed();
         ArgumentException.ThrowIfNullOrWhiteSpace(moduleId);
         return _records.GetValueOrDefault(moduleId);
+    }
+
+    public async Task<ModuleRuntimeSnapshot?> GetSnapshotAsync(
+        string moduleId,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ArgumentException.ThrowIfNullOrWhiteSpace(moduleId);
+
+        await _sync.WaitAsync(cancellationToken);
+        try
+        {
+            if (!_records.TryGetValue(moduleId, out var record))
+            {
+                return null;
+            }
+
+            var handle = record.IsLoaded ? record.Handle : null;
+            return new ModuleRuntimeSnapshot(
+                record.Manifest.Id,
+                record.Manifest.Version,
+                record.DiscoveredModule.ModuleDirectory,
+                record.State,
+                handle is not null,
+                handle is not null && record.State == ModuleState.Running,
+                record.LoadContextGeneration,
+                handle?.Manifest.Version,
+                handle?.LoadContextWeakReference,
+                record.LastUnloadedLoadContext);
+        }
+        finally
+        {
+            _sync.Release();
+        }
+    }
+
+    /// <summary>
+    /// Replaces metadata for one unloaded module without disturbing other
+    /// runtime records. Update recovery uses this after an atomic directory
+    /// replacement so the next load never reuses a stale manifest or entry.
+    /// </summary>
+    public async Task RefreshDiscoveredModuleAsync(
+        DiscoveredModule module,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(module);
+
+        await _sync.WaitAsync(cancellationToken);
+        try
+        {
+            if (_records.TryGetValue(module.Manifest.Id, out var existing) && existing.IsLoaded)
+            {
+                if (!Path.GetFullPath(existing.DiscoveredModule.ModuleDirectory).Equals(
+                        Path.GetFullPath(module.ModuleDirectory),
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(existing.Manifest.Version, module.Manifest.Version, StringComparison.Ordinal))
+                {
+                    throw new ModuleRuntimeException(
+                        $"Cannot refresh metadata for loaded module '{module.Manifest.Id}'.");
+                }
+
+                return;
+            }
+
+            _records[module.Manifest.Id] = new ModuleRuntimeRecord(module);
+        }
+        finally
+        {
+            _sync.Release();
+        }
     }
 
     public object? CreateView(string moduleId)
@@ -128,6 +200,9 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader) : IAsyncD
                     record.DiscoveredModule,
                     dataRootDirectory,
                     cancellationToken);
+                record.LoadContextGeneration = Interlocked.Increment(
+                    ref _nextLoadContextGeneration);
+                record.LastUnloadedLoadContext = null;
                 record.State = ModuleState.Loaded;
             }
             catch (Exception exception)
@@ -151,6 +226,11 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader) : IAsyncD
         try
         {
             var record = GetRequiredRecord(moduleId);
+            if (record.IsLoaded && record.State == ModuleState.Running)
+            {
+                return;
+            }
+
             var handle = GetRequiredHandle(record);
 
             record.State = ModuleState.Activating;
@@ -293,6 +373,7 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader) : IAsyncD
             return;
         }
 
+        WeakReference? unloadedContext = null;
         try
         {
             if (record.State == ModuleState.Running)
@@ -304,8 +385,10 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader) : IAsyncD
             record.State = ModuleState.Unloading;
             record.LastError = null;
 
-            await record.Handle!.DisposeAsync();
+            unloadedContext = record.Handle!.LoadContextWeakReference;
+            await record.Handle.DisposeAsync();
             record.Handle = null;
+            record.LastUnloadedLoadContext = unloadedContext;
             record.State = ModuleState.Unloaded;
         }
         catch (Exception exception)
@@ -313,6 +396,7 @@ public sealed class ModuleRuntimeManager(InProcessModuleLoader loader) : IAsyncD
             if (record.Handle?.IsDisposed == true)
             {
                 record.Handle = null;
+                record.LastUnloadedLoadContext = unloadedContext;
             }
 
             SetFailure(record, exception);

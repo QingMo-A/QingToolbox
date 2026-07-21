@@ -23,6 +23,7 @@ public partial class ModuleHostWindow : Window
     }
 
     public string ModuleId { get; }
+    internal object? HostedContent => ModuleContent.Content;
     public string ModuleSubtitle => _localization.GetString("moduleHost.subtitle");
     public string MinimizeText => _localization.GetString("window.minimize");
     public string MaximizeText => _localization.GetString("window.maximize");
@@ -60,9 +61,16 @@ public partial class ModuleHostWindow : Window
         if (!string.IsNullOrWhiteSpace(title)) Title = title;
     }
 
+    internal void ReleaseModuleContent()
+    {
+        ModuleContent.Content = null;
+        DataContext = null;
+        UpdateLayout();
+    }
+
     private void OnClosed(object? sender, EventArgs e)
     {
         Closed -= OnClosed;
-        ModuleContent.Content = null;
+        ReleaseModuleContent();
     }
 }

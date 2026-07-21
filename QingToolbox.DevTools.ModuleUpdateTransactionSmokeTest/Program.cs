@@ -644,7 +644,11 @@ static async Task SecurityHardeningAsync(string root)
         var journalNamespace = service.GetJournalNamespaceForTest(orphan.ModuleId); Directory.CreateDirectory(journalNamespace);
         var temp = Path.Combine(journalNamespace, Guid.NewGuid().ToString("N") + ".json.tmp-" + Guid.NewGuid().ToString("N"));
         await File.WriteAllTextAsync(temp, "{}");
-        Require((await service.RecoverAsync()).RecoveryRequired == 1 && File.Exists(temp),
+        var recovery = await service.RecoverAsync();
+        Require(recovery.RecoveryRequired == 1 && File.Exists(temp) &&
+                recovery.HasUnattributedRecoveryFailure && recovery.RecoveryRequiredModuleIds.Count == 0 &&
+                recovery.Issues.Count == 1 && recovery.Issues[0] is
+                    { ModuleId: null, IsUnattributed: true, FailureCode: ModuleUpdateTransactionFailureCode.JournalInvalid },
             "orphan journal temp is reported and preserved");
     }
 
@@ -681,6 +685,22 @@ static async Task SecurityHardeningAsync(string root)
         var recovery = await service.RecoverAsync();
         Require(recovery.RecoveryRequired == 1 && !Directory.Exists(fixture.Installed),
             mutation + " journal rejected without guessing at backup ownership");
+        if (mutation == "filename")
+        {
+            Require(recovery.HasUnattributedRecoveryFailure && recovery.RecoveryRequiredModuleIds.Count == 0 &&
+                    recovery.Issues.Count == 1 && recovery.Issues[0] is
+                        { ModuleId: null, IsUnattributed: true, FailureCode: ModuleUpdateTransactionFailureCode.JournalInvalid },
+                "journal with an untrusted filename triggers global fail-closed recovery");
+        }
+        else
+        {
+            Require(!recovery.HasUnattributedRecoveryFailure &&
+                    recovery.RecoveryRequiredModuleIds.SequenceEqual([fixture.ModuleId], StringComparer.Ordinal) &&
+                    recovery.Issues.Count == 1 && recovery.Issues[0] is
+                        { IsUnattributed: false, FailureCode: ModuleUpdateTransactionFailureCode.JournalInvalid } issue &&
+                    issue.ModuleId == fixture.ModuleId,
+                mutation + " attributable journal failure returns the exact module id");
+        }
     }
 
     var nestedCache = Path.Combine(root, "nested-cache"); Directory.CreateDirectory(nestedCache);

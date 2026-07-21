@@ -1,4 +1,8 @@
 using System.Windows;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("QingToolbox.DevTools.ModuleUpdateRuntimeAdapterSmokeTest")]
+[assembly: InternalsVisibleTo("QingToolbox.DevTools.TextToolsModuleUpdateCanary")]
 
 [assembly: ThemeInfo(
     ResourceDictionaryLocation.None,            //where theme specific resource dictionaries are located

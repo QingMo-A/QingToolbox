@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\QingToolbox.Abstractions\QingToolbox.Abstractions.csproj" />
+    <ProjectReference Include="..\QingToolbox.ModuleLoader\QingToolbox.ModuleLoader.csproj" />
+    <ProjectReference Include="..\QingToolbox.Core\QingToolbox.Core.csproj" />
+    <ProjectReference Include="..\QingToolbox.Shell\QingToolbox.Shell.csproj" />
+    <ProjectReference Include="..\QingToolbox.DevTools.ModuleUpdateRuntimeAdapterProbe\QingToolbox.DevTools.ModuleUpdateRuntimeAdapterProbe.csproj"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <StartupObject>QingToolbox.DevTools.ModuleUpdateRuntimeAdapterSmokeTest.Program</StartupObject>
+  </PropertyGroup>
+
+  <Target Name="CopyRuntimeAdapterProbe" AfterTargets="Build">
+    <PropertyGroup>
+      <RuntimeAdapterProbeAssembly>$(MSBuildProjectDirectory)\..\QingToolbox.DevTools.ModuleUpdateRuntimeAdapterProbe\bin\$(Configuration)\$(TargetFramework)\QingToolbox.DevTools.ModuleUpdateRuntimeAdapterProbe.dll</RuntimeAdapterProbeAssembly>
+      <RuntimeAdapterProbeDestination>$(OutDir)ProbePayload\QingToolbox.DevTools.ModuleUpdateRuntimeAdapterProbe.dll</RuntimeAdapterProbeDestination>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(RuntimeAdapterProbeAssembly)')"
+           Text="Runtime adapter probe assembly was not built: $(RuntimeAdapterProbeAssembly)" />
+    <MakeDir Directories="$(OutDir)ProbePayload" />
+    <Copy SourceFiles="$(RuntimeAdapterProbeAssembly)"
+          DestinationFiles="$(RuntimeAdapterProbeDestination)" />
+  </Target>
+
+</Project>

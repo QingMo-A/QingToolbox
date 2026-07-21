@@ -4,7 +4,7 @@ using QingToolbox.Shell.Services;
 
 namespace QingToolbox.Shell.Startup;
 
-public enum StartupSessionState { Starting, Discovering, Presenting, RestoringModules, Ready, Exiting }
+public enum StartupSessionState { Starting, Presenting, RecoveringModules, Discovering, RestoringModules, Ready, Exiting }
 
 public sealed class StartupSessionCoordinator(ApplicationLaunchOptions launchOptions)
 {
@@ -61,6 +61,7 @@ public sealed class StartupSessionCoordinator(ApplicationLaunchOptions launchOpt
             ? StartupPresentationMode.MainWindow
             : configuredMode;
     public void BeginDiscovery() => TrySetState(StartupSessionState.Discovering);
+    public void BeginModuleRecovery() => TrySetState(StartupSessionState.RecoveringModules);
     public void BeginModuleRestore() => TrySetState(StartupSessionState.RestoringModules);
     public void Complete() => TrySetState(StartupSessionState.Ready);
 

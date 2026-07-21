@@ -4,6 +4,7 @@ using QingToolbox.Abstractions.Modules;
 using QingToolbox.Core.Runtime;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Core.Updates;
+using QingToolbox.Shell.Startup;
 
 namespace QingToolbox.Shell.ViewModels;
 
@@ -60,7 +61,7 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     }
 
     public bool IsUserInstalled { get; internal set; }
-    public bool CanRemove => IsUserInstalled && !IsBusy;
+    public bool CanRemove => IsUserInstalled && !IsBusy && !IsExecutionBlocked;
 
     public string Id { get; }
     public string Name { get; }
@@ -96,7 +97,7 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     [ObservableProperty] private bool _isStartupAuthorizationBusy;
     [ObservableProperty] private string _startupAuthorizationMessage = string.Empty;
     [ObservableProperty] private StartupAuthorizationState _startupAuthorizationState;
-    public bool CanChangeStartupAuthorization => IsValid &&
+    public bool CanChangeStartupAuthorization => IsValid && !IsExecutionBlocked &&
         StartupAuthorizationState != StartupAuthorizationState.Unavailable && !IsStartupAuthorizationBusy;
 
     [ObservableProperty]
@@ -107,6 +108,24 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isBusy;
+
+    [ObservableProperty]
+    private ModuleExecutionReadinessStatus _executionReadinessStatus =
+        ModuleExecutionReadinessStatus.RecoveryPending;
+
+    public bool IsExecutionBlocked =>
+        ExecutionReadinessStatus != ModuleExecutionReadinessStatus.Ready;
+
+    public string ExecutionReadinessMessage => ExecutionReadinessStatus switch
+    {
+        ModuleExecutionReadinessStatus.RecoveryPending =>
+            _localization.GetString("module.recoveryPending"),
+        ModuleExecutionReadinessStatus.BlockedByModuleRecovery =>
+            _localization.GetString("module.recoveryBlocked"),
+        ModuleExecutionReadinessStatus.BlockedByUnattributedRecoveryFailure =>
+            _localization.GetString("module.recoveryGloballyBlocked"),
+        _ => string.Empty
+    };
 
     [ObservableProperty]
     private ModuleUpdateResult _updateResult;
@@ -177,24 +196,38 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         });
 
     public bool CanLoad =>
-        !IsBusy && RuntimeState is "NotLoaded" or "Unloaded";
+        !IsExecutionBlocked && !IsBusy && RuntimeState is "NotLoaded" or "Unloaded";
 
     public bool CanActivate =>
-        !IsBusy && RuntimeState is "Loaded" or "Deactivated";
+        !IsExecutionBlocked && !IsBusy && RuntimeState is "Loaded" or "Deactivated";
 
     public bool CanDeactivate =>
-        !IsBusy && RuntimeState == "Running";
+        !IsExecutionBlocked && !IsBusy && RuntimeState == "Running";
 
     public bool CanUnload =>
-        !IsBusy && RuntimeState is "Loaded" or "Running" or "Deactivated" or "Failed";
+        !IsExecutionBlocked && !IsBusy && RuntimeState is "Loaded" or "Running" or "Deactivated" or "Failed";
 
     public bool CanOpen =>
-        !IsBusy && RuntimeState is "Loaded" or "Running" or "Deactivated";
+        !IsExecutionBlocked && !IsBusy && RuntimeState is "Loaded" or "Running" or "Deactivated";
 
     public void UpdateRuntimeState(ModuleRuntimeRecord? record)
     {
         RuntimeState = record?.State.ToString() ?? State;
         RuntimeError = record?.LastError ?? string.Empty;
+    }
+
+    public void UpdateExecutionReadiness(ModuleExecutionReadiness readiness)
+    {
+        if (!string.Equals(readiness.ModuleId, Id, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("The readiness result belongs to another module.", nameof(readiness));
+        }
+
+        ExecutionReadinessStatus = readiness.Status;
+        if (IsExecutionBlocked)
+        {
+            RuntimeError = ExecutionReadinessMessage;
+        }
     }
 
     public void RefreshLocalization()
@@ -206,6 +239,7 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         OnPropertyChanged(nameof(DisplayUpdateReleaseNote));
         OnPropertyChanged(nameof(DisplayDownloadStatus));
         OnPropertyChanged(nameof(DisplayDownloadProgress));
+        OnPropertyChanged(nameof(ExecutionReadinessMessage));
     }
 
     partial void OnUpdateResultChanged(ModuleUpdateResult value)
@@ -238,6 +272,15 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     {
         NotifyCommandStatesChanged();
         OnPropertyChanged(nameof(CanRemove));
+    }
+
+    partial void OnExecutionReadinessStatusChanged(ModuleExecutionReadinessStatus value)
+    {
+        OnPropertyChanged(nameof(IsExecutionBlocked));
+        OnPropertyChanged(nameof(ExecutionReadinessMessage));
+        OnPropertyChanged(nameof(CanRemove));
+        OnPropertyChanged(nameof(CanChangeStartupAuthorization));
+        NotifyCommandStatesChanged();
     }
 
     partial void OnIsStartupAuthorizationBusyChanged(bool value) =>
