@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private readonly INotificationAreaIcon _notificationArea;
     private readonly ApplicationExitCoordinator _exitCoordinator;
     private readonly ModuleWindowManager _moduleWindowManager;
+    private readonly ModuleProcessBroker _moduleProcessBroker;
     private readonly StartupPreferenceSnapshot _startupPreferences;
     private readonly StartupHealthJournal _startupJournal;
     private readonly StartupPipelineCoordinator _startupPipeline;
@@ -41,6 +42,7 @@ public partial class MainWindow : Window
         INotificationAreaIcon notificationArea,
         ApplicationExitCoordinator exitCoordinator,
         ModuleWindowManager moduleWindowManager,
+        ModuleProcessBroker moduleProcessBroker,
         StartupPreferenceSnapshot startupPreferences,
         StartupHealthJournal startupJournal,
         StartupPipelineCoordinator startupPipeline,
@@ -57,6 +59,7 @@ public partial class MainWindow : Window
         _notificationArea = notificationArea;
         _exitCoordinator = exitCoordinator;
         _moduleWindowManager = moduleWindowManager;
+        _moduleProcessBroker = moduleProcessBroker;
         _startupPreferences = startupPreferences;
         _startupJournal = startupJournal;
         _startupPipeline = startupPipeline;
@@ -319,19 +322,26 @@ public partial class MainWindow : Window
             await _exitCoordinator.RequestExitAsync(ApplicationExitReason.UserRequested);
     }
 
-    internal Task MinimizeMainWindowToNotificationAreaAsync()
+    internal async Task MinimizeMainWindowToNotificationAreaAsync()
     {
         if (!_notificationArea.Initialize())
         {
             EnsureMainWindowVisible();
             _viewModel.StatusMessage = _localization.GetString("notificationArea.unavailable");
-            return Task.CompletedTask;
+            return;
         }
         _notificationAreaRestoreState = WindowState == WindowState.Maximized ? WindowState.Maximized : WindowState.Normal;
         _moduleWindowManager.SuspendForFloatingBadge();
+        if (!await _moduleProcessBroker.SuspendWindowsAsync())
+        {
+            _moduleWindowManager.RestoreAfterFloatingBadge();
+            EnsureMainWindowVisible();
+            _sessionLog.Warning("ModuleProcess", "Notification-area transition aborted because a worker window could not be suspended.");
+            _viewModel.StatusMessage = _localization.GetString("floatingBadge.restoreFailed");
+            return;
+        }
         ShowInTaskbar = false;
         Hide();
-        return Task.CompletedTask;
     }
 
     internal async Task RestoreMainWindowAsync()
@@ -345,6 +355,11 @@ public partial class MainWindow : Window
         Show();
         WindowState = _notificationAreaRestoreState;
         _moduleWindowManager.RestoreAfterFloatingBadge();
+        if (!await _moduleProcessBroker.RestoreWindowsAsync())
+        {
+            _sessionLog.Warning("ModuleProcess", "One or more worker windows could not be restored from the notification area.");
+            _viewModel.StatusMessage = _localization.GetString("floatingBadge.restoreFailed");
+        }
         Activate();
         Focus();
     }

@@ -1,4 +1,5 @@
 using QingToolbox.Abstractions.Modules;
+using System.Text.Json;
 
 namespace QingToolbox.ModuleLoader;
 
@@ -55,6 +56,9 @@ public sealed class ModuleManifestScanner(
         }
         catch (Exception exception)
         {
+            var code = exception is JsonException && HasUnknownRuntimeCapability(manifestPath)
+                ? "Manifest.RuntimeCapabilityUnsupported"
+                : "Manifest.ReadFailed";
             return new DiscoveredModule
             {
                 Manifest = CreateFallbackManifest(moduleDirectory),
@@ -65,7 +69,7 @@ public sealed class ModuleManifestScanner(
                 [
                     new ModuleDiscoveryError
                     {
-                        Code = "Manifest.ReadFailed",
+                        Code = code,
                         Message = exception.Message,
                         Path = manifestPath
                     }
@@ -73,6 +77,24 @@ public sealed class ModuleManifestScanner(
             };
         }
     }
+
+    private static bool HasUnknownRuntimeCapability(string manifestPath)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            var root = document.RootElement;
+            return IsUnknown<ModuleRuntimeIsolation>(root, "runtimeIsolation") ||
+                   IsUnknown<ModuleUiKind>(root, "uiKind");
+        }
+        catch { return false; }
+    }
+
+    private static bool IsUnknown<TEnum>(JsonElement root, string propertyName) where TEnum : struct, Enum =>
+        root.TryGetProperty(propertyName, out var value) &&
+        (value.ValueKind != JsonValueKind.String ||
+         !Enum.TryParse<TEnum>(value.GetString(), true, out var parsed) ||
+         !Enum.IsDefined(parsed));
 
     private static ModuleManifest CreateFallbackManifest(string moduleDirectory)
     {

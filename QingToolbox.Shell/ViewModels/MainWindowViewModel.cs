@@ -73,6 +73,7 @@ public sealed partial class MainWindowViewModel(
     private MainWindowCloseBehavior _persistedCloseBehavior = MainWindowCloseBehavior.Ask;
     private int _closeBehaviorSaveVersion;
     private bool _logSettingInitialized;
+    private bool _processExitSubscribed;
     [ObservableProperty] private bool _isCheckingModuleUpdates;
     [ObservableProperty] private int _moduleUpdateCount;
     [ObservableProperty] private string _moduleUpdateSummary = string.Empty;
@@ -576,8 +577,7 @@ public sealed partial class MainWindowViewModel(
                     moduleViewModel.DownloadStatus = download.Status;
                 else
                     _downloadResults.Remove(module.Manifest.Id);
-                moduleViewModel.UpdateRuntimeState(
-                    runtimeManager.GetRecord(module.Manifest.Id));
+                RefreshRuntimeProjection(moduleViewModel);
                 moduleViewModel.UpdateExecutionReadiness(
                     executionGate.GetReadiness(module.Manifest.Id));
                 if (authorizations.ContainsKey(module.Manifest.Id) &&
@@ -744,7 +744,7 @@ public sealed partial class MainWindowViewModel(
             }
 
             var view = runtimeManager.CreateView(moduleId);
-            moduleViewModel.UpdateRuntimeState(runtimeManager.GetRecord(moduleId));
+            RefreshRuntimeProjection(moduleViewModel);
 
             if (view is null)
             {
@@ -774,7 +774,7 @@ public sealed partial class MainWindowViewModel(
         }
         catch (Exception exception)
         {
-            moduleViewModel.UpdateRuntimeState(runtimeManager.GetRecord(moduleId));
+            RefreshRuntimeProjection(moduleViewModel);
             if (!moduleViewModel.HasRuntimeError)
             {
                 moduleViewModel.RuntimeError = exception.Message;
@@ -825,7 +825,7 @@ public sealed partial class MainWindowViewModel(
             if (IsOutOfProcessWpf(moduleId))
                 moduleViewModel.UpdateOutOfProcessRuntimeState(moduleProcessBroker.GetState(moduleId));
             else
-                moduleViewModel.UpdateRuntimeState(runtimeManager.GetRecord(moduleId));
+                RefreshRuntimeProjection(moduleViewModel);
             StatusMessage = localization.GetString(
                 "status.moduleOperationCompleted",
                 moduleViewModel.DisplayName,
@@ -843,7 +843,7 @@ public sealed partial class MainWindowViewModel(
         }
         catch (Exception exception)
         {
-            moduleViewModel.UpdateRuntimeState(runtimeManager.GetRecord(moduleId));
+            RefreshRuntimeProjection(moduleViewModel);
             if (!moduleViewModel.HasRuntimeError)
             {
                 moduleViewModel.RuntimeError = exception.Message;
@@ -868,6 +868,35 @@ public sealed partial class MainWindowViewModel(
         var module = Modules.FirstOrDefault(item => item.Id == moduleId);
         return module is not null && ModuleRuntimeCapabilities.Resolve(module.Module.Manifest) is
             { RuntimeIsolation: ModuleRuntimeIsolation.OutOfProcess, UiKind: ModuleUiKind.Wpf };
+    }
+
+    private void RefreshRuntimeProjection(DiscoveredModuleViewModel module)
+    {
+        if (IsOutOfProcessWpf(module.Id))
+            module.UpdateOutOfProcessRuntimeState(moduleProcessBroker.GetState(module.Id));
+        else
+            module.UpdateRuntimeState(runtimeManager.GetRecord(module.Id));
+    }
+
+    private void EnsureProcessExitSubscription()
+    {
+        if (_processExitSubscribed) return;
+        _processExitSubscribed = true;
+        moduleProcessBroker.ProcessExited += OnModuleProcessExited;
+    }
+
+    private void OnModuleProcessExited(object? sender, ModuleProcessExitedEventArgs args)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted) return;
+        _ = dispatcher.InvokeAsync(() =>
+        {
+            var module = Modules.FirstOrDefault(item => item.Id == args.ModuleId);
+            if (module is null) return;
+            RefreshRuntimeProjection(module);
+            if (!args.Expected) module.RuntimeError = args.FailureCode;
+            UpdateStatistics();
+        });
     }
 
     private async Task LoadOutOfProcessAsync(string moduleId)
@@ -919,22 +948,26 @@ public sealed partial class MainWindowViewModel(
         try
         {
             await using var executionLease = await executionGate.EnterExecutionAsync(moduleId);
-            moduleWindowManager.CloseWindow(moduleId);
-            var record = runtimeManager.GetRecord(moduleId);
-            if (record?.State.ToString() == "Running")
-                await runtimeManager.DeactivateAsync(moduleId);
-            record = runtimeManager.GetRecord(moduleId);
-            if (record?.State.ToString() is "Loaded" or "Deactivated" or "Failed")
-                await runtimeManager.UnloadAsync(moduleId);
+            if (IsOutOfProcessWpf(moduleId))
+            {
+                if (!await moduleProcessBroker.CommandAsync(moduleId, "CloseWindow", CancellationToken.None) ||
+                    !await moduleProcessBroker.CommandAsync(moduleId, "Deactivate", CancellationToken.None) ||
+                    !await moduleProcessBroker.ShutdownAsync(moduleId, CancellationToken.None) ||
+                    !moduleProcessBroker.VerifyExited(moduleId) || moduleProcessBroker.HasSession(moduleId))
+                    throw new IOException("The module worker did not exit cleanly; removal was cancelled.");
+            }
+            else
+            {
+                moduleWindowManager.CloseWindow(moduleId);
+                var record = runtimeManager.GetRecord(moduleId);
+                if (record?.State.ToString() == "Running") await runtimeManager.DeactivateAsync(moduleId);
+                record = runtimeManager.GetRecord(moduleId);
+                if (record?.State.ToString() is "Loaded" or "Deactivated" or "Failed")
+                    await runtimeManager.UnloadAsync(moduleId);
+            }
 
-            var moduleDirectory = Path.GetFullPath(module.ModuleDirectory);
-            if (!IsDirectChildOf(moduleDirectory, applicationPaths.UserModulesDirectory))
-                throw new InvalidOperationException(localization.GetString("modules.removeUnsafePath"));
-            EnsureRemovalTreeContainsNoLinks(moduleDirectory);
-
-            await settingsService.UpdateAsync(settings =>
-                settings.StartupModules.RemoveAll(item => item.ModuleId == moduleId));
-            Directory.Delete(moduleDirectory, recursive: true);
+            await ModuleProgramRemoval.DeleteAsync(
+                moduleId, module.ModuleDirectory, applicationPaths.UserModulesDirectory, settingsService);
 
             SelectedModule = null;
             await RefreshModulesAsync();
@@ -949,7 +982,7 @@ public sealed partial class MainWindowViewModel(
         }
         catch (Exception exception)
         {
-            module.UpdateRuntimeState(runtimeManager.GetRecord(moduleId));
+            RefreshRuntimeProjection(module);
             StatusMessage = localization.GetString("status.moduleRemoveFailed", module.DisplayName, exception.Message);
         }
         finally
@@ -959,22 +992,11 @@ public sealed partial class MainWindowViewModel(
     }
 
     private static bool IsDirectChildOf(string candidate, string parent)
-    {
-        var fullCandidate = Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar);
-        var fullParent = Path.GetFullPath(parent).TrimEnd(Path.DirectorySeparatorChar);
-        return string.Equals(Path.GetDirectoryName(fullCandidate), fullParent, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static void EnsureRemovalTreeContainsNoLinks(string root)
-    {
-        if (!Directory.Exists(root)) throw new DirectoryNotFoundException(root);
-        foreach (var path in Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories).Prepend(root))
-            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-                throw new IOException("Module links and reparse points cannot be removed automatically.");
-    }
+        => ModuleProgramRemoval.IsDirectChildOf(candidate, parent);
 
     public async Task InitializeDiscoveryAsync(CancellationToken cancellationToken = default)
     {
+        EnsureProcessExitSubscription();
         if (_initialized) return;
         await RefreshModulesCoreAsync(cancellationToken);
         _initialized = true;
@@ -1201,7 +1223,7 @@ public sealed partial class MainWindowViewModel(
                 {
                     await runtimeManager.LoadAsync(module.Id, applicationPaths.ModuleDataDirectory, cancellationToken);
                     if (authorization.ActivateOnStartup) await runtimeManager.ActivateAsync(module.Id, cancellationToken);
-                    module.UpdateRuntimeState(runtimeManager.GetRecord(module.Id));
+                    RefreshRuntimeProjection(module);
                 }
                 succeeded++;
             }
@@ -1213,7 +1235,7 @@ public sealed partial class MainWindowViewModel(
             }
             catch (Exception exception)
             {
-                module.UpdateRuntimeState(runtimeManager.GetRecord(module.Id));
+                RefreshRuntimeProjection(module);
                 module.RuntimeError = exception.Message;
                 failed++;
             }

@@ -30,6 +30,10 @@ The Shell receives only versioned IPC state; it never receives plugin `Type`, `U
 `FrameworkElement`, templates, dictionaries, or instances. ModuleHost creates an independent top-level
 window. One worker hosts exactly one module. The broker binds a process handle, random session ID,
 one-time nonce, manifest/API/tree identity, and protocol handshake; a PID alone is never identity.
+The same complete identity is required on every state response. Process-exit observation is bound to
+the exact session object, generation, and process identity so a delayed old-worker callback cannot
+remove a replacement worker. Window suspend/restore is an explicit allowlisted lifecycle operation
+that hides and shows the existing worker-owned WPF window without changing module activation.
 
 ModuleHost is lifecycle and crash isolation, not a permissions sandbox. It currently runs with the
 same user authority as QingToolbox.
@@ -39,3 +43,5 @@ same user authority as QingToolbox.
 Old manifests resolve to `LegacyInProcess` and `RestartRequired`. WPF module publishers can opt into
 the explicit OutOfProcess/Wpf manifest capability. Service-only modules migrate to
 InProcessCollectible/None and must not export plugin-defined UI objects.
+Partial capability declarations and unsupported isolation/UI combinations are rejected during
+discovery rather than deferred until load.

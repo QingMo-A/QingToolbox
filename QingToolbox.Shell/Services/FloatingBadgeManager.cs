@@ -10,6 +10,7 @@ namespace QingToolbox.Shell.Services;
 
 public sealed class FloatingBadgeManager(
     ModuleWindowManager moduleWindowManager,
+    ModuleProcessBroker moduleProcessBroker,
     UserSettingsService settingsService,
     ILocalizationService localization,
     ApplicationExecutionEnvironment environment) : IDisposable
@@ -57,7 +58,12 @@ public sealed class FloatingBadgeManager(
                 badge.Opacity = 1;
 
                 if (_exitRequested) return;
-                if (!preserveSuspendedWindows) moduleWindowManager.SuspendForFloatingBadge();
+                if (!preserveSuspendedWindows)
+                {
+                    moduleWindowManager.SuspendForFloatingBadge();
+                    if (!await moduleProcessBroker.SuspendWindowsAsync(cancellationToken))
+                        throw new InvalidOperationException("One or more module worker windows could not be suspended.");
+                }
                 mainWindow.ShowInTaskbar = false;
                 mainWindow.Hide();
                 _badgeWindow = badge;
@@ -73,6 +79,7 @@ public sealed class FloatingBadgeManager(
                     mainWindow.ShowInTaskbar = _snapshot?.ShowInTaskbar ?? true;
                     mainWindow.Show();
                     moduleWindowManager.RestoreAfterFloatingBadge();
+                    await moduleProcessBroker.RestoreWindowsAsync(CancellationToken.None);
                     _stateMachine.TryFailEnter();
                     EnsureRecoverableWindow();
                 }
@@ -106,6 +113,8 @@ public sealed class FloatingBadgeManager(
                 mainWindow.Show();
                 RestoreMainWindow(mainWindow, snapshot);
                 moduleWindowManager.RestoreAfterFloatingBadge();
+                if (!await moduleProcessBroker.RestoreWindowsAsync(cancellationToken))
+                    throw new InvalidOperationException("One or more module worker windows could not be restored.");
                 mainWindow.Activate();
                 mainWindow.Focus();
 

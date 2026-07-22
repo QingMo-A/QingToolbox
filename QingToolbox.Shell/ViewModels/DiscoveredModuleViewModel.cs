@@ -197,10 +197,10 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         });
 
     public bool CanLoad =>
-        !IsExecutionBlocked && !IsBusy && RuntimeState is "NotLoaded" or "Unloaded";
+        IsValid && !IsExecutionBlocked && !IsBusy && RuntimeState is "NotLoaded" or "Unloaded";
 
     public bool CanActivate =>
-        !IsExecutionBlocked && !IsBusy && RuntimeState is "Loaded" or "Deactivated";
+        IsValid && !IsExecutionBlocked && !IsBusy && RuntimeState is "Loaded" or "Deactivated";
 
     public bool CanDeactivate =>
         !IsExecutionBlocked && !IsBusy && RuntimeState == "Running";
@@ -209,7 +209,7 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         !IsExecutionBlocked && !IsBusy && RuntimeState is "Loaded" or "Running" or "Deactivated" or "Failed";
 
     public bool CanOpen =>
-        !IsExecutionBlocked && !IsBusy && RuntimeState is "Loaded" or "Running" or "Deactivated";
+        IsValid && !IsExecutionBlocked && !IsBusy && RuntimeState is "Loaded" or "Running" or "Deactivated";
 
     public void UpdateRuntimeState(ModuleRuntimeRecord? record)
     {

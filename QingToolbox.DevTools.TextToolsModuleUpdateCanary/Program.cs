@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -196,6 +197,8 @@ internal static class Program
         AssertInstalledVersion(paths, VersionOne);
         await coordinator.LoadAndActivateInstalledAsync(ModuleId);
         await coordinator.AssertRuntimeAsync(ModuleId, VersionOne, "v1", active: true);
+        await coordinator.VerifyWindowSuspendRestoreAsync(ModuleId);
+        await coordinator.VerifyUnexpectedExitRecoveryAsync(ModuleId, VersionOne, "v1");
         AssertTransactionClean(paths);
     }
 
@@ -905,6 +908,58 @@ internal static class Program
             }
 
             return restored;
+        }
+
+        public async Task VerifyWindowSuspendRestoreAsync(string moduleId)
+        {
+            var before = _broker.GetState(moduleId)
+                ?? throw new InvalidOperationException("ModuleHost session is missing before suspend.");
+            Require(before.HasWindows && before.WindowVisible,
+                "The real worker window was not visible before suspend.");
+            Require(await _broker.SuspendWindowsAsync(), "Worker window suspend failed.");
+            var suspended = _broker.GetState(moduleId)!;
+            Require(suspended.HasWindows && !suspended.WindowVisible &&
+                    suspended.RuntimeGeneration == before.RuntimeGeneration && suspended.IsActive == before.IsActive,
+                "Suspend closed/recreated the window or changed runtime activation.");
+            Require(await _broker.RestoreWindowsAsync(), "Worker window restore failed.");
+            var restored = _broker.GetState(moduleId)!;
+            Require(restored.HasWindows && restored.WindowVisible &&
+                    restored.RuntimeGeneration == before.RuntimeGeneration && restored.IsActive == before.IsActive,
+                "Restore recreated the worker or failed to restore its visible window.");
+        }
+
+        public async Task VerifyUnexpectedExitRecoveryAsync(
+            string moduleId, string manifestVersion, string variant)
+        {
+            var before = _broker.GetState(moduleId)
+                ?? throw new InvalidOperationException("ModuleHost session is missing before crash probe.");
+            var exited = new TaskCompletionSource<ModuleProcessExitedEventArgs>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler<ModuleProcessExitedEventArgs>? handler = null;
+            handler = (_, args) =>
+            {
+                if (args.ModuleId == moduleId && args.RuntimeGeneration == before.RuntimeGeneration)
+                    exited.TrySetResult(args);
+            };
+            _broker.ProcessExited += handler;
+            try
+            {
+                using var process = Process.GetProcessById(before.ProcessId!.Value);
+                process.Kill(true);
+                var observed = await exited.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                Require(!observed.Expected && observed.ProcessId == before.ProcessId,
+                    "Unexpected worker exit was not classified or identified correctly.");
+                Require(_broker.GetState(moduleId) is null && !_broker.HasSession(moduleId),
+                    "The crashed worker session was not removed.");
+                await LoadAndActivateInstalledAsync(moduleId);
+                var restarted = _broker.GetState(moduleId)
+                    ?? throw new InvalidOperationException("The module could not restart after a worker crash.");
+                Require(restarted.RuntimeGeneration != before.RuntimeGeneration &&
+                        restarted.ProcessId != before.ProcessId,
+                    "Worker restart reused stale session identity.");
+                await AssertRuntimeAsync(moduleId, manifestVersion, variant, active: true);
+            }
+            finally { _broker.ProcessExited -= handler; }
         }
 
         public async Task<bool> RestoreRuntimeStateAsync(

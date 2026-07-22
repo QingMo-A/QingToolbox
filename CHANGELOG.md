@@ -1,5 +1,11 @@
 # Changelog
 
+- Hardened post-freeze out-of-process host integration with complete response identity checks,
+  generation-safe crash cleanup, safe running-module removal, and non-recreating window suspend/restore.
+- Rejected partial or unsupported manifest runtime capability declarations during discovery while
+  retaining legacy manifest compatibility.
+- Extended the real TextTools canary to cover worker-window suspend/restore and unexpected-exit restart.
+
 - Added a manifest-declared hybrid module runtime: collectible in-process services and dedicated
   trusted ModuleHost processes for real WPF views.
 - Bound ModuleHost IPC to protocol, nonce, process handle, module/API/tree identity, command

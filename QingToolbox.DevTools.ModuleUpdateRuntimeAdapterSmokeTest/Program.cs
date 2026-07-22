@@ -145,6 +145,12 @@ internal static class Program
         Console.WriteLine("Verifying ModuleHost IPC authentication, allowlist, and kill fallback...");
         await VerifyModuleProcessContractsAsync();
 
+        Console.WriteLine("Verifying manifest runtime-capability contracts...");
+        VerifyManifestCapabilityContracts(fixture.UserModulesRoot);
+
+        Console.WriteLine("Verifying safe module program removal boundaries...");
+        await VerifyModuleProgramRemovalAsync(fixture);
+
         Console.WriteLine("Verifying startup authorization bytes remained unchanged...");
         var finalSettingsBytes = await File.ReadAllBytesAsync(fixture.SettingsPath);
         Require(fixture.InitialSettingsBytes.AsSpan().SequenceEqual(finalSettingsBytes),
@@ -262,6 +268,112 @@ internal static class Program
         Require(await ModuleProcessBroker.WaitForExitOrKillAsync(
                 process, TimeSpan.FromMilliseconds(100), CancellationToken.None) && process.HasExited,
             "Bounded process-exit fallback did not terminate the worker process tree.");
+    }
+
+    private static void VerifyManifestCapabilityContracts(string root)
+    {
+        var entry = Path.Combine(root, "capability-probe.dll");
+        File.WriteAllBytes(entry, [0]);
+        var validator = new ModuleManifestValidator();
+        ModuleManifest Manifest(ModuleRuntimeIsolation? isolation, ModuleUiKind? ui) => new()
+        {
+            Id = "capability.probe", Name = "Capability Probe", Version = "1.0.0",
+            Entry = Path.GetFileName(entry), RuntimeIsolation = isolation, UiKind = ui
+        };
+        IReadOnlyList<ModuleDiscoveryError> Validate(ModuleRuntimeIsolation? isolation, ModuleUiKind? ui) =>
+            validator.Validate(Manifest(isolation, ui), root, Path.Combine(root, "module.json"));
+
+        Require(Validate(null, null).Count == 0,
+            "A legacy manifest without capability fields was rejected.");
+        Require(ModuleRuntimeCapabilities.Resolve(Manifest(null, null)) is
+            { RuntimeIsolation: ModuleRuntimeIsolation.LegacyInProcess, UiKind: ModuleUiKind.Wpf,
+              UpdateCapability: ModuleUpdateCapability.RestartRequired },
+            "Legacy capability resolution changed.");
+        Require(Validate(ModuleRuntimeIsolation.LegacyInProcess, ModuleUiKind.Wpf).Count == 0 &&
+                Validate(ModuleRuntimeIsolation.InProcessCollectible, ModuleUiKind.None).Count == 0 &&
+                Validate(ModuleRuntimeIsolation.OutOfProcess, ModuleUiKind.Wpf).Count == 0,
+            "A supported runtime capability combination was rejected.");
+        Require(Validate(ModuleRuntimeIsolation.OutOfProcess, null).Any(x =>
+                    x.Code == "Manifest.RuntimeCapabilityIncomplete"),
+            "A partial runtime capability declaration was accepted.");
+        Require(Validate(ModuleRuntimeIsolation.InProcessCollectible, ModuleUiKind.Wpf).Any(x =>
+                    x.Code == "Manifest.RuntimeCapabilityUnsupported") &&
+                Validate(ModuleRuntimeIsolation.OutOfProcess, ModuleUiKind.None).Any(x =>
+                    x.Code == "Manifest.RuntimeCapabilityUnsupported") &&
+                Validate(ModuleRuntimeIsolation.LegacyInProcess, ModuleUiKind.None).Any(x =>
+                    x.Code == "Manifest.RuntimeCapabilityUnsupported"),
+            "An unsupported runtime capability combination was accepted.");
+        File.Delete(entry);
+
+        var unknownDirectory = Path.Combine(root, "unknown-capability");
+        Directory.CreateDirectory(unknownDirectory);
+        File.WriteAllText(Path.Combine(unknownDirectory, "probe.dll"), string.Empty);
+        File.WriteAllText(Path.Combine(unknownDirectory, "module.json"), """
+            {"id":"unknown.capability","name":"Unknown","version":"1.0.0","entry":"probe.dll",
+             "runtimeIsolation":"FutureRuntime","uiKind":"Wpf"}
+            """);
+        var scanner = new ModuleManifestScanner(new ModuleManifestReader(), validator);
+        var discovered = Task.Run(() => scanner.ScanAsync(root)).GetAwaiter().GetResult()
+            .Single(item => item.ModuleDirectory == unknownDirectory);
+        Require(!discovered.IsValid && discovered.Errors.Any(item =>
+                item.Code == "Manifest.RuntimeCapabilityUnsupported"),
+            "An unknown runtime enum did not fail discovery with the capability error code.");
+        Directory.Delete(unknownDirectory, recursive: true);
+    }
+
+    private static async Task VerifyModuleProgramRemovalAsync(RuntimeFixture fixture)
+    {
+        const string removableId = "probe.removable";
+        var removable = Path.Combine(fixture.UserModulesRoot, removableId);
+        var neighbor = Path.Combine(fixture.UserModulesRoot, "probe.neighbor");
+        var data = Path.Combine(fixture.ModuleDataRoot, removableId);
+        Directory.CreateDirectory(removable);
+        Directory.CreateDirectory(neighbor);
+        Directory.CreateDirectory(data);
+        File.WriteAllText(Path.Combine(removable, "program.bin"), "program");
+        File.WriteAllText(Path.Combine(neighbor, "sentinel.txt"), "neighbor");
+        File.WriteAllText(Path.Combine(data, "sentinel.txt"), "data");
+        await fixture.Settings.UpdateAsync(settings => settings.StartupModules.Add(new()
+        {
+            ModuleId = removableId, Version = "1.0.0", ManifestSha256 = "AA",
+            EntryAssemblySha256 = "BB", PayloadSha256 = "CC", PayloadFileCount = 1
+        }));
+        await ModuleProgramRemoval.DeleteAsync(
+            removableId, removable, fixture.UserModulesRoot, fixture.Settings);
+        Require(!Directory.Exists(removable), "The removable program directory still exists.");
+        Require(File.Exists(Path.Combine(neighbor, "sentinel.txt")), "Neighbor module was modified.");
+        Require(File.Exists(Path.Combine(data, "sentinel.txt")), "Module data was deleted.");
+        Require((await fixture.Settings.ReadAsync()).StartupModules.All(x => x.ModuleId != removableId),
+            "Startup authorization was retained after successful removal.");
+
+        const string blockedId = "probe.removal-blocked";
+        var blocked = Path.Combine(fixture.UserModulesRoot, blockedId);
+        Directory.CreateDirectory(blocked);
+        var lockedPath = Path.Combine(blocked, "locked.bin");
+        File.WriteAllText(lockedPath, "locked");
+        await fixture.Settings.UpdateAsync(settings => settings.StartupModules.Add(new()
+        {
+            ModuleId = blockedId, Version = "1.0.0", ManifestSha256 = "DD",
+            EntryAssemblySha256 = "EE", PayloadSha256 = "FF", PayloadFileCount = 1
+        }));
+        await using (File.Open(lockedPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            try
+            {
+                await ModuleProgramRemoval.DeleteAsync(
+                    blockedId, blocked, fixture.UserModulesRoot, fixture.Settings);
+                throw new InvalidOperationException("A locked module directory was deleted unexpectedly.");
+            }
+            catch (IOException) { }
+        }
+        Require(Directory.Exists(blocked), "Failed removal deleted the module directory.");
+        Require((await fixture.Settings.ReadAsync()).StartupModules.Any(x => x.ModuleId == blockedId),
+            "Failed removal revoked startup authorization.");
+        Directory.Delete(blocked, recursive: true);
+        await fixture.Settings.UpdateAsync(settings =>
+            settings.StartupModules.RemoveAll(x => x.ModuleId == blockedId));
+        Directory.Delete(neighbor, recursive: true);
+        Directory.Delete(data, recursive: true);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

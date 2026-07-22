@@ -59,9 +59,10 @@ internal static class Program
         var variant = handle.Module.GetType().Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(item => item.Key == "QingToolbox.TextToolsCanary.Variant")?.Value;
         await SendAsync(writer, new Message(ProtocolVersion, "Hello", options.Nonce, manifest.Id, manifest.Version,
-            options.ModuleApiVersion, treeIdentity, Environment.ProcessId, false, false, variant, null));
+            options.ModuleApiVersion, treeIdentity, Environment.ProcessId, false, false, variant, null, false));
 
         Window? window = null;
+        WindowSnapshot? suspendedWindow = null;
         var active = false;
         while (true)
         {
@@ -80,11 +81,31 @@ internal static class Program
                     window ??= CreateWindow(viewFactory, manifest.Name, () => window = null);
                     window.Show(); window.Activate(); break;
                 case "CloseWindow": window?.Close(); window = null; break;
+                case "SuspendWindow":
+                    if (window is not null && suspendedWindow is null)
+                    {
+                        suspendedWindow = new(window.IsVisible, window.WindowState, window.IsActive);
+                        if (window.IsVisible) window.Hide();
+                    }
+                    break;
+                case "RestoreWindow":
+                    if (window is not null && suspendedWindow is { } snapshot)
+                    {
+                        if (snapshot.WasVisible)
+                        {
+                            window.Show();
+                            window.WindowState = snapshot.State;
+                            if (snapshot.WasActive) window.Activate();
+                        }
+                        suspendedWindow = null;
+                    }
+                    break;
                 case "Shutdown": window?.Close(); if (active) await handle.Module.OnDeactivateAsync(); return;
                 default: throw new InvalidDataException("Unknown IPC command.");
             }
             await SendAsync(writer, new Message(ProtocolVersion, "State", options.Nonce, manifest.Id, manifest.Version,
-                options.ModuleApiVersion, treeIdentity, Environment.ProcessId, active, window is not null, variant, null));
+                options.ModuleApiVersion, treeIdentity, Environment.ProcessId, active, window is not null, variant, null,
+                window?.IsVisible == true));
         }
     }
 
@@ -110,9 +131,10 @@ internal static class Program
     }
 
     private static Task SendAsync(StreamWriter writer, Message message) => writer.WriteLineAsync(JsonSerializer.Serialize(message));
+    private sealed record WindowSnapshot(bool WasVisible, WindowState State, bool WasActive);
     private sealed record Message(int ProtocolVersion, string Type, string Nonce, string ModuleId, string ManifestVersion,
         string ModuleApiVersion, string ProgramTreeIdentity, int ProcessId, bool IsActive, bool HasWindows,
-        string? RuntimeVariant, string? Error);
+        string? RuntimeVariant, string? Error, bool WindowVisible = false);
     private sealed record Options(string PipeName, string Nonce, string ModuleId, string ManifestVersion,
         string ModuleApiVersion, string ProgramTreeIdentity, string ModuleDirectory, string DataRoot)
     {
