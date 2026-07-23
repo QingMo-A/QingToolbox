@@ -966,12 +966,23 @@ public sealed partial class MainWindowViewModel(
                     await runtimeManager.UnloadAsync(moduleId);
             }
 
-            await ModuleProgramRemoval.DeleteAsync(
+            var removal = await ModuleProgramRemoval.DeleteAsync(
                 moduleId, module.ModuleDirectory, applicationPaths.UserModulesDirectory, settingsService);
+
+            if (removal.Status == ModuleProgramRemovalStatus.ProgramDeletionFailed)
+            {
+                RefreshRuntimeProjection(module);
+                module.RuntimeError = removal.FailureCode ?? string.Empty;
+                StatusMessage = localization.GetString(
+                    "status.moduleRemoveFailed", module.DisplayName, removal.FailureCode ?? string.Empty);
+                return;
+            }
 
             SelectedModule = null;
             await RefreshModulesAsync();
-            StatusMessage = localization.GetString("status.moduleRemoved", module.DisplayName);
+            StatusMessage = removal.Status == ModuleProgramRemovalStatus.Completed
+                ? localization.GetString("status.moduleRemoved", module.DisplayName)
+                : localization.GetString("status.moduleRemoveAuthorizationFailed", module.DisplayName);
         }
         catch (ModuleExecutionBlockedException)
         {

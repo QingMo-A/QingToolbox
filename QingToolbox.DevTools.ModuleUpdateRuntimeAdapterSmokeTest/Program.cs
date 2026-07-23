@@ -151,6 +151,9 @@ internal static class Program
         Console.WriteLine("Verifying safe module program removal boundaries...");
         await VerifyModuleProgramRemovalAsync(fixture);
 
+        Console.WriteLine("Verifying symmetric module-window transition compensation...");
+        await VerifyWindowPresentationCompensationAsync();
+
         Console.WriteLine("Verifying startup authorization bytes remained unchanged...");
         var finalSettingsBytes = await File.ReadAllBytesAsync(fixture.SettingsPath);
         Require(fixture.InitialSettingsBytes.AsSpan().SequenceEqual(finalSettingsBytes),
@@ -338,8 +341,11 @@ internal static class Program
             ModuleId = removableId, Version = "1.0.0", ManifestSha256 = "AA",
             EntryAssemblySha256 = "BB", PayloadSha256 = "CC", PayloadFileCount = 1
         }));
-        await ModuleProgramRemoval.DeleteAsync(
+        var completed = await ModuleProgramRemoval.DeleteAsync(
             removableId, removable, fixture.UserModulesRoot, fixture.Settings);
+        Require(completed.Status == ModuleProgramRemovalStatus.Completed &&
+                completed.ProgramDeleted && completed.StartupAuthorizationRemoved,
+            "Successful removal did not report Completed.");
         Require(!Directory.Exists(removable), "The removable program directory still exists.");
         Require(File.Exists(Path.Combine(neighbor, "sentinel.txt")), "Neighbor module was modified.");
         Require(File.Exists(Path.Combine(data, "sentinel.txt")), "Module data was deleted.");
@@ -356,24 +362,72 @@ internal static class Program
             ModuleId = blockedId, Version = "1.0.0", ManifestSha256 = "DD",
             EntryAssemblySha256 = "EE", PayloadSha256 = "FF", PayloadFileCount = 1
         }));
+        var settingsBeforeFailure = await File.ReadAllBytesAsync(fixture.SettingsPath);
         await using (File.Open(lockedPath, FileMode.Open, FileAccess.Read, FileShare.None))
         {
-            try
-            {
-                await ModuleProgramRemoval.DeleteAsync(
-                    blockedId, blocked, fixture.UserModulesRoot, fixture.Settings);
-                throw new InvalidOperationException("A locked module directory was deleted unexpectedly.");
-            }
-            catch (IOException) { }
+            var blockedResult = await ModuleProgramRemoval.DeleteAsync(
+                blockedId, blocked, fixture.UserModulesRoot, fixture.Settings);
+            Require(blockedResult.Status == ModuleProgramRemovalStatus.ProgramDeletionFailed &&
+                    !blockedResult.ProgramDeleted && !blockedResult.StartupAuthorizationRemoved,
+                "A locked module directory did not report ProgramDeletionFailed.");
         }
         Require(Directory.Exists(blocked), "Failed removal deleted the module directory.");
+        var settingsAfterFailure = await File.ReadAllBytesAsync(fixture.SettingsPath);
+        Require(settingsBeforeFailure.SequenceEqual(settingsAfterFailure),
+            "ProgramDeletionFailed changed the settings bytes.");
         Require((await fixture.Settings.ReadAsync()).StartupModules.Any(x => x.ModuleId == blockedId),
             "Failed removal revoked startup authorization.");
         Directory.Delete(blocked, recursive: true);
         await fixture.Settings.UpdateAsync(settings =>
             settings.StartupModules.RemoveAll(x => x.ModuleId == blockedId));
+
+        const string partialId = "probe.removal-partial";
+        var partial = Path.Combine(fixture.UserModulesRoot, partialId);
+        Directory.CreateDirectory(partial);
+        File.WriteAllText(Path.Combine(partial, "program.bin"), "program");
+        await fixture.Settings.UpdateAsync(settings => settings.StartupModules.Add(new()
+        {
+            ModuleId = partialId, Version = "1.0.0", ManifestSha256 = "11",
+            EntryAssemblySha256 = "22", PayloadSha256 = "33", PayloadFileCount = 1
+        }));
+        var partialResult = await ModuleProgramRemoval.DeleteCoreAsync(
+            () => { Directory.Delete(partial, recursive: true); return Task.CompletedTask; },
+            () => throw new IOException("Injected settings save failure."));
+        Require(partialResult.Status == ModuleProgramRemovalStatus.AuthorizationCleanupFailed &&
+                partialResult.ProgramDeleted && !partialResult.StartupAuthorizationRemoved,
+            "Authorization cleanup failure did not report partial success.");
+        Require(!Directory.Exists(partial), "Partial success fabricated a restored program directory.");
+        Require((await fixture.Settings.ReadAsync()).StartupModules.Any(x => x.ModuleId == partialId),
+            "Partial success did not preserve the missing-module authorization diagnostic source.");
+        await fixture.Settings.UpdateAsync(settings =>
+            settings.StartupModules.RemoveAll(x => x.ModuleId == partialId));
         Directory.Delete(neighbor, recursive: true);
         Directory.Delete(data, recursive: true);
+    }
+
+    private static async Task VerifyWindowPresentationCompensationAsync()
+    {
+        foreach (var surface in new[] { "NotificationArea", "FloatingBadge" })
+        {
+            var inProcessSuspended = false;
+            var inProcessRestored = false;
+            var workerCompensationAttempted = false;
+            var failures = new List<string>();
+            var coordinator = new ModuleWindowPresentationCoordinator(
+                () => inProcessSuspended = true,
+                () => inProcessRestored = true,
+                _ => Task.FromResult(false),
+                _ => { workerCompensationAttempted = true; return Task.FromResult(false); },
+                (operation, failure) => failures.Add($"{operation}:{failure}"));
+
+            Require(!await coordinator.SuspendAsync(),
+                $"{surface} transition reported success after worker suspend failure.");
+            Require(inProcessSuspended && inProcessRestored && workerCompensationAttempted,
+                $"{surface} transition did not perform symmetric compensation.");
+            Require(failures.Any(item => item.StartsWith("Suspend:", StringComparison.Ordinal)) &&
+                    failures.Any(item => item.StartsWith("SuspendCompensation:", StringComparison.Ordinal)),
+                $"{surface} transition did not record structured failure diagnostics.");
+        }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

@@ -1,5 +1,12 @@
 # Changelog
 
+- Closed the ModuleHost publication race with publish-then-observe registration, immediate process
+  verification, a state round-trip, single-fire exit cleanup, and deterministic early-exit canaries.
+- Made multi-worker suspend/restore exhaustive and unified notification-area and floating-badge
+  compensation so the main Shell remains a recovery surface after partial failure.
+- Reordered module removal to delete program files before startup authorization and added typed
+  complete, program-failure, and authorization-cleanup partial-success outcomes.
+
 - Hardened post-freeze out-of-process host integration with complete response identity checks,
   generation-safe crash cleanup, safe running-module removal, and non-recreating window suspend/restore.
 - Rejected partial or unsupported manifest runtime capability declarations during discovery while

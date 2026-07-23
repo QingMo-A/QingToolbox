@@ -29,11 +29,12 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
     private const int ProtocolVersion = 1;
     private static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(8);
     private static readonly HashSet<string> AllowedCommands =
-        ["Activate", "Deactivate", "OpenWindow", "CloseWindow", "SuspendWindow", "RestoreWindow", "Shutdown"];
+        ["GetState", "Activate", "Deactivate", "OpenWindow", "CloseWindow", "SuspendWindow", "RestoreWindow", "Shutdown"];
     private readonly ConcurrentDictionary<string, Session> _sessions = new(StringComparer.Ordinal);
     private long _generation;
     public string? LastFailureCode { get; private set; }
     public event EventHandler<ModuleProcessExitedEventArgs>? ProcessExited;
+    internal ModuleProcessBrokerTestHooks? TestHooks { get; set; }
 
     public ModuleProcessRuntimeState? GetState(string moduleId) =>
         _sessions.TryGetValue(moduleId, out var session) ? session.State : null;
@@ -55,6 +56,7 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
             "--module-api", request.ExpectedProgram.ModuleApiVersion,
             "--tree-identity", request.ExpectedProgram.ProgramTreeIdentity,
             "--module-directory", moduleDirectory, "--data-root", paths.ModuleDataDirectory);
+        TestHooks?.ConfigureWorkerStart?.Invoke(request.ModuleId, start);
         var process = Process.Start(start) ?? throw new IOException("ModuleHost failed to start.");
         Session? session = null;
         try
@@ -62,11 +64,35 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
             await server.WaitForConnectionAsync(cancellationToken).WaitAsync(OperationTimeout, cancellationToken);
             session = await Session.CreateAsync(server, process, request, nonce,
                 Interlocked.Increment(ref _generation), OnSessionExited, cancellationToken);
+            var exitedBeforePublication = session.HasExited;
             if (!_sessions.TryAdd(request.ModuleId, session))
             {
+                LastFailureCode = "ModuleHost.SessionPublicationFailed";
                 session.MarkExpectedExit();
-                await session.ShutdownAsync(CancellationToken.None);
-                LastFailureCode = "SessionAlreadyExists";
+                await session.TerminateAsync();
+                await session.DisposeAsync();
+                return false;
+            }
+            TestHooks?.AfterSessionPublishedBeforeExitObservation?.Invoke(request.ModuleId, process);
+            var publicationFailureCode = exitedBeforePublication
+                ? "ModuleHost.ExitedBeforePublication"
+                : "ModuleHost.ExitedDuringRestore";
+            var observationActivated = session.ActivateExitObservation(publicationFailureCode);
+            if (exitedBeforePublication || !observationActivated ||
+                !_sessions.TryGetValue(request.ModuleId, out var current) || !ReferenceEquals(current, session))
+            {
+                LastFailureCode = exitedBeforePublication
+                    ? "ModuleHost.ExitedBeforePublication"
+                    : "ModuleHost.ExitedDuringRestore";
+                await session.ObserveExitAsync(LastFailureCode);
+                return false;
+            }
+            // A state round-trip closes the loaded-only race: Hello alone is not
+            // sufficient proof that the worker survived Session publication.
+            if (!await CommandAsync(request.ModuleId, "GetState", cancellationToken))
+            {
+                LastFailureCode = "ModuleHost.ExitedDuringRestore";
+                await session.ObserveExitAsync(LastFailureCode);
                 return false;
             }
             if (request.DesiredRuntimeState.IsActive &&
@@ -76,6 +102,13 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
                 await ShutdownAsync(request.ModuleId, CancellationToken.None);
                 return false;
             }
+            if (session.HasExited || !_sessions.TryGetValue(request.ModuleId, out current) ||
+                !ReferenceEquals(current, session))
+            {
+                LastFailureCode = "ModuleHost.ExitedDuringRestore";
+                await session.ObserveExitAsync(LastFailureCode);
+                return false;
+            }
             if (request.DesiredRuntimeState.HasWindows &&
                 !await CommandAsync(request.ModuleId, "OpenWindow", cancellationToken))
             {
@@ -83,14 +116,24 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
                 await ShutdownAsync(request.ModuleId, CancellationToken.None);
                 return false;
             }
+            if (!_sessions.TryGetValue(request.ModuleId, out current) ||
+                !ReferenceEquals(current, session) || !session.TryMarkRestoreCompleted())
+            {
+                LastFailureCode = "ModuleHost.ExitedDuringRestore";
+                await session.ObserveExitAsync(LastFailureCode);
+                return false;
+            }
             log.Information("ModuleProcess", $"ModuleHost restored; module={request.ModuleId}; generation={session.State.RuntimeGeneration}.");
             return true;
         }
         catch (Exception exception)
         {
-            LastFailureCode = exception is UnauthorizedAccessException ? "ResponseIdentityMismatch" : exception.GetType().Name;
+            LastFailureCode ??= exception is UnauthorizedAccessException
+                ? "ModuleHost.ResponseIdentityMismatch"
+                : session?.CurrentExitFailureCode ?? $"ModuleHost.{exception.GetType().Name}";
             log.Warning("ModuleProcess", $"ModuleHost restore failed; module={request.ModuleId}; failure={LastFailureCode}.");
-            if (session is not null) await RemoveAndTerminateAsync(request.ModuleId, session);
+            if (session is not null)
+                await RemoveAndTerminateAsync(request.ModuleId, session, expected: false, LastFailureCode);
             else
             {
                 try { process.Kill(true); } catch { }
@@ -107,8 +150,9 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
         try { return await session.CommandAsync(command, token); }
         catch (UnauthorizedAccessException)
         {
-            LastFailureCode = "ResponseIdentityMismatch";
-            await RemoveAndTerminateAsync(moduleId, session);
+            LastFailureCode = "ModuleHost.ResponseIdentityMismatch";
+            await RemoveAndTerminateAsync(moduleId, session, expected: false,
+                "ModuleHost.ResponseIdentityMismatch");
             return false;
         }
     }
@@ -121,10 +165,45 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
 
     private async Task<bool> CommandAllAsync(string command, CancellationToken token)
     {
-        foreach (var moduleId in _sessions.Keys.ToArray())
-            if (!await CommandAsync(moduleId, command, token)) return false;
-        return true;
+        var snapshot = _sessions.ToArray();
+        TestHooks?.AfterBatchSnapshot?.Invoke(command, snapshot.Select(item => item.Value.State).ToArray());
+        var allSucceeded = true;
+        foreach (var (moduleId, session) in snapshot)
+        {
+            var failureCode = "ModuleHost.BatchSessionUnavailable";
+            try
+            {
+                if (!_sessions.TryGetValue(moduleId, out var current) || !ReferenceEquals(current, session))
+                {
+                    allSucceeded = false;
+                    LogBatchFailure(moduleId, session, command, failureCode);
+                    continue;
+                }
+
+                if (!await session.CommandAsync(command, token))
+                {
+                    allSucceeded = false;
+                    failureCode = "ModuleHost.BatchCommandRejected";
+                    LogBatchFailure(moduleId, session, command, failureCode);
+                }
+            }
+            catch (Exception exception)
+            {
+                allSucceeded = false;
+                failureCode = exception is UnauthorizedAccessException
+                    ? "ModuleHost.ResponseIdentityMismatch"
+                    : $"ModuleHost.{exception.GetType().Name}";
+                LogBatchFailure(moduleId, session, command, failureCode);
+                if (exception is UnauthorizedAccessException)
+                    await RemoveAndTerminateAsync(moduleId, session, expected: false, failureCode);
+            }
+        }
+        return allSucceeded;
     }
+
+    private void LogBatchFailure(string moduleId, Session session, string command, string failureCode) =>
+        log.Warning("ModuleProcess",
+            $"Batch command failed; command={command}; module={moduleId}; generation={session.State.RuntimeGeneration}; failure={failureCode}.");
 
     public async Task<bool> ShutdownAsync(string moduleId, CancellationToken token)
     {
@@ -144,12 +223,12 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
         foreach (var id in _sessions.Keys.ToArray()) await ShutdownAsync(id, CancellationToken.None);
     }
 
-    private async void OnSessionExited(Session session)
+    private async Task OnSessionExited(Session session, string failureCode)
     {
         try
         {
-            if (!_sessions.TryRemove(new(session.ModuleId, session))) return;
-            var args = session.CreateExitEventArgs();
+            _sessions.TryRemove(new(session.ModuleId, session));
+            var args = session.CreateExitEventArgs(failureCode);
             await session.DisposeAsync();
             log.Warning("ModuleProcess", $"ModuleHost exited; module={args.ModuleId}; generation={args.RuntimeGeneration}; expected={args.Expected}; code={args.ExitCode}.");
             ProcessExited?.Invoke(this, args);
@@ -160,11 +239,15 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
         }
     }
 
-    private async Task RemoveAndTerminateAsync(string moduleId, Session session)
+    private async Task RemoveAndTerminateAsync(
+        string moduleId, Session session, bool expected = true, string? failureCode = null)
     {
-        session.MarkExpectedExit();
+        if (expected) session.MarkExpectedExit();
+        else if (failureCode is not null) session.SetExitFailureCode(failureCode);
         _sessions.TryRemove(new(moduleId, session));
         await session.TerminateAsync();
+        await session.ObserveExitAsync(failureCode ??
+            (expected ? "ModuleHost.ExpectedExit" : "ModuleHost.UnexpectedExit"));
         await session.DisposeAsync();
     }
 
@@ -210,26 +293,32 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
         private readonly StreamWriter _writer;
         private readonly string _nonce;
         private readonly SemaphoreSlim _commands = new(1, 1);
-        private readonly Action<Session> _exited;
+        private readonly Func<Session, string, Task> _exited;
+        private readonly TaskCompletionSource _exitHandled = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _disposed;
         private int _expectedExit;
         private int _exitPublished;
+        private int _exitObservationActive;
+        private readonly object _exitStateGate = new();
+        private string _exitFailureCode = "ModuleHost.ExitedDuringRestore";
         public string ModuleId { get; }
         public ModuleProcessRuntimeState State { get; private set; }
+        public string CurrentExitFailureCode
+        {
+            get { lock (_exitStateGate) return _exitFailureCode; }
+        }
         public bool HasExited { get { try { return _process.HasExited; } catch { return true; } } }
 
         private Session(NamedPipeServerStream pipe, Process process, string nonce, string moduleId,
-            ModuleProcessRuntimeState state, Action<Session> exited)
+            ModuleProcessRuntimeState state, Func<Session, string, Task> exited)
         {
             _pipe = pipe; _process = process; _nonce = nonce; ModuleId = moduleId; State = state; _exited = exited;
             _reader = new(pipe, leaveOpen: true); _writer = new(pipe, leaveOpen: true) { AutoFlush = true };
-            _process.EnableRaisingEvents = true;
-            _process.Exited += OnExited;
         }
 
         public static async Task<Session> CreateAsync(NamedPipeServerStream pipe, Process process,
             ModuleUpdateRuntimeRestoreRequest request, string nonce, long generation,
-            Action<Session> exited, CancellationToken token)
+            Func<Session, string, Task> exited, CancellationToken token)
         {
             var session = new Session(pipe, process, nonce, request.ModuleId, new(true, process.Id, false, false, false, false,
                 request.ExpectedProgram.ManifestVersion, request.ExpectedProgram.ModuleApiVersion,
@@ -268,6 +357,51 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
             response.ProgramTreeIdentity == State.ProgramTreeIdentity && response.ProcessId == State.ProcessId;
 
         public void MarkExpectedExit() => Interlocked.Exchange(ref _expectedExit, 1);
+        public void SetExitFailureCode(string failureCode)
+        {
+            lock (_exitStateGate) _exitFailureCode = failureCode;
+        }
+
+        public bool ActivateExitObservation(string failureCode)
+        {
+            lock (_exitStateGate) _exitFailureCode = failureCode;
+            if (Interlocked.Exchange(ref _exitObservationActive, 1) == 0)
+            {
+                _process.Exited += OnExited;
+                _process.EnableRaisingEvents = true;
+            }
+            if (HasExited) _ = ObserveExitAsync(DefaultExitFailureCode());
+            return !HasExited;
+        }
+
+        public bool TryMarkRestoreCompleted()
+        {
+            lock (_exitStateGate)
+            {
+                if (HasExited || Volatile.Read(ref _exitPublished) != 0) return false;
+                _exitFailureCode = "ModuleHost.UnexpectedExit";
+                return true;
+            }
+        }
+
+        public Task ObserveExitAsync(string failureCode)
+        {
+            if (Interlocked.Exchange(ref _exitPublished, 1) == 0)
+                _ = CompleteExitAsync(failureCode);
+            return _exitHandled.Task;
+        }
+
+        private async Task CompleteExitAsync(string failureCode)
+        {
+            try { await _exited(this, failureCode); }
+            finally { _exitHandled.TrySetResult(); }
+        }
+
+        private string DefaultExitFailureCode()
+        {
+            if (Volatile.Read(ref _expectedExit) != 0) return "ModuleHost.ExpectedExit";
+            lock (_exitStateGate) return _exitFailureCode;
+        }
 
         public async Task<bool> ShutdownAsync(CancellationToken token)
         {
@@ -282,18 +416,17 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
             try { await _process.WaitForExitAsync().WaitAsync(OperationTimeout); } catch { }
         }
 
-        public ModuleProcessExitedEventArgs CreateExitEventArgs()
+        public ModuleProcessExitedEventArgs CreateExitEventArgs(string failureCode)
         {
             int? exitCode = null;
             try { exitCode = _process.ExitCode; } catch { }
             return new(ModuleId, State.RuntimeGeneration, State.ProcessId ?? 0, exitCode,
-                Volatile.Read(ref _expectedExit) != 0,
-                Volatile.Read(ref _expectedExit) != 0 ? "ModuleHost.ExpectedExit" : "ModuleHost.UnexpectedExit");
+                Volatile.Read(ref _expectedExit) != 0, failureCode);
         }
 
         private void OnExited(object? sender, EventArgs args)
         {
-            if (Interlocked.Exchange(ref _exitPublished, 1) == 0) _exited(this);
+            _ = ObserveExitAsync(DefaultExitFailureCode());
         }
 
         private async Task<Message> ReadAsync(CancellationToken token)
@@ -306,7 +439,7 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
         public ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
-            _process.Exited -= OnExited;
+            if (Volatile.Read(ref _exitObservationActive) != 0) _process.Exited -= OnExited;
             try { _writer.Dispose(); } catch (IOException) { } catch (ObjectDisposedException) { }
             try { _reader.Dispose(); } catch (IOException) { } catch (ObjectDisposedException) { }
             try { _pipe.Dispose(); } catch (IOException) { } catch (ObjectDisposedException) { }
@@ -319,4 +452,11 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
     private sealed record Message(int ProtocolVersion, string Type, string Nonce, string ModuleId, string ManifestVersion,
         string ModuleApiVersion, string ProgramTreeIdentity, int ProcessId, bool IsActive, bool HasWindows,
         string? RuntimeVariant, bool WindowVisible = false);
+}
+
+internal sealed class ModuleProcessBrokerTestHooks
+{
+    public Action<string, ProcessStartInfo>? ConfigureWorkerStart { get; init; }
+    public Action<string, Process>? AfterSessionPublishedBeforeExitObservation { get; init; }
+    public Action<string, IReadOnlyList<ModuleProcessRuntimeState>>? AfterBatchSnapshot { get; init; }
 }

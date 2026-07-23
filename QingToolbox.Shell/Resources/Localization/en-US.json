@@ -136,6 +136,7 @@
   "status.moduleImportFailed": "Failed to import module: {0}",
   "status.moduleRemoved": "Module '{0}' was removed. Its user data was kept.",
   "status.moduleRemoveFailed": "Failed to remove module '{0}': {1}",
+  "status.moduleRemoveAuthorizationFailed": "Module '{0}' program files were removed, but its startup authorization could not be cleaned up.",
   "status.scanFailed": "Failed to scan modules: {0}",
   "status.moduleOperationStarted": "{0} module '{1}'...",
   "status.moduleOperationCompleted": "Module '{0}' {1} completed.",

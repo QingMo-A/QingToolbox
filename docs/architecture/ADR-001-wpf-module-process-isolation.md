@@ -34,6 +34,10 @@ The same complete identity is required on every state response. Process-exit obs
 the exact session object, generation, and process identity so a delayed old-worker callback cannot
 remove a replacement worker. Window suspend/restore is an explicit allowlisted lifecycle operation
 that hides and shows the existing worker-owned WPF window without changing module activation.
+The Session is published before exit observation is enabled, then immediately checked and challenged
+with an authenticated state round-trip. Thus an exit before, during, or immediately after publication
+converges on the same single-fire cleanup path and cannot leave a dead current Session. Multi-worker
+presentation commands use an immutable invocation snapshot and continue after individual failures.
 
 ModuleHost is lifecycle and crash isolation, not a permissions sandbox. It currently runs with the
 same user authority as QingToolbox.

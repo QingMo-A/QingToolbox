@@ -27,6 +27,9 @@ Every subsequent state response is authenticated against that same complete iden
 mismatch fails closed, retires the exact session, and cannot update projected runtime state. Broker
 sessions observe the bound process handle directly; unexpected exits remove only the matching
 session generation, publish one typed exit event, and allow a fresh generation to start safely.
+Exit observation is activated only after the authenticated Session is published. An immediate
+process check plus an authenticated `GetState` round-trip closes both the publication window and the
+loaded-only restore path; an early exit is removed before restore can report success.
 
 ModuleHost loads only the path supplied by the trusted Shell startup contract, verifies the same
 manifest and tree identity, invokes lifecycle methods, and owns the real top-level WPF window.
@@ -49,13 +52,18 @@ type, runtime generation, and process state without recording private paths or m
 Startup authorization is never created, removed, or re-signed by a transaction.
 
 Shell removal of an out-of-process module holds its execution lease while it closes and deactivates
-the view, shuts down the worker, proves process exit and session removal, validates the direct-child
-non-reparse program directory, removes startup authorization, and deletes only program files. User
-module data remains outside that deletion boundary.
+the view, shuts down the worker, proves process exit and session removal, and validates the
+direct-child non-reparse program directory. It deletes program files before changing startup
+authorization. Program deletion failure leaves settings bytes unchanged; authorization cleanup
+failure is reported as explicit partial success without pretending that deleted program files were
+restored. User module data remains outside that deletion boundary.
 
 Notification-area and floating-badge transitions suspend both in-process and worker-owned windows.
 ModuleHost hides and restores the existing view while retaining activation and runtime generation;
-it does not close or recreate the view. A failed suspend keeps the main Shell recovery surface visible.
+it does not close or recreate the view. Batch commands operate on a fixed Session snapshot, attempt
+every worker, and aggregate failures. Both Shell transitions use one compensation coordinator: a
+failed suspend attempts to restore every worker and every in-process window while keeping the main
+Shell recovery surface visible.
 
 ## Discovery, execution, and shutdown gate
 

@@ -25,6 +25,7 @@ namespace QingToolbox.DevTools.TextToolsModuleUpdateCanary;
 internal static class Program
 {
     private const string ModuleId = "qing.texttools";
+    private const string BatchModuleId = "qing.texttools.batch-probe";
     private const string VersionOne = "1.0.0";
     private const string VersionTwo = "2.0.0";
     private const string PinnedSourceCommit = "bc0e57b5a77e3526de157d92a3d300bf3d267e8b";
@@ -194,12 +195,35 @@ internal static class Program
             versionOneOutput,
             paths.UserModulesDirectory,
             VersionOne);
+        SeedBatchProbe(paths);
         AssertInstalledVersion(paths, VersionOne);
+        await coordinator.VerifyEarlyExitPublicationAsync(ModuleId);
         await coordinator.LoadAndActivateInstalledAsync(ModuleId);
         await coordinator.AssertRuntimeAsync(ModuleId, VersionOne, "v1", active: true);
         await coordinator.VerifyWindowSuspendRestoreAsync(ModuleId);
         await coordinator.VerifyUnexpectedExitRecoveryAsync(ModuleId, VersionOne, "v1");
+        await coordinator.VerifyMultiWorkerBatchAsync(ModuleId, BatchModuleId);
         AssertTransactionClean(paths);
+    }
+
+    private static void SeedBatchProbe(ApplicationPaths paths)
+    {
+        var source = Path.Combine(paths.UserModulesDirectory, ModuleId);
+        var destination = Path.Combine(paths.UserModulesDirectory, BatchModuleId);
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var target = Path.Combine(destination, Path.GetRelativePath(source, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target, overwrite: true);
+        }
+        var manifestPath = Path.Combine(destination, "module.json");
+        var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))?.AsObject()
+            ?? throw new InvalidDataException("Batch probe manifest is invalid.");
+        manifest["id"] = BatchModuleId;
+        manifest["name"] = "TextTools Batch Probe";
+        File.WriteAllText(manifestPath,
+            manifest.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
     }
 
     private static async Task RunSuccessAsync(
@@ -910,6 +934,68 @@ internal static class Program
             return restored;
         }
 
+        public async Task VerifyEarlyExitPublicationAsync(string moduleId)
+        {
+            await VerifyFailedPublicationAsync(
+                moduleId,
+                new ModuleProcessBrokerTestHooks
+                {
+                    ConfigureWorkerStart = (_, start) =>
+                    {
+                        start.ArgumentList.Add("--test-exit-after-hello");
+                        start.ArgumentList.Add("true");
+                    }
+                },
+                "ModuleHost.ExitedBeforePublication");
+
+            await VerifyFailedPublicationAsync(
+                moduleId,
+                new ModuleProcessBrokerTestHooks
+                {
+                    AfterSessionPublishedBeforeExitObservation = (_, process) => process.Kill(true)
+                },
+                "ModuleHost.ExitedDuringRestore");
+        }
+
+        private async Task VerifyFailedPublicationAsync(
+            string moduleId,
+            ModuleProcessBrokerTestHooks hooks,
+            string expectedFailureCode)
+        {
+            var exitCount = 0;
+            var exited = new TaskCompletionSource<ModuleProcessExitedEventArgs>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler<ModuleProcessExitedEventArgs> handler = (_, args) =>
+            {
+                if (args.ModuleId != moduleId) return;
+                Interlocked.Increment(ref exitCount);
+                exited.TrySetResult(args);
+            };
+            _broker.ProcessExited += handler;
+            _broker.TestHooks = hooks;
+            try
+            {
+                var restored = await _adapter.RestorePreviousRuntimeStateAsync(
+                    moduleId,
+                    new(false, false, true, false),
+                    CancellationToken.None);
+                Require(!restored, "An early-exit ModuleHost restore reported success.");
+                var observed = await exited.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                Require(exitCount == 1, "An early worker exit was published more than once.");
+                Require(observed.FailureCode == expectedFailureCode ||
+                        (expectedFailureCode == "ModuleHost.ExitedBeforePublication" &&
+                         observed.FailureCode == "ModuleHost.ExitedDuringRestore"),
+                    $"Unexpected early-exit failure code: {observed.FailureCode}.");
+                Require(_broker.GetState(moduleId) is null && !_broker.HasSession(moduleId),
+                    "A dead worker remained published after restore failure.");
+            }
+            finally
+            {
+                _broker.TestHooks = null;
+                _broker.ProcessExited -= handler;
+            }
+        }
+
         public async Task VerifyWindowSuspendRestoreAsync(string moduleId)
         {
             var before = _broker.GetState(moduleId)
@@ -960,6 +1046,87 @@ internal static class Program
                 await AssertRuntimeAsync(moduleId, manifestVersion, variant, active: true);
             }
             finally { _broker.ProcessExited -= handler; }
+        }
+
+        public async Task VerifyMultiWorkerBatchAsync(string primaryModuleId, string batchModuleId)
+        {
+            var desired = new ModuleUpdateRuntimeState(true, true, true, false);
+            Require(await _adapter.RestorePreviousRuntimeStateAsync(batchModuleId, desired, CancellationToken.None),
+                "The second batch worker could not start.");
+            var primary = _broker.GetState(primaryModuleId)!;
+            var secondary = _broker.GetState(batchModuleId)!;
+            Require(primary.WindowVisible && secondary.WindowVisible,
+                "Batch workers did not start with visible windows.");
+
+            var suspendedPeerExit = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler<ModuleProcessExitedEventArgs> suspendedPeerHandler = (_, args) =>
+            {
+                if (args.ModuleId == primaryModuleId && args.RuntimeGeneration == primary.RuntimeGeneration)
+                    suspendedPeerExit.TrySetResult();
+            };
+            _broker.ProcessExited += suspendedPeerHandler;
+            _broker.TestHooks = new ModuleProcessBrokerTestHooks
+            {
+                AfterBatchSnapshot = (command, _) =>
+                {
+                    if (command == "SuspendWindow")
+                        Process.GetProcessById(primary.ProcessId!.Value).Kill(true);
+                }
+            };
+            try
+            {
+                Require(!await _broker.SuspendWindowsAsync(),
+                    "A partial batch suspend reported complete success.");
+                Require(_broker.GetState(batchModuleId) is { WindowVisible: false },
+                    "The healthy worker did not receive SuspendWindow after its peer failed.");
+                await suspendedPeerExit.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            finally
+            {
+                _broker.TestHooks = null;
+                _broker.ProcessExited -= suspendedPeerHandler;
+            }
+
+            Require(await _adapter.RestorePreviousRuntimeStateAsync(primaryModuleId, desired, CancellationToken.None),
+                "The primary worker could not restart after batch suspend failure.");
+            Require(await _broker.SuspendWindowsAsync(), "Batch setup suspend failed.");
+            primary = _broker.GetState(primaryModuleId)!;
+            var restoredPeerExit = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var restoreGeneration = primary.RuntimeGeneration;
+            EventHandler<ModuleProcessExitedEventArgs> restoredPeerHandler = (_, args) =>
+            {
+                if (args.ModuleId == primaryModuleId && args.RuntimeGeneration == restoreGeneration)
+                    restoredPeerExit.TrySetResult();
+            };
+            _broker.ProcessExited += restoredPeerHandler;
+            _broker.TestHooks = new ModuleProcessBrokerTestHooks
+            {
+                AfterBatchSnapshot = (command, _) =>
+                {
+                    if (command == "RestoreWindow")
+                        Process.GetProcessById(primary.ProcessId!.Value).Kill(true);
+                }
+            };
+            try
+            {
+                Require(!await _broker.RestoreWindowsAsync(),
+                    "A partial batch restore reported complete success.");
+                Require(_broker.GetState(batchModuleId) is { WindowVisible: true },
+                    "The healthy worker did not receive RestoreWindow after its peer failed.");
+                await restoredPeerExit.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            finally
+            {
+                _broker.TestHooks = null;
+                _broker.ProcessExited -= restoredPeerHandler;
+            }
+
+            Require(await _adapter.RestorePreviousRuntimeStateAsync(primaryModuleId, desired, CancellationToken.None),
+                "The primary worker could not restart after batch restore failure.");
+            Require(await _adapter.UnloadAsync(batchModuleId, CancellationToken.None),
+                "The batch probe worker could not be unloaded.");
         }
 
         public async Task<bool> RestoreRuntimeStateAsync(

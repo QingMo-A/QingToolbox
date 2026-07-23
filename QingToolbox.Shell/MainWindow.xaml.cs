@@ -22,8 +22,7 @@ public partial class MainWindow : Window
     private readonly ILocalizationService _localization;
     private readonly INotificationAreaIcon _notificationArea;
     private readonly ApplicationExitCoordinator _exitCoordinator;
-    private readonly ModuleWindowManager _moduleWindowManager;
-    private readonly ModuleProcessBroker _moduleProcessBroker;
+    private readonly ModuleWindowPresentationCoordinator _moduleWindowPresentation;
     private readonly StartupPreferenceSnapshot _startupPreferences;
     private readonly StartupHealthJournal _startupJournal;
     private readonly StartupPipelineCoordinator _startupPipeline;
@@ -41,8 +40,7 @@ public partial class MainWindow : Window
         ILocalizationService localization,
         INotificationAreaIcon notificationArea,
         ApplicationExitCoordinator exitCoordinator,
-        ModuleWindowManager moduleWindowManager,
-        ModuleProcessBroker moduleProcessBroker,
+        ModuleWindowPresentationCoordinator moduleWindowPresentation,
         StartupPreferenceSnapshot startupPreferences,
         StartupHealthJournal startupJournal,
         StartupPipelineCoordinator startupPipeline,
@@ -58,8 +56,7 @@ public partial class MainWindow : Window
         _localization = localization;
         _notificationArea = notificationArea;
         _exitCoordinator = exitCoordinator;
-        _moduleWindowManager = moduleWindowManager;
-        _moduleProcessBroker = moduleProcessBroker;
+        _moduleWindowPresentation = moduleWindowPresentation;
         _startupPreferences = startupPreferences;
         _startupJournal = startupJournal;
         _startupPipeline = startupPipeline;
@@ -331,10 +328,8 @@ public partial class MainWindow : Window
             return;
         }
         _notificationAreaRestoreState = WindowState == WindowState.Maximized ? WindowState.Maximized : WindowState.Normal;
-        _moduleWindowManager.SuspendForFloatingBadge();
-        if (!await _moduleProcessBroker.SuspendWindowsAsync())
+        if (!await _moduleWindowPresentation.SuspendAsync())
         {
-            _moduleWindowManager.RestoreAfterFloatingBadge();
             EnsureMainWindowVisible();
             _sessionLog.Warning("ModuleProcess", "Notification-area transition aborted because a worker window could not be suspended.");
             _viewModel.StatusMessage = _localization.GetString("floatingBadge.restoreFailed");
@@ -354,8 +349,7 @@ public partial class MainWindow : Window
         ShowInTaskbar = true;
         Show();
         WindowState = _notificationAreaRestoreState;
-        _moduleWindowManager.RestoreAfterFloatingBadge();
-        if (!await _moduleProcessBroker.RestoreWindowsAsync())
+        if (!await _moduleWindowPresentation.RestoreAsync())
         {
             _sessionLog.Warning("ModuleProcess", "One or more worker windows could not be restored from the notification area.");
             _viewModel.StatusMessage = _localization.GetString("floatingBadge.restoreFailed");
@@ -375,7 +369,7 @@ public partial class MainWindow : Window
         {
             System.Diagnostics.Debug.WriteLine($"Notification area badge transition failed: {exception.GetType().Name}");
             EnsureMainWindowVisible();
-            _moduleWindowManager.RestoreAfterFloatingBadge();
+            await _moduleWindowPresentation.RestoreAsync(CancellationToken.None);
             _viewModel.StatusMessage = _localization.GetString("floatingBadge.restoreFailed");
         }
     }

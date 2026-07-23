@@ -136,6 +136,7 @@
   "status.moduleImportFailed": "导入模块失败：{0}",
   "status.moduleRemoved": "模块“{0}”已删除，用户数据已保留。",
   "status.moduleRemoveFailed": "删除模块“{0}”失败：{1}",
+  "status.moduleRemoveAuthorizationFailed": "模块“{0}”的程序文件已删除，但无法清理其启动授权。",
   "status.scanFailed": "扫描模块失败：{0}",
   "status.moduleOperationStarted": "正在对模块“{1}”执行{0}操作……",
   "status.moduleOperationCompleted": "模块“{0}”的{1}操作已完成。",

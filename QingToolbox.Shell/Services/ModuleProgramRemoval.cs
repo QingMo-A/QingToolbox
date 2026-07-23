@@ -3,9 +3,22 @@ using QingToolbox.Core.Settings;
 
 namespace QingToolbox.Shell.Services;
 
+internal enum ModuleProgramRemovalStatus
+{
+    Completed,
+    ProgramDeletionFailed,
+    AuthorizationCleanupFailed
+}
+
+internal sealed record ModuleProgramRemovalResult(
+    bool ProgramDeleted,
+    bool StartupAuthorizationRemoved,
+    ModuleProgramRemovalStatus Status,
+    string? FailureCode);
+
 internal static class ModuleProgramRemoval
 {
-    public static async Task DeleteAsync(
+    public static Task<ModuleProgramRemovalResult> DeleteAsync(
         string moduleId,
         string moduleDirectory,
         string userModulesDirectory,
@@ -17,24 +30,39 @@ internal static class ModuleProgramRemoval
             throw new InvalidOperationException("The module directory is outside the user module root.");
         EnsureTreeContainsNoLinks(fullDirectory);
 
-        var priorSettings = await settingsService.ReadAsync(cancellationToken);
-        var priorAuthorizations = priorSettings.StartupModules
-            .Where(item => item.ModuleId == moduleId)
-            .ToArray();
-        await settingsService.UpdateAsync(settings =>
-            settings.StartupModules.RemoveAll(item => item.ModuleId == moduleId), cancellationToken);
+        return DeleteCoreAsync(
+            () =>
+            {
+                Directory.Delete(fullDirectory, recursive: true);
+                return Task.CompletedTask;
+            },
+            () => settingsService.UpdateAsync(settings =>
+                settings.StartupModules.RemoveAll(item => item.ModuleId == moduleId), cancellationToken));
+    }
+
+    internal static async Task<ModuleProgramRemovalResult> DeleteCoreAsync(
+        Func<Task> deleteProgram,
+        Func<Task> removeStartupAuthorization)
+    {
         try
         {
-            Directory.Delete(fullDirectory, recursive: true);
+            await deleteProgram();
         }
-        catch
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            await settingsService.UpdateAsync(settings =>
-            {
-                settings.StartupModules.RemoveAll(item => item.ModuleId == moduleId);
-                settings.StartupModules.AddRange(priorAuthorizations);
-            }, CancellationToken.None);
-            throw;
+            return new(false, false, ModuleProgramRemovalStatus.ProgramDeletionFailed,
+                $"ModuleRemoval.ProgramDeletion.{exception.GetType().Name}");
+        }
+
+        try
+        {
+            await removeStartupAuthorization();
+            return new(true, true, ModuleProgramRemovalStatus.Completed, null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new(true, false, ModuleProgramRemovalStatus.AuthorizationCleanupFailed,
+                $"ModuleRemoval.AuthorizationCleanup.{exception.GetType().Name}");
         }
     }
 

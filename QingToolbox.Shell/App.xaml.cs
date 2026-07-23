@@ -153,6 +153,7 @@ public partial class App : Application
             services.AddSingleton<ILocalizationService>(
                 provider => provider.GetRequiredService<LocalizationManager>());
             services.AddSingleton<ModuleWindowManager>();
+            services.AddSingleton<ModuleWindowPresentationCoordinator>();
             services.AddSingleton<FloatingBadgeManager>();
             services.AddSingleton<NotificationAreaService>();
             services.AddSingleton<INotificationAreaIcon>(provider => provider.GetRequiredService<NotificationAreaService>());

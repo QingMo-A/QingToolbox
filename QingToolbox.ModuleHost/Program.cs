@@ -60,6 +60,7 @@ internal static class Program
             .FirstOrDefault(item => item.Key == "QingToolbox.TextToolsCanary.Variant")?.Value;
         await SendAsync(writer, new Message(ProtocolVersion, "Hello", options.Nonce, manifest.Id, manifest.Version,
             options.ModuleApiVersion, treeIdentity, Environment.ProcessId, false, false, variant, null, false));
+        if (options.TestExitAfterHello) return;
 
         Window? window = null;
         WindowSnapshot? suspendedWindow = null;
@@ -75,6 +76,7 @@ internal static class Program
                 throw new UnauthorizedAccessException("IPC identity rejected.");
             switch (request.Type)
             {
+                case "GetState": break;
                 case "Activate": if (!active) { await handle.Module.OnActivateAsync(); active = true; } break;
                 case "Deactivate": if (active) { await handle.Module.OnDeactivateAsync(); active = false; } break;
                 case "OpenWindow":
@@ -136,7 +138,8 @@ internal static class Program
         string ModuleApiVersion, string ProgramTreeIdentity, int ProcessId, bool IsActive, bool HasWindows,
         string? RuntimeVariant, string? Error, bool WindowVisible = false);
     private sealed record Options(string PipeName, string Nonce, string ModuleId, string ManifestVersion,
-        string ModuleApiVersion, string ProgramTreeIdentity, string ModuleDirectory, string DataRoot)
+        string ModuleApiVersion, string ProgramTreeIdentity, string ModuleDirectory, string DataRoot,
+        bool TestExitAfterHello)
     {
         public static Options Parse(string[] args)
         {
@@ -145,7 +148,9 @@ internal static class Program
                 ? value : throw new ArgumentException($"Missing {key}.");
             return new(Get("--pipe"), Get("--nonce"), Get("--module-id"), Get("--manifest-version"),
                 Get("--module-api"), Get("--tree-identity"), Path.GetFullPath(Get("--module-directory")),
-                Path.GetFullPath(Get("--data-root")));
+                Path.GetFullPath(Get("--data-root")),
+                values.TryGetValue("--test-exit-after-hello", out var testExit) &&
+                bool.TryParse(testExit, out var enabled) && enabled);
         }
     }
     private sealed class PassthroughLocalization : ILocalizationService
