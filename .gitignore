@@ -9,6 +9,10 @@ publish/
 *.dll
 *.exe
 *.pdb
+node_modules/
+dist/
+.vite/
+coverage/
 
 # Local QingToolbox development environments
 /.qingtoolbox/

@@ -3,6 +3,7 @@ param(
     [string]$Profile = "Shell",
     [ValidateSet("Debug", "Release")][string]$Configuration = "Debug",
     [switch]$NoBuild,
+    [switch]$EnableWebDevTools,
     [switch]$ValidateOnly
 )
 
@@ -17,9 +18,11 @@ Write-Host "ProfileRoot: $($profileInfo.ProfileRoot)"
 $arguments = @('run','--project',(Join-Path $profileInfo.RepoRoot 'QingToolbox.Shell\QingToolbox.Shell.csproj'),'--configuration',$Configuration)
 if ($NoBuild) { $arguments += '--no-build' }
 $arguments += @('--','--environment','Development','--profile',$Profile,'--repo-root',$profileInfo.RepoRoot)
+if ($EnableWebDevTools) { $arguments += '--web-devtools' }
 if ($ValidateOnly) {
     foreach ($item in $arguments) { Write-Output "Argument: $item" }
     exit 0
 }
+& (Join-Path $PSScriptRoot 'build-web-ui.ps1')
 & dotnet @arguments
 exit $LASTEXITCODE

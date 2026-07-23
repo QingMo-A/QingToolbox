@@ -4,6 +4,14 @@
 >
 > 文档创建时，`toolbox` 的已验证远程基线为 `aaae0475529c570c87c170e773feabd2b779834b`。继续开发前必须重新获取远程状态，不得假设该 SHA 始终是最新版本。
 
+## UI modernization status (authoritative addendum)
+
+- B1: Engineering Complete — Frozen.
+- B2.1: Engineering Complete — Frozen.
+- UI-1: Engineering Complete — Development-only Web Shell foundation.
+- Production and ModuleTest continue to use the native WPF workspace.
+- Next: UI-2 Design System, Surface System, and read-only module center.
+
 ## 1. 项目定位
 
 QingToolbox 是一个面向 Windows 的模块化桌面工具箱。

@@ -115,6 +115,7 @@ try {
         'QingToolbox.StartupMaintenance.exe',
         'Resources\Localization\en-US.json',
         'Resources\Localization\zh-CN.json',
+        'WebUI\index.html',
         'LICENSE',
         'CHANGELOG.md',
         'docs\QMOD_FORMAT.md',

@@ -50,7 +50,7 @@
                 </Button>
             </controls:WindowTitleBar.AdditionalActions>
         </controls:WindowTitleBar>
-        <Grid Grid.Row="1">
+        <Grid x:Name="NativeWorkspace" Grid.Row="1">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto"/>
             <ColumnDefinition Width="*"/>
@@ -1651,5 +1651,9 @@
             </Grid>
         </Grid>
         </Grid>
+        <ContentControl x:Name="DevelopmentWebWorkspace"
+                        Grid.Row="1"
+                        Visibility="Collapsed"
+                        Background="#F7FAFF"/>
     </Grid>
 </Window>

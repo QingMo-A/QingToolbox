@@ -53,6 +53,33 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Setup Node 24
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: QingToolbox.WebUI/package-lock.json
+
+      - name: Restore WebUI
+        working-directory: QingToolbox.WebUI
+        shell: pwsh
+        run: npm ci
+
+      - name: Type check WebUI
+        working-directory: QingToolbox.WebUI
+        shell: pwsh
+        run: npm run typecheck
+
+      - name: Test WebUI
+        working-directory: QingToolbox.WebUI
+        shell: pwsh
+        run: npm run test
+
+      - name: Build WebUI production assets
+        working-directory: QingToolbox.WebUI
+        shell: pwsh
+        run: npm run build
+
       - name: Restore
         shell: pwsh
         run: dotnet restore
@@ -61,9 +88,21 @@ jobs:
         shell: powershell
         run: ./scripts/test-preview-final-head-contracts.ps1
 
+      - name: Build Debug
+        shell: pwsh
+        run: dotnet build -c Debug --no-restore
+
       - name: Build Release
         shell: pwsh
         run: dotnet build -c Release --no-restore
+
+      - name: Run Web Shell smoke test
+        shell: pwsh
+        run: >-
+          dotnet run
+          --project QingToolbox.DevTools.WebShellSmokeTest
+          -c Release
+          --no-build
 
       - name: Run module update smoke test
         shell: pwsh

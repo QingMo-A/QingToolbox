@@ -23,6 +23,10 @@ Read these plans in order unless the user says otherwise:
    - Close the B2.1 verified runtime identity, tree lease, discovery, gate, and shutdown boundaries.
    - **Engineering Complete — Frozen**; UI-1 is now the next planned stage.
 
+5. [`005-development-only-web-shell-foundation.md`](005-development-only-web-shell-foundation.md)
+   - Establish the Development-only WebView2 + Vue 3 workspace and read-only Qing Bridge v1.
+   - Preserve native WPF as the Production/ModuleTest default and failure fallback.
+
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 
 ## Branch rule

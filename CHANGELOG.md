@@ -1,5 +1,12 @@
 # Changelog
 
+- Added a Development-only WebView2 + Vue 3 workspace while preserving native WPF for Production,
+  ModuleTest, and initialization/process failure recovery.
+- Established Qing Bridge protocol v1 with three read-only commands, C# authoritative snapshots,
+  strict local navigation/capability denial, isolated profiles, and explicit mock mode.
+- Added deterministic Web/native tests and build, portable, installer, and CI integration without
+  committing generated assets or weakening frozen B1/B2.1 gates.
+
 - Closed the ModuleHost publication race with publish-then-observe registration, immediate process
   verification, a state round-trip, single-fire exit cleanup, and deterministic early-exit canaries.
 - Made multi-worker suspend/restore exhaustive and unified notification-area and floating-badge

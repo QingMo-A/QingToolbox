@@ -13,6 +13,7 @@
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
     <PackageReference Include="SharpVectors.Wpf" Version="1.8.5" />
   </ItemGroup>
 
@@ -41,5 +42,19 @@
     <UseWPF>true</UseWPF>
     <ApplicationIcon>Assets\Branding\QingToolbox.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup Condition="Exists('..\QingToolbox.WebUI\dist\index.html')">
+    <Content Include="..\QingToolbox.WebUI\dist\**\*">
+      <Link>WebUI\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="ValidateWebShellAssets" BeforeTargets="BeforeBuild"
+          Condition="'$(Configuration)' == 'Release' and '$(DesignTimeBuild)' != 'true'">
+    <Error Condition="!Exists('..\QingToolbox.WebUI\dist\index.html')"
+           Text="Verified WebUI assets are missing. Run scripts/build-web-ui.ps1 before a Release build." />
+  </Target>
 
 </Project>

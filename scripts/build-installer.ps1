@@ -230,6 +230,7 @@ try {
         "docs\sdk\README.md",
         "Resources\Localization\en-US.json",
         "Resources\Localization\zh-CN.json",
+        "WebUI\index.html",
         "QingToolbox.StartupMaintenance.exe",
         "QingToolbox.ModuleHost.exe",
         "host-payload.manifest.json"

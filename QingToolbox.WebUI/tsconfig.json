@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ESNext", "module": "ESNext", "moduleResolution": "Bundler",
+    "strict": true, "jsx": "preserve", "resolveJsonModule": true,
+    "lib": ["ESNext", "DOM", "DOM.Iterable"], "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"]
+}

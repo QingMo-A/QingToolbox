@@ -17,6 +17,7 @@ using System.Reflection;
 using System.Net.Http;
 using System.Net;
 using System.Diagnostics;
+using QingToolbox.Shell.WebShell;
 
 namespace QingToolbox.Shell;
 
@@ -257,6 +258,21 @@ public partial class App : Application
             services.AddSingleton(provider => new ModulePackageDownloadCoordinator(
                 provider.GetRequiredService<IModuleUpdateChecker>(), provider.GetRequiredService<IModulePackageTransport>(),
                 provider.GetRequiredService<ApplicationPaths>().CacheDirectory, provider.GetRequiredService<TimeProvider>(), environment.IsModuleTest));
+            if (environment.IsDevelopment)
+            {
+                services.AddSingleton<WebShellState>();
+                services.AddSingleton<WebNavigationPolicy>();
+                services.AddSingleton<WebAppSnapshotProvider>();
+                services.AddSingleton<IWebCommandHandler, WebPingCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebSnapshotCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebReadyCommandHandler>();
+                services.AddSingleton<WebBridgeDispatcher>();
+                services.AddSingleton<WebBridgeHost>();
+                services.AddSingleton<WebShellInitializer>();
+                services.AddSingleton<IWebShellInitializer>(provider =>
+                    provider.GetRequiredService<WebShellInitializer>());
+            }
+            else services.AddSingleton<IWebShellInitializer, DisabledWebShellInitializer>();
             services.AddSingleton<MainWindowViewModel>();
             services.AddSingleton<MainWindow>();
 

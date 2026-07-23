@@ -5,7 +5,8 @@ public sealed record ApplicationLaunchOptions(
     ApplicationExecutionEnvironment Environment,
     bool EnvironmentWasExplicit,
     StartupLaunchSource StartupSource = StartupLaunchSource.Manual,
-    Guid? StartupTestId = null)
+    Guid? StartupTestId = null,
+    bool EnableWebDevTools = false)
 {
     public ApplicationLaunchOptions(bool isStartupLaunch) : this(
         isStartupLaunch, ApplicationExecutionEnvironment.Production(), false) { }
@@ -13,7 +14,7 @@ public sealed record ApplicationLaunchOptions(
     public static ApplicationLaunchOptions Parse(IEnumerable<string> arguments, bool requireExplicitEnvironment = false)
     {
         var args = arguments.ToArray();
-        bool startup = false, environmentSeen = false, profileSeen = false, repositoryRootSeen = false, sourceSeen = false, testIdSeen = false;
+        bool startup = false, environmentSeen = false, profileSeen = false, repositoryRootSeen = false, sourceSeen = false, testIdSeen = false, webDevTools = false;
         var startupSource = StartupLaunchSource.Manual;
         Guid? startupTestId = null;
         string? profile = null, repositoryRoot = null;
@@ -25,6 +26,12 @@ public sealed record ApplicationLaunchOptions(
             {
                 if (startup) throw new ArgumentException("Duplicate argument: --startup");
                 startup = true;
+                continue;
+            }
+            if (argument.Equals("--web-devtools", StringComparison.OrdinalIgnoreCase))
+            {
+                if (webDevTools) throw new ArgumentException("Duplicate argument: --web-devtools");
+                webDevTools = true;
                 continue;
             }
             string ReadValue()
@@ -83,18 +90,21 @@ public sealed record ApplicationLaunchOptions(
         if (startupSource == StartupLaunchSource.StartupTest && !testIdSeen)
             throw new ArgumentException("StartupTest requires --startup-test-id.");
         if (startup && !sourceSeen) startupSource = StartupLaunchSource.RegistryRun;
+        if (webDevTools && kind != ApplicationEnvironmentKind.Development)
+            throw new ArgumentException("--web-devtools is available only in Development.");
         if (kind == ApplicationEnvironmentKind.Production)
         {
             if (repositoryRootSeen) throw new ArgumentException("Production does not accept --repo-root.");
             if (profileSeen && !string.Equals(profile, "Default", StringComparison.Ordinal))
                 throw new ArgumentException("Production only supports profile Default.");
             return new(startup, ApplicationExecutionEnvironment.Production(), environmentSeen,
-                startup ? startupSource : StartupLaunchSource.Manual, startupTestId);
+                startup ? startupSource : StartupLaunchSource.Manual, startupTestId, false);
         }
         if (startup) throw new ArgumentException("--startup cannot be combined with a non-production environment.");
         if (!profileSeen) throw new ArgumentException("Development and ModuleTest require --profile.");
         if (!repositoryRootSeen) throw new ArgumentException("Development and ModuleTest require --repo-root.");
-        return new(false, ApplicationExecutionEnvironment.Sandbox(kind, profile!, repositoryRoot!), environmentSeen);
+        return new(false, ApplicationExecutionEnvironment.Sandbox(kind, profile!, repositoryRoot!), environmentSeen,
+            StartupLaunchSource.Manual, null, webDevTools);
     }
 }
 

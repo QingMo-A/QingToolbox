@@ -10,6 +10,7 @@ using QingToolbox.Core.Settings;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Shell.Views;
 using QingToolbox.Shell.Windowing;
+using QingToolbox.Shell.WebShell;
 
 namespace QingToolbox.Shell;
 
@@ -28,6 +29,7 @@ public partial class MainWindow : Window
     private readonly StartupPipelineCoordinator _startupPipeline;
     private readonly ModuleTransactionRecoveryCoordinator _moduleRecovery;
     private readonly SessionLogService _sessionLog;
+    private readonly IWebShellInitializer _webShellInitializer;
     private Task? _backgroundStartupTask;
     private int _closeRequestPending;
     private WindowState _notificationAreaRestoreState = WindowState.Normal;
@@ -45,7 +47,8 @@ public partial class MainWindow : Window
         StartupHealthJournal startupJournal,
         StartupPipelineCoordinator startupPipeline,
         ModuleTransactionRecoveryCoordinator moduleRecovery,
-        SessionLogService sessionLog)
+        SessionLogService sessionLog,
+        IWebShellInitializer webShellInitializer)
     {
         InitializeComponent();
 
@@ -62,6 +65,7 @@ public partial class MainWindow : Window
         _startupPipeline = startupPipeline;
         _moduleRecovery = moduleRecovery;
         _sessionLog = sessionLog;
+        _webShellInitializer = webShellInitializer;
         _startupSession.Attach(this, floatingBadgeManager);
         _floatingBadgeManager.Attach(this);
         DataContext = viewModel;
@@ -97,6 +101,7 @@ public partial class MainWindow : Window
         {
             await PresentCriticalStartupAsync();
             _backgroundStartupTask = InitializeApplicationInBackgroundAsync();
+            if (_webShellInitializer.IsAllowed) _ = InitializeDevelopmentWebShellAsync();
         }
         catch (OperationCanceledException) when (_startupSession.State == StartupSessionState.Exiting)
         {
@@ -117,6 +122,28 @@ public partial class MainWindow : Window
                 _viewModel.StatusMessage = _viewModel.Strings["status.startupFailed"];
             }
         }
+    }
+
+    private async Task InitializeDevelopmentWebShellAsync()
+    {
+        var webView = await _webShellInitializer.InitializeAsync(
+            ShowNativeWebShellFallback, _startupSession.LifetimeToken);
+        if (webView is null || _startupSession.State == StartupSessionState.Exiting) return;
+        DevelopmentWebWorkspace.Content = webView;
+        DevelopmentWebWorkspace.Visibility = Visibility.Visible;
+        NativeWorkspace.Visibility = Visibility.Collapsed;
+    }
+
+    private void ShowNativeWebShellFallback(string failureCode)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            DevelopmentWebWorkspace.Content = null;
+            DevelopmentWebWorkspace.Visibility = Visibility.Collapsed;
+            NativeWorkspace.Visibility = Visibility.Visible;
+            _viewModel.StatusMessage =
+                $"Development Web Shell unavailable ({failureCode}); native workspace restored.";
+        });
     }
 
     private async Task PresentCriticalStartupAsync()
@@ -182,6 +209,7 @@ public partial class MainWindow : Window
                 _startupSession.Complete();
                 _startupJournal.Mark(StartupPhase.Ready);
                 _sessionLog.Information("Startup", "Background startup pipeline completed.");
+                _webShellInitializer.PublishSnapshot();
             }
         }
         catch(OperationCanceledException) when(_startupSession.State==StartupSessionState.Exiting){}

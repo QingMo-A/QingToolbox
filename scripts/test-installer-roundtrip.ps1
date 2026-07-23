@@ -148,6 +148,7 @@ try {
         (Join-Path $installDirectory "docs\sdk\README.md"),
         (Join-Path $installDirectory "Resources\Localization\en-US.json"),
         (Join-Path $installDirectory "Resources\Localization\zh-CN.json")
+        (Join-Path $installDirectory "WebUI\index.html")
     )
     foreach ($requiredFile in $requiredFiles) {
         if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
