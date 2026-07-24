@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Gate the Development Web Shell on protocol-v2 ready identity, current WebView generation,
+  authoritative snapshot, and ping instead of source assignment or raw JSON text matching.
+- Add explicit transport disposal, opt-in browser Mock, strict CSP/network denial, deterministic Web
+  asset manifests, and package-time integrity checks.
+- Add a bounded real Development WebView2 canary and verify non-Mock navigation, trusted ready,
+  authoritative snapshot, and ping/pong locally.
+
 - Added a Development-only WebView2 + Vue 3 workspace while preserving native WPF for Production,
   ModuleTest, and initialization/process failure recovery.
 - Established Qing Bridge protocol v1 with three read-only commands, C# authoritative snapshots,

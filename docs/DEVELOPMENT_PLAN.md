@@ -8,9 +8,9 @@
 
 - B1: Engineering Complete — Frozen.
 - B2.1: Engineering Complete — Frozen.
-- UI-1: Engineering Complete — Development-only Web Shell foundation.
+- UI-1: Engineering Complete — Frozen; Development-only Web Shell foundation.
 - Production and ModuleTest continue to use the native WPF workspace.
-- Next: UI-2 Design System, Surface System, and read-only module center.
+- UI-1.1 / Plan 006: Engineering Complete; next is UI-2.
 
 ## 1. 项目定位
 

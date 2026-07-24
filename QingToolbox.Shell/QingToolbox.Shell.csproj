@@ -53,8 +53,9 @@
 
   <Target Name="ValidateWebShellAssets" BeforeTargets="BeforeBuild"
           Condition="'$(Configuration)' == 'Release' and '$(DesignTimeBuild)' != 'true'">
-    <Error Condition="!Exists('..\QingToolbox.WebUI\dist\index.html')"
+    <Error Condition="!Exists('..\QingToolbox.WebUI\dist\index.html') or !Exists('..\QingToolbox.WebUI\dist\qing-web-assets.json')"
            Text="Verified WebUI assets are missing. Run scripts/build-web-ui.ps1 before a Release build." />
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\scripts\verify-web-ui-assets.ps1&quot;" />
   </Target>
 
 </Project>

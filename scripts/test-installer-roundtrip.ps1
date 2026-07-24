@@ -149,12 +149,14 @@ try {
         (Join-Path $installDirectory "Resources\Localization\en-US.json"),
         (Join-Path $installDirectory "Resources\Localization\zh-CN.json")
         (Join-Path $installDirectory "WebUI\index.html")
+        (Join-Path $installDirectory "WebUI\qing-web-assets.json")
     )
     foreach ($requiredFile in $requiredFiles) {
         if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
             throw "Installed payload is missing required file: $requiredFile"
         }
     }
+    & (Join-Path $PSScriptRoot 'verify-packaged-web-assets.ps1') -WebUIRoot (Join-Path $installDirectory 'WebUI')
 
     $uninstaller = Get-ChildItem -LiteralPath $installDirectory `
         -Filter "unins*.exe" -File | Select-Object -First 1

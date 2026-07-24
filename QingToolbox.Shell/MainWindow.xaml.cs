@@ -127,11 +127,30 @@ public partial class MainWindow : Window
     private async Task InitializeDevelopmentWebShellAsync()
     {
         var webView = await _webShellInitializer.InitializeAsync(
-            ShowNativeWebShellFallback, _startupSession.LifetimeToken);
-        if (webView is null || _startupSession.State == StartupSessionState.Exiting) return;
+            AttachPreparingWebShell, ShowReadyWebShell, ShowNativeWebShellFallback, _startupSession.LifetimeToken);
+        _ = webView;
+    }
+
+    private void AttachPreparingWebShell(Microsoft.Web.WebView2.Wpf.WebView2 webView)
+    {
         DevelopmentWebWorkspace.Content = webView;
+        DevelopmentWebWorkspace.Opacity = 0;
+        DevelopmentWebWorkspace.IsHitTestVisible = false;
         DevelopmentWebWorkspace.Visibility = Visibility.Visible;
-        NativeWorkspace.Visibility = Visibility.Collapsed;
+        NativeWorkspace.Visibility = Visibility.Visible;
+    }
+
+    private void ShowReadyWebShell(Microsoft.Web.WebView2.Wpf.WebView2 webView)
+    {
+        if (_startupSession.State == StartupSessionState.Exiting) return;
+        Dispatcher.InvokeAsync(() =>
+        {
+            DevelopmentWebWorkspace.Content = webView;
+            DevelopmentWebWorkspace.Opacity = 1;
+            DevelopmentWebWorkspace.IsHitTestVisible = true;
+            DevelopmentWebWorkspace.Visibility = Visibility.Visible;
+            NativeWorkspace.Visibility = Visibility.Collapsed;
+        });
     }
 
     private void ShowNativeWebShellFallback(string failureCode)
@@ -139,6 +158,8 @@ public partial class MainWindow : Window
         Dispatcher.InvokeAsync(() =>
         {
             DevelopmentWebWorkspace.Content = null;
+            DevelopmentWebWorkspace.Opacity = 0;
+            DevelopmentWebWorkspace.IsHitTestVisible = false;
             DevelopmentWebWorkspace.Visibility = Visibility.Collapsed;
             NativeWorkspace.Visibility = Visibility.Visible;
             _viewModel.StatusMessage =

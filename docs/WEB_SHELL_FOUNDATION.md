@@ -1,68 +1,44 @@
 # Development Web Shell Foundation
 
-QingToolbox UI-1 adds a local WebView2 + Vue workspace for explicit `Development` sessions only.
-It does not migrate product pages or module operations and does not enable a Production Web UI.
+QingToolbox UI-1/UI-1.1 is a Development-only local WebView2 + Vue projection. Production and
+ModuleTest remain native WPF and never initialize this bridge.
 
-## Environment enablement
+## Readiness and fallback
 
-- Development asynchronously attempts Web Shell initialization after native presentation.
-- Production and ModuleTest remain native WPF and create no WebView2/bridge/profile.
-- DevTools require Development plus the explicit `--web-devtools` option.
+The native workspace remains visible while the Web Shell is initializing, navigating, awaiting
+ready, or recovering. The Web workspace replaces it only after exact local navigation, a trusted
+protocol-v2 `web.ready`, matching asset identity, authoritative snapshot response, and ping/pong.
+The ready timeout is 12 seconds; Runtime/controller creation has a separate bounded timeout.
 
-The decision uses `ApplicationExecutionEnvironment`, not environment variables or build symbols.
+A first process failure disposes the old Core, bridge session, and WebView generation before one
+rebuild. A second failure selects native fallback for the session. Shutdown cancellation performs
+cleanup without being reported as Runtime failure.
 
-## WPF / WebView2 boundary
+## Bridge boundary
 
-WPF retains MainWindow, WindowChrome, title/caption/system menus, Snap, notification area, floating
-badge, recovery, shutdown, and module windows. WebView occupies only `DevelopmentWebWorkspace`; the
-complete existing `NativeWorkspace` remains the fallback.
+The only commands are `web.ready`, `app.ping`, and `app.getSnapshot`. Requests are limited to 64 KiB
+and require protocol 2, a UUID, an allowlisted command, an object payload, and exact allowed fields.
+Ready requires `assetBuildId`, `documentReadyState: complete`, and `transportMode: WebView`.
+Generation, captured Core, and session cancellation are checked before any response affects the
+current page. C# remains authoritative and Vue rebuilds Pinia from snapshots.
 
-## Bridge Protocol v1
+## Browser and network boundary
 
-Requests contain protocol version, UUID request ID, command, and payload. Responses match version
-and ID and return structured payload/error. Events are versioned. The only commands are `web.ready`,
-`app.ping`, and `app.getSnapshot`; no side-effect commands or host objects exist.
+Packaged assets require `WebViewTransport`; a missing host API is shown as unavailable. Browser Mock
+is enabled only by explicit Vite mock mode and cannot satisfy the C# ready handler. CSP denies
+network connections, remote scripts/fonts, objects, forms, and frames. WPF independently denies
+external HTTP/HTTPS subresources, new windows, downloads, and permissions. No host object exists.
 
-## Snapshot fields
+## Asset identity
 
-The authoritative C# snapshot contains `environmentKind`, `environmentDisplayName`, `hostVersion`,
-`protocolVersion`, `totalModuleCount`, `validModuleCount`, `runningModuleCount`, and `generatedAt`.
-Pinia is rebuilt from snapshots after ready/reload and never infers runtime state.
+`dist/qing-web-assets.json` records a deterministic asset build ID, package-lock SHA256, source-tree
+SHA256, and exact output paths, sizes, and SHA256 values. It contains no timestamps, machine names,
+users, or absolute paths. Release MSBuild, portable packaging, installer construction, and installed
+payload tests require the manifest and reject stale or modified assets.
 
-## Navigation security
+## Verification status
 
-Assets map read-only to `https://app.qingtoolbox.local/`. HTTP, file URLs, external HTTPS, new
-windows, downloads, and permissions are denied. There are no runtime CDN resources and
-`AddHostObjectToScript` is not used.
-
-## User Data Folder isolation
-
-Only Development creates data under its isolated local profile root and profile name. Profiles do
-not share data. Production, ModuleTest, repository, module, module-data, and production-cache paths
-are not used.
-
-## Resource packaging
-
-The restore/test/build scripts run `npm ci`, typecheck, tests, and Vite build. `dist` and
-`node_modules` are ignored. Release builds reject missing verified assets, and the same `WebUI/`
-output is consumed by portable and installer pipelines. Runtime does not require Node.
-
-## Runtime and process fallback
-
-Missing Runtime/assets, a 12-second initialization timeout, initialization/bridge/navigation failure, or repeated process failure logs
-a redacted diagnostic, disposes WebView2, and restores native WPF without terminating QingToolbox.
-One process failure may receive one controlled reload attempt.
-
-Local manual observation confirmed that a Runtime initialization timeout leaves the Development
-host running and restores native WPF. It did not confirm successful rendering on that machine.
-
-## MockTransport and tests
-
-Browser development explicitly reports `Mock` and never claims C# connectivity. Frontend tests
-cover request/event behavior. `QingToolbox.DevTools.WebShellSmokeTest` verifies host policies without
-screen-driven automation.
-
-## Non-goals
-
-No Production Web Shell, page/module-center migration, module side effects, settings, picker,
-hybrid child window, Web module API, Qing Design System, or Qing Surface System is implemented.
+Implementation and deterministic tests pass locally. A real non-Mock canary passed controller
+creation, exact local navigation, Vue execution, trusted ready, authoritative snapshot, and
+ping/pong. Plan 005 is Engineering Complete — Frozen and Plan 006 is Engineering Complete. UI-2 is
+the next stage after the exact pushed-HEAD gate.

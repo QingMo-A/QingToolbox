@@ -6,7 +6,8 @@ public sealed record ApplicationLaunchOptions(
     bool EnvironmentWasExplicit,
     StartupLaunchSource StartupSource = StartupLaunchSource.Manual,
     Guid? StartupTestId = null,
-    bool EnableWebDevTools = false)
+    bool EnableWebDevTools = false,
+    Guid? WebShellProbeId = null)
 {
     public ApplicationLaunchOptions(bool isStartupLaunch) : this(
         isStartupLaunch, ApplicationExecutionEnvironment.Production(), false) { }
@@ -14,9 +15,10 @@ public sealed record ApplicationLaunchOptions(
     public static ApplicationLaunchOptions Parse(IEnumerable<string> arguments, bool requireExplicitEnvironment = false)
     {
         var args = arguments.ToArray();
-        bool startup = false, environmentSeen = false, profileSeen = false, repositoryRootSeen = false, sourceSeen = false, testIdSeen = false, webDevTools = false;
+        bool startup = false, environmentSeen = false, profileSeen = false, repositoryRootSeen = false, sourceSeen = false, testIdSeen = false, webDevTools = false, webShellProbeSeen = false;
         var startupSource = StartupLaunchSource.Manual;
         Guid? startupTestId = null;
+        Guid? webShellProbeId = null;
         string? profile = null, repositoryRoot = null;
         var kind = ApplicationEnvironmentKind.Production;
         for (var index = 0; index < args.Length; index++)
@@ -79,6 +81,13 @@ public sealed record ApplicationLaunchOptions(
                 if (repositoryRootSeen) throw new ArgumentException("Duplicate argument: --repo-root");
                 repositoryRootSeen = true; repositoryRoot = ReadValue();
             }
+            else if (argument.Equals("--web-shell-probe", StringComparison.OrdinalIgnoreCase))
+            {
+                if (webShellProbeSeen) throw new ArgumentException("Duplicate argument: --web-shell-probe");
+                webShellProbeSeen = true;
+                if (!Guid.TryParse(ReadValue(), out var parsedProbeId)) throw new ArgumentException("Web Shell probe id must be a GUID.");
+                webShellProbeId = parsedProbeId;
+            }
             else throw new ArgumentException($"Unknown argument: {argument}");
         }
 
@@ -92,6 +101,8 @@ public sealed record ApplicationLaunchOptions(
         if (startup && !sourceSeen) startupSource = StartupLaunchSource.RegistryRun;
         if (webDevTools && kind != ApplicationEnvironmentKind.Development)
             throw new ArgumentException("--web-devtools is available only in Development.");
+        if (webShellProbeSeen && kind != ApplicationEnvironmentKind.Development)
+            throw new ArgumentException("--web-shell-probe is available only in Development.");
         if (kind == ApplicationEnvironmentKind.Production)
         {
             if (repositoryRootSeen) throw new ArgumentException("Production does not accept --repo-root.");
@@ -104,7 +115,7 @@ public sealed record ApplicationLaunchOptions(
         if (!profileSeen) throw new ArgumentException("Development and ModuleTest require --profile.");
         if (!repositoryRootSeen) throw new ArgumentException("Development and ModuleTest require --repo-root.");
         return new(false, ApplicationExecutionEnvironment.Sandbox(kind, profile!, repositoryRoot!), environmentSeen,
-            StartupLaunchSource.Manual, null, webDevTools);
+            StartupLaunchSource.Manual, null, webDevTools, webShellProbeId);
     }
 }
 

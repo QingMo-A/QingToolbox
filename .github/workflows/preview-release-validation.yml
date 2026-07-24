@@ -80,6 +80,15 @@ jobs:
         shell: pwsh
         run: npm run build
 
+      - name: Verify WebUI asset identity
+        working-directory: QingToolbox.WebUI
+        shell: pwsh
+        run: npm run verify-assets
+
+      - name: Test WebUI asset tamper rejection
+        shell: pwsh
+        run: ./scripts/test-web-asset-integrity.ps1
+
       - name: Restore
         shell: pwsh
         run: dotnet restore
@@ -103,6 +112,10 @@ jobs:
           --project QingToolbox.DevTools.WebShellSmokeTest
           -c Release
           --no-build
+
+      - name: Run Development Web Shell canary
+        shell: pwsh
+        run: ./scripts/test-development-web-shell.ps1 -Configuration Release -NoBuild
 
       - name: Run module update smoke test
         shell: pwsh

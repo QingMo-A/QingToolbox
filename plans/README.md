@@ -24,8 +24,13 @@ Read these plans in order unless the user says otherwise:
    - **Engineering Complete — Frozen**; UI-1 is now the next planned stage.
 
 5. [`005-development-only-web-shell-foundation.md`](005-development-only-web-shell-foundation.md)
-   - Establish the Development-only WebView2 + Vue 3 workspace and read-only Qing Bridge v1.
+   - Establish the Development-only WebView2 + Vue 3 workspace and read-only Qing Bridge.
    - Preserve native WPF as the Production/ModuleTest default and failure fallback.
+
+6. [`006-web-shell-readiness-and-asset-integrity-gate.md`](006-web-shell-readiness-and-asset-integrity-gate.md)
+   - Gate Web Shell visibility on trusted protocol-v2 readiness, snapshot, and ping.
+   - Bind bridge generations and packaged assets to deterministic identities.
+   - **Engineering Complete** after a real non-Mock navigation/ready/snapshot/ping canary.
 
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 

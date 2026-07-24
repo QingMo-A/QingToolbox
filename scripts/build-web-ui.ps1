@@ -11,3 +11,7 @@ Push-Location $root
 try { & $npm run build; if ($LASTEXITCODE -ne 0) { throw 'WebUI production build failed.' } }
 finally { Pop-Location }
 if (-not (Test-Path -LiteralPath (Join-Path $dist 'index.html') -PathType Leaf)) { throw 'WebUI build did not produce dist/index.html.' }
+Push-Location $root
+try { & $npm run verify-assets; if ($LASTEXITCODE -ne 0) { throw 'WebUI asset verification failed.' } }
+finally { Pop-Location }
+if (-not (Test-Path -LiteralPath (Join-Path $dist 'qing-web-assets.json') -PathType Leaf)) { throw 'WebUI build did not produce the asset manifest.' }

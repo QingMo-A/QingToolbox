@@ -231,6 +231,7 @@ try {
         "Resources\Localization\en-US.json",
         "Resources\Localization\zh-CN.json",
         "WebUI\index.html",
+        "WebUI\qing-web-assets.json",
         "QingToolbox.StartupMaintenance.exe",
         "QingToolbox.ModuleHost.exe",
         "host-payload.manifest.json"
@@ -241,6 +242,7 @@ try {
             throw "Installer payload is missing required file: $relativePath"
         }
     }
+    & (Join-Path $PSScriptRoot 'verify-packaged-web-assets.ps1') -WebUIRoot (Join-Path $payloadDirectory 'WebUI')
     if (-not (Test-Path -LiteralPath $previousHostManifest -PathType Leaf)) {
         throw "Preview 1 host payload baseline is missing: $previousHostManifest"
     }

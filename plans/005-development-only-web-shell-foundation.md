@@ -3,7 +3,8 @@
 ## Status
 
 ```text
-Status: Engineering Complete
+Status: Engineering Complete — Frozen
+Integration Verification: Complete
 Track: UI Modernization / UI-1
 Depends on: Plan 003 and frozen Plan 004
 Environment: Development only
@@ -35,7 +36,7 @@ participates in recovery, discovery, or single-instance gates. Failure restores 
 
 ## Security boundary
 
-Only `https://app.qingtoolbox.local/` may navigate. New windows and downloads are cancelled,
+Only the packaged local asset origin may navigate. New windows and downloads are cancelled,
 permissions are denied, no host object is exposed, and the bridge only permits `web.ready`,
 `app.ping`, and `app.getSnapshot`. Responses never expose paths, command lines, assemblies, journals,
 settings, or service objects.
@@ -48,7 +49,7 @@ the Development diagnostics page, and local styles. Only `WebViewTransport` acce
 
 ## Bridge protocol
 
-Protocol v1 defines request, response, event, snapshot, and structured error envelopes. Requests
+Protocol v2 defines request, response, event, snapshot, ready identity, and structured error envelopes. Requests
 require a UUID and an allowlisted command. Vue rebuilds Pinia from C# snapshots after ready/reload.
 
 ## Build integration
@@ -80,5 +81,4 @@ Do not amend, force push, create a tag/release, or modify the modules branch.
 
 ## Definition of completion
 
-All frontend, build, smoke, portable, installer, upgrade, and exact final-HEAD gates pass; B1/B2.1
-remain frozen; Production remains native; and the pushed workspace is clean.
+Plan 006's real non-Mock canary passed; this foundation is frozen.

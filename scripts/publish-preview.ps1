@@ -116,6 +116,7 @@ try {
         'Resources\Localization\en-US.json',
         'Resources\Localization\zh-CN.json',
         'WebUI\index.html',
+        'WebUI\qing-web-assets.json',
         'LICENSE',
         'CHANGELOG.md',
         'docs\QMOD_FORMAT.md',
@@ -128,6 +129,7 @@ try {
             throw "Portable payload is missing required file: $relativePath"
         }
     }
+    & (Join-Path $PSScriptRoot 'verify-packaged-web-assets.ps1') -WebUIRoot (Join-Path $publishDirectory 'WebUI')
     Add-Type -AssemblyName System.Drawing
     $publishedIcon = [System.Drawing.Icon]::ExtractAssociatedIcon(
         (Join-Path $publishDirectory 'QingToolbox.Shell.exe'))

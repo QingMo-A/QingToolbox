@@ -262,6 +262,7 @@ public partial class App : Application
             {
                 services.AddSingleton<WebShellState>();
                 services.AddSingleton<WebNavigationPolicy>();
+                services.AddSingleton(_ => new WebAssetIdentity(Path.Combine(AppContext.BaseDirectory, "WebUI")));
                 services.AddSingleton<WebAppSnapshotProvider>();
                 services.AddSingleton<IWebCommandHandler, WebPingCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSnapshotCommandHandler>();
