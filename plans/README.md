@@ -35,7 +35,12 @@ Read these plans in order unless the user says otherwise:
 7. [`007-web-shell-activation-attestation-and-runtime-asset-trust.md`](007-web-shell-activation-attestation-and-runtime-asset-trust.md)
    - Require a generation-scoped challenge and acknowledged nonce ping before workspace activation.
    - Anchor runtime assets to manifest identity compiled into the Shell.
-   - **Engineering Complete — Frozen**; next is UI-2.
+   - **Engineering Complete**; post-freeze correctness correction continues in Plan 008.
+
+8. [`008-web-shell-session-semantics-and-immutable-asset-serving.md`](008-web-shell-session-semantics-and-immutable-asset-serving.md)
+   - Separate one-use activation nonces from generation-scoped read-only session tokens.
+   - Serialize recovery and serve verified Web assets only from an immutable memory snapshot.
+   - **Verification Pending**; UI-2 remains blocked until exact-final-HEAD validation succeeds.
 
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 

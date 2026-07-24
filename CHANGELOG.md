@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Upgrade the Development Web Shell to protocol v4 with one-use activation nonces and
+  generation-scoped session tokens shared by the Host and Mock state machines.
+- Serialize WebView recovery and serve verified Web assets exclusively from a bounded immutable
+  memory snapshot with explicit reparse-point rejection.
+- Extend repeated-ping, stale-handler, asset TOCTOU, resource-limit, and PowerShell generator tests.
+
 - Require a protocol-v3, generation-scoped activation challenge and nonce-bound ping before the
   Development Web Shell can replace the native recovery workspace.
 - Compile the verified Web asset manifest identity into the Shell and reject runtime manifest,

@@ -36,16 +36,19 @@ public sealed class WebShellInitializer(
     private CancellationTokenSource? _generationLifetime;
     private Action? _unbindCore;
     private readonly object _recoverySync = new();
+    private readonly WebGenerationSequencer _generationSequence = new();
     private readonly WebProcessFailureGate _processFailureGate = new();
     private Task _recoveryTask = Task.CompletedTask;
+    private Task<WebView2?> _activeGenerationTask = Task.FromResult<WebView2?>(null);
     private CoreWebView2? _currentCore;
     private long _currentGeneration;
     private bool _disposed;
     private bool _navigationSucceeded;
     private bool _readyIdentitySucceeded;
-    private bool _snapshotIssued;
     private bool _snapshotValidated;
     private bool _activationPingSucceeded;
+    private bool _sessionTokenIssued;
+    private bool _repeatedPingSucceeded;
     private bool _workspaceActivated;
     public bool IsAllowed => environment.IsDevelopment;
 
@@ -54,7 +57,7 @@ public sealed class WebShellInitializer(
         if (!IsAllowed || _disposed) return null;
         _preparing = preparing; _ready = ready; _fallback = fallback;
         _lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        try { return await CreateAndHandshakeAsync(_lifetime.Token); }
+        try { _activeGenerationTask = RunGenerationAsync(_lifetime.Token); return await _activeGenerationTask; }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _disposed) { DisposeCurrent(); return null; }
         catch (Exception exception)
         {
@@ -63,15 +66,28 @@ public sealed class WebShellInitializer(
         }
     }
 
+    private async Task<WebView2?> RunGenerationAsync(CancellationToken lifetimeToken)
+    {
+        using var generationLease = await _generationSequence.EnterAsync(lifetimeToken);
+        var generationLifetime = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
+        _generationLifetime = generationLifetime;
+        var completed = false;
+        try { var webView = await CreateAndHandshakeAsync(generationLifetime.Token); completed = true; return webView; }
+        catch (OperationCanceledException) when (generationLifetime.IsCancellationRequested && !lifetimeToken.IsCancellationRequested) { return null; }
+        finally
+        {
+            if (!completed) DisposeCurrent(generationLifetime);
+        }
+    }
+
     private async Task<WebView2> CreateAndHandshakeAsync(CancellationToken cancellationToken)
     {
         _navigationSucceeded = false;
-        _readyIdentitySucceeded = false; _snapshotIssued = false; _snapshotValidated = false; _activationPingSucceeded = false; _workspaceActivated = false;
+        _readyIdentitySucceeded = false; _snapshotValidated = false; _activationPingSucceeded = false; _sessionTokenIssued = false; _repeatedPingSucceeded = false; _workspaceActivated = false;
         state.BeginInitialization();
         WebAssetIdentity assets;
         try { assets = assetIdentity.Value; }
         catch (WebAssetIdentityException exception) { throw new WebAssetIdentityException(exception.Code); }
-        var assetRoot = assets.AssetRoot;
         Directory.CreateDirectory(paths.WebView2UserDataDirectory);
         var webView = new WebView2(); _webView = webView;
         _preparing?.Invoke(webView);
@@ -81,14 +97,21 @@ public sealed class WebShellInitializer(
         await webView.EnsureCoreWebView2Async(coreEnvironment).WaitAsync(EnvironmentTimeout, cancellationToken);
         var core = webView.CoreWebView2;
         var generation = bridge.Attach(core);
-        _generationLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _currentCore = core; _currentGeneration = generation;
-        _processFailureGate.Bind(core, generation, _generationLifetime.Token);
-        _unbindCore = ConfigureCore(core, assets, generation, _generationLifetime.Token);
+        _processFailureGate.Bind(core, generation, cancellationToken);
+        _unbindCore = ConfigureCore(core, assets, generation, cancellationToken);
         var activationAccepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        void OnChallenge(long acceptedGeneration) { if (acceptedGeneration == generation) { _readyIdentitySucceeded = true; _snapshotIssued = true; } }
+        var repeatedPingAccepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var repeatedPingCount = 0;
+        void OnChallenge(long acceptedGeneration) { if (acceptedGeneration == generation) _readyIdentitySucceeded = true; }
         void OnActivation(long acceptedGeneration) { if (acceptedGeneration == generation) { _snapshotValidated = true; _activationPingSucceeded = true; activationAccepted.TrySetResult(); } }
-        bridge.ReadyChallengeIssued += OnChallenge; bridge.ActivationAccepted += OnActivation;
+        void OnPing(long acceptedGeneration, bool issuedSessionToken)
+        {
+            if (acceptedGeneration != generation) return;
+            if (issuedSessionToken) _sessionTokenIssued = true;
+            else if (++repeatedPingCount >= 2) { _repeatedPingSucceeded = true; repeatedPingAccepted.TrySetResult(); }
+        }
+        bridge.ReadyChallengeIssued += OnChallenge; bridge.ActivationAccepted += OnActivation; bridge.PingAccepted += OnPing;
         try
         {
             state.BeginNavigation();
@@ -113,6 +136,7 @@ public sealed class WebShellInitializer(
             state.AwaitReady();
             log.Information("WebShell", "Local navigation completed; awaiting acknowledged activation.");
             await activationAccepted.Task.WaitAsync(ReadyTimeout, cancellationToken);
+            await repeatedPingAccepted.Task.WaitAsync(ReadyTimeout, cancellationToken);
             state.MarkReady();
             log.Information("WebShell", $"Development Web Shell ready; protocol={WebBridgeProtocol.Version}; generation={generation}.");
             _ready?.Invoke(webView);
@@ -121,12 +145,11 @@ public sealed class WebShellInitializer(
                 CompleteProbe(probeId, null);
             return webView;
         }
-        finally { bridge.ReadyChallengeIssued -= OnChallenge; bridge.ActivationAccepted -= OnActivation; }
+        finally { bridge.ReadyChallengeIssued -= OnChallenge; bridge.ActivationAccepted -= OnActivation; bridge.PingAccepted -= OnPing; }
     }
 
     private Action ConfigureCore(CoreWebView2 core, WebAssetIdentity assets, long generation, CancellationToken generationToken)
     {
-        core.SetVirtualHostNameToFolderMapping(WebNavigationPolicy.VirtualHost, assets.AssetRoot, CoreWebView2HostResourceAccessKind.DenyCors);
         core.Settings.AreDefaultContextMenusEnabled = false; core.Settings.IsStatusBarEnabled = false;
         core.Settings.IsPasswordAutosaveEnabled = false; core.Settings.IsGeneralAutofillEnabled = false;
         core.Settings.AreDevToolsEnabled = environment.IsDevelopment && launchOptions.EnableWebDevTools;
@@ -142,16 +165,17 @@ public sealed class WebShellInitializer(
         core.AddWebResourceRequestedFilter("https://*/*", CoreWebView2WebResourceContext.All);
         void OnWebResourceRequested(object? _, CoreWebView2WebResourceRequestedEventArgs args)
         {
-            if (!Uri.TryCreate(args.Request.Uri, UriKind.Absolute, out var uri) || !navigation.IsAllowed(uri))
-            { log.Warning("WebShell", "External web resource request denied."); args.Response = core.Environment.CreateWebResourceResponse(null, 403, "Forbidden", "Content-Type: text/plain"); }
-            else
+            try
             {
-                if (!assets.TryResolve(uri.AbsolutePath, out var file))
+                if (!Uri.TryCreate(args.Request.Uri, UriKind.Absolute, out var uri) || !navigation.IsAllowed(uri))
+                { log.Warning("WebShell", "External web resource request denied."); args.Response = core.Environment.CreateWebResourceResponse(null, 403, "Forbidden", "Content-Type: text/plain"); return; }
+                if (!assets.TryResolve(uri.AbsolutePath, out var asset))
                 { args.Response = core.Environment.CreateWebResourceResponse(null, 404, "Not Found", "Content-Type: text/plain"); return; }
-                var contentType = Path.GetExtension(file).ToLowerInvariant() switch { ".html" => "text/html; charset=utf-8", ".js" => "text/javascript; charset=utf-8", ".css" => "text/css; charset=utf-8", ".json" => "application/json; charset=utf-8", ".svg" => "image/svg+xml", _ => "application/octet-stream" };
-                args.Response = core.Environment.CreateWebResourceResponse(File.OpenRead(file), 200, "OK", $"Content-Type: {contentType}\r\nCache-Control: no-store");
+                args.Response = core.Environment.CreateWebResourceResponse(asset.OpenRead(), 200, "OK", $"Content-Type: {asset.ContentType}\r\nCache-Control: no-store");
                 log.Information("WebShell", $"Local web resource served; path={uri.AbsolutePath}.");
             }
+            catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or IOException or System.Runtime.InteropServices.COMException)
+            { try { args.Response = core.Environment.CreateWebResourceResponse(null, 500, "Internal Server Error", "Content-Type: text/plain"); } catch { } log.Warning("WebShell", "Local web resource request failed safely."); }
         }
         void OnNewWindow(object? _, CoreWebView2NewWindowRequestedEventArgs args) => args.Handled = true;
         void OnDownload(object? _, CoreWebView2DownloadStartingEventArgs args) => args.Cancel = true;
@@ -174,20 +198,25 @@ public sealed class WebShellInitializer(
         lock (_recoverySync)
         {
             if (!_processFailureGate.TryAccept(core, generation, generationToken, _disposed)) return;
-            _recoveryTask = RecoverProcessAsync(generation, kind);
+            var superseded = _activeGenerationTask;
+            _generationLifetime?.Cancel();
+            _recoveryTask = RecoverProcessAsync(generation, kind, superseded);
         }
     }
 
-    private async Task RecoverProcessAsync(long generation, CoreWebView2ProcessFailedKind kind)
+    private async Task RecoverProcessAsync(long generation, CoreWebView2ProcessFailedKind kind, Task<WebView2?> superseded)
     {
         try
         {
             log.Warning("WebShell", $"Current WebView generation failed; generation={generation}; kind={kind}.");
             _fallback?.Invoke("WebShell.Recovering");
             if (!state.TryBeginProcessRecovery()) { FallBack("WebShell.ProcessFailure.Repeated"); return; }
-            DisposeCurrent();
             if (_lifetime is null) return;
-            await CreateAndHandshakeAsync(_lifetime.Token);
+            await superseded;
+            if (_disposed || _lifetime.IsCancellationRequested) return;
+            DisposeCurrent();
+            _activeGenerationTask = RunGenerationAsync(_lifetime.Token);
+            await _activeGenerationTask;
         }
         catch (OperationCanceledException) when (_lifetime?.IsCancellationRequested != false) { }
         catch { FallBack("WebShell.ProcessFailure.RecoveryFailed"); }
@@ -204,8 +233,9 @@ public sealed class WebShellInitializer(
     {
         var result = new { probeId, protocolVersion = WebBridgeProtocol.Version,
             assetBuildId = assetIdentity.IsValueCreated ? assetIdentity.Value.AssetBuildId : WebAssetBuildInfo.ExpectedAssetBuildId, navigationSucceeded = _navigationSucceeded,
-            readyIdentitySucceeded = _readyIdentitySucceeded, snapshotIssued = _snapshotIssued, snapshotValidated = _snapshotValidated,
-            activationPingSucceeded = _activationPingSucceeded, workspaceActivated = _workspaceActivated,
+            readyChallengeIssued = _readyIdentitySucceeded, snapshotValidated = _snapshotValidated,
+            activationPingSucceeded = _activationPingSucceeded, sessionTokenIssued = _sessionTokenIssued,
+            repeatedPingSucceeded = _repeatedPingSucceeded, workspaceActivated = _workspaceActivated,
             usedMockTransport = false, failureCode };
         Directory.CreateDirectory(paths.TempDirectory);
         var output = Path.Combine(paths.TempDirectory, $"web-shell-probe-{probeId:D}.json");
@@ -217,13 +247,14 @@ public sealed class WebShellInitializer(
         state.FallBack(code); DisposeCurrent(); _fallback?.Invoke(code);
         if (launchOptions.WebShellProbeId is { } probeId) CompleteProbe(probeId, code);
     }
-    private void DisposeCurrent()
+    private void DisposeCurrent(CancellationTokenSource? owner = null)
     {
+        if (owner is not null && !ReferenceEquals(owner, _generationLifetime)) { owner.Dispose(); return; }
         _generationLifetime?.Cancel(); _generationLifetime?.Dispose(); _generationLifetime = null;
         _processFailureGate.Unbind();
         _unbindCore?.Invoke(); _unbindCore = null; bridge.Detach(); _webView?.Dispose(); _webView = null;
         _currentCore = null; _currentGeneration = 0;
     }
     public void PublishSnapshot() { if (state.IsReady) bridge.PublishSnapshot(); }
-    public void Dispose() { _disposed = true; state.BeginDisposal(); _lifetime?.Cancel(); _lifetime?.Dispose(); DisposeCurrent(); state.MarkDisposed(); }
+    public void Dispose() { _disposed = true; state.BeginDisposal(); _lifetime?.Cancel(); DisposeCurrent(); _lifetime?.Dispose(); state.MarkDisposed(); }
 }

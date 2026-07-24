@@ -8,7 +8,8 @@ public sealed class WebBridgeDispatcher(IEnumerable<IWebCommandHandler> handlers
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly IReadOnlyDictionary<string, IWebCommandHandler> _handlers = handlers.ToDictionary(x => x.Command, StringComparer.Ordinal);
 
-    public async Task<WebBridgeDispatchResult> DispatchAsync(string json, CancellationToken cancellationToken = default)
+    public async Task<WebBridgeDispatchResult> DispatchAsync(string json, WebBridgeRequestContext context,
+        CancellationToken cancellationToken = default)
     {
         if (Encoding.UTF8.GetByteCount(json) > WebBridgeProtocol.MaximumRequestBytes)
             return Invalid("", "RequestTooLarge", "The request exceeds the size limit.");
@@ -25,12 +26,13 @@ public sealed class WebBridgeDispatcher(IEnumerable<IWebCommandHandler> handlers
             return Invalid(requestId, "InvalidPayload", "The command payload is invalid.");
         try
         {
-            var payload = await handler.HandleAsync(request.Payload, cancellationToken);
+            context.SessionCancellation.ThrowIfCancellationRequested();
+            var payload = await handler.HandleAsync(request.Payload, context, cancellationToken);
             var response = new WebBridgeResponse(WebBridgeProtocol.Version, requestId, true, payload, null);
             return new(request.Command, requestId, request.ProtocolVersion, request.Payload, response);
         }
         catch (WebBridgeValidationException exception) { return Invalid(requestId, exception.Code, exception.Message); }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return Invalid(requestId, "Cancelled", "The request was cancelled."); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || context.SessionCancellation.IsCancellationRequested) { return Invalid(requestId, "Cancelled", "The request was cancelled."); }
         catch { return Invalid(requestId, "HandlerFailed", "The host could not complete the request."); }
     }
 

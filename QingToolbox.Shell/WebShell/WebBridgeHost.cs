@@ -15,6 +15,7 @@ public sealed class WebBridgeHost(WebBridgeDispatcher dispatcher, WebAppSnapshot
     private bool _disposed;
     public event Action<long>? ReadyChallengeIssued;
     public event Action<long>? ActivationAccepted;
+    public event Action<long, bool>? PingAccepted;
     public event Action<string, long>? CommandSucceeded;
     public long Generation { get { lock (_sync) return _generation; } }
 
@@ -46,12 +47,19 @@ public sealed class WebBridgeHost(WebBridgeDispatcher dispatcher, WebAppSnapshot
         }
         if (!Uri.TryCreate(args.Source, UriKind.Absolute, out var source) || !navigation.IsAllowed(source))
         { log.Warning("WebShell", "Bridge request rejected; failure=UntrustedSource."); return; }
-        var result = await dispatcher.DispatchAsync(args.WebMessageAsJson, token);
+        if (!IsCurrent(core, generation, token)) return;
+        var context = new WebBridgeRequestContext(generation, token);
+        var result = await dispatcher.DispatchAsync(args.WebMessageAsJson, context, token);
         if (!IsCurrent(core, generation, token)) return;
         Post(core, result.Response);
         if (result.Response.Success && result.ValidatedCommand is not null) CommandSucceeded?.Invoke(result.ValidatedCommand, generation);
         if (result.Response.Success && result.ValidatedCommand == "web.ready") ReadyChallengeIssued?.Invoke(generation);
-        if (result.Response.Success && result.ValidatedCommand == "app.ping" && activation.IsActivated(generation)) ActivationAccepted?.Invoke(generation);
+        if (result.Response.Success && result.ValidatedCommand == "app.ping" && activation.IsActivated(generation))
+        {
+            var issued = result.Response.Payload is WebPingResponse ping && ping.SessionToken is not null;
+            PingAccepted?.Invoke(generation, issued);
+            if (issued) ActivationAccepted?.Invoke(generation);
+        }
     }
 
     private bool IsCurrent(CoreWebView2 core, long generation, CancellationToken token)
@@ -72,7 +80,7 @@ public sealed class WebBridgeHost(WebBridgeDispatcher dispatcher, WebAppSnapshot
     private void DetachCore()
     {
         _session?.Cancel(); _session?.Dispose(); _session = null;
-        activation.Invalidate();
+        activation.Invalidate(_generation);
         if (_core is not null) _core.WebMessageReceived -= OnMessageReceived;
         _core = null;
     }

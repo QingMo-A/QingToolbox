@@ -89,6 +89,10 @@ jobs:
         shell: pwsh
         run: ./scripts/test-web-asset-integrity.ps1
 
+      - name: Verify PowerShell 5.1 Web asset generation
+        shell: pwsh
+        run: ./scripts/test-web-asset-generator-compatibility.ps1
+
       - name: Restore
         shell: pwsh
         run: dotnet restore

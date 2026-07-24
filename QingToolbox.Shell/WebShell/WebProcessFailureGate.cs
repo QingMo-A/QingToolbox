@@ -42,3 +42,12 @@ public sealed class WebProcessFailureGate
         }
     }
 }
+
+internal sealed class WebGenerationSequencer
+{
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    public async ValueTask<IDisposable> EnterAsync(CancellationToken cancellationToken)
+    { await _gate.WaitAsync(cancellationToken); return new Lease(_gate); }
+    private sealed class Lease(SemaphoreSlim gate) : IDisposable
+    { private int _released; public void Dispose() { if (Interlocked.Exchange(ref _released, 1) == 0) gate.Release(); } }
+}
