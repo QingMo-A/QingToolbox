@@ -67,6 +67,32 @@ Require(!cancelledResult.Response.Success && cancelledResult.Response.Error?.Cod
 Require(!WebBridgeHost.TryPost(() => throw new ObjectDisposedException("core")), "Disposed Core posts must be isolated.");
 Require(!WebBridgeHost.TryPost(() => throw new System.Runtime.InteropServices.COMException()), "Failed COM Core posts must be isolated.");
 
+Console.WriteLine("Verifying activated read-only module projection...");
+var moduleActivation = new WebActivationSession();
+moduleActivation.Begin(11);
+var moduleNonce = moduleActivation.IssueChallenge(11, CancellationToken.None);
+_ = moduleActivation.AcceptActivationPing(11, moduleNonce, CancellationToken.None);
+var source = new SnapshotSource();
+var moduleHandler = new WebModuleSnapshotCommandHandler(
+    new WebModuleSnapshotProvider(source, TimeProvider.System), moduleActivation);
+var moduleDispatcher = new WebBridgeDispatcher([moduleHandler]);
+var moduleRequest = JsonSerializer.Serialize(new { protocolVersion = 4, requestId = Guid.NewGuid(), command = "modules.getSnapshot", payload = new { } });
+var moduleResult = await moduleDispatcher.DispatchAsync(moduleRequest, new(11, CancellationToken.None));
+Require(moduleResult.Response.Success && source.ReadCount == 1, "Activated module projection must read the existing source once.");
+var projectedJson = JsonSerializer.Serialize(moduleResult.Response.Payload);
+Require(!projectedJson.Contains("ModuleDirectory", StringComparison.OrdinalIgnoreCase) &&
+        !projectedJson.Contains("ManifestPath", StringComparison.OrdinalIgnoreCase) &&
+        !projectedJson.Contains("Entry", StringComparison.OrdinalIgnoreCase) &&
+        !projectedJson.Contains(root, StringComparison.OrdinalIgnoreCase), "Module DTO must not expose execution paths.");
+var beforeActivation = new WebActivationSession(); beforeActivation.Begin(12);
+var rejected = await new WebBridgeDispatcher([new WebModuleSnapshotCommandHandler(
+    new WebModuleSnapshotProvider(new SnapshotSource(), TimeProvider.System), beforeActivation)])
+    .DispatchAsync(moduleRequest, new(12, CancellationToken.None));
+Require(!rejected.Response.Success && rejected.Response.Error?.Code == "BridgeNotActivated", "Module projection must require an activated session.");
+var extraPayload = JsonSerializer.Serialize(new { protocolVersion = 4, requestId = Guid.NewGuid(), command = "modules.getSnapshot", payload = new { path = root } });
+var extraResult = await moduleDispatcher.DispatchAsync(extraPayload, new(11, CancellationToken.None));
+Require(!extraResult.Response.Success && extraResult.Response.Error?.Code == "InvalidPayload", "Module projection must reject additional payload properties.");
+
 Console.WriteLine("Verifying immutable runtime assets, TOCTOU resistance and limits...");
 var sourceAssets = Path.Combine(AppContext.BaseDirectory, "WebUI");
 var valid = new WebAssetIdentity(sourceAssets);
@@ -105,4 +131,14 @@ file sealed class EchoHandler : IWebCommandHandler
     public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string>();
     public Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context, CancellationToken token)
     { context.SessionCancellation.ThrowIfCancellationRequested(); return Task.FromResult<object>(new { generation = context.Generation }); }
+}
+file sealed class SnapshotSource : IWebModuleSnapshotSource
+{
+    public int ReadCount { get; private set; }
+    public IReadOnlyList<WebModuleSnapshotItem> ReadModules()
+    {
+        ReadCount++;
+        return [new("qing.test", "Test", "Safe description", "1.0.0", "Qing", "OutOfProcess", "Manual",
+            "Running", true, 0, [], ["Clipboard"], "0.2.0-alpha", true)];
+    }
 }

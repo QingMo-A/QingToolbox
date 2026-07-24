@@ -18,6 +18,10 @@ public sealed record WebReadyChallenge(string ActivationNonce, WebAppSnapshot Sn
 public sealed record WebAppSnapshot(string EnvironmentKind, string EnvironmentDisplayName, string HostVersion,
     int ProtocolVersion, int TotalModuleCount, int ValidModuleCount, int RunningModuleCount, DateTimeOffset GeneratedAt);
 public sealed record WebPingResponse(bool Pong, DateTimeOffset HostTime, string? SessionToken, bool Activated);
+public sealed record WebModuleSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList<WebModuleSnapshotItem> Modules);
+public sealed record WebModuleSnapshotItem(string Id, string DisplayName, string DisplayDescription, string Version,
+    string Author, string RuntimeType, string LoadMode, string RuntimeState, bool IsValid, int ErrorCount,
+    IReadOnlyList<string> Errors, IReadOnlyList<string> Permissions, string MinimumHostVersion, bool IsUserInstalled);
 public sealed record WebAssetManifest(int SchemaVersion, string AssetBuildId, string PackageLockSha256,
     string SourceTreeSha256, IReadOnlyList<WebAssetFile> OutputFiles);
 public sealed record WebAssetFile(string Path, long Size, string Sha256);

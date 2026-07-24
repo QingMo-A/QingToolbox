@@ -1,0 +1,1 @@
+<script setup lang="ts">import{useToastStore}from'../../app/toastStore';const toast=useToastStore()</script><template><Transition name="toast"><div v-if="toast.visible" class="q-toast" :class="`is-${toast.kind}`" role="status">{{toast.message}}</div></Transition></template>

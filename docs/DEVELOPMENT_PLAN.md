@@ -13,6 +13,8 @@
 - UI-1.1 / Plan 006: Engineering Complete — Frozen.
 - UI-1.2 / Plan 007: Engineering Complete — Frozen.
 - UI-1.3 / Plan 008: Engineering Complete — Frozen; next is UI-2.
+- UI-2A / Plan 009: Implementation Complete; Development-only read-only module center and visual foundation.
+- UI-2A preserves protocol v4 and projects authoritative C# module state without module side effects.
 
 ## 1. 项目定位
 

@@ -266,8 +266,11 @@ public partial class App : Application
                     new WebAssetIdentity(Path.Combine(AppContext.BaseDirectory, "WebUI"), AppContext.BaseDirectory), true));
                 services.AddSingleton<WebActivationSession>();
                 services.AddSingleton<WebAppSnapshotProvider>();
+                services.AddSingleton<IWebModuleSnapshotSource, WebModuleSnapshotSource>();
+                services.AddSingleton<WebModuleSnapshotProvider>();
                 services.AddSingleton<IWebCommandHandler, WebPingCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSnapshotCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebModuleSnapshotCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebReadyCommandHandler>();
                 services.AddSingleton<WebBridgeDispatcher>();
                 services.AddSingleton<WebBridgeHost>();

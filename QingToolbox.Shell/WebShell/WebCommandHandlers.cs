@@ -39,6 +39,17 @@ public sealed class WebSnapshotCommandHandler(WebAppSnapshotProvider snapshots, 
     { activation.RequireActivated(context.Generation, context.SessionCancellation); return Task.FromResult<object>(snapshots.Create()); }
 }
 
+public sealed class WebModuleSnapshotCommandHandler(WebModuleSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "modules.getSnapshot";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string>();
+    public Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        return Task.FromResult<object>(snapshots.Create());
+    }
+}
+
 public sealed class WebReadyCommandHandler(WebAppSnapshotProvider snapshots, Lazy<WebAssetIdentity> assets,
     WebActivationSession activation) : IWebCommandHandler
 {

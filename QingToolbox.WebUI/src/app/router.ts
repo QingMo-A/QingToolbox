@@ -1,3 +1,9 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import DevelopmentHomePage from '../pages/DevelopmentHomePage.vue'
-export const router = createRouter({ history: createWebHashHistory(), routes: [{ path: '/', component: DevelopmentHomePage }] })
+import HomePage from '../pages/HomePage.vue'
+import ModulesPage from '../pages/ModulesPage.vue'
+import DevelopmentDiagnosticsPage from '../pages/DevelopmentHomePage.vue'
+export const router = createRouter({ history: createWebHashHistory(), scrollBehavior:()=>({top:0}), routes: [
+  { path: '/', component: HomePage, meta:{title:'Home'} },
+  { path: '/modules', component: ModulesPage, meta:{title:'Modules'} },
+  { path: '/diagnostics', component: DevelopmentDiagnosticsPage, meta:{title:'Development diagnostics'} }
+] })

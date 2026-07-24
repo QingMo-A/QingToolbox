@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added a modern Development Web Shell workspace with Home, collapsible navigation, retained
+  diagnostics, local system/light/dark preview, and a focused token-based Qing component foundation.
+- Added an activated-session-only `modules.getSnapshot` projection and read-only module list,
+  search, state filters, safe details drawer, refresh feedback, loading, empty, and error states.
+- Kept the module projection free of paths and lifecycle commands and added focused frontend and C#
+  coverage for validation, filtering, repeated refresh, accessible drawer behavior, and bridge gates.
+
 - Upgrade the Development Web Shell to protocol v4 with one-use activation nonces and
   generation-scoped session tokens shared by the Host and Mock state machines.
 - Serialize WebView recovery and serve verified Web assets exclusively from a bounded immutable

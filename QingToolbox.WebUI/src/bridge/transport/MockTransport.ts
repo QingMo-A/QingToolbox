@@ -20,6 +20,7 @@ export class MockTransport implements Transport {
       return this.ok(message,{pong:true,hostTime:new Date().toISOString(),activated:true})
     }
     if(message.command==='app.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');return this.ok(message,snapshot)}
+    if(message.command==='modules.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');return this.ok(message,{generatedAt:new Date().toISOString(),modules:[{id:'qing.hello',displayName:'Hello Module',displayDescription:'A small example module for validating the Qing workspace.',version:'0.1.0',author:'QingMo-A',runtimeType:'InProcess',loadMode:'Manual',runtimeState:'NotLoaded',isValid:true,errorCount:0,errors:[],permissions:[],minimumHostVersion:'0.2.0-alpha',isUserInstalled:false},{id:'qing.texttools',displayName:'Text Tools',displayDescription:'Lightweight text conversion and formatting tools.',version:'0.1.0',author:'QingMo-A',runtimeType:'OutOfProcess',loadMode:'Manual',runtimeState:'Running',isValid:true,errorCount:0,errors:[],permissions:['Clipboard'],minimumHostVersion:'0.2.0-alpha',isUserInstalled:true}]})}
     return this.error(message,'UnknownCommand')
   }
   subscribe(listener:(event:BridgeEvent)=>void){this.listeners.add(listener);return()=>this.listeners.delete(listener)} emit(event:BridgeEvent){this.listeners.forEach(x=>x(event))}

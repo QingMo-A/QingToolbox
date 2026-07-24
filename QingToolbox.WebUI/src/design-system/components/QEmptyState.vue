@@ -1,0 +1,1 @@
+<script setup lang="ts">defineProps<{title:string;description:string}>()</script><template><div class="q-empty"><div class="q-empty-icon">◇</div><h3>{{title}}</h3><p>{{description}}</p><slot/></div></template>

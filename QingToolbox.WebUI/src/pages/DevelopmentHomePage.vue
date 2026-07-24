@@ -8,7 +8,7 @@ async function ping() { const started = performance.now(); try { await app.ping(
 async function snapshot() { try { store.rebuild(await app.getSnapshot()) } catch (e) { store.error = String(e) } }
 function reload() { window.location.reload() }
 </script>
-<template><main>
+<template><main class="diagnostics-page">
   <header><p class="eyebrow">DEVELOPMENT ONLY</p><h1>QingToolbox Development Web Shell</h1><p>A read-only projection of authoritative C# host state.</p></header>
   <section class="status" aria-live="polite"><span :class="{ ok: store.bridge === 'Connected' }">{{ store.bridge }}</span><strong>{{ store.mode }} mode</strong><span v-if="store.error">{{ store.error }}</span></section>
   <section class="grid" v-if="store.snapshot">

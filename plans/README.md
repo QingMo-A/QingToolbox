@@ -42,6 +42,11 @@ Read these plans in order unless the user says otherwise:
    - Serialize recovery and serve verified Web assets only from an immutable memory snapshot.
    - **Engineering Complete — Frozen**; UI-1 is frozen and UI-2 is next.
 
+9. [`009-ui-2a-read-only-module-center-and-visual-foundation.md`](009-ui-2a-read-only-module-center-and-visual-foundation.md)
+   - Establish the first Qing design tokens and reusable visible workspace primitives.
+   - Add Home, read-only Modules and details, retained Diagnostics, and local theme preview.
+   - **Implementation Complete**; no module lifecycle or settings mutation was introduced.
+
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 
 ## Branch rule
