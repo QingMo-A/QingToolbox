@@ -10,4 +10,5 @@ export class RequestClient {
     if (!response.success) throw new Error(`${response.error?.code ?? 'BridgeError'}: ${response.error?.message ?? 'Request failed.'}`)
     return response.payload as T
   }
+  dispose() { this.transport.dispose() }
 }

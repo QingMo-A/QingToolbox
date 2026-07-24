@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Require a protocol-v3, generation-scoped activation challenge and nonce-bound ping before the
+  Development Web Shell can replace the native recovery workspace.
+- Compile the verified Web asset manifest identity into the Shell and reject runtime manifest,
+  file-set, file-hash, extra-file, or self-consistent replacement tampering before WebView creation.
+- Bind process-failure recovery to Core/Generation/Session and coalesce duplicate stale failures.
+
 - Gate the Development Web Shell on protocol-v2 ready identity, current WebView generation,
   authoritative snapshot, and ping instead of source assignment or raw JSON text matching.
 - Add explicit transport disposal, opt-in browser Mock, strict CSP/network denial, deterministic Web

@@ -5,7 +5,7 @@ using QingToolbox.Shell.Services;
 namespace QingToolbox.Shell.WebShell;
 
 public sealed class WebBridgeHost(WebBridgeDispatcher dispatcher, WebAppSnapshotProvider snapshots,
-    WebNavigationPolicy navigation, SessionLogService log) : IDisposable
+    WebNavigationPolicy navigation, WebActivationSession activation, SessionLogService log) : IDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly object _sync = new();
@@ -13,7 +13,8 @@ public sealed class WebBridgeHost(WebBridgeDispatcher dispatcher, WebAppSnapshot
     private CancellationTokenSource? _session;
     private long _generation;
     private bool _disposed;
-    public event Action<long>? ReadyAccepted;
+    public event Action<long>? ReadyChallengeIssued;
+    public event Action<long>? ActivationAccepted;
     public event Action<string, long>? CommandSucceeded;
     public long Generation { get { lock (_sync) return _generation; } }
 
@@ -25,6 +26,7 @@ public sealed class WebBridgeHost(WebBridgeDispatcher dispatcher, WebAppSnapshot
             _core = core;
             _session = new CancellationTokenSource();
             _generation++;
+            activation.Begin(_generation);
             core.WebMessageReceived += OnMessageReceived;
             return _generation;
         }
@@ -48,7 +50,8 @@ public sealed class WebBridgeHost(WebBridgeDispatcher dispatcher, WebAppSnapshot
         if (!IsCurrent(core, generation, token)) return;
         Post(core, result.Response);
         if (result.Response.Success && result.ValidatedCommand is not null) CommandSucceeded?.Invoke(result.ValidatedCommand, generation);
-        if (result.Response.Success && result.ValidatedCommand == "web.ready") ReadyAccepted?.Invoke(generation);
+        if (result.Response.Success && result.ValidatedCommand == "web.ready") ReadyChallengeIssued?.Invoke(generation);
+        if (result.Response.Success && result.ValidatedCommand == "app.ping" && activation.IsActivated(generation)) ActivationAccepted?.Invoke(generation);
     }
 
     private bool IsCurrent(CoreWebView2 core, long generation, CancellationToken token)
@@ -56,11 +59,20 @@ public sealed class WebBridgeHost(WebBridgeDispatcher dispatcher, WebAppSnapshot
 
     private void PostCurrent(object message) { lock (_sync) { if (_core is not null) Post(_core, message); } }
     private void Post(CoreWebView2 core, object message)
-    { try { core.PostWebMessageAsJson(JsonSerializer.Serialize(message, JsonOptions)); } catch (InvalidOperationException) { log.Warning("WebShell", "Bridge post failed; failure=WebViewUnavailable."); } }
+    {
+        if (!TryPost(() => core.PostWebMessageAsJson(JsonSerializer.Serialize(message, JsonOptions))))
+            log.Warning("WebShell", "Bridge post failed; failure=WebViewUnavailable.");
+    }
+    public static bool TryPost(Action post)
+    {
+        try { post(); return true; }
+        catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or System.Runtime.InteropServices.COMException) { return false; }
+    }
 
     private void DetachCore()
     {
         _session?.Cancel(); _session?.Dispose(); _session = null;
+        activation.Invalidate();
         if (_core is not null) _core.WebMessageReceived -= OnMessageReceived;
         _core = null;
     }

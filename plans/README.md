@@ -32,6 +32,11 @@ Read these plans in order unless the user says otherwise:
    - Bind bridge generations and packaged assets to deterministic identities.
    - **Engineering Complete** after a real non-Mock navigation/ready/snapshot/ping canary.
 
+7. [`007-web-shell-activation-attestation-and-runtime-asset-trust.md`](007-web-shell-activation-attestation-and-runtime-asset-trust.md)
+   - Require a generation-scoped challenge and acknowledged nonce ping before workspace activation.
+   - Anchor runtime assets to manifest identity compiled into the Shell.
+   - **Engineering Complete — Frozen**; next is UI-2.
+
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 
 ## Branch rule

@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const sourceNames = ['index.html','package.json','package-lock.json','tsconfig.json','vite.config.ts','src']
+const sourceNames = ['index.html','package.json','package-lock.json','tsconfig.json','vite.config.ts','src','tools/asset-identity.mjs','tools/assets.mjs','tools/asset-identity.d.mts']
 const slash = value => value.split(path.sep).join('/')
 async function filesUnder(target) { const s=await stat(target);if(s.isFile())return[target];const entries=await readdir(target);const nested=await Promise.all(entries.sort().map(x=>filesUnder(path.join(target,x))));return nested.flat() }
 export async function shaFile(file){return createHash('sha256').update(await readFile(file)).digest('hex')}

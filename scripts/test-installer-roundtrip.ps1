@@ -156,7 +156,7 @@ try {
             throw "Installed payload is missing required file: $requiredFile"
         }
     }
-    & (Join-Path $PSScriptRoot 'verify-packaged-web-assets.ps1') -WebUIRoot (Join-Path $installDirectory 'WebUI')
+    & (Join-Path $PSScriptRoot 'verify-host-web-asset-binding.ps1') -PayloadRoot $installDirectory
 
     $uninstaller = Get-ChildItem -LiteralPath $installDirectory `
         -Filter "unins*.exe" -File | Select-Object -First 1

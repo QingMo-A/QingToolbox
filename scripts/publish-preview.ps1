@@ -129,7 +129,7 @@ try {
             throw "Portable payload is missing required file: $relativePath"
         }
     }
-    & (Join-Path $PSScriptRoot 'verify-packaged-web-assets.ps1') -WebUIRoot (Join-Path $publishDirectory 'WebUI')
+    & (Join-Path $PSScriptRoot 'verify-host-web-asset-binding.ps1') -PayloadRoot $publishDirectory
     Add-Type -AssemblyName System.Drawing
     $publishedIcon = [System.Drawing.Icon]::ExtractAssociatedIcon(
         (Join-Path $publishDirectory 'QingToolbox.Shell.exe'))

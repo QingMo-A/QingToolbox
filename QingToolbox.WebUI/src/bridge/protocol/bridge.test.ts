@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { MockTransport } from '../transport/MockTransport'
 import { RequestClient } from './RequestClient'
 import { EventDispatcher } from './EventDispatcher'
-import { protocolVersion } from '../../contracts/app'
+import { isAppSnapshot, isPingResponse, isReadyChallenge, protocolVersion } from '../../contracts/app'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAppStore } from '../../app/store'
 import { WebViewTransport } from '../transport/WebViewTransport'
 import { UnavailableTransport } from '../transport/UnavailableTransport'
+import { AppClient } from '../clients/AppClient'
 
 describe('Qing Bridge frontend', () => {
-  it('pings and returns an explicit mock snapshot', async () => { const c = new RequestClient(new MockTransport()); expect((await c.request<{pong:boolean}>('app.ping')).pong).toBe(true); expect((await c.request<{environmentKind:string}>('app.getSnapshot')).environmentKind).toBe('Mock') })
+  it('returns an explicit mock snapshot', async () => { const c = new RequestClient(new MockTransport()); expect((await c.request<{environmentKind:string}>('app.getSnapshot')).environmentKind).toBe('Mock') })
+  it('validates a ready challenge, snapshot and ping at runtime', async()=>{const snapshot={environmentKind:'Development',environmentDisplayName:'Development',hostVersion:'1',protocolVersion,totalModuleCount:1,validModuleCount:1,runningModuleCount:0,generatedAt:new Date().toISOString()};expect(isAppSnapshot(snapshot)).toBe(true);expect(isReadyChallenge({activationNonce:'a'.repeat(64),snapshot})).toBe(true);expect(isPingResponse({pong:true,hostTime:new Date().toISOString()})).toBe(true)})
+  it('rejects invalid snapshot fields and challenges',()=>{const base={environmentKind:'Development',environmentDisplayName:'Development',hostVersion:'1',protocolVersion,totalModuleCount:1,validModuleCount:1,runningModuleCount:0,generatedAt:new Date().toISOString()};expect(isAppSnapshot({...base,totalModuleCount:-1})).toBe(false);expect(isAppSnapshot({...base,totalModuleCount:1.5})).toBe(false);expect(isAppSnapshot({...base,protocolVersion:2})).toBe(false);expect(isAppSnapshot({...base,generatedAt:'invalid'})).toBe(false);expect(isReadyChallenge({snapshot:base})).toBe(false);expect(isPingResponse({pong:false,hostTime:new Date().toISOString()})).toBe(false)})
+  it('uses the challenge nonce for activation and clears it on dispose',async()=>{const transport=new MockTransport();const client=new AppClient(new RequestClient(transport));expect((await client.ready('Mock')).environmentKind).toBe('Mock');expect((await client.ping()).pong).toBe(true);client.dispose();await expect(client.ping()).rejects.toThrow('nonce')})
   it('rejects a mismatched response request id', async () => { const transport = new MockTransport(); transport.request = async request => ({ protocolVersion, requestId: request.requestId+'bad', success:true,payload:{},error:null }); await expect(new RequestClient(transport).request('app.ping')).rejects.toThrow('identity') })
   it('rejects protocol mismatch and unknown command', async () => { const transport = new MockTransport(); expect((await transport.request({protocolVersion:1,requestId:'x',command:'app.ping',payload:{}})).success).toBe(false); await expect(new RequestClient(transport).request('bad')).rejects.toThrow('UnknownCommand') })
   it('dispatches known events and safely ignores unknown events', () => { const d = new EventDispatcher(); let value=''; d.on('app.hostEvent', payload => value=String(payload)); d.dispatch({protocolVersion,event:'unknown',payload:'bad'}); expect(value).toBe(''); d.dispatch({protocolVersion,event:'app.hostEvent',payload:'ok'}); expect(value).toBe('ok') })

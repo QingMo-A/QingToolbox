@@ -242,7 +242,7 @@ try {
             throw "Installer payload is missing required file: $relativePath"
         }
     }
-    & (Join-Path $PSScriptRoot 'verify-packaged-web-assets.ps1') -WebUIRoot (Join-Path $payloadDirectory 'WebUI')
+    & (Join-Path $PSScriptRoot 'verify-host-web-asset-binding.ps1') -PayloadRoot $payloadDirectory
     if (-not (Test-Path -LiteralPath $previousHostManifest -PathType Leaf)) {
         throw "Preview 1 host payload baseline is missing: $previousHostManifest"
     }

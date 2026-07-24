@@ -8,9 +8,10 @@
 
 - B1: Engineering Complete — Frozen.
 - B2.1: Engineering Complete — Frozen.
-- UI-1: Engineering Complete — Frozen; Development-only Web Shell foundation.
+- UI-1: Engineering Complete — Frozen; activation-attested, host-anchored Development Web Shell.
 - Production and ModuleTest continue to use the native WPF workspace.
-- UI-1.1 / Plan 006: Engineering Complete; next is UI-2.
+- UI-1.1 / Plan 006: Engineering Complete — Frozen.
+- UI-1.2 / Plan 007: Engineering Complete — Frozen; next is UI-2.
 
 ## 1. 项目定位
 

@@ -43,6 +43,10 @@
     <ApplicationIcon>Assets\Branding\QingToolbox.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Include="$(IntermediateOutputPath)Generated\WebAssetBuildInfo.g.cs" />
+  </ItemGroup>
+
   <ItemGroup Condition="Exists('..\QingToolbox.WebUI\dist\index.html')">
     <Content Include="..\QingToolbox.WebUI\dist\**\*">
       <Link>WebUI\%(RecursiveDir)%(Filename)%(Extension)</Link>
@@ -51,11 +55,12 @@
     </Content>
   </ItemGroup>
 
-  <Target Name="ValidateWebShellAssets" BeforeTargets="BeforeBuild"
-          Condition="'$(Configuration)' == 'Release' and '$(DesignTimeBuild)' != 'true'">
+  <Target Name="ValidateWebShellAssets" BeforeTargets="CoreCompile"
+          Condition="'$(DesignTimeBuild)' != 'true'">
     <Error Condition="!Exists('..\QingToolbox.WebUI\dist\index.html') or !Exists('..\QingToolbox.WebUI\dist\qing-web-assets.json')"
            Text="Verified WebUI assets are missing. Run scripts/build-web-ui.ps1 before a Release build." />
     <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\scripts\verify-web-ui-assets.ps1&quot;" />
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\scripts\generate-web-asset-build-info.ps1&quot; -ManifestPath &quot;$(MSBuildProjectDirectory)\..\QingToolbox.WebUI\dist\qing-web-assets.json&quot; -OutputPath &quot;$(MSBuildProjectDirectory)\$(IntermediateOutputPath)Generated\WebAssetBuildInfo.g.cs&quot;" />
   </Target>
 
 </Project>

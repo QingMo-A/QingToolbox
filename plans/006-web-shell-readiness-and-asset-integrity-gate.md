@@ -3,9 +3,10 @@
 ## Status
 
 ```text
-Status: Engineering Complete
+Status: Engineering Complete — Frozen
 Track: UI Modernization / UI-1.1
 Depends on: Plan 005
+Post-review activation and runtime trust follow-up: Plan 007 — Engineering Complete — Frozen
 Next: UI-2
 ```
 

@@ -12,4 +12,5 @@ if(command==='generate'){
   if(JSON.stringify(actual)!==JSON.stringify(manifest.outputFiles))throw new Error('Web asset output set or hash does not match the manifest.')
   if(actual.some(x=>x.path.endsWith('.map')||/^[A-Za-z]:|^\//.test(x.path)))throw new Error('Web assets contain a source map or unsafe path.')
   console.log(`Verified ${actual.length} WebUI assets; buildId=${manifest.assetBuildId}`)
-}else throw new Error('Use generate or verify.')
+}else if(command==='source')console.log(sourceTreeSha256)
+else throw new Error('Use generate, verify or source.')
