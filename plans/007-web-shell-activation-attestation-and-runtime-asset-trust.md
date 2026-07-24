@@ -3,10 +3,10 @@
 ## Status
 
 ```text
-Status: Engineering Complete
+Status: Engineering Complete — Frozen
 Track: UI Modernization / UI-1.2
 Depends on: Plan 006
-Post-freeze correctness correction: Plan 008
+Post-freeze correctness correction: Plan 008 — Engineering Complete — Frozen
 ```
 
 ## Scope

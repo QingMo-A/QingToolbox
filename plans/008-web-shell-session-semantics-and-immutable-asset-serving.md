@@ -3,10 +3,10 @@
 ## Status
 
 ```text
-Status: Verification Pending
+Status: Engineering Complete — Frozen
 Track: UI Modernization / UI-1.3
 Depends on: Plan 007
-Blocks: UI-2
+Next: UI-2
 ```
 
 ## Scope
@@ -33,5 +33,5 @@ reparse points are rejected before reading. No virtual-host disk mapping remains
 ## Verification boundary
 
 Local protocol, frontend, immutable-asset, PowerShell 5.1/7, Debug/Release, real non-Mock repeated-ping
-canary, frozen-core smoke, portable, and installer checks pass. Final status remains Verification
-Pending until the implementation commit is pushed and exact-final-HEAD GitHub validation succeeds.
+canary, frozen-core smoke, portable, installer roundtrip, and Preview upgrade checks pass. The pushed
+implementation HEAD completed its exact GitHub validation successfully; UI-1 is frozen and UI-2 is next.

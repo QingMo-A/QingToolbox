@@ -8,11 +8,11 @@
 
 - B1: Engineering Complete — Frozen.
 - B2.1: Engineering Complete — Frozen.
-- UI-1: Verification Pending; the Plan 008 session and immutable-serving correction awaits final-HEAD validation.
+- UI-1: Engineering Complete — Frozen; protocol-v4 session and immutable-serving correction verified.
 - Production and ModuleTest continue to use the native WPF workspace.
 - UI-1.1 / Plan 006: Engineering Complete — Frozen.
-- UI-1.2 / Plan 007: Engineering Complete; post-freeze correctness correction is Plan 008.
-- UI-1.3 / Plan 008: Verification Pending; UI-2 is blocked.
+- UI-1.2 / Plan 007: Engineering Complete — Frozen.
+- UI-1.3 / Plan 008: Engineering Complete — Frozen; next is UI-2.
 
 ## 1. 项目定位
 

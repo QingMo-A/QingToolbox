@@ -45,5 +45,5 @@ Portable, installer, and installed-payload tests verify the same host binding.
 
 Implementation and deterministic tests pass locally. A real non-Mock canary passed controller
 creation, exact local navigation, Vue execution, trusted ready, authoritative snapshot, and
-activation and two repeated session pings. Plan 008 is Verification Pending, so UI-2 remains blocked
-until the exact-final-HEAD validation succeeds.
+activation and two repeated session pings. Plans 005, 006, 007, and 008 are Engineering Complete —
+Frozen. UI-1 is frozen and UI-2 is next.
