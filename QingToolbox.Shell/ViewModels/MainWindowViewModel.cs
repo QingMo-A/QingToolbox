@@ -1410,8 +1410,7 @@ public sealed partial class MainWindowViewModel(
             try
             {
                 if (version != Volatile.Read(ref _presentationSaveVersion)) return;
-                await settingsService.UpdateAsync(settings => settings.StartupPresentationMode = newValue);
-                _persistedStartupPresentationMode = newValue;
+                await PersistStartupPresentationModeAsync(newValue, CancellationToken.None);
                 StartupSettingsMessage = localization.GetString("startup.presentationSaved");
             }
             finally { _presentationSaveGate.Release(); }
@@ -1430,6 +1429,38 @@ public sealed partial class MainWindowViewModel(
         {
             if (version == Volatile.Read(ref _presentationSaveVersion)) IsStartupSettingsBusy = false;
         }
+    }
+
+    public async Task SetStartupPresentationModeAsync(
+        StartupPresentationMode value,
+        CancellationToken cancellationToken = default)
+    {
+        var version = Interlocked.Increment(ref _presentationSaveVersion);
+        await _presentationSaveGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_persistedStartupPresentationMode == value) return;
+            await PersistStartupPresentationModeAsync(value, cancellationToken);
+            _suppressPresentationSave = true;
+            try { SelectedStartupPresentationMode = value; }
+            finally { _suppressPresentationSave = false; }
+            if (version == Volatile.Read(ref _presentationSaveVersion))
+                StartupSettingsMessage = localization.GetString("startup.presentationSaved");
+            sessionLog.Information("Settings", $"Startup presentation preference changed by Web Settings: {value}.");
+        }
+        finally
+        {
+            _presentationSaveGate.Release();
+        }
+    }
+
+    private async Task PersistStartupPresentationModeAsync(
+        StartupPresentationMode value,
+        CancellationToken cancellationToken)
+    {
+        if (_persistedStartupPresentationMode == value) return;
+        await settingsService.UpdateAsync(settings => settings.StartupPresentationMode = value, cancellationToken);
+        _persistedStartupPresentationMode = value;
     }
 
     [RelayCommand]

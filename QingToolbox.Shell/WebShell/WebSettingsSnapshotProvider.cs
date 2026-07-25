@@ -13,18 +13,23 @@ public interface IWebSettingsMutation
 {
     bool ShowLogsInSidebar { get; }
     MainWindowCloseBehavior MainWindowCloseBehavior { get; }
+    StartupPresentationMode StartupPresentationMode { get; }
     Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken);
     Task SetMainWindowCloseBehaviorAsync(MainWindowCloseBehavior value, CancellationToken cancellationToken);
+    Task SetStartupPresentationModeAsync(StartupPresentationMode value, CancellationToken cancellationToken);
 }
 
 public sealed class WebSettingsMutation(MainWindowViewModel viewModel) : IWebSettingsMutation
 {
     public bool ShowLogsInSidebar => viewModel.ShowLogsInSidebar;
     public MainWindowCloseBehavior MainWindowCloseBehavior => viewModel.SelectedMainWindowCloseBehavior;
+    public StartupPresentationMode StartupPresentationMode => viewModel.SelectedStartupPresentationMode;
     public Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken) =>
         viewModel.SetShowLogsInSidebarAsync(value, cancellationToken);
     public Task SetMainWindowCloseBehaviorAsync(MainWindowCloseBehavior value, CancellationToken cancellationToken) =>
         viewModel.SetMainWindowCloseBehaviorAsync(value, cancellationToken);
+    public Task SetStartupPresentationModeAsync(StartupPresentationMode value, CancellationToken cancellationToken) =>
+        viewModel.SetStartupPresentationModeAsync(value, cancellationToken);
 }
 
 public sealed class WebSettingsSnapshotSource(MainWindowViewModel viewModel) : IWebSettingsSnapshotSource

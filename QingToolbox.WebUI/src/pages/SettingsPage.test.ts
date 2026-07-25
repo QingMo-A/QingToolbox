@@ -30,7 +30,8 @@ function page(
   bridge: 'Connecting' | 'Connected' = 'Connected',
   status: 'idle' | 'loading' | 'ready' | 'error' = 'idle',
   setImpl?: (value: boolean) => Promise<typeof snapshot>,
-  closeImpl?: (value: 'Ask'|'MinimizeToNotificationArea'|'ExitApplication') => Promise<typeof snapshot>
+  closeImpl?: (value: 'Ask'|'MinimizeToNotificationArea'|'ExitApplication') => Promise<typeof snapshot>,
+  startupImpl?: (value: 'MainWindow'|'Minimized'|'FloatingBadge') => Promise<typeof snapshot>
 ) {
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -42,11 +43,12 @@ function page(
   const getSnapshot = vi.fn(async () => snapshot)
   const setShowLogsInSidebar = vi.fn(setImpl ?? (async value => ({ ...snapshot, showLogsInSidebar: value })))
   const setMainWindowCloseBehavior = vi.fn(closeImpl ?? (async value => ({ ...snapshot, mainWindowCloseBehavior: value })))
+  const setStartupPresentationMode = vi.fn(startupImpl ?? (async value => ({ ...snapshot, startupPresentationMode: value })))
   const wrapper = mount(SettingsPage, {
-    global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setShowLogsInSidebar, setMainWindowCloseBehavior } } }
+    global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode } } }
   })
   wrappers.push(wrapper)
-  return { wrapper, settings, getSnapshot, setShowLogsInSidebar, setMainWindowCloseBehavior, theme: useThemeStore(), toast: useToastStore() }
+  return { wrapper, settings, getSnapshot, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, theme: useThemeStore(), toast: useToastStore() }
 }
 
 describe('SettingsPage', () => {
@@ -72,24 +74,24 @@ describe('SettingsPage', () => {
     expect(text).toContain('Registry Run')
     expect(text).toContain('Healthy')
   })
-  it('keeps language and startup read-only while exposing only the two supported controls', () => {
+  it('keeps language and launch registration read-only while exposing only supported controls', () => {
     const wrapper = page('Connected', 'ready').wrapper
     expect(wrapper.text()).toContain('Some host settings can be changed')
     expect(wrapper.findAll('button').map(button => button.text())).not.toEqual(expect.arrayContaining(['Save', 'Apply', 'Reset']))
     expect(wrapper.find('select').exists()).toBe(false)
     expect(wrapper.find('input').exists()).toBe(false)
     expect(wrapper.findAll('[role="switch"]')).toHaveLength(1)
-    expect(wrapper.findAll('[role="radiogroup"]')).toHaveLength(1)
-    expect(wrapper.findAll('[role="radio"]')).toHaveLength(3)
+    expect(wrapper.findAll('[role="radiogroup"]')).toHaveLength(2)
+    expect(wrapper.findAll('[role="radio"]')).toHaveLength(6)
   })
   it('maps the current close behavior to one accessible radio', () => {
-    const radios = page('Connected', 'ready').wrapper.findAll('[role="radio"]')
+    const radios = page('Connected', 'ready').wrapper.get('[aria-label="Main window close behavior"]').findAll('[role="radio"]')
     expect(radios.map(radio => radio.attributes('aria-checked'))).toEqual(['true', 'false', 'false'])
     expect(radios.map(radio => radio.text())).toEqual(expect.arrayContaining([expect.stringContaining('Ask every time'), expect.stringContaining('Minimize to notification area'), expect.stringContaining('Exit application')]))
   })
   it('persists a close behavior without closing the page', async () => {
     const x = page('Connected', 'ready')
-    await x.wrapper.findAll('[role="radio"]')[2].trigger('click')
+    await x.wrapper.get('[aria-label="Main window close behavior"]').findAll('[role="radio"]')[2].trigger('click')
     await flushPromises()
     expect(x.setMainWindowCloseBehavior).toHaveBeenCalledOnce()
     expect(x.setMainWindowCloseBehavior).toHaveBeenCalledWith('ExitApplication')
@@ -99,7 +101,7 @@ describe('SettingsPage', () => {
   })
   it('preserves close behavior on failure', async () => {
     const x = page('Connected', 'ready', undefined, async () => { throw new Error('denied') })
-    await x.wrapper.findAll('[role="radio"]')[1].trigger('click')
+    await x.wrapper.get('[aria-label="Main window close behavior"]').findAll('[role="radio"]')[1].trigger('click')
     await flushPromises()
     expect(x.settings.snapshot?.mainWindowCloseBehavior).toBe('Ask')
     expect(x.settings.closeBehaviorError).toBe('denied')
@@ -109,7 +111,7 @@ describe('SettingsPage', () => {
     let resolve!: (value: typeof snapshot) => void
     const pending = new Promise<typeof snapshot>(done => { resolve = done })
     const x = page('Connected', 'ready', undefined, () => pending)
-    const radios = x.wrapper.findAll('[role="radio"]')
+    const radios = x.wrapper.get('[aria-label="Main window close behavior"]').findAll('[role="radio"]')
     await radios[1].trigger('click')
     await radios[2].trigger('click')
     expect(x.setMainWindowCloseBehavior).toHaveBeenCalledTimes(1)
@@ -118,6 +120,46 @@ describe('SettingsPage', () => {
     resolve({ ...snapshot, mainWindowCloseBehavior: 'MinimizeToNotificationArea' })
     await flushPromises()
     expect(x.wrapper.findAll('[role="radio"]').every(radio => radio.attributes('disabled') === undefined)).toBe(true)
+  })
+  it('maps and persists the startup presentation for the next launch', async () => {
+    const x = page('Connected', 'ready')
+    const group = x.wrapper.get('[aria-label="Startup presentation mode"]')
+    const radios = group.findAll('[role="radio"]')
+    expect(radios.map(radio => radio.attributes('aria-checked'))).toEqual(['false', 'false', 'true'])
+    expect(group.text()).toContain('Show the main window')
+    expect(group.text()).toContain('Start minimized')
+    expect(group.text()).toContain('Show the floating badge')
+    expect(x.wrapper.text()).toContain('next time QingToolbox starts')
+    await radios[0].trigger('click')
+    await flushPromises()
+    expect(x.setStartupPresentationMode).toHaveBeenCalledOnce()
+    expect(x.setStartupPresentationMode).toHaveBeenCalledWith('MainWindow')
+    expect(x.settings.snapshot?.startupPresentationMode).toBe('MainWindow')
+    expect(x.wrapper.exists()).toBe(true)
+    expect(x.toast.kind).toBe('success')
+  })
+  it('preserves startup presentation and reports a failed save', async () => {
+    const x = page('Connected', 'ready', undefined, undefined, async () => { throw new Error('denied') })
+    await x.wrapper.get('[aria-label="Startup presentation mode"]').findAll('[role="radio"]')[0].trigger('click')
+    await flushPromises()
+    expect(x.settings.snapshot?.startupPresentationMode).toBe('FloatingBadge')
+    expect(x.settings.startupPresentationError).toBe('denied')
+    expect(x.toast.kind).toBe('error')
+  })
+  it('disables only startup presentation choices and suppresses parallel writes', async () => {
+    let resolve!: (value: typeof snapshot) => void
+    const pending = new Promise<typeof snapshot>(done => { resolve = done })
+    const x = page('Connected', 'ready', undefined, undefined, () => pending)
+    const startupRadios = x.wrapper.get('[aria-label="Startup presentation mode"]').findAll('[role="radio"]')
+    await startupRadios[0].trigger('click')
+    await startupRadios[1].trigger('click')
+    expect(x.setStartupPresentationMode).toHaveBeenCalledTimes(1)
+    expect(startupRadios.every(radio => radio.attributes('disabled') !== undefined)).toBe(true)
+    expect(x.wrapper.get('[role="switch"]').attributes('disabled')).toBeUndefined()
+    expect(x.wrapper.get('[aria-label="Main window close behavior"]').findAll('[role="radio"]').every(radio => radio.attributes('disabled') === undefined)).toBe(true)
+    resolve({ ...snapshot, startupPresentationMode: 'MainWindow' })
+    await flushPromises()
+    expect(x.wrapper.get('[aria-label="Startup presentation mode"]').findAll('[role="radio"]').every(radio => radio.attributes('disabled') === undefined)).toBe(true)
   })
   it('persists the logs switch and exposes its accessible state', async () => {
     const x = page('Connected', 'ready')
@@ -173,6 +215,7 @@ describe('SettingsPage', () => {
     expect(x.getSnapshot).not.toHaveBeenCalled()
     expect(x.setShowLogsInSidebar).not.toHaveBeenCalled()
     expect(x.setMainWindowCloseBehavior).not.toHaveBeenCalled()
+    expect(x.setStartupPresentationMode).not.toHaveBeenCalled()
   })
-  it('renders long state through definition rows', () => expect(page('Connected', 'ready').wrapper.findAll('.settings-values > div').length).toBeGreaterThanOrEqual(8))
+  it('renders remaining read-only state through definition rows', () => expect(page('Connected', 'ready').wrapper.findAll('.settings-values > div').length).toBeGreaterThanOrEqual(7))
 })

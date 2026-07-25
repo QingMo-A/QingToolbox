@@ -192,6 +192,34 @@ var failedClose = await closeDispatcher.DispatchAsync(CloseRequest(new { mainWin
 Require(!failedClose.Response.Success && failedClose.Response.Error?.Code == "HandlerFailed" && mutationSource.MainWindowCloseBehavior == MainWindowCloseBehavior.Ask, "A failed close behavior write must preserve authority and return a safe error.");
 Require(!JsonSerializer.Serialize(failedClose.Response).Contains(root, StringComparison.OrdinalIgnoreCase) && WebBridgeProtocol.Version == 4, "Close behavior failure must not expose paths and protocol version must remain 4.");
 
+Console.WriteLine("Verifying the startup presentation settings mutation...");
+mutationSource.FailWrites = false;
+var presentationDispatcher = new WebBridgeDispatcher([new WebSetStartupPresentationModeCommandHandler(
+    mutationSource, new WebSettingsSnapshotProvider(mutationSource, TimeProvider.System), settingsActivation)]);
+string PresentationRequest(object payload) => JsonSerializer.Serialize(new { protocolVersion = 4, requestId = Guid.NewGuid(), command = "settings.setStartupPresentationMode", payload });
+foreach (var payload in new object[] { new { }, new { startupPresentationMode = 1 }, new { startupPresentationMode = "" }, new { startupPresentationMode = "Unknown" }, new { startupPresentationMode = "floatingbadge" }, new { startupPresentationMode = "MainWindow", extra = true } })
+{
+    var rejectedPresentation = await presentationDispatcher.DispatchAsync(PresentationRequest(payload), new(31, CancellationToken.None));
+    Require(!rejectedPresentation.Response.Success && rejectedPresentation.Response.Error?.Code == "InvalidPayload", "Startup presentation mutation must reject malformed or ambiguous payloads.");
+}
+var inactivePresentation = await new WebBridgeDispatcher([new WebSetStartupPresentationModeCommandHandler(
+    mutationSource, new WebSettingsSnapshotProvider(mutationSource, TimeProvider.System), inactiveSettings)])
+    .DispatchAsync(PresentationRequest(new { startupPresentationMode = "MainWindow" }), new(32, CancellationToken.None));
+Require(!inactivePresentation.Response.Success && inactivePresentation.Response.Error?.Code == "BridgeNotActivated", "Startup presentation mutation must require activation.");
+foreach (var expected in new[] { StartupPresentationMode.MainWindow, StartupPresentationMode.Minimized, StartupPresentationMode.FloatingBadge })
+{
+    var changed = await presentationDispatcher.DispatchAsync(PresentationRequest(new { startupPresentationMode = expected.ToString() }), new(31, CancellationToken.None));
+    Require(changed.Response.Success && mutationSource.StartupPresentationMode == expected && ((WebSettingsSnapshot)changed.Response.Payload).StartupPresentationMode == expected.ToString(), "Startup presentation mutation must persist and return each supported value.");
+}
+var preservedSettings = mutationSource.Read();
+Require(mutationSource.PresentationWriteCount == 3 && !mutationSource.ShowLogsInSidebar && mutationSource.MainWindowCloseBehavior == MainWindowCloseBehavior.Ask && preservedSettings.LaunchAtLogin, "Startup presentation mutation must preserve logs, close behavior and launch settings.");
+_ = await presentationDispatcher.DispatchAsync(PresentationRequest(new { startupPresentationMode = "FloatingBadge" }), new(31, CancellationToken.None));
+Require(mutationSource.PresentationWriteCount == 3, "An unchanged startup presentation must not be persisted again.");
+mutationSource.FailWrites = true;
+var failedPresentation = await presentationDispatcher.DispatchAsync(PresentationRequest(new { startupPresentationMode = "MainWindow" }), new(31, CancellationToken.None));
+Require(!failedPresentation.Response.Success && failedPresentation.Response.Error?.Code == "HandlerFailed" && mutationSource.StartupPresentationMode == StartupPresentationMode.FloatingBadge, "A failed startup presentation write must preserve authority and return a safe error.");
+Require(!JsonSerializer.Serialize(failedPresentation.Response).Contains(root, StringComparison.OrdinalIgnoreCase) && WebBridgeProtocol.Version == 4, "Startup presentation failure must not expose paths and protocol version must remain 4.");
+
 Console.WriteLine("Verifying immutable runtime assets, TOCTOU resistance and limits...");
 var sourceAssets = Path.Combine(AppContext.BaseDirectory, "WebUI");
 var valid = new WebAssetIdentity(sourceAssets);
@@ -266,11 +294,13 @@ file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapsh
 {
     public bool ShowLogsInSidebar { get; private set; } = initialValue;
     public MainWindowCloseBehavior MainWindowCloseBehavior { get; private set; } = MainWindowCloseBehavior.Ask;
+    public StartupPresentationMode StartupPresentationMode { get; private set; } = StartupPresentationMode.FloatingBadge;
     public bool FailWrites { get; set; }
     public int WriteCount { get; private set; }
     public int CloseWriteCount { get; private set; }
+    public int PresentationWriteCount { get; private set; }
     public WebSettingsSnapshotValues Read() => new(new("en-US", "English"), ShowLogsInSidebar,
-        MainWindowCloseBehavior.ToString(), "Ask before closing.", true, true, "FloatingBadge", "Task Scheduler", "Healthy", "Startup registration is healthy.");
+        MainWindowCloseBehavior.ToString(), "Ask before closing.", true, true, StartupPresentationMode.ToString(), "Task Scheduler", "Healthy", "Startup registration is healthy.");
     public Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -285,6 +315,14 @@ file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapsh
         if (FailWrites) throw new IOException("Synthetic settings write failure.");
         CloseWriteCount++;
         MainWindowCloseBehavior = value;
+        return Task.CompletedTask;
+    }
+    public Task SetStartupPresentationModeAsync(StartupPresentationMode value, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (FailWrites) throw new IOException("Synthetic settings write failure.");
+        PresentationWriteCount++;
+        StartupPresentationMode = value;
         return Task.CompletedTask;
     }
 }

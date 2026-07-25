@@ -108,6 +108,29 @@ public sealed class WebSetMainWindowCloseBehaviorCommandHandler(IWebSettingsMuta
     }
 }
 
+public sealed class WebSetStartupPresentationModeCommandHandler(IWebSettingsMutation mutation,
+    WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "settings.setStartupPresentationMode";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string> { "startupPresentationMode" };
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        if (!payload.TryGetProperty("startupPresentationMode", out var property) || property.ValueKind != JsonValueKind.String)
+            throw new WebBridgeValidationException("InvalidPayload", "A valid startup presentation mode is required.");
+        var value = property.GetString() switch
+        {
+            "MainWindow" => StartupPresentationMode.MainWindow,
+            "Minimized" => StartupPresentationMode.Minimized,
+            "FloatingBadge" => StartupPresentationMode.FloatingBadge,
+            _ => throw new WebBridgeValidationException("InvalidPayload", "A valid startup presentation mode is required.")
+        };
+        if (mutation.StartupPresentationMode != value)
+            await mutation.SetStartupPresentationModeAsync(value, context.SessionCancellation);
+        return snapshots.Create();
+    }
+}
+
 public sealed class WebReadyCommandHandler(WebAppSnapshotProvider snapshots, Lazy<WebAssetIdentity> assets,
     WebActivationSession activation) : IWebCommandHandler
 {

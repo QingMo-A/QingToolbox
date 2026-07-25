@@ -5,6 +5,7 @@ export class MockTransport implements Transport {
   private nonce:string|null=null;private sessionToken:string|null=null;private phase:'PreReady'|'ChallengeIssued'|'Activated'='PreReady'
   private showLogsInSidebar=true
   private mainWindowCloseBehavior:'Ask'|'MinimizeToNotificationArea'|'ExitApplication'='MinimizeToNotificationArea'
+  private startupPresentationMode:'MainWindow'|'Minimized'|'FloatingBadge'='FloatingBadge'
   async request(message:BridgeRequest):Promise<BridgeResponse>{
     if(this.disposed)throw new Error('Bridge transport is disposed.')
     if(message.protocolVersion!==protocolVersion)return this.error(message,'ProtocolMismatch')
@@ -27,12 +28,13 @@ export class MockTransport implements Transport {
     if(message.command==='settings.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length!==0)return this.error(message,'InvalidPayload');return this.ok(message,this.settingsSnapshot())}
     if(message.command==='settings.setShowLogsInSidebar'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length!==1||typeof message.payload.showLogsInSidebar!=='boolean')return this.error(message,'InvalidPayload');this.showLogsInSidebar=message.payload.showLogsInSidebar;return this.ok(message,this.settingsSnapshot())}
     if(message.command==='settings.setMainWindowCloseBehavior'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');const value=message.payload.mainWindowCloseBehavior;if(Object.keys(message.payload).length!==1||value!=='Ask'&&value!=='MinimizeToNotificationArea'&&value!=='ExitApplication')return this.error(message,'InvalidPayload');this.mainWindowCloseBehavior=value;return this.ok(message,this.settingsSnapshot())}
+    if(message.command==='settings.setStartupPresentationMode'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');const value=message.payload.startupPresentationMode;if(Object.keys(message.payload).length!==1||value!=='MainWindow'&&value!=='Minimized'&&value!=='FloatingBadge')return this.error(message,'InvalidPayload');this.startupPresentationMode=value;return this.ok(message,this.settingsSnapshot())}
     return this.error(message,'UnknownCommand')
   }
   subscribe(listener:(event:BridgeEvent)=>void){this.listeners.add(listener);return()=>this.listeners.delete(listener)} emit(event:BridgeEvent){this.listeners.forEach(x=>x(event))}
   dispose(){this.disposed=true;this.nonce=null;this.sessionToken=null;this.listeners.clear()}
   private randomToken(){return crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','')}
-  private settingsSnapshot(){return{generatedAt:'2026-07-25T12:00:00.000Z',language:{code:'en-US',displayName:'English'},showLogsInSidebar:this.showLogsInSidebar,mainWindowCloseBehavior:this.mainWindowCloseBehavior,closeBehaviorMessage:'The selected behavior applies the next time the main window is closed.',launchAtLogin:false,canConfigureLaunchAtLogin:true,startupPresentationMode:'FloatingBadge',startupBackend:'Registry Run',startupStatus:'Healthy',startupMessage:'Windows startup registration is healthy.'}}
+  private settingsSnapshot(){return{generatedAt:'2026-07-25T12:00:00.000Z',language:{code:'en-US',displayName:'English'},showLogsInSidebar:this.showLogsInSidebar,mainWindowCloseBehavior:this.mainWindowCloseBehavior,closeBehaviorMessage:'The selected behavior applies the next time the main window is closed.',launchAtLogin:false,canConfigureLaunchAtLogin:true,startupPresentationMode:this.startupPresentationMode,startupBackend:'Registry Run',startupStatus:'Healthy',startupMessage:'Windows startup registration is healthy.'}}
   private ok(r:BridgeRequest,payload:unknown):BridgeResponse{return{protocolVersion,requestId:r.requestId,success:true,payload,error:null}}
   private error(r:BridgeRequest,code:string):BridgeResponse{return{protocolVersion,requestId:r.requestId,success:false,payload:{},error:{code,message:'Mock bridge rejected the request.'}}}
 }
