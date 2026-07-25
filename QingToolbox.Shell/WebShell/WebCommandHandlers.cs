@@ -66,6 +66,24 @@ public sealed class WebSettingsSnapshotCommandHandler(WebSettingsSnapshotProvide
     { activation.RequireActivated(context.Generation, context.SessionCancellation); return Task.FromResult<object>(snapshots.Create()); }
 }
 
+public sealed class WebSetShowLogsInSidebarCommandHandler(IWebSettingsMutation mutation,
+    WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "settings.setShowLogsInSidebar";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string> { "showLogsInSidebar" };
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        if (!payload.TryGetProperty("showLogsInSidebar", out var property) ||
+            property.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            throw new WebBridgeValidationException("InvalidPayload", "A Boolean logs visibility value is required.");
+        var value = property.GetBoolean();
+        if (mutation.ShowLogsInSidebar != value)
+            await mutation.SetShowLogsInSidebarAsync(value, context.SessionCancellation);
+        return snapshots.Create();
+    }
+}
+
 public sealed class WebReadyCommandHandler(WebAppSnapshotProvider snapshots, Lazy<WebAssetIdentity> assets,
     WebActivationSession activation) : IWebCommandHandler
 {

@@ -486,7 +486,25 @@ public sealed partial class MainWindowViewModel(
     partial void OnShowLogsInSidebarChanged(bool value)
     {
         if (!value && SelectedNavigationKey == "Logs") SelectedNavigationKey = "Settings";
-        if (_logSettingInitialized) _ = SaveLogVisibilityAsync(value);
+        if (_logSettingInitialized && !_suppressLogVisibilitySave) _ = SaveLogVisibilityAsync(value);
+    }
+
+    private readonly SemaphoreSlim _webLogVisibilityGate = new(1, 1);
+    private bool _suppressLogVisibilitySave;
+
+    public async Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken = default)
+    {
+        await _webLogVisibilityGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (ShowLogsInSidebar == value) return;
+            await settingsService.UpdateAsync(settings => settings.ShowLogsInSidebar = value, cancellationToken);
+            _suppressLogVisibilitySave = true;
+            try { ShowLogsInSidebar = value; }
+            finally { _suppressLogVisibilitySave = false; }
+            sessionLog.Information("Settings", $"Log navigation visibility changed by Web Settings: {value}.");
+        }
+        finally { _webLogVisibilityGate.Release(); }
     }
 
     private async Task SaveLogVisibilityAsync(bool value)

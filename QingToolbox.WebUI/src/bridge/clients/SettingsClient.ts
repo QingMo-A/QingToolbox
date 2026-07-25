@@ -1,3 +1,3 @@
 import type { RequestClient } from '../protocol/RequestClient'
 import { isSettingsSnapshot } from '../../contracts/settings'
-export class SettingsClient { constructor(private readonly requests:RequestClient){} async getSnapshot(){const value=await this.requests.request<unknown>('settings.getSnapshot');if(!isSettingsSnapshot(value))throw new Error('Settings snapshot validation failed.');return value} }
+export class SettingsClient { constructor(private readonly requests:RequestClient){} async getSnapshot(){return this.validated(await this.requests.request<unknown>('settings.getSnapshot'))} async setShowLogsInSidebar(value:boolean){return this.validated(await this.requests.request<unknown>('settings.setShowLogsInSidebar',{showLogsInSidebar:value}))} private validated(value:unknown){if(!isSettingsSnapshot(value))throw new Error('Settings snapshot validation failed.');return value} }

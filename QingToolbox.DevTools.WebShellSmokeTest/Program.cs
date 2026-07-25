@@ -137,6 +137,33 @@ var extraSettingsResult = await settingsDispatcher.DispatchAsync(extraSettingsPa
 Require(!extraSettingsResult.Response.Success && extraSettingsResult.Response.Error?.Code == "InvalidPayload", "Settings projection must reject additional payload properties.");
 Require(WebBridgeProtocol.Version == 4, "Settings projection must preserve protocol version 4.");
 
+Console.WriteLine("Verifying the single safe settings mutation...");
+var mutationSource = new SettingsMutationSource(false);
+var mutationDispatcher = new WebBridgeDispatcher([new WebSetShowLogsInSidebarCommandHandler(
+    mutationSource, new WebSettingsSnapshotProvider(mutationSource, TimeProvider.System), settingsActivation)]);
+string MutationRequest(object payload) => JsonSerializer.Serialize(new { protocolVersion = 4, requestId = Guid.NewGuid(), command = "settings.setShowLogsInSidebar", payload });
+var missingMutation = await mutationDispatcher.DispatchAsync(MutationRequest(new { }), new(31, CancellationToken.None));
+Require(!missingMutation.Response.Success && missingMutation.Response.Error?.Code == "InvalidPayload", "Settings mutation must require its Boolean field.");
+var wrongMutation = await mutationDispatcher.DispatchAsync(MutationRequest(new { showLogsInSidebar = "true" }), new(31, CancellationToken.None));
+Require(!wrongMutation.Response.Success && wrongMutation.Response.Error?.Code == "InvalidPayload", "Settings mutation must reject non-Boolean values.");
+var extraMutation = await mutationDispatcher.DispatchAsync(MutationRequest(new { showLogsInSidebar = true, language = "zh-CN" }), new(31, CancellationToken.None));
+Require(!extraMutation.Response.Success && extraMutation.Response.Error?.Code == "InvalidPayload", "Settings mutation must reject additional fields.");
+var inactiveMutation = await new WebBridgeDispatcher([new WebSetShowLogsInSidebarCommandHandler(
+    mutationSource, new WebSettingsSnapshotProvider(mutationSource, TimeProvider.System), inactiveSettings)])
+    .DispatchAsync(MutationRequest(new { showLogsInSidebar = true }), new(32, CancellationToken.None));
+Require(!inactiveMutation.Response.Success && inactiveMutation.Response.Error?.Code == "BridgeNotActivated", "Settings mutation must require activation.");
+var enableMutation = await mutationDispatcher.DispatchAsync(MutationRequest(new { showLogsInSidebar = true }), new(31, CancellationToken.None));
+Require(enableMutation.Response.Success && mutationSource.ShowLogsInSidebar && mutationSource.WriteCount == 1 && ((WebSettingsSnapshot)enableMutation.Response.Payload).ShowLogsInSidebar, "Settings mutation must persist false to true and return the new snapshot.");
+var unchangedLanguage = ((WebSettingsSnapshot)enableMutation.Response.Payload).Language.Code;
+var disableMutation = await mutationDispatcher.DispatchAsync(MutationRequest(new { showLogsInSidebar = false }), new(31, CancellationToken.None));
+Require(disableMutation.Response.Success && !mutationSource.ShowLogsInSidebar && mutationSource.WriteCount == 2 && unchangedLanguage == "en-US", "Settings mutation must persist true to false without changing other settings.");
+_ = await mutationDispatcher.DispatchAsync(MutationRequest(new { showLogsInSidebar = false }), new(31, CancellationToken.None));
+Require(mutationSource.WriteCount == 2, "An unchanged settings value must not be persisted again.");
+mutationSource.FailWrites = true;
+var failedMutation = await mutationDispatcher.DispatchAsync(MutationRequest(new { showLogsInSidebar = true }), new(31, CancellationToken.None));
+Require(!failedMutation.Response.Success && failedMutation.Response.Error?.Code == "HandlerFailed" && !mutationSource.ShowLogsInSidebar, "A failed settings write must preserve the authoritative value and return a safe error.");
+Require(!JsonSerializer.Serialize(failedMutation.Response).Contains(root, StringComparison.OrdinalIgnoreCase), "A failed settings write must not expose paths or stack details.");
+
 Console.WriteLine("Verifying immutable runtime assets, TOCTOU resistance and limits...");
 var sourceAssets = Path.Combine(AppContext.BaseDirectory, "WebUI");
 var valid = new WebAssetIdentity(sourceAssets);
@@ -205,5 +232,21 @@ file sealed class SettingsSnapshotSource : IWebSettingsSnapshotSource
         ReadCount++;
         return new(new("en-US", "English"), false, "Ask", "Ask before closing.", true, true,
             "FloatingBadge", "Task Scheduler", "Healthy", "Startup registration is healthy.");
+    }
+}
+file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapshotSource, IWebSettingsMutation
+{
+    public bool ShowLogsInSidebar { get; private set; } = initialValue;
+    public bool FailWrites { get; set; }
+    public int WriteCount { get; private set; }
+    public WebSettingsSnapshotValues Read() => new(new("en-US", "English"), ShowLogsInSidebar,
+        "Ask", "Ask before closing.", true, true, "FloatingBadge", "Task Scheduler", "Healthy", "Startup registration is healthy.");
+    public Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (FailWrites) throw new IOException("Synthetic settings write failure.");
+        WriteCount++;
+        ShowLogsInSidebar = value;
+        return Task.CompletedTask;
     }
 }

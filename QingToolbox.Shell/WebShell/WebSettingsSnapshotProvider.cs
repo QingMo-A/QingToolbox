@@ -8,6 +8,14 @@ public sealed record WebSettingsSnapshotValues(WebSettingsLanguage Language, boo
     string StartupStatus, string StartupMessage);
 
 public interface IWebSettingsSnapshotSource { WebSettingsSnapshotValues Read(); }
+public interface IWebSettingsMutation { bool ShowLogsInSidebar { get; } Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken); }
+
+public sealed class WebSettingsMutation(MainWindowViewModel viewModel) : IWebSettingsMutation
+{
+    public bool ShowLogsInSidebar => viewModel.ShowLogsInSidebar;
+    public Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken) =>
+        viewModel.SetShowLogsInSidebarAsync(value, cancellationToken);
+}
 
 public sealed class WebSettingsSnapshotSource(MainWindowViewModel viewModel) : IWebSettingsSnapshotSource
 {
