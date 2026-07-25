@@ -93,6 +93,26 @@ var extraPayload = JsonSerializer.Serialize(new { protocolVersion = 4, requestId
 var extraResult = await moduleDispatcher.DispatchAsync(extraPayload, new(11, CancellationToken.None));
 Require(!extraResult.Response.Success && extraResult.Response.Error?.Code == "InvalidPayload", "Module projection must reject additional payload properties.");
 
+Console.WriteLine("Verifying activated read-only session log projection...");
+var logActivation = new WebActivationSession(); logActivation.Begin(21);
+var logNonce = logActivation.IssueChallenge(21, CancellationToken.None);
+_ = logActivation.AcceptActivationPing(21, logNonce, CancellationToken.None);
+var logSource = new LogSnapshotSource();
+var logDispatcher = new WebBridgeDispatcher([new WebLogSnapshotCommandHandler(new WebLogSnapshotProvider(logSource, TimeProvider.System), logActivation)]);
+var logRequest = JsonSerializer.Serialize(new { protocolVersion = 4, requestId = Guid.NewGuid(), command = "logs.getSnapshot", payload = new { } });
+var logResult = await logDispatcher.DispatchAsync(logRequest, new(21, CancellationToken.None));
+Require(logResult.Response.Success && logSource.ReadCount == 1, "Log projection must read the in-memory source exactly once.");
+var logSnapshot = (WebLogSnapshot)logResult.Response.Payload;
+Require(logSnapshot.Entries.Count == 500 && logSnapshot.Entries[0].Message == "entry-1" && logSnapshot.Entries[^1].Message == "entry-500", "Log projection must retain the latest 500 entries in source order.");
+var logJson = JsonSerializer.Serialize(logSnapshot);
+Require(!logJson.Contains("Path", StringComparison.OrdinalIgnoreCase) && !logJson.Contains(root, StringComparison.OrdinalIgnoreCase), "Log DTO must not expose paths or file metadata.");
+var inactiveLogs = new WebActivationSession(); inactiveLogs.Begin(22);
+var inactiveLogResult = await new WebBridgeDispatcher([new WebLogSnapshotCommandHandler(new WebLogSnapshotProvider(new LogSnapshotSource(), TimeProvider.System), inactiveLogs)]).DispatchAsync(logRequest, new(22, CancellationToken.None));
+Require(!inactiveLogResult.Response.Success && inactiveLogResult.Response.Error?.Code == "BridgeNotActivated", "Log projection must require an activated session.");
+var extraLogPayload = JsonSerializer.Serialize(new { protocolVersion = 4, requestId = Guid.NewGuid(), command = "logs.getSnapshot", payload = new { file = "session.log" } });
+var extraLogResult = await logDispatcher.DispatchAsync(extraLogPayload, new(21, CancellationToken.None));
+Require(!extraLogResult.Response.Success && extraLogResult.Response.Error?.Code == "InvalidPayload", "Log projection must reject additional payload properties.");
+
 Console.WriteLine("Verifying immutable runtime assets, TOCTOU resistance and limits...");
 var sourceAssets = Path.Combine(AppContext.BaseDirectory, "WebUI");
 var valid = new WebAssetIdentity(sourceAssets);
@@ -140,5 +160,15 @@ file sealed class SnapshotSource : IWebModuleSnapshotSource
         ReadCount++;
         return [new("qing.test", "Test", "Safe description", "1.0.0", "Qing", "OutOfProcess", "Manual",
             "Running", true, 0, [], ["Clipboard"], "0.2.0-alpha", true)];
+    }
+}
+file sealed class LogSnapshotSource : IWebLogSnapshotSource
+{
+    public int ReadCount { get; private set; }
+    public IReadOnlyList<WebLogSnapshotEntry> ReadEntries()
+    {
+        ReadCount++;
+        return Enumerable.Range(0, 501).Select(index => new WebLogSnapshotEntry(
+            DateTimeOffset.UnixEpoch.AddSeconds(index), (index % 3) switch { 0 => "Information", 1 => "Warning", _ => "Error" }, "Test", $"entry-{index}")).ToArray();
     }
 }

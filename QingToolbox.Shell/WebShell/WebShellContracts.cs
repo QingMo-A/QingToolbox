@@ -22,6 +22,8 @@ public sealed record WebModuleSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList
 public sealed record WebModuleSnapshotItem(string Id, string DisplayName, string DisplayDescription, string Version,
     string Author, string RuntimeType, string LoadMode, string RuntimeState, bool IsValid, int ErrorCount,
     IReadOnlyList<string> Errors, IReadOnlyList<string> Permissions, string MinimumHostVersion, bool IsUserInstalled);
+public sealed record WebLogSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList<WebLogSnapshotEntry> Entries);
+public sealed record WebLogSnapshotEntry(DateTimeOffset Timestamp, string Level, string Category, string Message);
 public sealed record WebAssetManifest(int SchemaVersion, string AssetBuildId, string PackageLockSha256,
     string SourceTreeSha256, IReadOnlyList<WebAssetFile> OutputFiles);
 public sealed record WebAssetFile(string Path, long Size, string Sha256);

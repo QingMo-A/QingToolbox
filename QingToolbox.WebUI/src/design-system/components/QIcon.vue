@@ -1,5 +1,5 @@
 <script setup lang="ts">
-type QIconName = 'home'|'modules'|'running'|'diagnostics'|'pin'|'unpin'|'refresh'|'statusSuccess'|'statusInfo'|'statusWarning'|'statusDanger'|'back'|'search'|'close'
+type QIconName = 'home'|'modules'|'running'|'logs'|'diagnostics'|'pin'|'unpin'|'refresh'|'statusSuccess'|'statusInfo'|'statusWarning'|'statusDanger'|'back'|'search'|'close'
 defineProps<{ name: QIconName; size?: number }>()
 </script>
 
@@ -7,6 +7,7 @@ defineProps<{ name: QIconName; size?: number }>()
   <template v-if="name==='home'"><path d="M3 9.1 10 3l7 6.1"/><path d="M5 8.3V17h10V8.3M8 17v-5h4v5"/></template>
   <template v-else-if="name==='modules'"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="12" y="3" width="5" height="5" rx="1"/><rect x="3" y="12" width="5" height="5" rx="1"/><rect x="12" y="12" width="5" height="5" rx="1"/></template>
   <template v-else-if="name==='running'"><path d="M7.2 4.3 15 10l-7.8 5.7V4.3Z"/><circle cx="10" cy="10" r="8"/></template>
+  <template v-else-if="name==='logs'"><path d="M4 4h12v12H4z"/><path d="M7 7h6M7 10h6M7 13h4"/></template>
   <template v-else-if="name==='diagnostics'"><path d="M3 15.5h14M4 12l3-3 2.5 2.5L14.5 6 17 8.5"/><circle cx="7" cy="9" r=".7" fill="currentColor" stroke="none"/><circle cx="14.5" cy="6" r=".7" fill="currentColor" stroke="none"/></template>
   <template v-else-if="name==='pin'||name==='unpin'"><path v-if="name==='unpin'" d="m4 4 12 12"/><path d="m7 3 6 6-1.8 1.8.5 3.2-1.2 1.2-2.8-2.8L4 16l3.6-3.7-2.8-2.8L6 8.3l3.2.5L11 7"/></template>
   <template v-else-if="name==='refresh'"><path d="M16.5 7A7 7 0 1 0 17 11"/><path d="M13 3h4v4"/></template>
