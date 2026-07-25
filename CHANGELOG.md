@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added a read-only Running workspace that mirrors the native Shell layout and links active modules to their details.
 - Added a modern Development Web Shell workspace with Home, collapsible navigation, retained
   diagnostics, local system/light/dark preview, and a focused token-based Qing component foundation.
 - Added an activated-session-only `modules.getSnapshot` projection and read-only module list,
