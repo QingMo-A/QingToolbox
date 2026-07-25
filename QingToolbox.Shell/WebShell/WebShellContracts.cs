@@ -24,6 +24,11 @@ public sealed record WebModuleSnapshotItem(string Id, string DisplayName, string
     IReadOnlyList<string> Errors, IReadOnlyList<string> Permissions, string MinimumHostVersion, bool IsUserInstalled);
 public sealed record WebLogSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList<WebLogSnapshotEntry> Entries);
 public sealed record WebLogSnapshotEntry(DateTimeOffset Timestamp, string Level, string Category, string Message);
+public sealed record WebSettingsSnapshot(DateTimeOffset GeneratedAt, WebSettingsLanguage Language,
+    bool ShowLogsInSidebar, string MainWindowCloseBehavior, string CloseBehaviorMessage,
+    bool LaunchAtLogin, bool CanConfigureLaunchAtLogin, string StartupPresentationMode,
+    string StartupBackend, string StartupStatus, string StartupMessage);
+public sealed record WebSettingsLanguage(string Code, string DisplayName);
 public sealed record WebAssetManifest(int SchemaVersion, string AssetBuildId, string PackageLockSha256,
     string SourceTreeSha256, IReadOnlyList<WebAssetFile> OutputFiles);
 public sealed record WebAssetFile(string Path, long Size, string Sha256);

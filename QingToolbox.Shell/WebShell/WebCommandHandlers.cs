@@ -58,6 +58,14 @@ public sealed class WebLogSnapshotCommandHandler(WebLogSnapshotProvider snapshot
     { activation.RequireActivated(context.Generation, context.SessionCancellation); return Task.FromResult<object>(snapshots.Create()); }
 }
 
+public sealed class WebSettingsSnapshotCommandHandler(WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "settings.getSnapshot";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string>();
+    public Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context, CancellationToken cancellationToken)
+    { activation.RequireActivated(context.Generation, context.SessionCancellation); return Task.FromResult<object>(snapshots.Create()); }
+}
+
 public sealed class WebReadyCommandHandler(WebAppSnapshotProvider snapshots, Lazy<WebAssetIdentity> assets,
     WebActivationSession activation) : IWebCommandHandler
 {

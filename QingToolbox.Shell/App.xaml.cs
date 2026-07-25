@@ -270,10 +270,13 @@ public partial class App : Application
                 services.AddSingleton<WebModuleSnapshotProvider>();
                 services.AddSingleton<IWebLogSnapshotSource, WebLogSnapshotSource>();
                 services.AddSingleton<WebLogSnapshotProvider>();
+                services.AddSingleton<IWebSettingsSnapshotSource, WebSettingsSnapshotSource>();
+                services.AddSingleton<WebSettingsSnapshotProvider>();
                 services.AddSingleton<IWebCommandHandler, WebPingCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSnapshotCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleSnapshotCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebLogSnapshotCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebSettingsSnapshotCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebReadyCommandHandler>();
                 services.AddSingleton<WebBridgeDispatcher>();
                 services.AddSingleton<WebBridgeHost>();

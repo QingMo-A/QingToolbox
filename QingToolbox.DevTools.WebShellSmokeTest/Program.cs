@@ -113,6 +113,30 @@ var extraLogPayload = JsonSerializer.Serialize(new { protocolVersion = 4, reques
 var extraLogResult = await logDispatcher.DispatchAsync(extraLogPayload, new(21, CancellationToken.None));
 Require(!extraLogResult.Response.Success && extraLogResult.Response.Error?.Code == "InvalidPayload", "Log projection must reject additional payload properties.");
 
+Console.WriteLine("Verifying activated read-only settings projection...");
+var settingsActivation = new WebActivationSession(); settingsActivation.Begin(31);
+var settingsNonce = settingsActivation.IssueChallenge(31, CancellationToken.None);
+_ = settingsActivation.AcceptActivationPing(31, settingsNonce, CancellationToken.None);
+var settingsSource = new SettingsSnapshotSource();
+var settingsDispatcher = new WebBridgeDispatcher([new WebSettingsSnapshotCommandHandler(new WebSettingsSnapshotProvider(settingsSource, TimeProvider.System), settingsActivation)]);
+var settingsRequest = JsonSerializer.Serialize(new { protocolVersion = WebBridgeProtocol.Version, requestId = Guid.NewGuid(), command = "settings.getSnapshot", payload = new { } });
+var settingsResult = await settingsDispatcher.DispatchAsync(settingsRequest, new(31, CancellationToken.None));
+Require(settingsResult.Response.Success && settingsSource.ReadCount == 1, "Settings projection must read its authoritative source once.");
+var settingsSnapshot = (WebSettingsSnapshot)settingsResult.Response.Payload;
+Require(settingsSnapshot.Language.Code == "en-US" && settingsSnapshot.Language.DisplayName == "English", "Settings DTO must include the current language.");
+Require(!settingsSnapshot.ShowLogsInSidebar && settingsSnapshot.MainWindowCloseBehavior == "Ask", "Settings DTO must include navigation and close behavior.");
+Require(settingsSnapshot.LaunchAtLogin && settingsSnapshot.CanConfigureLaunchAtLogin && settingsSnapshot.StartupPresentationMode == "FloatingBadge" && settingsSnapshot.StartupBackend == "Task Scheduler" && settingsSnapshot.StartupStatus == "Healthy", "Settings DTO must include safe startup state.");
+Require(settingsSource.WriteCount == 0, "Reading settings must not invoke a write operation.");
+var settingsJson = JsonSerializer.Serialize(settingsSnapshot);
+Require(!settingsJson.Contains("RegistryPath", StringComparison.OrdinalIgnoreCase) && !settingsJson.Contains("ExecutablePath", StringComparison.OrdinalIgnoreCase) && !settingsJson.Contains(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), StringComparison.OrdinalIgnoreCase), "Settings DTO must not expose system or user paths.");
+var inactiveSettings = new WebActivationSession(); inactiveSettings.Begin(32);
+var inactiveSettingsResult = await new WebBridgeDispatcher([new WebSettingsSnapshotCommandHandler(new WebSettingsSnapshotProvider(new SettingsSnapshotSource(), TimeProvider.System), inactiveSettings)]).DispatchAsync(settingsRequest, new(32, CancellationToken.None));
+Require(!inactiveSettingsResult.Response.Success && inactiveSettingsResult.Response.Error?.Code == "BridgeNotActivated", "Settings projection must require an activated session.");
+var extraSettingsPayload = JsonSerializer.Serialize(new { protocolVersion = 4, requestId = Guid.NewGuid(), command = "settings.getSnapshot", payload = new { save = true } });
+var extraSettingsResult = await settingsDispatcher.DispatchAsync(extraSettingsPayload, new(31, CancellationToken.None));
+Require(!extraSettingsResult.Response.Success && extraSettingsResult.Response.Error?.Code == "InvalidPayload", "Settings projection must reject additional payload properties.");
+Require(WebBridgeProtocol.Version == 4, "Settings projection must preserve protocol version 4.");
+
 Console.WriteLine("Verifying immutable runtime assets, TOCTOU resistance and limits...");
 var sourceAssets = Path.Combine(AppContext.BaseDirectory, "WebUI");
 var valid = new WebAssetIdentity(sourceAssets);
@@ -170,5 +194,16 @@ file sealed class LogSnapshotSource : IWebLogSnapshotSource
         ReadCount++;
         return Enumerable.Range(0, 501).Select(index => new WebLogSnapshotEntry(
             DateTimeOffset.UnixEpoch.AddSeconds(index), (index % 3) switch { 0 => "Information", 1 => "Warning", _ => "Error" }, "Test", $"entry-{index}")).ToArray();
+    }
+}
+file sealed class SettingsSnapshotSource : IWebSettingsSnapshotSource
+{
+    public int ReadCount { get; private set; }
+    public int WriteCount { get; private set; }
+    public WebSettingsSnapshotValues Read()
+    {
+        ReadCount++;
+        return new(new("en-US", "English"), false, "Ask", "Ask before closing.", true, true,
+            "FloatingBadge", "Task Scheduler", "Healthy", "Startup registration is healthy.");
     }
 }
