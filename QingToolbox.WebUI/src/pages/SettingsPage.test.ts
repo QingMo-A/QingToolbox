@@ -7,15 +7,16 @@ import { useAppStore } from '../app/store'
 import { useSettingsStore } from '../app/settingsStore'
 import { useThemeStore } from '../app/themeStore'
 import { useToastStore } from '../app/toastStore'
+import type { SettingsSnapshot } from '../contracts/settings'
 
 const wrappers: VueWrapper[] = []
 afterEach(() => wrappers.splice(0).forEach(wrapper => wrapper.unmount()))
 
-const snapshot = {
+const snapshot: SettingsSnapshot = {
   generatedAt: '2026-07-25T12:00:00Z',
   language: { code: 'en-US', displayName: 'English' },
   showLogsInSidebar: true,
-  mainWindowCloseBehavior: 'Ask' as const,
+  mainWindowCloseBehavior: 'Ask',
   closeBehaviorMessage: 'Ask before closing.',
   launchAtLogin: false,
   canConfigureLaunchAtLogin: true,
@@ -28,7 +29,8 @@ const snapshot = {
 function page(
   bridge: 'Connecting' | 'Connected' = 'Connected',
   status: 'idle' | 'loading' | 'ready' | 'error' = 'idle',
-  setImpl: (value: boolean) => Promise<typeof snapshot> = async value => ({ ...snapshot, showLogsInSidebar: value })
+  setImpl?: (value: boolean) => Promise<typeof snapshot>,
+  closeImpl?: (value: 'Ask'|'MinimizeToNotificationArea'|'ExitApplication') => Promise<typeof snapshot>
 ) {
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -38,12 +40,13 @@ function page(
   if (status === 'ready') settings.complete(snapshot)
   if (status === 'error') settings.fail(new Error('offline'))
   const getSnapshot = vi.fn(async () => snapshot)
-  const setShowLogsInSidebar = vi.fn(setImpl)
+  const setShowLogsInSidebar = vi.fn(setImpl ?? (async value => ({ ...snapshot, showLogsInSidebar: value })))
+  const setMainWindowCloseBehavior = vi.fn(closeImpl ?? (async value => ({ ...snapshot, mainWindowCloseBehavior: value })))
   const wrapper = mount(SettingsPage, {
-    global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setShowLogsInSidebar } } }
+    global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setShowLogsInSidebar, setMainWindowCloseBehavior } } }
   })
   wrappers.push(wrapper)
-  return { wrapper, settings, getSnapshot, setShowLogsInSidebar, theme: useThemeStore(), toast: useToastStore() }
+  return { wrapper, settings, getSnapshot, setShowLogsInSidebar, setMainWindowCloseBehavior, theme: useThemeStore(), toast: useToastStore() }
 }
 
 describe('SettingsPage', () => {
@@ -69,13 +72,52 @@ describe('SettingsPage', () => {
     expect(text).toContain('Registry Run')
     expect(text).toContain('Healthy')
   })
-  it('keeps every setting except logs read-only', () => {
+  it('keeps language and startup read-only while exposing only the two supported controls', () => {
     const wrapper = page('Connected', 'ready').wrapper
-    expect(wrapper.text()).toContain('read-only')
+    expect(wrapper.text()).toContain('Some host settings can be changed')
     expect(wrapper.findAll('button').map(button => button.text())).not.toEqual(expect.arrayContaining(['Save', 'Apply', 'Reset']))
     expect(wrapper.find('select').exists()).toBe(false)
     expect(wrapper.find('input').exists()).toBe(false)
     expect(wrapper.findAll('[role="switch"]')).toHaveLength(1)
+    expect(wrapper.findAll('[role="radiogroup"]')).toHaveLength(1)
+    expect(wrapper.findAll('[role="radio"]')).toHaveLength(3)
+  })
+  it('maps the current close behavior to one accessible radio', () => {
+    const radios = page('Connected', 'ready').wrapper.findAll('[role="radio"]')
+    expect(radios.map(radio => radio.attributes('aria-checked'))).toEqual(['true', 'false', 'false'])
+    expect(radios.map(radio => radio.text())).toEqual(expect.arrayContaining([expect.stringContaining('Ask every time'), expect.stringContaining('Minimize to notification area'), expect.stringContaining('Exit application')]))
+  })
+  it('persists a close behavior without closing the page', async () => {
+    const x = page('Connected', 'ready')
+    await x.wrapper.findAll('[role="radio"]')[2].trigger('click')
+    await flushPromises()
+    expect(x.setMainWindowCloseBehavior).toHaveBeenCalledOnce()
+    expect(x.setMainWindowCloseBehavior).toHaveBeenCalledWith('ExitApplication')
+    expect(x.settings.snapshot?.mainWindowCloseBehavior).toBe('ExitApplication')
+    expect(x.wrapper.exists()).toBe(true)
+    expect(x.toast.kind).toBe('success')
+  })
+  it('preserves close behavior on failure', async () => {
+    const x = page('Connected', 'ready', undefined, async () => { throw new Error('denied') })
+    await x.wrapper.findAll('[role="radio"]')[1].trigger('click')
+    await flushPromises()
+    expect(x.settings.snapshot?.mainWindowCloseBehavior).toBe('Ask')
+    expect(x.settings.closeBehaviorError).toBe('denied')
+    expect(x.toast.kind).toBe('error')
+  })
+  it('disables only close choices and suppresses parallel close writes', async () => {
+    let resolve!: (value: typeof snapshot) => void
+    const pending = new Promise<typeof snapshot>(done => { resolve = done })
+    const x = page('Connected', 'ready', undefined, () => pending)
+    const radios = x.wrapper.findAll('[role="radio"]')
+    await radios[1].trigger('click')
+    await radios[2].trigger('click')
+    expect(x.setMainWindowCloseBehavior).toHaveBeenCalledTimes(1)
+    expect(radios.every(radio => radio.attributes('disabled') !== undefined)).toBe(true)
+    expect(x.wrapper.get('[role="switch"]').attributes('disabled')).toBeUndefined()
+    resolve({ ...snapshot, mainWindowCloseBehavior: 'MinimizeToNotificationArea' })
+    await flushPromises()
+    expect(x.wrapper.findAll('[role="radio"]').every(radio => radio.attributes('disabled') === undefined)).toBe(true)
   })
   it('persists the logs switch and exposes its accessible state', async () => {
     const x = page('Connected', 'ready')
@@ -130,6 +172,7 @@ describe('SettingsPage', () => {
     expect(x.theme.mode).toBe('dark')
     expect(x.getSnapshot).not.toHaveBeenCalled()
     expect(x.setShowLogsInSidebar).not.toHaveBeenCalled()
+    expect(x.setMainWindowCloseBehavior).not.toHaveBeenCalled()
   })
   it('renders long state through definition rows', () => expect(page('Connected', 'ready').wrapper.findAll('.settings-values > div').length).toBeGreaterThanOrEqual(8))
 })

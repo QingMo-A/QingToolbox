@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using QingToolbox.Core.Settings;
 using QingToolbox.Shell.Startup;
 using QingToolbox.Shell.WebShell;
 
@@ -164,6 +165,33 @@ var failedMutation = await mutationDispatcher.DispatchAsync(MutationRequest(new 
 Require(!failedMutation.Response.Success && failedMutation.Response.Error?.Code == "HandlerFailed" && !mutationSource.ShowLogsInSidebar, "A failed settings write must preserve the authoritative value and return a safe error.");
 Require(!JsonSerializer.Serialize(failedMutation.Response).Contains(root, StringComparison.OrdinalIgnoreCase), "A failed settings write must not expose paths or stack details.");
 
+Console.WriteLine("Verifying the close behavior settings mutation...");
+mutationSource.FailWrites = false;
+var closeDispatcher = new WebBridgeDispatcher([new WebSetMainWindowCloseBehaviorCommandHandler(
+    mutationSource, new WebSettingsSnapshotProvider(mutationSource, TimeProvider.System), settingsActivation)]);
+string CloseRequest(object payload) => JsonSerializer.Serialize(new { protocolVersion = 4, requestId = Guid.NewGuid(), command = "settings.setMainWindowCloseBehavior", payload });
+foreach (var payload in new object[] { new { }, new { mainWindowCloseBehavior = 1 }, new { mainWindowCloseBehavior = "Unknown" }, new { mainWindowCloseBehavior = "ask" }, new { mainWindowCloseBehavior = "" }, new { mainWindowCloseBehavior = "Ask", extra = true } })
+{
+    var rejectedClosePayload = await closeDispatcher.DispatchAsync(CloseRequest(payload), new(31, CancellationToken.None));
+    Require(!rejectedClosePayload.Response.Success && rejectedClosePayload.Response.Error?.Code == "InvalidPayload", "Close behavior mutation must reject malformed or ambiguous payloads.");
+}
+var inactiveClose = await new WebBridgeDispatcher([new WebSetMainWindowCloseBehaviorCommandHandler(
+    mutationSource, new WebSettingsSnapshotProvider(mutationSource, TimeProvider.System), inactiveSettings)])
+    .DispatchAsync(CloseRequest(new { mainWindowCloseBehavior = "MinimizeToNotificationArea" }), new(32, CancellationToken.None));
+Require(!inactiveClose.Response.Success && inactiveClose.Response.Error?.Code == "BridgeNotActivated", "Close behavior mutation must require activation.");
+foreach (var expected in new[] { MainWindowCloseBehavior.MinimizeToNotificationArea, MainWindowCloseBehavior.ExitApplication, MainWindowCloseBehavior.Ask })
+{
+    var changed = await closeDispatcher.DispatchAsync(CloseRequest(new { mainWindowCloseBehavior = expected.ToString() }), new(31, CancellationToken.None));
+    Require(changed.Response.Success && mutationSource.MainWindowCloseBehavior == expected && ((WebSettingsSnapshot)changed.Response.Payload).MainWindowCloseBehavior == expected.ToString(), "Close behavior mutation must persist and return each supported value.");
+}
+Require(mutationSource.CloseWriteCount == 3 && !mutationSource.ShowLogsInSidebar && mutationSource.Read().LaunchAtLogin, "Close behavior mutation must preserve logs and startup settings.");
+_ = await closeDispatcher.DispatchAsync(CloseRequest(new { mainWindowCloseBehavior = "Ask" }), new(31, CancellationToken.None));
+Require(mutationSource.CloseWriteCount == 3, "An unchanged close behavior must not be persisted again.");
+mutationSource.FailWrites = true;
+var failedClose = await closeDispatcher.DispatchAsync(CloseRequest(new { mainWindowCloseBehavior = "ExitApplication" }), new(31, CancellationToken.None));
+Require(!failedClose.Response.Success && failedClose.Response.Error?.Code == "HandlerFailed" && mutationSource.MainWindowCloseBehavior == MainWindowCloseBehavior.Ask, "A failed close behavior write must preserve authority and return a safe error.");
+Require(!JsonSerializer.Serialize(failedClose.Response).Contains(root, StringComparison.OrdinalIgnoreCase) && WebBridgeProtocol.Version == 4, "Close behavior failure must not expose paths and protocol version must remain 4.");
+
 Console.WriteLine("Verifying immutable runtime assets, TOCTOU resistance and limits...");
 var sourceAssets = Path.Combine(AppContext.BaseDirectory, "WebUI");
 var valid = new WebAssetIdentity(sourceAssets);
@@ -237,16 +265,26 @@ file sealed class SettingsSnapshotSource : IWebSettingsSnapshotSource
 file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapshotSource, IWebSettingsMutation
 {
     public bool ShowLogsInSidebar { get; private set; } = initialValue;
+    public MainWindowCloseBehavior MainWindowCloseBehavior { get; private set; } = MainWindowCloseBehavior.Ask;
     public bool FailWrites { get; set; }
     public int WriteCount { get; private set; }
+    public int CloseWriteCount { get; private set; }
     public WebSettingsSnapshotValues Read() => new(new("en-US", "English"), ShowLogsInSidebar,
-        "Ask", "Ask before closing.", true, true, "FloatingBadge", "Task Scheduler", "Healthy", "Startup registration is healthy.");
+        MainWindowCloseBehavior.ToString(), "Ask before closing.", true, true, "FloatingBadge", "Task Scheduler", "Healthy", "Startup registration is healthy.");
     public Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (FailWrites) throw new IOException("Synthetic settings write failure.");
         WriteCount++;
         ShowLogsInSidebar = value;
+        return Task.CompletedTask;
+    }
+    public Task SetMainWindowCloseBehaviorAsync(MainWindowCloseBehavior value, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (FailWrites) throw new IOException("Synthetic settings write failure.");
+        CloseWriteCount++;
+        MainWindowCloseBehavior = value;
         return Task.CompletedTask;
     }
 }

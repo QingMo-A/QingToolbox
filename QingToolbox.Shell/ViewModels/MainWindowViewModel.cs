@@ -1162,8 +1162,7 @@ public sealed partial class MainWindowViewModel(
         {
             if (version != Volatile.Read(ref _closeBehaviorSaveVersion)) return;
             IsCloseBehaviorBusy = true;
-            await settingsService.UpdateAsync(settings => settings.MainWindowCloseBehavior = value);
-            _persistedCloseBehavior = value;
+            await PersistCloseBehaviorAsync(value, CancellationToken.None);
             if (version == Volatile.Read(ref _closeBehaviorSaveVersion))
                 CloseBehaviorMessage = localization.GetString("closeBehavior.saved");
         }
@@ -1183,6 +1182,36 @@ public sealed partial class MainWindowViewModel(
                 IsCloseBehaviorBusy = false;
             _closeBehaviorSaveGate.Release();
         }
+    }
+
+    public async Task SetMainWindowCloseBehaviorAsync(
+        MainWindowCloseBehavior value,
+        CancellationToken cancellationToken = default)
+    {
+        var version = Interlocked.Increment(ref _closeBehaviorSaveVersion);
+        await _closeBehaviorSaveGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_persistedCloseBehavior == value) return;
+            await PersistCloseBehaviorAsync(value, cancellationToken);
+            _suppressCloseBehaviorSave = true;
+            try { SelectedMainWindowCloseBehavior = value; }
+            finally { _suppressCloseBehaviorSave = false; }
+            if (version == Volatile.Read(ref _closeBehaviorSaveVersion))
+                CloseBehaviorMessage = localization.GetString("closeBehavior.saved");
+            sessionLog.Information("Settings", $"Main window close behavior changed by Web Settings: {value}.");
+        }
+        finally
+        {
+            _closeBehaviorSaveGate.Release();
+        }
+    }
+
+    private async Task PersistCloseBehaviorAsync(MainWindowCloseBehavior value, CancellationToken cancellationToken)
+    {
+        if (_persistedCloseBehavior == value) return;
+        await settingsService.UpdateAsync(settings => settings.MainWindowCloseBehavior = value, cancellationToken);
+        _persistedCloseBehavior = value;
     }
 
     internal void SetCloseBehaviorFromCloseDialog(MainWindowCloseBehavior value)

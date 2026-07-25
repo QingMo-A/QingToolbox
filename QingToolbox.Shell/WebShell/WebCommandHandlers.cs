@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.IO;
+using QingToolbox.Core.Settings;
 
 namespace QingToolbox.Shell.WebShell;
 
@@ -80,6 +81,29 @@ public sealed class WebSetShowLogsInSidebarCommandHandler(IWebSettingsMutation m
         var value = property.GetBoolean();
         if (mutation.ShowLogsInSidebar != value)
             await mutation.SetShowLogsInSidebarAsync(value, context.SessionCancellation);
+        return snapshots.Create();
+    }
+}
+
+public sealed class WebSetMainWindowCloseBehaviorCommandHandler(IWebSettingsMutation mutation,
+    WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "settings.setMainWindowCloseBehavior";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string> { "mainWindowCloseBehavior" };
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        if (!payload.TryGetProperty("mainWindowCloseBehavior", out var property) || property.ValueKind != JsonValueKind.String)
+            throw new WebBridgeValidationException("InvalidPayload", "A valid main window close behavior is required.");
+        var value = property.GetString() switch
+        {
+            "Ask" => MainWindowCloseBehavior.Ask,
+            "MinimizeToNotificationArea" => MainWindowCloseBehavior.MinimizeToNotificationArea,
+            "ExitApplication" => MainWindowCloseBehavior.ExitApplication,
+            _ => throw new WebBridgeValidationException("InvalidPayload", "A valid main window close behavior is required.")
+        };
+        if (mutation.MainWindowCloseBehavior != value)
+            await mutation.SetMainWindowCloseBehaviorAsync(value, context.SessionCancellation);
         return snapshots.Create();
     }
 }

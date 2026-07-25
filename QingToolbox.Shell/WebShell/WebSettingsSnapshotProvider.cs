@@ -1,3 +1,4 @@
+using QingToolbox.Core.Settings;
 using QingToolbox.Shell.ViewModels;
 
 namespace QingToolbox.Shell.WebShell;
@@ -8,13 +9,22 @@ public sealed record WebSettingsSnapshotValues(WebSettingsLanguage Language, boo
     string StartupStatus, string StartupMessage);
 
 public interface IWebSettingsSnapshotSource { WebSettingsSnapshotValues Read(); }
-public interface IWebSettingsMutation { bool ShowLogsInSidebar { get; } Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken); }
+public interface IWebSettingsMutation
+{
+    bool ShowLogsInSidebar { get; }
+    MainWindowCloseBehavior MainWindowCloseBehavior { get; }
+    Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken);
+    Task SetMainWindowCloseBehaviorAsync(MainWindowCloseBehavior value, CancellationToken cancellationToken);
+}
 
 public sealed class WebSettingsMutation(MainWindowViewModel viewModel) : IWebSettingsMutation
 {
     public bool ShowLogsInSidebar => viewModel.ShowLogsInSidebar;
+    public MainWindowCloseBehavior MainWindowCloseBehavior => viewModel.SelectedMainWindowCloseBehavior;
     public Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken) =>
         viewModel.SetShowLogsInSidebarAsync(value, cancellationToken);
+    public Task SetMainWindowCloseBehaviorAsync(MainWindowCloseBehavior value, CancellationToken cancellationToken) =>
+        viewModel.SetMainWindowCloseBehaviorAsync(value, cancellationToken);
 }
 
 public sealed class WebSettingsSnapshotSource(MainWindowViewModel viewModel) : IWebSettingsSnapshotSource

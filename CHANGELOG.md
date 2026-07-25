@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Enabled the Development Settings workspace to persist the main window close behavior through the host.
 - Enabled the Development Settings workspace to persist the Logs navigation preference through the host.
 - Added a read-only Settings workspace that projects the current host configuration and mirrors the native Logs navigation preference.
 - Added an activated-session, read-only Session Logs workspace backed only by the current in-memory log entries.

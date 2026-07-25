@@ -4,6 +4,7 @@ export class MockTransport implements Transport {
   readonly mode='Mock' as const; private readonly listeners=new Set<(event:BridgeEvent)=>void>(); private disposed=false
   private nonce:string|null=null;private sessionToken:string|null=null;private phase:'PreReady'|'ChallengeIssued'|'Activated'='PreReady'
   private showLogsInSidebar=true
+  private mainWindowCloseBehavior:'Ask'|'MinimizeToNotificationArea'|'ExitApplication'='MinimizeToNotificationArea'
   async request(message:BridgeRequest):Promise<BridgeResponse>{
     if(this.disposed)throw new Error('Bridge transport is disposed.')
     if(message.protocolVersion!==protocolVersion)return this.error(message,'ProtocolMismatch')
@@ -25,12 +26,13 @@ export class MockTransport implements Transport {
     if(message.command==='logs.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length!==0)return this.error(message,'InvalidPayload');return this.ok(message,{generatedAt:'2026-07-25T12:00:03.000Z',entries:[{timestamp:'2026-07-25T12:00:01.000Z',level:'Information',category:'Application',message:'Session started.'},{timestamp:'2026-07-25T12:00:02.000Z',level:'Warning',category:'Modules',message:'Example warning.'},{timestamp:'2026-07-25T12:00:03.000Z',level:'Error',category:'Bridge',message:'Example error.'}]})}
     if(message.command==='settings.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length!==0)return this.error(message,'InvalidPayload');return this.ok(message,this.settingsSnapshot())}
     if(message.command==='settings.setShowLogsInSidebar'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length!==1||typeof message.payload.showLogsInSidebar!=='boolean')return this.error(message,'InvalidPayload');this.showLogsInSidebar=message.payload.showLogsInSidebar;return this.ok(message,this.settingsSnapshot())}
+    if(message.command==='settings.setMainWindowCloseBehavior'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');const value=message.payload.mainWindowCloseBehavior;if(Object.keys(message.payload).length!==1||value!=='Ask'&&value!=='MinimizeToNotificationArea'&&value!=='ExitApplication')return this.error(message,'InvalidPayload');this.mainWindowCloseBehavior=value;return this.ok(message,this.settingsSnapshot())}
     return this.error(message,'UnknownCommand')
   }
   subscribe(listener:(event:BridgeEvent)=>void){this.listeners.add(listener);return()=>this.listeners.delete(listener)} emit(event:BridgeEvent){this.listeners.forEach(x=>x(event))}
   dispose(){this.disposed=true;this.nonce=null;this.sessionToken=null;this.listeners.clear()}
   private randomToken(){return crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','')}
-  private settingsSnapshot(){return{generatedAt:'2026-07-25T12:00:00.000Z',language:{code:'en-US',displayName:'English'},showLogsInSidebar:this.showLogsInSidebar,mainWindowCloseBehavior:'MinimizeToNotificationArea',closeBehaviorMessage:'The main window minimizes to the notification area.',launchAtLogin:false,canConfigureLaunchAtLogin:true,startupPresentationMode:'FloatingBadge',startupBackend:'Registry Run',startupStatus:'Healthy',startupMessage:'Windows startup registration is healthy.'}}
+  private settingsSnapshot(){return{generatedAt:'2026-07-25T12:00:00.000Z',language:{code:'en-US',displayName:'English'},showLogsInSidebar:this.showLogsInSidebar,mainWindowCloseBehavior:this.mainWindowCloseBehavior,closeBehaviorMessage:'The selected behavior applies the next time the main window is closed.',launchAtLogin:false,canConfigureLaunchAtLogin:true,startupPresentationMode:'FloatingBadge',startupBackend:'Registry Run',startupStatus:'Healthy',startupMessage:'Windows startup registration is healthy.'}}
   private ok(r:BridgeRequest,payload:unknown):BridgeResponse{return{protocolVersion,requestId:r.requestId,success:true,payload,error:null}}
   private error(r:BridgeRequest,code:string):BridgeResponse{return{protocolVersion,requestId:r.requestId,success:false,payload:{},error:{code,message:'Mock bridge rejected the request.'}}}
 }
