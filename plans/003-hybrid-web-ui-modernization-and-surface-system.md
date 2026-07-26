@@ -11,10 +11,10 @@ This plan does **not** authorize a one-shot rewrite of the Shell. Every implemen
 ## Plan status
 
 ```text
-Status: Not Started
+Status: Active Architecture — Phased Implementation
 Track: UI Modernization
 Branch: toolbox
-Current implementation priority: B2.1 runtime lifecycle integration
+Current implementation priority: UI-3 Development Web module operations
 ```
 
 Plan 003 is the architecture source for future Web UI work.
@@ -25,16 +25,14 @@ The repository currently treats the B1 recoverable module transaction core as:
 Engineering Complete — Frozen
 ```
 
-The next code priority remains B2.1:
+The B2.1 runtime lifecycle boundary is:
 
 ```text
-Production lifecycle adapter boundary
-Transaction recovery execution gate
-Development-only TextTools canary
-Disk/runtime version consistency
+Engineering Complete — Frozen
 ```
 
-UI documentation may proceed now, but UI code with module lifecycle side effects must not bypass or race B2.1.
+Development Web module operations may now proceed in narrow slices, but must reuse and must not
+bypass the frozen B2.1 execution, recovery, runtime, and module-window boundaries.
 
 ## Product objective
 
@@ -914,7 +912,7 @@ Do not create a complex npm monorepo before a second real consumer exists. Split
 
 ## B2.1 dependency
 
-B2.1 remains the first code priority.
+B2.1 is Engineering Complete — Frozen.
 
 It must establish:
 
@@ -930,7 +928,8 @@ Development-only TextTools canary
 Disk/runtime version consistency
 ```
 
-Before B2.1 is stable, Vue must not trigger:
+Vue module operations may be introduced only through explicit, typed, Development-only commands
+that reuse these frozen boundaries. Vue must never directly perform:
 
 ```text
 Load
@@ -941,12 +940,12 @@ Module replacement
 Automatic module update
 ```
 
-Static Design System exploration may proceed independently, but it must not bypass runtime boundaries.
+UI-3 is no longer blocked by B2.1, but it remains constrained by B2.1.
 
 ## UI-0: Architecture plan
 
 ```text
-Status: Engineering Complete when Plan 003 is approved and committed
+Status: Engineering Complete
 ```
 
 UI-0 changes planning only. It adds no runtime behavior.
@@ -954,8 +953,8 @@ UI-0 changes planning only. It adds no runtime behavior.
 ## UI-1: Development-only Web Shell
 
 ```text
-Status: Not Started
-Priority: P1 after B2.1 Shell lifecycle interfaces are stable
+Status: Engineering Complete — Frozen
+Priority: Complete
 ```
 
 Planned stack:
@@ -1000,21 +999,18 @@ WPF MainWindow
 
 Do not rewrite non-client behavior, Snap Layout, or the system menu in UI-1.
 
-## UI-2: Design System, Surface System, and read-only module center
+## UI-2A: Visual foundation and read-only module center
 
 ```text
-Status: Not Started
-Priority: P1
+Status: Implementation Complete
+Priority: Complete
 ```
 
-Planned scope:
+Implemented scope:
 
 ```text
 Design Tokens
 Qing UI
-Web Overlay Layer
-Surface Store
-Surface Registry prototype
 Qing Bridge
 Qing Contracts
 Home shell
@@ -1023,9 +1019,7 @@ Read-only module list
 Module details
 State badges
 Toast
-Dialog
 Drawer
-Command Palette
 Theme preview
 ```
 
@@ -1042,11 +1036,25 @@ Settings writes
 Arbitrary filesystem changes
 ```
 
+Running, Session Logs, Settings, and three narrow settings writes were delivered incrementally after
+Plan 009. They remain supported, but do not change Plan 009's original read-only scope. New Settings
+Bridge commands are frozen while UI-3 is active.
+
+## UI-2B: Shared interaction components
+
+```text
+Status: Not a standalone infrastructure phase
+```
+
+Add a concrete shared interaction component only when a real user operation requires it. Do not
+require a complete Surface Registry, Hybrid Window Framework, Command Palette Framework, generic
+Dialog system, or generic Operation Queue before UI-3 can begin.
+
 ## UI-2.5: Development-only Hybrid Surface prototype
 
 ```text
-Status: Not Started
-Priority: P1
+Status: Deferred
+Priority: P3
 ```
 
 Use one isolated prototype:
@@ -1079,8 +1087,9 @@ Do not connect the prototype to real Production update behavior.
 ## UI-3: Module lifecycle operations
 
 ```text
-Status: Blocked by B2.1
-Priority: P2
+Status: Planned — Next
+Priority: P1
+Plan: Plan 010
 ```
 
 Future scope:
@@ -1111,7 +1120,7 @@ Vue provides the entry point and state projection, not the module view renderer.
 ## UI-4: Settings, home, downloads, updates, and floating surfaces
 
 ```text
-Status: Blocked by earlier UI phases and Stage B Production boundaries
+Status: Deferred
 Priority: P2
 ```
 
@@ -1319,24 +1328,21 @@ Host self-update
 # Part XII: Execution order
 
 ```text
-P0  B2.1 Runtime Adapter + Recovery Gate + Canary
-P0  UI-0 Plan 003 architecture documentation
-P1  UI-1 Development-only Web Shell
-P1  UI-2 Design System + Surface System + read-only module center
-P1  UI-2.5 Development-only Hybrid Surface
-P2  UI-3 module lifecycle Web UI
+Complete  B2.1 Runtime Adapter + Recovery Gate + Canary — Frozen
+Complete  UI-0 Plan 003 architecture documentation
+Complete  UI-1 Development-only Web Shell — Frozen
+Complete  UI-2A visual foundation + read-only module center
+P1        UI-3 Development Web module operations through Plan 010
 P2  Stage B Production-safe integration
-P2  UI-4 settings, home, downloads, updates, and floating surfaces
+P2  UI-4 downloads, updates, and floating surfaces — Deferred
+P3  UI-2.5 Development-only Hybrid Surface — Deferred
 P3  UI-5 default Shell migration evaluation
 P3  optional Web module protocol in Module API/SDK
 P4  host self-update
 ```
 
-B2.1 and UI-1 must not both perform large, uncontrolled changes to the Shell startup lifecycle.
-
-Stabilize the Recovery Gate first, then integrate Web Shell startup.
-
-Static Design System work may proceed in parallel, but commands with side effects wait for stable C# services.
+B2.1 and UI-1 are frozen. UI-3 must reuse their boundaries and proceed through the separate slices in
+Plan 010. Preview 2 release work and UI modernization remain independent tracks.
 
 # Part XIII: Status vocabulary
 
@@ -1344,8 +1350,10 @@ Use only:
 
 ```text
 Not Started
+Planned
 In Progress
 Engineering Complete
+Implementation Complete
 Blocked
 Deferred
 Archived
@@ -1373,13 +1381,10 @@ Plan 003 is a master architecture plan. Do not execute all phases in one Codex t
 
 Each implementation phase must receive a separate numbered plan that references Plan 003 instead of copying it.
 
-Suggested follow-up plans, subject to the repository's actual next plan number:
+The current follow-up plan is:
 
 ```text
-Plan 004: Development-only Web Shell Foundation
-Plan 005: Qing Design and Overlay Foundations
-Plan 006: Hybrid Surface Prototype
-Plan 007: Module Lifecycle Web UI Integration
+Plan 010: Development Web Module Operations
 ```
 
 Every follow-up plan must define:

@@ -5,10 +5,12 @@ This directory stores Codex-ready implementation plans for the `toolbox` branch.
 Read these plans in order unless the user says otherwise:
 
 1. [`001-redesign-shell-workspace-layout.md`](001-redesign-shell-workspace-layout.md)
+   - **Historical — Implemented by the native WPF Shell baseline.**
    - Polish the current Shell workspace layout.
    - Improve Sidebar icon rendering, summary cards, compact module cards, action button hierarchy, and Workspace empty state.
 
 2. [`002-real-shell-navigation-and-module-windows.md`](002-real-shell-navigation-and-module-windows.md)
+   - **Historical — Implemented by the native WPF Shell baseline.**
    - Add real Home / Modules / Running / Settings page switching.
    - Move module cards into the Modules page.
    - Hide module details by default.
@@ -46,6 +48,12 @@ Read these plans in order unless the user says otherwise:
    - Establish the first Qing design tokens and reusable visible workspace primitives.
    - Add Home, read-only Modules and details, retained Diagnostics, and local theme preview.
    - **Implementation Complete**; no module lifecycle or settings mutation was introduced.
+
+10. [`010-development-web-module-operations.md`](010-development-web-module-operations.md)
+    - Add host-confirmed Development Web module lifecycle entry points.
+    - Reuse frozen B2.1 execution, recovery, and module-window boundaries.
+    - Deliver Load/Activate, Open, Deactivate/Unload, and startup authorization as separate tasks.
+    - **Planned — Next**; this plan does not authorize implementing all of UI-3 at once.
 
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 

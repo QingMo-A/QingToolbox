@@ -12,9 +12,21 @@
 - Production and ModuleTest continue to use the native WPF workspace.
 - UI-1.1 / Plan 006: Engineering Complete — Frozen.
 - UI-1.2 / Plan 007: Engineering Complete — Frozen.
-- UI-1.3 / Plan 008: Engineering Complete — Frozen; next is UI-2.
+- UI-1.3 / Plan 008: Engineering Complete — Frozen.
 - UI-2A / Plan 009: Implementation Complete; Development-only read-only module center and visual foundation.
 - UI-2A preserves protocol v4 and projects authoritative C# module state without module side effects.
+- UI-3 / Plan 010: Planned — Next; Development-only, host-confirmed module lifecycle entry points.
+- Production Web UI: Deferred. Preview 2 release work and UI modernization remain independent tracks.
+
+The Development Vue workspace currently contains Home, Modules, Running, Session Logs, Settings,
+and Development Diagnostics. Plan 009's original boundary remains the read-only module center and
+visual foundation; Running, Logs, Settings, and the three narrow settings mutations added afterward
+are incremental implementation, not a retroactive expansion of Plan 009.
+
+The existing settings mutations are limited to `ShowLogsInSidebar`, `MainWindowCloseBehavior`, and
+`StartupPresentationMode`. Preserve them, but freeze new Settings Bridge commands while UI-3 is the
+active modernization priority. B2.1 no longer blocks Development Web module operations, provided
+all operations reuse its frozen execution, recovery, runtime, and module-window boundaries.
 
 ## 1. 项目定位
 
