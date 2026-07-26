@@ -1,11 +1,16 @@
 import { assetBuildId, protocolVersion, type AppSnapshot, type BridgeEvent, type BridgeRequest, type BridgeResponse } from '../../contracts/app'
 import type { Transport } from './Transport'
+import type { ModuleSnapshot, ModuleSnapshotItem } from '../../contracts/modules'
 export class MockTransport implements Transport {
   readonly mode='Mock' as const; private readonly listeners=new Set<(event:BridgeEvent)=>void>(); private disposed=false
   private nonce:string|null=null;private sessionToken:string|null=null;private phase:'PreReady'|'ChallengeIssued'|'Activated'='PreReady'
   private showLogsInSidebar=true
   private mainWindowCloseBehavior:'Ask'|'MinimizeToNotificationArea'|'ExitApplication'='MinimizeToNotificationArea'
   private startupPresentationMode:'MainWindow'|'Minimized'|'FloatingBadge'='FloatingBadge'
+  private modules:ModuleSnapshotItem[]=[
+    {id:'qing.hello',displayName:'Hello Module',displayDescription:'A small example module for validating the Qing workspace.',version:'0.1.0',author:'QingMo-A',runtimeType:'InProcess',loadMode:'Manual',runtimeState:'NotLoaded',isValid:true,errorCount:0,errors:[],permissions:[],minimumHostVersion:'0.2.0-alpha',isUserInstalled:false,canLoad:true,canActivate:false,isBusy:false,isExecutionBlocked:false},
+    {id:'qing.texttools',displayName:'Text Tools',displayDescription:'Lightweight text conversion and formatting tools.',version:'0.1.0',author:'QingMo-A',runtimeType:'OutOfProcess',loadMode:'Manual',runtimeState:'Running',isValid:true,errorCount:0,errors:[],permissions:['Clipboard'],minimumHostVersion:'0.2.0-alpha',isUserInstalled:true,canLoad:false,canActivate:false,isBusy:false,isExecutionBlocked:false}
+  ]
   async request(message:BridgeRequest):Promise<BridgeResponse>{
     if(this.disposed)throw new Error('Bridge transport is disposed.')
     if(message.protocolVersion!==protocolVersion)return this.error(message,'ProtocolMismatch')
@@ -23,7 +28,21 @@ export class MockTransport implements Transport {
       return this.ok(message,{pong:true,hostTime:new Date().toISOString(),activated:true})
     }
     if(message.command==='app.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');return this.ok(message,snapshot)}
-    if(message.command==='modules.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');return this.ok(message,{generatedAt:new Date().toISOString(),modules:[{id:'qing.hello',displayName:'Hello Module',displayDescription:'A small example module for validating the Qing workspace.',version:'0.1.0',author:'QingMo-A',runtimeType:'InProcess',loadMode:'Manual',runtimeState:'NotLoaded',isValid:true,errorCount:0,errors:[],permissions:[],minimumHostVersion:'0.2.0-alpha',isUserInstalled:false},{id:'qing.texttools',displayName:'Text Tools',displayDescription:'Lightweight text conversion and formatting tools.',version:'0.1.0',author:'QingMo-A',runtimeType:'OutOfProcess',loadMode:'Manual',runtimeState:'Running',isValid:true,errorCount:0,errors:[],permissions:['Clipboard'],minimumHostVersion:'0.2.0-alpha',isUserInstalled:true}]})}
+    if(message.command==='modules.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length)return this.error(message,'InvalidPayload');return this.ok(message,this.moduleSnapshot())}
+    if(message.command==='modules.load'||message.command==='modules.activate'){
+      if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated')
+      if(Object.keys(message.payload).length!==1||typeof message.payload.moduleId!=='string'||!message.payload.moduleId.trim())return this.error(message,'InvalidPayload')
+      const index=this.modules.findIndex(item=>item.id===message.payload.moduleId);if(index<0)return this.error(message,'ModuleNotFound')
+      const item=this.modules[index];if(item.isBusy)return this.error(message,'ModuleBusy');if(item.isExecutionBlocked)return this.error(message,'ModuleExecutionBlocked')
+      if(message.command==='modules.load'){
+        if(!item.canLoad)return this.error(message,'ModuleOperationUnavailable')
+        this.modules[index]={...item,runtimeState:'Loaded',canLoad:false,canActivate:true}
+      }else{
+        if(!item.canActivate)return this.error(message,'ModuleOperationUnavailable')
+        this.modules[index]={...item,runtimeState:'Running',canLoad:false,canActivate:false}
+      }
+      return this.ok(message,this.moduleSnapshot())
+    }
     if(message.command==='logs.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length!==0)return this.error(message,'InvalidPayload');return this.ok(message,{generatedAt:'2026-07-25T12:00:03.000Z',entries:[{timestamp:'2026-07-25T12:00:01.000Z',level:'Information',category:'Application',message:'Session started.'},{timestamp:'2026-07-25T12:00:02.000Z',level:'Warning',category:'Modules',message:'Example warning.'},{timestamp:'2026-07-25T12:00:03.000Z',level:'Error',category:'Bridge',message:'Example error.'}]})}
     if(message.command==='settings.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length!==0)return this.error(message,'InvalidPayload');return this.ok(message,this.settingsSnapshot())}
     if(message.command==='settings.setShowLogsInSidebar'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length!==1||typeof message.payload.showLogsInSidebar!=='boolean')return this.error(message,'InvalidPayload');this.showLogsInSidebar=message.payload.showLogsInSidebar;return this.ok(message,this.settingsSnapshot())}
@@ -35,6 +54,7 @@ export class MockTransport implements Transport {
   dispose(){this.disposed=true;this.nonce=null;this.sessionToken=null;this.listeners.clear()}
   private randomToken(){return crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','')}
   private settingsSnapshot(){return{generatedAt:'2026-07-25T12:00:00.000Z',language:{code:'en-US',displayName:'English'},showLogsInSidebar:this.showLogsInSidebar,mainWindowCloseBehavior:this.mainWindowCloseBehavior,closeBehaviorMessage:'The selected behavior applies the next time the main window is closed.',launchAtLogin:false,canConfigureLaunchAtLogin:true,startupPresentationMode:this.startupPresentationMode,startupBackend:'Registry Run',startupStatus:'Healthy',startupMessage:'Windows startup registration is healthy.'}}
+  private moduleSnapshot():ModuleSnapshot{return{generatedAt:new Date().toISOString(),modules:this.modules.map(item=>({...item,errors:[...item.errors],permissions:[...item.permissions]}))}}
   private ok(r:BridgeRequest,payload:unknown):BridgeResponse{return{protocolVersion,requestId:r.requestId,success:true,payload,error:null}}
   private error(r:BridgeRequest,code:string):BridgeResponse{return{protocolVersion,requestId:r.requestId,success:false,payload:{},error:{code,message:'Mock bridge rejected the request.'}}}
 }

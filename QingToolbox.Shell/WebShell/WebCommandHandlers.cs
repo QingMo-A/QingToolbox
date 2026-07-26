@@ -51,6 +51,53 @@ public sealed class WebModuleSnapshotCommandHandler(WebModuleSnapshotProvider sn
     }
 }
 
+public abstract class WebModuleLifecycleCommandHandler(
+    WebModuleSnapshotProvider snapshots,
+    WebActivationSession activation) : IWebCommandHandler
+{
+    public abstract string Command { get; }
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string>(StringComparer.Ordinal) { "moduleId" };
+
+    protected abstract Task<WebModuleLifecycleResult> ExecuteAsync(string moduleId, CancellationToken cancellationToken);
+
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        if (!payload.TryGetProperty("moduleId", out var property) || property.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(property.GetString()))
+            throw new WebBridgeValidationException("InvalidPayload", "A non-empty module ID is required.");
+
+        var result = await ExecuteAsync(property.GetString()!, context.SessionCancellation);
+        if (result == WebModuleLifecycleResult.Succeeded) return snapshots.Create();
+        throw result switch
+        {
+            WebModuleLifecycleResult.NotFound => new WebBridgeValidationException("ModuleNotFound", "The requested module was not found."),
+            WebModuleLifecycleResult.Busy => new WebBridgeValidationException("ModuleBusy", "The requested module is busy."),
+            WebModuleLifecycleResult.Unavailable => new WebBridgeValidationException("ModuleOperationUnavailable", "The requested module operation is not available."),
+            WebModuleLifecycleResult.ExecutionBlocked => new WebBridgeValidationException("ModuleExecutionBlocked", "Module operations are blocked while recovery is pending."),
+            _ => new WebBridgeValidationException("ModuleOperationFailed", "The host could not complete the module operation.")
+        };
+    }
+}
+
+public sealed class WebModuleLoadCommandHandler(IWebModuleLifecycleOperations operations,
+    WebModuleSnapshotProvider snapshots, WebActivationSession activation)
+    : WebModuleLifecycleCommandHandler(snapshots, activation)
+{
+    public override string Command => "modules.load";
+    protected override Task<WebModuleLifecycleResult> ExecuteAsync(string moduleId, CancellationToken cancellationToken) =>
+        operations.LoadAsync(moduleId, cancellationToken);
+}
+
+public sealed class WebModuleActivateCommandHandler(IWebModuleLifecycleOperations operations,
+    WebModuleSnapshotProvider snapshots, WebActivationSession activation)
+    : WebModuleLifecycleCommandHandler(snapshots, activation)
+{
+    public override string Command => "modules.activate";
+    protected override Task<WebModuleLifecycleResult> ExecuteAsync(string moduleId, CancellationToken cancellationToken) =>
+        operations.ActivateAsync(moduleId, cancellationToken);
+}
+
 public sealed class WebLogSnapshotCommandHandler(WebLogSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
 {
     public string Command => "logs.getSnapshot";

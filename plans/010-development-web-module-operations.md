@@ -3,7 +3,7 @@
 ## Status
 
 ```text
-Status: Planned
+Status: In Progress
 Track: UI Modernization / UI-3
 Depends on:
 - B2.1 Engineering Complete — Frozen
@@ -11,6 +11,8 @@ Depends on:
 - UI-2A / Plan 009 Implementation Complete
 Environment:
 - Development only
+UI-3A: Implementation Complete
+Next: UI-3B Open / Focus
 ```
 
 ## Product objective

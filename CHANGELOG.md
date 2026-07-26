@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added host-confirmed Load and Activate controls to the Development Web module center.
 - Enabled the Development Settings workspace to persist the startup presentation preference through the host.
 - Enabled the Development Settings workspace to persist the main window close behavior through the host.
 - Enabled the Development Settings workspace to persist the Logs navigation preference through the host.

@@ -17,6 +17,7 @@ using QingToolbox.Shell.Startup;
 using QingToolbox.Abstractions.Modules;
 using QingToolbox.Core.Updates;
 using QingToolbox.Shell.Views;
+using QingToolbox.Shell.WebShell;
 
 namespace QingToolbox.Shell.ViewModels;
 
@@ -650,26 +651,38 @@ public sealed partial class MainWindowViewModel(
     }
 
     [RelayCommand]
-    private Task LoadModuleAsync(string moduleId)
+    private Task LoadModuleAsync(string moduleId) => LoadModuleOperationAsync(moduleId, CancellationToken.None, false);
+
+    public Task<WebModuleLifecycleResult> LoadModuleFromWebAsync(string moduleId, CancellationToken cancellationToken) =>
+        LoadModuleOperationAsync(moduleId, cancellationToken, true);
+
+    private Task<WebModuleLifecycleResult> LoadModuleOperationAsync(string moduleId, CancellationToken cancellationToken, bool validateAvailability)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (IsOutOfProcessWpf(moduleId))
             return ExecuteLifecycleAsync(moduleId, "load", async () =>
             {
                 if (!await updateRuntimeCoordinator.RestorePreviousRuntimeStateAsync(moduleId,
                         new(false, false, true, false), CancellationToken.None))
                     throw new ModuleRuntimeException("The module worker could not be started.");
-            });
+            }, validateAvailability);
         return ExecuteLifecycleAsync(
             moduleId,
             "load",
             () => runtimeManager.LoadAsync(
                 moduleId,
-                applicationPaths.ModuleDataDirectory));
+                applicationPaths.ModuleDataDirectory), validateAvailability);
     }
 
     [RelayCommand]
-    private Task ActivateModuleAsync(string moduleId)
+    private Task ActivateModuleAsync(string moduleId) => ActivateModuleOperationAsync(moduleId, CancellationToken.None, false);
+
+    public Task<WebModuleLifecycleResult> ActivateModuleFromWebAsync(string moduleId, CancellationToken cancellationToken) =>
+        ActivateModuleOperationAsync(moduleId, cancellationToken, true);
+
+    private Task<WebModuleLifecycleResult> ActivateModuleOperationAsync(string moduleId, CancellationToken cancellationToken, bool validateAvailability)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (IsOutOfProcessWpf(moduleId))
             return ExecuteLifecycleAsync(moduleId, "activate", async () =>
             {
@@ -677,11 +690,11 @@ public sealed partial class MainWindowViewModel(
                     await LoadOutOfProcessAsync(moduleId);
                 if (!await moduleProcessBroker.CommandAsync(moduleId, "Activate", CancellationToken.None))
                     throw new ModuleRuntimeException("The module worker could not be activated.");
-            });
+            }, validateAvailability);
         return ExecuteLifecycleAsync(
             moduleId,
             "activate",
-            () => runtimeManager.ActivateAsync(moduleId));
+            () => runtimeManager.ActivateAsync(moduleId), validateAvailability);
     }
 
     [RelayCommand]
@@ -813,17 +826,23 @@ public sealed partial class MainWindowViewModel(
 
     public void CloseModuleWindows() => moduleWindowManager.CloseAll();
 
-    private async Task ExecuteLifecycleAsync(
+    private async Task<WebModuleLifecycleResult> ExecuteLifecycleAsync(
         string moduleId,
         string operation,
-        Func<Task> action)
+        Func<Task> action,
+        bool validateAvailability = false)
     {
         var moduleViewModel = Modules.FirstOrDefault(
             module => string.Equals(module.Id, moduleId, StringComparison.Ordinal));
 
-        if (moduleViewModel is null || moduleViewModel.IsBusy)
+        if (moduleViewModel is null) return WebModuleLifecycleResult.NotFound;
+        if (moduleViewModel.IsBusy) return WebModuleLifecycleResult.Busy;
+        if (validateAvailability)
         {
-            return;
+            if (moduleViewModel.IsExecutionBlocked) return WebModuleLifecycleResult.ExecutionBlocked;
+            if (operation == "load" && !moduleViewModel.CanLoad ||
+                operation == "activate" && !moduleViewModel.CanActivate)
+                return WebModuleLifecycleResult.Unavailable;
         }
 
         moduleViewModel.IsBusy = true;
@@ -849,6 +868,7 @@ public sealed partial class MainWindowViewModel(
                 moduleViewModel.DisplayName,
                 localizedOperation);
             sessionLog.Information("Module", $"{operation} completed for module '{moduleId}'.");
+            return WebModuleLifecycleResult.Succeeded;
         }
         catch (ModuleExecutionBlockedException exception)
         {
@@ -858,6 +878,7 @@ public sealed partial class MainWindowViewModel(
                 moduleViewModel.DisplayName);
             sessionLog.Warning("ModuleRecovery",
                 $"Module execution blocked by recovery; module={moduleId}; state={exception.Status}.");
+            return WebModuleLifecycleResult.ExecutionBlocked;
         }
         catch (Exception exception)
         {
@@ -873,6 +894,7 @@ public sealed partial class MainWindowViewModel(
                 moduleViewModel.DisplayName,
                 exception.Message);
             sessionLog.Error("Module", $"{operation} failed for module '{moduleId}'.", exception);
+            return WebModuleLifecycleResult.Failed;
         }
         finally
         {

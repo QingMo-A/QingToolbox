@@ -24,7 +24,11 @@ public sealed class WebModuleSnapshotSource(MainWindowViewModel viewModel) : IWe
             SafeErrors(module),
             module.Module.Manifest.Permissions.Select(permission => permission.ToString()).ToArray(),
             module.MinimumHostVersion,
-            module.IsUserInstalled)).ToArray();
+            module.IsUserInstalled,
+            module.CanLoad,
+            module.CanActivate,
+            module.IsBusy,
+            module.IsExecutionBlocked)).ToArray();
 
     private static IReadOnlyList<string> SafeErrors(DiscoveredModuleViewModel module)
     {

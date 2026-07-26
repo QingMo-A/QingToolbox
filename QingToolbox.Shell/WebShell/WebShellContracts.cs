@@ -21,7 +21,8 @@ public sealed record WebPingResponse(bool Pong, DateTimeOffset HostTime, string?
 public sealed record WebModuleSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList<WebModuleSnapshotItem> Modules);
 public sealed record WebModuleSnapshotItem(string Id, string DisplayName, string DisplayDescription, string Version,
     string Author, string RuntimeType, string LoadMode, string RuntimeState, bool IsValid, int ErrorCount,
-    IReadOnlyList<string> Errors, IReadOnlyList<string> Permissions, string MinimumHostVersion, bool IsUserInstalled);
+    IReadOnlyList<string> Errors, IReadOnlyList<string> Permissions, string MinimumHostVersion, bool IsUserInstalled,
+    bool CanLoad, bool CanActivate, bool IsBusy, bool IsExecutionBlocked);
 public sealed record WebLogSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList<WebLogSnapshotEntry> Entries);
 public sealed record WebLogSnapshotEntry(DateTimeOffset Timestamp, string Level, string Category, string Message);
 public sealed record WebSettingsSnapshot(DateTimeOffset GeneratedAt, WebSettingsLanguage Language,

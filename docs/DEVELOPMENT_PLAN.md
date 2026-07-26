@@ -15,7 +15,7 @@
 - UI-1.3 / Plan 008: Engineering Complete — Frozen.
 - UI-2A / Plan 009: Implementation Complete; Development-only read-only module center and visual foundation.
 - UI-2A preserves protocol v4 and projects authoritative C# module state without module side effects.
-- UI-3 / Plan 010: Planned — Next; Development-only, host-confirmed module lifecycle entry points.
+- UI-3 / Plan 010: In Progress — UI-3A complete; UI-3B next.
 - Production Web UI: Deferred. Preview 2 release work and UI modernization remain independent tracks.
 
 The Development Vue workspace currently contains Home, Modules, Running, Session Logs, Settings,
