@@ -122,6 +122,7 @@ internal static class Program
         VerifyUserSettingsAsync().GetAwaiter().GetResult();
         VerifyStartupInfrastructureAsync(helloModule).GetAwaiter().GetResult();
         VerifyWindowChromeContracts();
+        VerifyModuleWindowReuse();
         RunQmodImportScenario(repositoryRoot);
         Console.WriteLine("Smoke test passed.");
         return 0;
@@ -214,6 +215,32 @@ internal static class Program
         Require(!exitDuringRestore.TryCompleteRestore() && exitDuringRestore.State == FloatingBadgeState.Exiting,
             "Completing restore after exit must not return to Normal.");
         Console.WriteLine("Custom window chrome contracts passed.");
+    }
+
+    private static void VerifyModuleWindowReuse()
+    {
+        Console.WriteLine("Verifying native module window open, focus and restore...");
+        var application = Application.Current ?? new Application();
+        application.Resources["BooleanToVisibilityConverter"] = new System.Windows.Controls.BooleanToVisibilityConverter();
+        application.Resources.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri("/QingToolbox.Shell;component/Resources/ShellTheme.xaml", UriKind.Relative)
+        });
+        var manager = new ModuleWindowManager(new SmokeTestLocalizationService());
+        var firstView = new System.Windows.Controls.Border();
+        manager.OpenWindow("qing.window-smoke", "Window smoke", firstView, null);
+        if (!manager.IsWindowOpen("qing.window-smoke"))
+            throw new InvalidOperationException("The first module window was not opened.");
+        var window = application.Windows.OfType<QingToolbox.Shell.Views.ModuleHostWindow>().Single(item => item.IsVisible);
+        manager.OpenWindow("qing.window-smoke", "Window smoke", new System.Windows.Controls.Border(), null);
+        var openWindows = application.Windows.OfType<QingToolbox.Shell.Views.ModuleHostWindow>().Where(item => item.IsVisible).ToArray();
+        if (openWindows.Length != 1 || !ReferenceEquals(openWindows[0], window))
+            throw new InvalidOperationException("A repeated Open created or replaced the existing module window.");
+        window.WindowState = WindowState.Minimized;
+        manager.ActivateWindow("qing.window-smoke");
+        if (window.WindowState != WindowState.Normal)
+            throw new InvalidOperationException("A repeated Open did not restore the minimized module window.");
+        manager.CloseWindow("qing.window-smoke");
     }
 
     private static async Task VerifyUserSettingsAsync()

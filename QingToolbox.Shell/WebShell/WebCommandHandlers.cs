@@ -98,6 +98,15 @@ public sealed class WebModuleActivateCommandHandler(IWebModuleLifecycleOperation
         operations.ActivateAsync(moduleId, cancellationToken);
 }
 
+public sealed class WebModuleOpenCommandHandler(IWebModuleLifecycleOperations operations,
+    WebModuleSnapshotProvider snapshots, WebActivationSession activation)
+    : WebModuleLifecycleCommandHandler(snapshots, activation)
+{
+    public override string Command => "modules.open";
+    protected override Task<WebModuleLifecycleResult> ExecuteAsync(string moduleId, CancellationToken cancellationToken) =>
+        operations.OpenAsync(moduleId, cancellationToken);
+}
+
 public sealed class WebLogSnapshotCommandHandler(WebLogSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
 {
     public string Command => "logs.getSnapshot";

@@ -733,22 +733,28 @@ public sealed partial class MainWindowViewModel(
     }
 
     [RelayCommand]
-    private async Task OpenModuleAsync(string moduleId)
+    private Task OpenModuleAsync(string moduleId) => OpenModuleOperationAsync(moduleId, CancellationToken.None);
+
+    public Task<WebModuleLifecycleResult> OpenModuleFromWebAsync(string moduleId, CancellationToken cancellationToken) =>
+        OpenModuleOperationAsync(moduleId, cancellationToken);
+
+    private async Task<WebModuleLifecycleResult> OpenModuleOperationAsync(string moduleId, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var moduleViewModel = Modules.FirstOrDefault(
             module => string.Equals(module.Id, moduleId, StringComparison.Ordinal));
 
-        if (moduleViewModel is null || moduleViewModel.IsBusy)
-        {
-            return;
-        }
+        if (moduleViewModel is null) return WebModuleLifecycleResult.NotFound;
+        if (moduleViewModel.IsBusy) return WebModuleLifecycleResult.Busy;
 
         if (!moduleViewModel.CanOpen)
         {
             StatusMessage = moduleViewModel.IsExecutionBlocked
                 ? localization.GetString("status.moduleBlockedByRecovery", moduleViewModel.DisplayName)
                 : localization.GetString("status.moduleLoadBeforeOpen", moduleViewModel.DisplayName);
-            return;
+            return moduleViewModel.IsExecutionBlocked
+                ? WebModuleLifecycleResult.ExecutionBlocked
+                : WebModuleLifecycleResult.Unavailable;
         }
 
         moduleViewModel.IsBusy = true;
@@ -763,7 +769,7 @@ public sealed partial class MainWindowViewModel(
                     throw new ModuleRuntimeException("The module window could not be opened.");
                 moduleViewModel.UpdateOutOfProcessRuntimeState(moduleProcessBroker.GetState(moduleId));
                 StatusMessage = localization.GetString("status.moduleOpened", moduleViewModel.DisplayName);
-                return;
+                return WebModuleLifecycleResult.Succeeded;
             }
             if (moduleWindowManager.IsWindowOpen(moduleId))
             {
@@ -771,7 +777,7 @@ public sealed partial class MainWindowViewModel(
                 StatusMessage = localization.GetString(
                     "status.moduleFocused",
                     moduleViewModel.DisplayName);
-                return;
+                return WebModuleLifecycleResult.Succeeded;
             }
 
             var view = runtimeManager.CreateView(moduleId);
@@ -782,7 +788,7 @@ public sealed partial class MainWindowViewModel(
                 StatusMessage = localization.GetString(
                     "status.moduleNoView",
                     moduleViewModel.DisplayName);
-                return;
+                return WebModuleLifecycleResult.Unavailable;
             }
 
             moduleWindowManager.OpenWindow(
@@ -793,6 +799,7 @@ public sealed partial class MainWindowViewModel(
             StatusMessage = localization.GetString(
                 "status.moduleOpened",
                 moduleViewModel.DisplayName);
+            return WebModuleLifecycleResult.Succeeded;
         }
         catch (ModuleExecutionBlockedException exception)
         {
@@ -802,6 +809,7 @@ public sealed partial class MainWindowViewModel(
                 moduleViewModel.DisplayName);
             sessionLog.Warning("ModuleRecovery",
                 $"Module execution blocked by recovery; module={moduleId}; state={exception.Status}.");
+            return WebModuleLifecycleResult.ExecutionBlocked;
         }
         catch (Exception exception)
         {
@@ -815,6 +823,7 @@ public sealed partial class MainWindowViewModel(
                 "status.moduleOpenFailed",
                 moduleViewModel.DisplayName,
                 exception.Message);
+            return WebModuleLifecycleResult.Failed;
         }
         finally
         {

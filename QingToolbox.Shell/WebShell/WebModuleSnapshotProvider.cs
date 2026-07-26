@@ -27,6 +27,7 @@ public sealed class WebModuleSnapshotSource(MainWindowViewModel viewModel) : IWe
             module.IsUserInstalled,
             module.CanLoad,
             module.CanActivate,
+            module.CanOpen,
             module.IsBusy,
             module.IsExecutionBlocked)).ToArray();
 

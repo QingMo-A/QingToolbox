@@ -9,7 +9,7 @@ const mounted: VueWrapper[] = []
 afterEach(() => mounted.splice(0).forEach(wrapper => wrapper.unmount()))
 
 function moduleItem(index: number, hasIssue = false) {
-  return { id: `module.${index}`, displayName: `Module ${index}`, displayDescription: `Description ${index}`, version: '1.0.0', author: 'Qing', runtimeType: 'InProcess', loadMode: 'Manual', runtimeState: 'NotLoaded', isValid: !hasIssue, errorCount: hasIssue ? 1 : 0, errors: hasIssue ? ['Invalid'] : [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canLoad: !hasIssue, canActivate: false, isBusy: false, isExecutionBlocked: false }
+  return { id: `module.${index}`, displayName: `Module ${index}`, displayDescription: `Description ${index}`, version: '1.0.0', author: 'Qing', runtimeType: 'InProcess', loadMode: 'Manual', runtimeState: 'NotLoaded', isValid: !hasIssue, errorCount: hasIssue ? 1 : 0, errors: hasIssue ? ['Invalid'] : [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canLoad: !hasIssue, canActivate: false, canOpen: false, isBusy: false, isExecutionBlocked: false }
 }
 
 function page(bridge = 'Connected') {

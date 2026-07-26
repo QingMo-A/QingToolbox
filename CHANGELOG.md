@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added a host-confirmed Open action that opens or focuses native module windows from the Development Web workspace.
 - Added host-confirmed Load and Activate controls to the Development Web module center.
 - Enabled the Development Settings workspace to persist the startup presentation preference through the host.
 - Enabled the Development Settings workspace to persist the main window close behavior through the host.

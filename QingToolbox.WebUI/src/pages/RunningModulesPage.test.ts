@@ -10,7 +10,7 @@ import { useModuleStore } from '../app/moduleStore'
 const mounted: VueWrapper[] = []
 afterEach(() => mounted.splice(0).forEach(wrapper => wrapper.unmount()))
 
-const item = (id: string, runtimeState: string) => ({ id, displayName: id, displayDescription: `${id} description`, version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState, isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canLoad: false, canActivate: false, isBusy: false, isExecutionBlocked: false })
+const item = (id: string, runtimeState: string) => ({ id, displayName: id, displayDescription: `${id} description`, version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState, isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canLoad: false, canActivate: false, canOpen: runtimeState === 'Running', isBusy: false, isExecutionBlocked: false })
 const snapshot = { generatedAt: new Date().toISOString(), modules: [item('Running module', 'Running'), item('Loaded module', 'Loaded'), item('Waiting module', 'NotLoaded'), item('Failed module', 'Failed')] }
 
 async function page(status: 'idle'|'loading'|'ready'|'error' = 'ready') {
@@ -22,12 +22,13 @@ async function page(status: 'idle'|'loading'|'ready'|'error' = 'ready') {
   if (status === 'ready') modules.complete(snapshot)
   if (status === 'error') modules.fail(new Error('offline'))
   const getSnapshot = vi.fn(async () => snapshot)
+  const open = vi.fn(async () => snapshot)
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/running', component: RunningModulesPage }, { path: '/modules', component: { template: '<div>Modules</div>' } }] })
   await router.push('/running')
   await router.isReady()
-  const wrapper = mount(RunningModulesPage, { global: { plugins: [pinia, router], provide: { moduleClient: { getSnapshot } } } })
+  const wrapper = mount(RunningModulesPage, { global: { plugins: [pinia, router], provide: { moduleClient: { getSnapshot, open } } } })
   mounted.push(wrapper)
-  return { wrapper, modules, router, getSnapshot }
+  return { wrapper, modules, router, getSnapshot, open }
 }
 
 describe('RunningModulesPage', () => {
@@ -41,7 +42,8 @@ describe('RunningModulesPage', () => {
     expect(wrapper.text()).not.toContain('Loaded module')
     expect(wrapper.text()).not.toContain('Waiting module')
     expect(wrapper.text()).not.toContain('Failed module')
-    expect(wrapper.text()).not.toMatch(/Open|Deactivate|Unload/)
+    expect(wrapper.text()).toContain('Open')
+    expect(wrapper.text()).not.toMatch(/Deactivate|Unload|Remove/)
   })
 
   it('shows the empty state and links safely to modules', async () => {
@@ -54,15 +56,25 @@ describe('RunningModulesPage', () => {
 
   it('opens details through the existing module workspace', async () => {
     const { wrapper, modules, router } = await page()
-    await wrapper.get('.running-module-action button').trigger('click')
+    await wrapper.findAll('.running-module-action button').find(button => button.text() === 'View details')!.trigger('click')
     await flushPromises()
     expect(modules.selectedModuleId).toBe('Running module')
     expect(router.currentRoute.value.path).toBe('/modules')
   })
 
+  it('opens through the shared store and preserves details navigation', async () => {
+    const { wrapper, modules, open } = await page()
+    const openButton = wrapper.findAll('.running-module-action button').find(button => button.text() === 'Open')!
+    await openButton.trigger('click')
+    await flushPromises()
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(modules.selectedModuleId).toBeNull()
+    expect(modules.modules[0].runtimeState).toBe('Running')
+  })
+
   it('uses a native focusable button for keyboard detail navigation', async () => {
     const { wrapper } = await page()
-    const button = wrapper.get('.running-module-action button')
+    const button = wrapper.findAll('.running-module-action button').find(item => item.text() === 'View details')!
     expect(button.element.tagName).toBe('BUTTON')
     expect(button.attributes('disabled')).toBeUndefined()
     expect(button.attributes('tabindex')).not.toBe('-1')

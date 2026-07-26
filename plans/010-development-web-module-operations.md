@@ -12,7 +12,8 @@ Depends on:
 Environment:
 - Development only
 UI-3A: Implementation Complete
-Next: UI-3B Open / Focus
+UI-3B: Implementation Complete
+Next: UI-3C Deactivate / Unload
 ```
 
 ## Product objective
