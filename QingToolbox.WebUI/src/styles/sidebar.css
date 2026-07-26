@@ -1,0 +1,54 @@
+.q-shell {
+  grid-template-columns: 72px minmax(0, 1fr) !important;
+}
+
+.q-shell.expanded {
+  grid-template-columns: 236px minmax(0, 1fr) !important;
+}
+
+.q-brand > img {
+  display: block;
+  width: 32px;
+  height: 32px;
+}
+
+.q-fluent-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets";
+  font-weight: 400;
+  line-height: 1;
+  opacity: 1 !important;
+  pointer-events: none;
+}
+
+.q-sidebar nav .q-fluent-icon {
+  display: inline-flex !important;
+}
+
+.q-sidebar nav > a,
+.q-sidebar nav > button {
+  min-width: 0;
+}
+
+.q-sidebar nav a:hover,
+.q-sidebar nav button:hover,
+.q-sidebar nav a.router-link-active,
+.q-sidebar nav button.active {
+  transform: none !important;
+}
+
+.q-shell.expanded .q-sidebar nav a:hover,
+.q-shell.expanded .q-sidebar nav button:hover,
+.q-shell.expanded .q-sidebar nav a.router-link-active,
+.q-shell.expanded .q-sidebar nav button.active {
+  transform: translateX(2px) !important;
+}
+
+@media (max-width: 719px) {
+  .q-shell,
+  .q-shell.expanded {
+    grid-template-columns: 72px minmax(0, 1fr) !important;
+  }
+}

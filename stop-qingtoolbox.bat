@@ -1,22 +1,15 @@
 @echo off
 setlocal
-title Stop QingToolbox
+cd /d "%~dp0"
+title Stop QingToolbox Development Host
 
-echo Checking for QingToolbox.Shell.exe...
-tasklist /FI "IMAGENAME eq QingToolbox.Shell.exe" 2>NUL | find /I "QingToolbox.Shell.exe" >NUL
-
-if errorlevel 1 (
-    echo QingToolbox is not running.
-) else (
-    echo Stopping QingToolbox and its child processes...
-    taskkill /F /T /IM QingToolbox.Shell.exe
-    if errorlevel 1 (
-        echo Failed to stop QingToolbox. Try running this file as administrator.
-    ) else (
-        echo QingToolbox has been stopped successfully.
-    )
-)
+echo Looking for the QingToolbox development host from this workspace...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stop-dev-host.ps1" -RepositoryRoot "%~dp0"
+set "EXIT_CODE=%ERRORLEVEL%"
 
 echo.
+if not "%EXIT_CODE%"=="0" (
+    echo The development host could not be stopped. The installed QingToolbox was not targeted.
+)
 pause
-endlocal
+endlocal & exit /b %EXIT_CODE%

@@ -7,10 +7,11 @@ import { useSettingsStore } from '../../app/settingsStore'
 const snapshot=(showLogsInSidebar:boolean)=>({generatedAt:new Date().toISOString(),language:{code:'en-US',displayName:'English'},showLogsInSidebar,mainWindowCloseBehavior:'Ask' as const,closeBehaviorMessage:'',launchAtLogin:false,canConfigureLaunchAtLogin:true,startupPresentationMode:'FloatingBadge' as const,startupBackend:'None',startupStatus:'Unavailable',startupMessage:''})
 
 describe('QSidebarLayout icons', () => {
-  it('uses local SVG navigation icons and exposes the pin action', () => {
+  it('uses the native Fluent navigation glyphs and the product brand mark', () => {
     const pinia=createPinia();setActivePinia(pinia)
     const wrapper = mount(QSidebarLayout, { global: { plugins:[pinia],stubs: { RouterLink: { template: '<a><slot/></a>' } } } })
-    expect(wrapper.findAll('nav svg').length).toBeGreaterThanOrEqual(4)
+    expect(wrapper.findAll('nav .q-fluent-icon').length).toBeGreaterThanOrEqual(4)
+    expect(wrapper.get('.q-brand img').attributes('src')).toContain('data:image/svg+xml')
     expect(wrapper.text()).toContain('Running')
     expect(wrapper.text()).toContain('Settings')
     expect(wrapper.text()).not.toMatch(/[⌂▦⌁⌖]/)

@@ -1,2 +1,73 @@
-<script setup lang="ts">import{computed,ref}from'vue';import{useSettingsStore}from'../../app/settingsStore';import QIcon from'../components/QIcon.vue';const hovered=ref(false);const pinned=ref(false);const settings=useSettingsStore();const showLogs=computed(()=>settings.status!=='ready'||settings.snapshot?.showLogsInSidebar===true)</script>
-<template><div class="q-shell" :class="{expanded:hovered||pinned,pinned}"><aside class="q-sidebar" @mouseenter="hovered=true" @mouseleave="hovered=false"><div class="q-brand"><span>Q</span><strong>QingToolbox</strong></div><nav aria-label="Workspace"><RouterLink to="/" title="Home"><b><QIcon name="home"/></b><span>Home</span></RouterLink><RouterLink to="/modules" title="Modules"><b><QIcon name="modules"/></b><span>Modules</span></RouterLink><RouterLink to="/running" title="Running"><b><QIcon name="running"/></b><span>Running</span></RouterLink><RouterLink v-if="showLogs" to="/logs" title="Logs"><b><QIcon name="logs"/></b><span>Logs</span></RouterLink></nav><div class="q-sidebar-spacer"/><nav class="q-sidebar-secondary"><RouterLink to="/diagnostics" title="Diagnostics"><b><QIcon name="diagnostics"/></b><span>Diagnostics</span></RouterLink><button :class="{active:pinned}" :aria-label="pinned?'Unpin sidebar':'Pin sidebar'" :title="pinned?'Unpin sidebar':'Pin sidebar'" @click="pinned=!pinned"><b><QIcon :name="pinned?'unpin':'pin'"/></b><span>{{pinned?'Unpin sidebar':'Pin sidebar'}}</span></button><RouterLink to="/settings" title="Settings"><b><QIcon name="settings"/></b><span>Settings</span></RouterLink></nav></aside><div class="q-workspace"><slot/></div></div></template>
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { useSettingsStore } from '../../app/settingsStore'
+import brandMark from '../../assets/QingToolbox.Mark.svg'
+import QIcon from '../components/QIcon.vue'
+
+const hovered = ref(false)
+const pinned = ref(false)
+const settings = useSettingsStore()
+const showLogs = computed(
+  () => settings.status !== 'ready' || settings.snapshot?.showLogsInSidebar === true,
+)
+</script>
+
+<template>
+  <div class="q-shell" :class="{ expanded: hovered || pinned, pinned }">
+    <aside
+      class="q-sidebar"
+      @mouseenter="hovered = true"
+      @mouseleave="hovered = false"
+    >
+      <div class="q-brand">
+        <img :src="brandMark" alt="" aria-hidden="true" />
+        <strong>QingToolbox</strong>
+      </div>
+
+      <nav aria-label="Workspace">
+        <RouterLink to="/" title="Home">
+          <b><QIcon name="home" /></b>
+          <span>Home</span>
+        </RouterLink>
+        <RouterLink to="/modules" title="Modules">
+          <b><QIcon name="modules" /></b>
+          <span>Modules</span>
+        </RouterLink>
+        <RouterLink to="/running" title="Running">
+          <b><QIcon name="running" /></b>
+          <span>Running</span>
+        </RouterLink>
+        <RouterLink v-if="showLogs" to="/logs" title="Logs">
+          <b><QIcon name="logs" /></b>
+          <span>Logs</span>
+        </RouterLink>
+      </nav>
+
+      <div class="q-sidebar-spacer" />
+
+      <nav class="q-sidebar-secondary">
+        <RouterLink to="/diagnostics" title="Diagnostics">
+          <b><QIcon name="diagnostics" /></b>
+          <span>Diagnostics</span>
+        </RouterLink>
+        <button
+          :class="{ active: pinned }"
+          :aria-label="pinned ? 'Unpin sidebar' : 'Pin sidebar'"
+          :title="pinned ? 'Unpin sidebar' : 'Pin sidebar'"
+          @click="pinned = !pinned"
+        >
+          <b><QIcon :name="pinned ? 'unpin' : 'pin'" /></b>
+          <span>{{ pinned ? 'Unpin sidebar' : 'Pin sidebar' }}</span>
+        </button>
+        <RouterLink to="/settings" title="Settings">
+          <b><QIcon name="settings" /></b>
+          <span>Settings</span>
+        </RouterLink>
+      </nav>
+    </aside>
+
+    <div class="q-workspace">
+      <slot />
+    </div>
+  </div>
+</template>
