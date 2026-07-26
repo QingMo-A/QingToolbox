@@ -8,8 +8,8 @@ export class MockTransport implements Transport {
   private mainWindowCloseBehavior:'Ask'|'MinimizeToNotificationArea'|'ExitApplication'='MinimizeToNotificationArea'
   private startupPresentationMode:'MainWindow'|'Minimized'|'FloatingBadge'='FloatingBadge'
   private modules:ModuleSnapshotItem[]=[
-    {id:'qing.hello',displayName:'Hello Module',displayDescription:'A small example module for validating the Qing workspace.',version:'0.1.0',author:'QingMo-A',runtimeType:'InProcess',loadMode:'Manual',runtimeState:'NotLoaded',isValid:true,errorCount:0,errors:[],permissions:[],minimumHostVersion:'0.2.0-alpha',isUserInstalled:false,canLoad:true,canActivate:false,canOpen:false,isBusy:false,isExecutionBlocked:false},
-    {id:'qing.texttools',displayName:'Text Tools',displayDescription:'Lightweight text conversion and formatting tools.',version:'0.1.0',author:'QingMo-A',runtimeType:'OutOfProcess',loadMode:'Manual',runtimeState:'Running',isValid:true,errorCount:0,errors:[],permissions:['Clipboard'],minimumHostVersion:'0.2.0-alpha',isUserInstalled:true,canLoad:false,canActivate:false,canOpen:true,isBusy:false,isExecutionBlocked:false}
+    {id:'qing.hello',displayName:'Hello Module',displayDescription:'A small example module for validating the Qing workspace.',version:'0.1.0',author:'QingMo-A',runtimeType:'InProcess',loadMode:'Manual',runtimeState:'NotLoaded',isValid:true,errorCount:0,errors:[],permissions:[],minimumHostVersion:'0.2.0-alpha',isUserInstalled:false,canLoad:true,canActivate:false,canOpen:false,canDeactivate:false,canUnload:false,isBusy:false,isExecutionBlocked:false},
+    {id:'qing.texttools',displayName:'Text Tools',displayDescription:'Lightweight text conversion and formatting tools.',version:'0.1.0',author:'QingMo-A',runtimeType:'OutOfProcess',loadMode:'Manual',runtimeState:'Running',isValid:true,errorCount:0,errors:[],permissions:['Clipboard'],minimumHostVersion:'0.2.0-alpha',isUserInstalled:true,canLoad:false,canActivate:false,canOpen:true,canDeactivate:true,canUnload:true,isBusy:false,isExecutionBlocked:false}
   ]
   async request(message:BridgeRequest):Promise<BridgeResponse>{
     if(this.disposed)throw new Error('Bridge transport is disposed.')
@@ -29,18 +29,25 @@ export class MockTransport implements Transport {
     }
     if(message.command==='app.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');return this.ok(message,snapshot)}
     if(message.command==='modules.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length)return this.error(message,'InvalidPayload');return this.ok(message,this.moduleSnapshot())}
-    if(message.command==='modules.load'||message.command==='modules.activate'||message.command==='modules.open'){
+    if(message.command==='modules.load'||message.command==='modules.activate'||message.command==='modules.open'||message.command==='modules.deactivate'||message.command==='modules.unload'){
       if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated')
       if(Object.keys(message.payload).length!==1||typeof message.payload.moduleId!=='string'||!message.payload.moduleId.trim())return this.error(message,'InvalidPayload')
       const index=this.modules.findIndex(item=>item.id===message.payload.moduleId);if(index<0)return this.error(message,'ModuleNotFound')
       const item=this.modules[index];if(item.isBusy)return this.error(message,'ModuleBusy');if(item.isExecutionBlocked)return this.error(message,'ModuleExecutionBlocked')
       if(message.command==='modules.load'){
         if(!item.canLoad)return this.error(message,'ModuleOperationUnavailable')
-        this.modules[index]={...item,runtimeState:'Loaded',canLoad:false,canActivate:true,canOpen:true}
+        this.modules[index]={...item,runtimeState:'Loaded',canLoad:false,canActivate:true,canOpen:true,canDeactivate:false,canUnload:true}
       }else if(message.command==='modules.activate'){
         if(!item.canActivate)return this.error(message,'ModuleOperationUnavailable')
-        this.modules[index]={...item,runtimeState:'Running',canLoad:false,canActivate:false,canOpen:true}
-      }else if(!item.canOpen)return this.error(message,'ModuleOperationUnavailable')
+        this.modules[index]={...item,runtimeState:'Running',canLoad:false,canActivate:false,canOpen:true,canDeactivate:true,canUnload:true}
+      }else if(message.command==='modules.open'){if(!item.canOpen)return this.error(message,'ModuleOperationUnavailable')}
+      else if(message.command==='modules.deactivate'){
+        if(!item.canDeactivate)return this.error(message,'ModuleOperationUnavailable')
+        this.modules[index]={...item,runtimeState:'Deactivated',canActivate:true,canOpen:true,canDeactivate:false,canUnload:true}
+      }else{
+        if(!item.canUnload)return this.error(message,'ModuleOperationUnavailable')
+        this.modules[index]={...item,runtimeState:'Unloaded',canLoad:true,canActivate:false,canOpen:false,canDeactivate:false,canUnload:false}
+      }
       return this.ok(message,this.moduleSnapshot())
     }
     if(message.command==='logs.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length!==0)return this.error(message,'InvalidPayload');return this.ok(message,{generatedAt:'2026-07-25T12:00:03.000Z',entries:[{timestamp:'2026-07-25T12:00:01.000Z',level:'Information',category:'Application',message:'Session started.'},{timestamp:'2026-07-25T12:00:02.000Z',level:'Warning',category:'Modules',message:'Example warning.'},{timestamp:'2026-07-25T12:00:03.000Z',level:'Error',category:'Bridge',message:'Example error.'}]})}

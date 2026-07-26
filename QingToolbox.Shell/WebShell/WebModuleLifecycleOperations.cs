@@ -17,6 +17,8 @@ public interface IWebModuleLifecycleOperations
     Task<WebModuleLifecycleResult> LoadAsync(string moduleId, CancellationToken cancellationToken);
     Task<WebModuleLifecycleResult> ActivateAsync(string moduleId, CancellationToken cancellationToken);
     Task<WebModuleLifecycleResult> OpenAsync(string moduleId, CancellationToken cancellationToken);
+    Task<WebModuleLifecycleResult> DeactivateAsync(string moduleId, CancellationToken cancellationToken);
+    Task<WebModuleLifecycleResult> UnloadAsync(string moduleId, CancellationToken cancellationToken);
 }
 
 public sealed class WebModuleLifecycleOperations(MainWindowViewModel viewModel) : IWebModuleLifecycleOperations
@@ -29,4 +31,8 @@ public sealed class WebModuleLifecycleOperations(MainWindowViewModel viewModel) 
 
     public Task<WebModuleLifecycleResult> OpenAsync(string moduleId, CancellationToken cancellationToken) =>
         viewModel.OpenModuleFromWebAsync(moduleId, cancellationToken);
+    public Task<WebModuleLifecycleResult> DeactivateAsync(string moduleId, CancellationToken cancellationToken) =>
+        viewModel.DeactivateModuleFromWebAsync(moduleId, cancellationToken);
+    public Task<WebModuleLifecycleResult> UnloadAsync(string moduleId, CancellationToken cancellationToken) =>
+        viewModel.UnloadModuleFromWebAsync(moduleId, cancellationToken);
 }

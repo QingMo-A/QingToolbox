@@ -698,30 +698,42 @@ public sealed partial class MainWindowViewModel(
     }
 
     [RelayCommand]
-    private Task DeactivateModuleAsync(string moduleId)
+    private Task DeactivateModuleAsync(string moduleId) => DeactivateModuleOperationAsync(moduleId, CancellationToken.None, false);
+
+    public Task<WebModuleLifecycleResult> DeactivateModuleFromWebAsync(string moduleId, CancellationToken cancellationToken) =>
+        DeactivateModuleOperationAsync(moduleId, cancellationToken, true);
+
+    private Task<WebModuleLifecycleResult> DeactivateModuleOperationAsync(string moduleId, CancellationToken cancellationToken, bool validateAvailability)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (IsOutOfProcessWpf(moduleId))
             return ExecuteLifecycleAsync(moduleId, "deactivate", async () =>
             {
-                if (!await updateRuntimeCoordinator.DeactivateAsync(moduleId, CancellationToken.None))
+                if (!await updateRuntimeCoordinator.DeactivateAsync(moduleId, cancellationToken))
                     throw new ModuleRuntimeException("The module worker could not be deactivated.");
-            });
+            }, validateAvailability);
         return ExecuteLifecycleAsync(
             moduleId,
             "deactivate",
-            () => runtimeManager.DeactivateAsync(moduleId));
+            () => runtimeManager.DeactivateAsync(moduleId), validateAvailability);
     }
 
     [RelayCommand]
-    private Task UnloadModuleAsync(string moduleId)
+    private Task UnloadModuleAsync(string moduleId) => UnloadModuleOperationAsync(moduleId, CancellationToken.None, false);
+
+    public Task<WebModuleLifecycleResult> UnloadModuleFromWebAsync(string moduleId, CancellationToken cancellationToken) =>
+        UnloadModuleOperationAsync(moduleId, cancellationToken, true);
+
+    private Task<WebModuleLifecycleResult> UnloadModuleOperationAsync(string moduleId, CancellationToken cancellationToken, bool validateAvailability)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (IsOutOfProcessWpf(moduleId))
             return ExecuteLifecycleAsync(moduleId, "unload", async () =>
             {
-                if (!await updateRuntimeCoordinator.UnloadAsync(moduleId, CancellationToken.None) ||
-                    !await updateRuntimeCoordinator.VerifyUnloadedAsync(moduleId, CancellationToken.None))
+                if (!await updateRuntimeCoordinator.UnloadAsync(moduleId, cancellationToken) ||
+                    !await updateRuntimeCoordinator.VerifyUnloadedAsync(moduleId, cancellationToken))
                     throw new ModuleRuntimeException("The module worker did not exit.");
-            });
+            }, validateAvailability);
         return ExecuteLifecycleAsync(
             moduleId,
             "unload",
@@ -729,7 +741,7 @@ public sealed partial class MainWindowViewModel(
             {
                 moduleWindowManager.CloseWindow(moduleId);
                 await runtimeManager.UnloadAsync(moduleId);
-            });
+            }, validateAvailability);
     }
 
     [RelayCommand]
@@ -850,7 +862,9 @@ public sealed partial class MainWindowViewModel(
         {
             if (moduleViewModel.IsExecutionBlocked) return WebModuleLifecycleResult.ExecutionBlocked;
             if (operation == "load" && !moduleViewModel.CanLoad ||
-                operation == "activate" && !moduleViewModel.CanActivate)
+                operation == "activate" && !moduleViewModel.CanActivate ||
+                operation == "deactivate" && !moduleViewModel.CanDeactivate ||
+                operation == "unload" && !moduleViewModel.CanUnload)
                 return WebModuleLifecycleResult.Unavailable;
         }
 

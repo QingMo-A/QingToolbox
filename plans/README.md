@@ -53,7 +53,7 @@ Read these plans in order unless the user says otherwise:
     - Add host-confirmed Development Web module lifecycle entry points.
     - Reuse frozen B2.1 execution, recovery, and module-window boundaries.
     - Deliver Load/Activate, Open, Deactivate/Unload, and startup authorization as separate tasks.
-    - **Planned — Next**; this plan does not authorize implementing all of UI-3 at once.
+    - **In Progress — UI-3A, UI-3B, and UI-3C complete; UI-3D next.**
 
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 

@@ -94,7 +94,7 @@ var extraPayload = JsonSerializer.Serialize(new { protocolVersion = 4, requestId
 var extraResult = await moduleDispatcher.DispatchAsync(extraPayload, new(11, CancellationToken.None));
 Require(!extraResult.Response.Success && extraResult.Response.Error?.Code == "InvalidPayload", "Module projection must reject additional payload properties.");
 var moduleSnapshot = (WebModuleSnapshot)moduleResult.Response.Payload;
-Require(moduleSnapshot.Modules[0] is { CanLoad: false, CanActivate: false, CanOpen: true, IsBusy: false, IsExecutionBlocked: false }, "Module projection must include host lifecycle capabilities.");
+Require(moduleSnapshot.Modules[0] is { CanLoad: false, CanActivate: false, CanOpen: true, CanDeactivate: true, CanUnload: true, IsBusy: false, IsExecutionBlocked: false }, "Module projection must include host lifecycle capabilities.");
 
 Console.WriteLine("Verifying explicit host-confirmed module lifecycle commands...");
 var lifecycle = new LifecycleOperations();
@@ -103,7 +103,9 @@ var lifecycleProvider = new WebModuleSnapshotProvider(lifecycleSource, TimeProvi
 var lifecycleDispatcher = new WebBridgeDispatcher([
     new WebModuleLoadCommandHandler(lifecycle, lifecycleProvider, moduleActivation),
     new WebModuleActivateCommandHandler(lifecycle, lifecycleProvider, moduleActivation),
-    new WebModuleOpenCommandHandler(lifecycle, lifecycleProvider, moduleActivation)]);
+    new WebModuleOpenCommandHandler(lifecycle, lifecycleProvider, moduleActivation),
+    new WebModuleDeactivateCommandHandler(lifecycle, lifecycleProvider, moduleActivation),
+    new WebModuleUnloadCommandHandler(lifecycle, lifecycleProvider, moduleActivation)]);
 string LifecycleRequest(string command, object payload) => JsonSerializer.Serialize(new { protocolVersion = 4, requestId = Guid.NewGuid(), command, payload });
 var inactiveLifecycle = new WebActivationSession(); inactiveLifecycle.Begin(13);
 var inactiveLifecycleResult = await new WebBridgeDispatcher([new WebModuleLoadCommandHandler(lifecycle, lifecycleProvider, inactiveLifecycle)])
@@ -112,9 +114,17 @@ Require(!inactiveLifecycleResult.Response.Success && inactiveLifecycleResult.Res
 var inactiveOpenResult = await new WebBridgeDispatcher([new WebModuleOpenCommandHandler(lifecycle, lifecycleProvider, inactiveLifecycle)])
     .DispatchAsync(LifecycleRequest("modules.open", new { moduleId = "qing.test" }), new(13, CancellationToken.None));
 Require(!inactiveOpenResult.Response.Success && inactiveOpenResult.Response.Error?.Code == "BridgeNotActivated", "Open must require activation.");
+foreach (var command in new[] { "modules.deactivate", "modules.unload" })
+{
+    IWebCommandHandler handler = command == "modules.deactivate"
+        ? new WebModuleDeactivateCommandHandler(lifecycle, lifecycleProvider, inactiveLifecycle)
+        : new WebModuleUnloadCommandHandler(lifecycle, lifecycleProvider, inactiveLifecycle);
+    var inactive = await new WebBridgeDispatcher([handler]).DispatchAsync(LifecycleRequest(command, new { moduleId = "qing.test" }), new(13, CancellationToken.None));
+    Require(!inactive.Response.Success && inactive.Response.Error?.Code == "BridgeNotActivated", $"{command} must require activation.");
+}
 foreach (var payload in new object[] { new { }, new { moduleId = 42 }, new { moduleId = "" }, new { moduleId = "qing.test", path = root } })
 {
-    foreach (var command in new[] { "modules.load", "modules.open" })
+    foreach (var command in new[] { "modules.load", "modules.open", "modules.deactivate", "modules.unload" })
     {
         var malformed = await lifecycleDispatcher.DispatchAsync(LifecycleRequest(command, payload), new(11, CancellationToken.None));
         Require(!malformed.Response.Success && malformed.Response.Error?.Code == "InvalidPayload", "Lifecycle commands must reject malformed payloads.");
@@ -132,14 +142,16 @@ lifecycle.NextResult = WebModuleLifecycleResult.Succeeded;
 var loaded = await lifecycleDispatcher.DispatchAsync(LifecycleRequest("modules.load", new { moduleId = "qing.test" }), new(11, CancellationToken.None));
 var activated = await lifecycleDispatcher.DispatchAsync(LifecycleRequest("modules.activate", new { moduleId = "qing.test" }), new(11, CancellationToken.None));
 var opened = await lifecycleDispatcher.DispatchAsync(LifecycleRequest("modules.open", new { moduleId = "qing.test" }), new(11, CancellationToken.None));
-Require(loaded.Response.Success && activated.Response.Success && opened.Response.Success && opened.Response.Payload is WebModuleSnapshot, "Successful lifecycle commands must return complete snapshots.");
-Require(lifecycle.LoadCount == 1 && lifecycle.ActivateCount == 1 && lifecycle.OpenCount == 6 && lifecycle.LastModuleId == "qing.test", "Each accepted lifecycle request must call only its explicit adapter once.");
+var deactivated = await lifecycleDispatcher.DispatchAsync(LifecycleRequest("modules.deactivate", new { moduleId = "qing.test" }), new(11, CancellationToken.None));
+var unloaded = await lifecycleDispatcher.DispatchAsync(LifecycleRequest("modules.unload", new { moduleId = "qing.test" }), new(11, CancellationToken.None));
+Require(loaded.Response.Success && activated.Response.Success && opened.Response.Success && deactivated.Response.Success && unloaded.Response.Success && unloaded.Response.Payload is WebModuleSnapshot, "Successful lifecycle commands must return complete snapshots.");
+Require(lifecycle.LoadCount == 1 && lifecycle.ActivateCount == 1 && lifecycle.OpenCount == 6 && lifecycle.DeactivateCount == 1 && lifecycle.UnloadCount == 1 && lifecycle.LastModuleId == "qing.test", "Each accepted lifecycle request must call only its explicit adapter once.");
 Require(WebBridgeProtocol.Version == 4, "Lifecycle commands must preserve protocol version 4.");
 var unsupportedOperations = new WebBridgeDispatcher([]);
-foreach (var command in new[] { "modules.deactivate", "modules.unload", "modules.remove" })
+foreach (var command in new[] { "modules.remove", "modules.setStartupAuthorization" })
 {
     var unsupported = await unsupportedOperations.DispatchAsync(LifecycleRequest(command, new { moduleId = "qing.test" }), new(11, CancellationToken.None));
-    Require(!unsupported.Response.Success && unsupported.Response.Error?.Code == "UnknownCommand", "UI-3B must not register later lifecycle commands.");
+    Require(!unsupported.Response.Success && unsupported.Response.Error?.Code == "UnknownCommand", "UI-3C must not register later module commands.");
 }
 
 Console.WriteLine("Verifying activated read-only session log projection...");
@@ -314,7 +326,7 @@ file sealed class SnapshotSource : IWebModuleSnapshotSource
     {
         ReadCount++;
         return [new("qing.test", "Test", "Safe description", "1.0.0", "Qing", "OutOfProcess", "Manual",
-            "Running", true, 0, [], ["Clipboard"], "0.2.0-alpha", true, false, false, true, false, false)];
+            "Running", true, 0, [], ["Clipboard"], "0.2.0-alpha", true, false, false, true, true, true, false, false)];
     }
 }
 file sealed class LifecycleOperations : IWebModuleLifecycleOperations
@@ -323,6 +335,8 @@ file sealed class LifecycleOperations : IWebModuleLifecycleOperations
     public int LoadCount { get; private set; }
     public int ActivateCount { get; private set; }
     public int OpenCount { get; private set; }
+    public int DeactivateCount { get; private set; }
+    public int UnloadCount { get; private set; }
     public string LastModuleId { get; private set; } = string.Empty;
     public Task<WebModuleLifecycleResult> LoadAsync(string moduleId, CancellationToken cancellationToken)
     { cancellationToken.ThrowIfCancellationRequested(); LoadCount++; LastModuleId = moduleId; return Task.FromResult(NextResult); }
@@ -330,6 +344,10 @@ file sealed class LifecycleOperations : IWebModuleLifecycleOperations
     { cancellationToken.ThrowIfCancellationRequested(); ActivateCount++; LastModuleId = moduleId; return Task.FromResult(NextResult); }
     public Task<WebModuleLifecycleResult> OpenAsync(string moduleId, CancellationToken cancellationToken)
     { cancellationToken.ThrowIfCancellationRequested(); OpenCount++; LastModuleId = moduleId; return Task.FromResult(NextResult); }
+    public Task<WebModuleLifecycleResult> DeactivateAsync(string moduleId, CancellationToken cancellationToken)
+    { cancellationToken.ThrowIfCancellationRequested(); DeactivateCount++; LastModuleId = moduleId; return Task.FromResult(NextResult); }
+    public Task<WebModuleLifecycleResult> UnloadAsync(string moduleId, CancellationToken cancellationToken)
+    { cancellationToken.ThrowIfCancellationRequested(); UnloadCount++; LastModuleId = moduleId; return Task.FromResult(NextResult); }
 }
 file sealed class LogSnapshotSource : IWebLogSnapshotSource
 {

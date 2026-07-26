@@ -28,6 +28,8 @@ public sealed class WebModuleSnapshotSource(MainWindowViewModel viewModel) : IWe
             module.CanLoad,
             module.CanActivate,
             module.CanOpen,
+            module.CanDeactivate,
+            module.CanUnload,
             module.IsBusy,
             module.IsExecutionBlocked)).ToArray();
 

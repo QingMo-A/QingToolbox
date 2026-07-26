@@ -10,10 +10,10 @@ import { useModuleStore } from '../app/moduleStore'
 const mounted: VueWrapper[] = []
 afterEach(() => mounted.splice(0).forEach(wrapper => wrapper.unmount()))
 
-const item = (id: string, runtimeState: string) => ({ id, displayName: id, displayDescription: `${id} description`, version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState, isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canLoad: false, canActivate: false, canOpen: runtimeState === 'Running', isBusy: false, isExecutionBlocked: false })
+const item = (id: string, runtimeState: string) => ({ id, displayName: id, displayDescription: `${id} description`, version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState, isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canLoad: false, canActivate: false, canOpen: runtimeState === 'Running', canDeactivate: runtimeState === 'Running', canUnload: runtimeState === 'Running', isBusy: false, isExecutionBlocked: false })
 const snapshot = { generatedAt: new Date().toISOString(), modules: [item('Running module', 'Running'), item('Loaded module', 'Loaded'), item('Waiting module', 'NotLoaded'), item('Failed module', 'Failed')] }
 
-async function page(status: 'idle'|'loading'|'ready'|'error' = 'ready') {
+async function page(status: 'idle'|'loading'|'ready'|'error' = 'ready', clientOverrides: Record<string, unknown> = {}) {
   const pinia = createPinia()
   setActivePinia(pinia)
   useAppStore().bridge = 'Connected'
@@ -23,12 +23,14 @@ async function page(status: 'idle'|'loading'|'ready'|'error' = 'ready') {
   if (status === 'error') modules.fail(new Error('offline'))
   const getSnapshot = vi.fn(async () => snapshot)
   const open = vi.fn(async () => snapshot)
+  const deactivate = vi.fn(async () => ({ generatedAt: new Date().toISOString(), modules: snapshot.modules.map(module => module.id === 'Running module' ? { ...module, runtimeState: 'Deactivated', canActivate: true, canOpen: true, canDeactivate: false, canUnload: true } : module) }))
+  const unload = vi.fn(async () => ({ generatedAt: new Date().toISOString(), modules: snapshot.modules.map(module => module.id === 'Running module' ? { ...module, runtimeState: 'Unloaded', canLoad: true, canOpen: false, canDeactivate: false, canUnload: false } : module) }))
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/running', component: RunningModulesPage }, { path: '/modules', component: { template: '<div>Modules</div>' } }] })
   await router.push('/running')
   await router.isReady()
-  const wrapper = mount(RunningModulesPage, { global: { plugins: [pinia, router], provide: { moduleClient: { getSnapshot, open } } } })
+  const wrapper = mount(RunningModulesPage, { global: { plugins: [pinia, router], provide: { moduleClient: { getSnapshot, open, deactivate, unload, ...clientOverrides } } } })
   mounted.push(wrapper)
-  return { wrapper, modules, router, getSnapshot, open }
+  return { wrapper, modules, router, getSnapshot, open, deactivate, unload }
 }
 
 describe('RunningModulesPage', () => {
@@ -43,7 +45,9 @@ describe('RunningModulesPage', () => {
     expect(wrapper.text()).not.toContain('Waiting module')
     expect(wrapper.text()).not.toContain('Failed module')
     expect(wrapper.text()).toContain('Open')
-    expect(wrapper.text()).not.toMatch(/Deactivate|Unload|Remove/)
+    expect(wrapper.text()).toContain('Deactivate')
+    expect(wrapper.text()).toContain('Unload')
+    expect(wrapper.text()).not.toContain('Remove')
   })
 
   it('shows the empty state and links safely to modules', async () => {
@@ -70,6 +74,31 @@ describe('RunningModulesPage', () => {
     expect(open).toHaveBeenCalledTimes(1)
     expect(modules.selectedModuleId).toBeNull()
     expect(modules.modules[0].runtimeState).toBe('Running')
+  })
+
+  it.each(['Deactivate', 'Unload'])('waits for the host before removing a running card for %s', async label => {
+    let resolve!: (value: typeof snapshot) => void
+    const pending = new Promise<typeof snapshot>(value => { resolve = value })
+    const operation = vi.fn(() => pending)
+    const { wrapper } = await page('ready', { [label.toLowerCase()]: operation })
+    await wrapper.findAll('.running-module-action button').find(button => button.text() === label)!.trigger('click')
+    expect(wrapper.text()).toContain('Running module')
+    expect(wrapper.text()).toContain(label === 'Unload' ? 'Unloading…' : 'Deactivating…')
+    resolve({ generatedAt: new Date().toISOString(), modules: snapshot.modules.map(module => module.id === 'Running module' ? { ...module, runtimeState: label === 'Unload' ? 'Unloaded' : 'Deactivated', canDeactivate: false, canUnload: label !== 'Unload' } : module) })
+    await flushPromises()
+    expect(operation).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).not.toContain('Running module description')
+  })
+
+  it('preserves the host snapshot and resyncs only once after a failed shutdown operation', async () => {
+    const getSnapshot = vi.fn().mockRejectedValue(new Error('resync failed'))
+    const deactivate = vi.fn().mockRejectedValue(new Error('ModuleBusy: The requested module is busy.'))
+    const { wrapper, modules } = await page('ready', { getSnapshot, deactivate })
+    await wrapper.findAll('.running-module-action button').find(button => button.text() === 'Deactivate')!.trigger('click')
+    await flushPromises()
+    expect(modules.modules[0].runtimeState).toBe('Running')
+    expect(deactivate).toHaveBeenCalledTimes(1)
+    expect(getSnapshot).toHaveBeenCalledTimes(1)
   })
 
   it('uses a native focusable button for keyboard detail navigation', async () => {

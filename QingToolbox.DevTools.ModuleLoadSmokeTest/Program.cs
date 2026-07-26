@@ -241,6 +241,8 @@ internal static class Program
         if (window.WindowState != WindowState.Normal)
             throw new InvalidOperationException("A repeated Open did not restore the minimized module window.");
         manager.CloseWindow("qing.window-smoke");
+        if (manager.IsWindowOpen("qing.window-smoke"))
+            throw new InvalidOperationException("The module window remained open after the unload close path.");
     }
 
     private static async Task VerifyUserSettingsAsync()

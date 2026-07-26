@@ -13,7 +13,8 @@ Environment:
 - Development only
 UI-3A: Implementation Complete
 UI-3B: Implementation Complete
-Next: UI-3C Deactivate / Unload
+UI-3C: Implementation Complete
+Next: UI-3D Module startup authorization
 ```
 
 ## Product objective

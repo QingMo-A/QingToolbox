@@ -107,6 +107,22 @@ public sealed class WebModuleOpenCommandHandler(IWebModuleLifecycleOperations op
         operations.OpenAsync(moduleId, cancellationToken);
 }
 
+public sealed class WebModuleDeactivateCommandHandler(IWebModuleLifecycleOperations operations,
+    WebModuleSnapshotProvider snapshots, WebActivationSession activation)
+    : WebModuleLifecycleCommandHandler(snapshots, activation)
+{
+    public override string Command => "modules.deactivate";
+    protected override Task<WebModuleLifecycleResult> ExecuteAsync(string moduleId, CancellationToken cancellationToken) => operations.DeactivateAsync(moduleId, cancellationToken);
+}
+
+public sealed class WebModuleUnloadCommandHandler(IWebModuleLifecycleOperations operations,
+    WebModuleSnapshotProvider snapshots, WebActivationSession activation)
+    : WebModuleLifecycleCommandHandler(snapshots, activation)
+{
+    public override string Command => "modules.unload";
+    protected override Task<WebModuleLifecycleResult> ExecuteAsync(string moduleId, CancellationToken cancellationToken) => operations.UnloadAsync(moduleId, cancellationToken);
+}
+
 public sealed class WebLogSnapshotCommandHandler(WebLogSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
 {
     public string Command => "logs.getSnapshot";
