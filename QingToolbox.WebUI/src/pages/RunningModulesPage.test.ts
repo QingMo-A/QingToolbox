@@ -10,7 +10,7 @@ import { useModuleStore } from '../app/moduleStore'
 const mounted: VueWrapper[] = []
 afterEach(() => mounted.splice(0).forEach(wrapper => wrapper.unmount()))
 
-const item = (id: string, runtimeState: string) => ({ id, displayName: id, displayDescription: `${id} description`, version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState, isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canLoad: false, canActivate: false, canOpen: runtimeState === 'Running', canDeactivate: runtimeState === 'Running', canUnload: runtimeState === 'Running', isBusy: false, isExecutionBlocked: false })
+const item = (id: string, runtimeState: string) => ({ id, displayName: id, displayDescription: `${id} description`, version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState, isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canLoad: false, canActivate: false, canOpen: runtimeState === 'Running', canDeactivate: runtimeState === 'Running', canUnload: runtimeState === 'Running', isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled' as const, canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false })
 const snapshot = { generatedAt: new Date().toISOString(), modules: [item('Running module', 'Running'), item('Loaded module', 'Loaded'), item('Waiting module', 'NotLoaded'), item('Failed module', 'Failed')] }
 
 async function page(status: 'idle'|'loading'|'ready'|'error' = 'ready', clientOverrides: Record<string, unknown> = {}) {
@@ -48,6 +48,7 @@ describe('RunningModulesPage', () => {
     expect(wrapper.text()).toContain('Deactivate')
     expect(wrapper.text()).toContain('Unload')
     expect(wrapper.text()).not.toContain('Remove')
+    expect(wrapper.text()).not.toContain('Start with QingToolbox')
   })
 
   it('shows the empty state and links safely to modules', async () => {

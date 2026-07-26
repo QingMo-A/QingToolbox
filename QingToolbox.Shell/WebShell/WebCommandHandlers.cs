@@ -69,7 +69,10 @@ public abstract class WebModuleLifecycleCommandHandler(
 
         var result = await ExecuteAsync(property.GetString()!, context.SessionCancellation);
         if (result == WebModuleLifecycleResult.Succeeded) return snapshots.Create();
-        throw result switch
+        throw ErrorForResult(result);
+    }
+
+    internal static WebBridgeValidationException ErrorForResult(WebModuleLifecycleResult result) => result switch
         {
             WebModuleLifecycleResult.NotFound => new WebBridgeValidationException("ModuleNotFound", "The requested module was not found."),
             WebModuleLifecycleResult.Busy => new WebBridgeValidationException("ModuleBusy", "The requested module is busy."),
@@ -77,7 +80,6 @@ public abstract class WebModuleLifecycleCommandHandler(
             WebModuleLifecycleResult.ExecutionBlocked => new WebBridgeValidationException("ModuleExecutionBlocked", "Module operations are blocked while recovery is pending."),
             _ => new WebBridgeValidationException("ModuleOperationFailed", "The host could not complete the module operation.")
         };
-    }
 }
 
 public sealed class WebModuleLoadCommandHandler(IWebModuleLifecycleOperations operations,
@@ -121,6 +123,29 @@ public sealed class WebModuleUnloadCommandHandler(IWebModuleLifecycleOperations 
 {
     public override string Command => "modules.unload";
     protected override Task<WebModuleLifecycleResult> ExecuteAsync(string moduleId, CancellationToken cancellationToken) => operations.UnloadAsync(moduleId, cancellationToken);
+}
+
+public sealed class WebSetModuleStartupAuthorizationCommandHandler(
+    IWebModuleStartupAuthorizationOperations operations,
+    WebModuleSnapshotProvider snapshots,
+    WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "modules.setStartupAuthorization";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } =
+        new HashSet<string>(StringComparer.Ordinal) { "moduleId", "enabled" };
+
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        if (!payload.TryGetProperty("moduleId", out var moduleIdProperty) ||
+            moduleIdProperty.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(moduleIdProperty.GetString()) ||
+            !payload.TryGetProperty("enabled", out var enabledProperty) || enabledProperty.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            throw new WebBridgeValidationException("InvalidPayload", "A non-empty module ID and boolean enabled value are required.");
+
+        var result = await operations.SetAsync(moduleIdProperty.GetString()!, enabledProperty.GetBoolean(), context.SessionCancellation);
+        if (result == WebModuleLifecycleResult.Succeeded) return snapshots.Create();
+        throw WebModuleLifecycleCommandHandler.ErrorForResult(result);
+    }
 }
 
 public sealed class WebLogSnapshotCommandHandler(WebLogSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler

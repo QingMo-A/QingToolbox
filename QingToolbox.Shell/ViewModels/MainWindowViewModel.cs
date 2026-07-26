@@ -1368,24 +1368,8 @@ public sealed partial class MainWindowViewModel(
         module.IsStartupAuthorizationBusy = true;
         try
         {
-            if (desired)
-            {
-                var authorization = await fingerprintService.CreateAuthorizationAsync(module.Module);
-                await settingsService.UpdateAsync(settings =>
-                {
-                    settings.StartupModules.RemoveAll(item => item.ModuleId == module.Id);
-                settings.StartupModules.Add(authorization);
-                });
-                module.StartupAuthorizationMessage = localization.GetString("startup.moduleEnabled");
-                module.StartupAuthorizationState = StartupAuthorizationState.Enabled;
-            }
-            else
-            {
-                await settingsService.UpdateAsync(settings =>
-                    settings.StartupModules.RemoveAll(item => item.ModuleId == module.Id));
-                module.StartupAuthorizationMessage = localization.GetString("startup.moduleDisabled");
-                module.StartupAuthorizationState = StartupAuthorizationState.NotEnabled;
-            }
+            await PersistModuleStartupAuthorizationAsync(module, desired, CancellationToken.None);
+            ApplyStartupAuthorizationProjection(module, desired);
             if (desired)
             {
                 if (previousState == StartupAuthorizationState.NotEnabled) StartupAuthorizationCount++;
@@ -1404,6 +1388,76 @@ public sealed partial class MainWindowViewModel(
             StartupSettingsMessage = localization.GetString("startup.moduleAuthorizationFailed");
         }
         finally { module.IsStartupAuthorizationBusy = false; }
+    }
+
+    public async Task<WebModuleLifecycleResult> SetModuleStartupAuthorizationFromWebAsync(
+        string moduleId, bool enabled, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var module = Modules.FirstOrDefault(item => string.Equals(item.Id, moduleId, StringComparison.Ordinal));
+        if (module is null) return WebModuleLifecycleResult.NotFound;
+        if (module.IsStartupAuthorizationBusy || module.IsBusy) return WebModuleLifecycleResult.Busy;
+        if (module.IsExecutionBlocked) return WebModuleLifecycleResult.ExecutionBlocked;
+        if (!module.IsValid || module.StartupAuthorizationState == StartupAuthorizationState.Unavailable ||
+            !module.CanChangeStartupAuthorization) return WebModuleLifecycleResult.Unavailable;
+        if (enabled && module.IsStartupEnabled && module.StartupAuthorizationState == StartupAuthorizationState.Enabled ||
+            !enabled && module.StartupAuthorizationState == StartupAuthorizationState.NotEnabled)
+            return WebModuleLifecycleResult.Succeeded;
+
+        var previousEnabled = module.IsStartupEnabled;
+        var previousState = module.StartupAuthorizationState;
+        var previousMessage = module.StartupAuthorizationMessage;
+        var previousCount = StartupAuthorizationCount;
+        module.IsStartupAuthorizationBusy = true;
+        try
+        {
+            await PersistModuleStartupAuthorizationAsync(module, enabled, cancellationToken);
+            ApplyStartupAuthorizationProjection(module, enabled);
+            if (enabled)
+            {
+                if (previousState == StartupAuthorizationState.NotEnabled) StartupAuthorizationCount++;
+            }
+            else if (previousState is StartupAuthorizationState.Enabled or StartupAuthorizationState.ChangedNeedsConfirmation)
+                StartupAuthorizationCount = Math.Max(0, StartupAuthorizationCount - 1);
+            return WebModuleLifecycleResult.Succeeded;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"Startup module authorization update failed: {exception.GetType().Name}");
+            module.IsStartupEnabled = previousEnabled;
+            module.StartupAuthorizationState = previousState;
+            module.StartupAuthorizationMessage = previousMessage;
+            StartupAuthorizationCount = previousCount;
+            StartupSettingsMessage = localization.GetString("startup.moduleAuthorizationFailed");
+            return WebModuleLifecycleResult.Failed;
+        }
+        finally { module.IsStartupAuthorizationBusy = false; }
+    }
+
+    private async Task PersistModuleStartupAuthorizationAsync(
+        DiscoveredModuleViewModel module, bool enabled, CancellationToken cancellationToken)
+    {
+        if (enabled)
+        {
+            var authorization = await fingerprintService.CreateAuthorizationAsync(module.Module, cancellationToken);
+            await settingsService.UpdateAsync(settings =>
+            {
+                settings.StartupModules.RemoveAll(item => item.ModuleId == module.Id);
+                settings.StartupModules.Add(authorization);
+            }, cancellationToken);
+            return;
+        }
+
+        await settingsService.UpdateAsync(settings =>
+            settings.StartupModules.RemoveAll(item => item.ModuleId == module.Id), cancellationToken);
+    }
+
+    private void ApplyStartupAuthorizationProjection(DiscoveredModuleViewModel module, bool enabled)
+    {
+        module.IsStartupEnabled = enabled;
+        module.StartupAuthorizationState = enabled ? StartupAuthorizationState.Enabled : StartupAuthorizationState.NotEnabled;
+        module.StartupAuthorizationMessage = localization.GetString(enabled ? "startup.moduleEnabled" : "startup.moduleDisabled");
     }
 
     [RelayCommand]

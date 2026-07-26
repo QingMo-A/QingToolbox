@@ -22,7 +22,8 @@ public sealed record WebModuleSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList
 public sealed record WebModuleSnapshotItem(string Id, string DisplayName, string DisplayDescription, string Version,
     string Author, string RuntimeType, string LoadMode, string RuntimeState, bool IsValid, int ErrorCount,
     IReadOnlyList<string> Errors, IReadOnlyList<string> Permissions, string MinimumHostVersion, bool IsUserInstalled,
-    bool CanLoad, bool CanActivate, bool CanOpen, bool CanDeactivate, bool CanUnload, bool IsBusy, bool IsExecutionBlocked);
+    bool CanLoad, bool CanActivate, bool CanOpen, bool CanDeactivate, bool CanUnload, bool IsBusy, bool IsExecutionBlocked,
+    bool IsStartupEnabled, string StartupAuthorizationState, bool CanChangeStartupAuthorization, bool IsStartupAuthorizationBusy);
 public sealed record WebLogSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList<WebLogSnapshotEntry> Entries);
 public sealed record WebLogSnapshotEntry(DateTimeOffset Timestamp, string Level, string Category, string Message);
 public sealed record WebSettingsSnapshot(DateTimeOffset GeneratedAt, WebSettingsLanguage Language,

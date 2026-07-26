@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added fingerprint-bound module startup authorization to the Development Web module details workspace.
 - Added a host-confirmed Open action that opens or focuses native module windows from the Development Web workspace.
 - Added host-confirmed Deactivate and Unload actions to the Development Web module center and running-module view.
 - Added host-confirmed Load and Activate controls to the Development Web module center.

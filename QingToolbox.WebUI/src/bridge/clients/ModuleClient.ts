@@ -9,6 +9,7 @@ export class ModuleClient {
   open(moduleId: string) { return this.requestSnapshot('modules.open', { moduleId }) }
   deactivate(moduleId: string) { return this.requestSnapshot('modules.deactivate', { moduleId }) }
   unload(moduleId: string) { return this.requestSnapshot('modules.unload', { moduleId }) }
+  setStartupAuthorization(moduleId: string, enabled: boolean) { return this.requestSnapshot('modules.setStartupAuthorization', { moduleId, enabled }) }
   private async requestSnapshot(command: string, payload: Record<string, unknown> = {}): Promise<ModuleSnapshot> {
     const value = await this.requests.request<unknown>(command, payload)
     if (!isModuleSnapshot(value)) throw new Error('Module snapshot validation failed.')

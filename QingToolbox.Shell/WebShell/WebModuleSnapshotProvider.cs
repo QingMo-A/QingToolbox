@@ -31,7 +31,11 @@ public sealed class WebModuleSnapshotSource(MainWindowViewModel viewModel) : IWe
             module.CanDeactivate,
             module.CanUnload,
             module.IsBusy,
-            module.IsExecutionBlocked)).ToArray();
+            module.IsExecutionBlocked,
+            module.IsStartupEnabled,
+            module.StartupAuthorizationState.ToString(),
+            module.CanChangeStartupAuthorization,
+            module.IsStartupAuthorizationBusy)).ToArray();
 
     private static IReadOnlyList<string> SafeErrors(DiscoveredModuleViewModel module)
     {

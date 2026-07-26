@@ -1087,9 +1087,9 @@ Do not connect the prototype to real Production update behavior.
 ## UI-3: Module lifecycle operations
 
 ```text
-Status: Planned — Next
-Priority: P1
+Status: Implementation Complete
 Plan: Plan 010
+Priority: P1
 ```
 
 Future scope:

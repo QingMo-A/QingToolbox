@@ -269,6 +269,7 @@ public partial class App : Application
                 services.AddSingleton<IWebModuleSnapshotSource, WebModuleSnapshotSource>();
                 services.AddSingleton<WebModuleSnapshotProvider>();
                 services.AddSingleton<IWebModuleLifecycleOperations, WebModuleLifecycleOperations>();
+                services.AddSingleton<IWebModuleStartupAuthorizationOperations, WebModuleStartupAuthorizationOperations>();
                 services.AddSingleton<IWebLogSnapshotSource, WebLogSnapshotSource>();
                 services.AddSingleton<WebLogSnapshotProvider>();
                 services.AddSingleton<IWebSettingsSnapshotSource, WebSettingsSnapshotSource>();
@@ -282,6 +283,7 @@ public partial class App : Application
                 services.AddSingleton<IWebCommandHandler, WebModuleOpenCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleDeactivateCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleUnloadCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebSetModuleStartupAuthorizationCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebLogSnapshotCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSettingsSnapshotCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetShowLogsInSidebarCommandHandler>();
