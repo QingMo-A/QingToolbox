@@ -47,6 +47,9 @@ describe('RunningModulesPage', () => {
     expect(wrapper.text()).toContain('Open')
     expect(wrapper.text()).toContain('Deactivate')
     expect(wrapper.text()).toContain('Unload')
+    expect(wrapper.get('.running-module-heading .q-badge').text()).toBe('Running')
+    expect(wrapper.get('.running-module-action .q-button.is-primary').text()).toBe('Open')
+    expect(wrapper.get('.running-details-link').classes()).not.toContain('q-button')
     expect(wrapper.text()).not.toContain('Remove')
     expect(wrapper.text()).not.toContain('Start with QingToolbox')
   })
@@ -108,6 +111,12 @@ describe('RunningModulesPage', () => {
     expect(button.element.tagName).toBe('BUTTON')
     expect(button.attributes('disabled')).toBeUndefined()
     expect(button.attributes('tabindex')).not.toBe('-1')
+  })
+
+  it('keeps controls in a wrapping action group for narrow layouts', async () => {
+    const { wrapper } = await page()
+    expect(wrapper.get('.running-module-action').element.children).toHaveLength(4)
+    expect(wrapper.get('.running-details-link').element.tagName).toBe('BUTTON')
   })
 
   it('requests one snapshot from idle and reuses a ready snapshot', async () => {
