@@ -1120,17 +1120,17 @@ Vue provides the entry point and state projection, not the module view renderer.
 ## UI-4: Development Web everyday workspace
 
 ```text
-Status: Active — Phased Implementation
+Status: Phased — Plan 011 Implementation Complete
 Priority: P2
 Plan: Plan 011
-Current slice: UI-4A1 Home Dashboard complete
+Current slice: UI-4A Home Dashboard and Settings information architecture complete
 ```
 
 Current migration order:
 
 ```text
 Home Dashboard — complete
-Settings information-architecture review — next, not started
+Settings information architecture — complete
 ```
 
 Downloads, updates and floating surfaces remain deferred. Automatic module installation must not be exposed until the complete Production-safe Stage B boundary exists.

@@ -57,8 +57,8 @@ Read these plans in order unless the user says otherwise:
 
 11. [`011-development-web-everyday-workspace.md`](011-development-web-everyday-workspace.md)
     - Deliver a useful host-backed Home dashboard.
-    - Continue later with a focused Settings information-architecture review.
-    - **In Progress — UI-4A1 Home Dashboard complete.**
+    - Reorganize Settings into focused everyday-workspace sections.
+    - **Implementation Complete — Home Dashboard and Settings information architecture delivered.**
 
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 

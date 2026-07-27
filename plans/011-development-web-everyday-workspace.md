@@ -1,7 +1,7 @@
 # Plan 011: Development Web Everyday Workspace
 
 ```text
-Status: In Progress
+Status: Implementation Complete
 Track: UI Modernization / UI-4
 Environment: Development only
 ```
@@ -22,9 +22,13 @@ Turn the Development Web workspace into a useful everyday entry point without ex
 
 **Implementation Complete.** Home projects the existing App and Module snapshots into a welcome area, module overview, actionable attention categories, running-module preview, and existing workspace destinations.
 
-### UI-4A2 Settings information-architecture review
+### UI-4A2 Settings Information Architecture
 
-**Not started.** Review the current Settings information architecture before selecting a focused follow-up slice.
+**Implementation Complete.** Settings now provides focused General, Window, Startup, and About sections while preserving the existing host-backed mutations and stale Snapshot behavior.
+
+## Next
+
+Review actual everyday workspace usage before selecting another bounded UI phase.
 
 ## Deferred
 
