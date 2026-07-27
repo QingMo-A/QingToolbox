@@ -30,9 +30,16 @@ const moduleIssues = computed(() => modules.modules.filter(module => !module.isV
 const recoveryBlocked = computed(() => modules.modules.filter(module => module.isExecutionBlocked))
 const startupApproval = computed(() => modules.modules.filter(module => module.startupAuthorizationState === 'ChangedNeedsConfirmation'))
 const attentionIds = computed(() => new Set([...moduleIssues.value, ...recoveryBlocked.value, ...startupApproval.value].map(module => module.id)))
-const startsOnLaunch = computed(() => modules.modules.filter(module => module.isStartupEnabled).length)
+const startupEnabled = computed(() => modules.modules.filter(module => module.isStartupEnabled))
 const runningPreview = computed(() => modules.runningModules.slice(0, 3))
-const hasSnapshot = computed(() => modules.modules.length > 0)
+const hasSnapshot = computed(() => modules.lastUpdatedAt !== null)
+const waitingForHost = computed(() => app.bridge !== 'Connected' && !hasSnapshot.value && modules.modules.length === 0)
+const snapshotWarning = computed(() => {
+  if (!hasSnapshot.value) return ''
+  if (modules.status === 'error') return 'Module refresh failed. The dashboard is showing the last available snapshot.'
+  if (app.bridge !== 'Connected') return 'The host is disconnected. The dashboard is showing the last available snapshot.'
+  return ''
+})
 const environment = computed(() => app.snapshot?.environmentDisplayName || app.mode || 'Development')
 const hostVersion = computed(() => app.snapshot?.hostVersion || 'Unavailable')
 
@@ -45,6 +52,13 @@ async function browse(filter: 'all' | 'issues' = 'all', selectedId: string | nul
 const openIssues = () => browse('issues', moduleIssues.value[0]?.id ?? null)
 const openBlocked = () => browse('all', recoveryBlocked.value[0]?.id ?? null)
 const openStartupApproval = () => browse('all', startupApproval.value[0]?.id ?? null)
+function openPrimaryAttention() {
+  if (moduleIssues.value.length) return openIssues()
+  if (recoveryBlocked.value.length) return openBlocked()
+  if (startupApproval.value.length) return openStartupApproval()
+  return browse('all')
+}
+const openStartsOnLaunch = () => browse('all', startupEnabled.value[0]?.id ?? null)
 const viewModule = (module: ModuleSnapshotItem) => browse('all', module.id)
 </script>
 
@@ -67,13 +81,19 @@ const viewModule = (module: ModuleSnapshotItem) => browse('all', module.id)
       </dl>
     </section>
 
-    <div v-if="modules.status === 'error' && hasSnapshot" class="dashboard-stale-notice" role="status">
+    <div v-if="snapshotWarning" class="dashboard-stale-notice" role="status">
       <QIcon name="statusWarning" />
-      <span>Module refresh failed. The dashboard is showing the last available snapshot.</span>
-      <QButton @click="refresh">Retry</QButton>
+      <span>{{ snapshotWarning }}</span>
+      <QButton v-if="modules.status === 'error'" @click="refresh">Retry</QButton>
     </div>
 
-    <section v-if="modules.status === 'loading' && !hasSnapshot" class="dashboard-loading" aria-label="Loading dashboard">
+    <section v-if="waitingForHost" class="q-empty dashboard-waiting" aria-live="polite">
+      <div class="q-empty-icon"><QIcon name="statusInfo" :size="28" /></div>
+      <h3>Waiting for the host</h3>
+      <p>The dashboard will appear after the Development bridge is connected.</p>
+      <QBadge tone="warning">{{ app.bridge }}</QBadge>
+    </section>
+    <section v-else-if="modules.status === 'loading' && !hasSnapshot" class="dashboard-loading" aria-label="Loading dashboard">
       <QSkeleton v-for="item in 4" :key="item" />
     </section>
     <section v-else-if="modules.status === 'error' && !hasSnapshot" class="q-empty dashboard-full-error">
@@ -88,8 +108,8 @@ const viewModule = (module: ModuleSnapshotItem) => browse('all', module.id)
         <div class="dashboard-overview-grid">
           <button @click="browse('all')"><span>Total modules</span><strong>{{ modules.modules.length }}</strong><small>Browse installed modules</small></button>
           <button @click="navigate('/running')"><span>Running</span><strong class="success">{{ modules.runningModules.length }}</strong><small>Review active modules</small></button>
-          <button @click="openIssues"><span>Needs attention</span><strong class="warning">{{ attentionIds.size }}</strong><small>Review module health</small></button>
-          <button @click="browse('all')"><span>Starts on launch</span><strong class="accent">{{ startsOnLaunch }}</strong><small>Review startup access</small></button>
+          <button @click="openPrimaryAttention"><span>Needs attention</span><strong class="warning">{{ attentionIds.size }}</strong><small>Review module health</small></button>
+          <button @click="openStartsOnLaunch"><span>Starts on launch</span><strong class="accent">{{ startupEnabled.length }}</strong><small>Review startup access</small></button>
         </div>
       </section>
 
