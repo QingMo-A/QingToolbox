@@ -4,7 +4,7 @@ cd /d "%~dp0"
 
 title QingToolbox - Update, Repair, Build and Run
 
-echo [1/5] Checking the toolbox branch...
+echo [1/6] Checking the toolbox branch...
 for /f "delims=" %%B in ('git branch --show-current 2^>nul') do set "CURRENT_BRANCH=%%B"
 if /i not "%CURRENT_BRANCH%"=="toolbox" (
     echo.
@@ -13,8 +13,12 @@ if /i not "%CURRENT_BRANCH%"=="toolbox" (
     goto :failed
 )
 
-echo [2/5] Updating from origin/toolbox...
+echo [2/6] Updating from origin/toolbox...
 git pull --ff-only origin toolbox
+if errorlevel 1 goto :failed
+
+echo [3/6] Stopping the previous development host...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stop-dev-host.ps1" -RepositoryRoot "%~dp0."
 if errorlevel 1 goto :failed
 
 where node.exe >nul 2>nul
@@ -30,7 +34,7 @@ if errorlevel 1 (
     )
 )
 
-echo [3/5] Checking Web workspace assets...
+echo [4/6] Checking Web workspace assets...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\verify-web-ui-assets.ps1"
 if errorlevel 1 (
     echo.
@@ -58,11 +62,11 @@ if errorlevel 1 (
     )
 )
 
-echo [4/5] Building and deploying development modules...
+echo [5/6] Building and deploying development modules...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\deploy-dev-modules.ps1"
 if errorlevel 1 goto :failed
 
-echo [5/5] Starting QingToolbox...
+echo [6/6] Starting QingToolbox...
 set "SHELL_EXE=%~dp0QingToolbox.Shell\bin\Debug\net10.0-windows\QingToolbox.Shell.exe"
 set "REPOSITORY_ROOT=%~dp0"
 if "%REPOSITORY_ROOT:~-1%"=="\" set "REPOSITORY_ROOT=%REPOSITORY_ROOT:~0,-1%"
