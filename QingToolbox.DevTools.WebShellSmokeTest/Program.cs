@@ -343,6 +343,35 @@ var failedLaunchJson = JsonSerializer.Serialize(failedLaunch.Response);
 Require(!failedLaunch.Response.Success && failedLaunch.Response.Error?.Code == "SettingsMutationFailed" && mutationSource.LaunchAtLogin, "Failed startup writes must preserve confirmed state.");
 Require(!failedLaunchJson.Contains(root, StringComparison.OrdinalIgnoreCase) && !failedLaunchJson.Contains("Registry", StringComparison.OrdinalIgnoreCase) && WebBridgeProtocol.Version == 4, "Launch failures must not expose paths and must preserve protocol v4.");
 
+Console.WriteLine("Verifying host-confirmed startup registration repair...");
+mutationSource.FailWrites = false; mutationSource.CanRepairStartup = true;
+var repairDispatcher = new WebBridgeDispatcher([new WebRepairStartupRegistrationCommandHandler(
+    mutationSource, new WebSettingsSnapshotProvider(mutationSource, TimeProvider.System), settingsActivation)]);
+string RepairRequest(object payload) => JsonSerializer.Serialize(new { protocolVersion = 4, requestId = Guid.NewGuid(), command = "settings.repairStartupRegistration", payload });
+var inactiveRepair = await new WebBridgeDispatcher([new WebRepairStartupRegistrationCommandHandler(mutationSource,
+    new WebSettingsSnapshotProvider(mutationSource, TimeProvider.System), inactiveSettings)])
+    .DispatchAsync(RepairRequest(new { }), new(32, CancellationToken.None));
+Require(!inactiveRepair.Response.Success && inactiveRepair.Response.Error?.Code == "BridgeNotActivated", "Startup repair must require activation.");
+var invalidRepair = await repairDispatcher.DispatchAsync(RepairRequest(new { extra = true }), new(31, CancellationToken.None));
+Require(!invalidRepair.Response.Success && invalidRepair.Response.Error?.Code == "InvalidPayload", "Startup repair must reject payload properties.");
+var repaired = await repairDispatcher.DispatchAsync(RepairRequest(new { }), new(31, CancellationToken.None));
+Require(repaired.Response.Success && mutationSource.RepairWriteCount == 1 && !((WebSettingsSnapshot)repaired.Response.Payload).CanRepairStartup,
+    "Startup repair must call its adapter once and return a confirmed full snapshot.");
+var unavailableRepair = await repairDispatcher.DispatchAsync(RepairRequest(new { }), new(31, CancellationToken.None));
+Require(!unavailableRepair.Response.Success && unavailableRepair.Response.Error?.Code == "SettingsMutationUnavailable", "Healthy startup state must not remain repairable.");
+mutationSource.CanRepairStartup = true; mutationSource.RepairReturnsDisabled = true;
+var cleanupRepair = await repairDispatcher.DispatchAsync(RepairRequest(new { }), new(31, CancellationToken.None));
+Require(cleanupRepair.Response.Success && !((WebSettingsSnapshot)cleanupRepair.Response.Payload).LaunchAtLogin && mutationSource.RepairWriteCount == 2,
+    "Cleanup repair may succeed with startup disabled.");
+mutationSource.CanRepairStartup = true; mutationSource.FailWrites = true;
+var failedRepair = await repairDispatcher.DispatchAsync(RepairRequest(new { }), new(31, CancellationToken.None));
+var failedRepairJson = JsonSerializer.Serialize(failedRepair.Response);
+Require(!failedRepair.Response.Success && failedRepair.Response.Error?.Code == "SettingsMutationFailed" && mutationSource.CanRepairStartup,
+    "Failed startup repair must preserve the previous repairable state.");
+Require(!failedRepairJson.Contains(root, StringComparison.OrdinalIgnoreCase) && !failedRepairJson.Contains("HKCU", StringComparison.OrdinalIgnoreCase) &&
+    !failedRepairJson.Contains("stack", StringComparison.OrdinalIgnoreCase) && WebBridgeProtocol.Version == 4,
+    "Startup repair failures must remain safe and preserve protocol v4.");
+
 Console.WriteLine("Verifying immutable runtime assets, TOCTOU resistance and limits...");
 var sourceAssets = Path.Combine(AppContext.BaseDirectory, "WebUI");
 var valid = new WebAssetIdentity(sourceAssets);
@@ -439,7 +468,7 @@ file sealed class SettingsSnapshotSource : IWebSettingsSnapshotSource
     public WebSettingsSnapshotValues Read()
     {
         ReadCount++;
-        return new(new("en-US", "English"), false, "Ask", "Ask before closing.", true, true,
+        return new(new("en-US", "English"), false, "Ask", "Ask before closing.", true, true, false,
             "FloatingBadge", "Task Scheduler", "Healthy", "Startup registration is healthy.");
     }
 }
@@ -450,13 +479,16 @@ file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapsh
     public StartupPresentationMode StartupPresentationMode { get; private set; } = StartupPresentationMode.FloatingBadge;
     public bool LaunchAtLogin { get; private set; } = true;
     public bool CanConfigureLaunchAtLogin { get; set; } = true;
+    public bool CanRepairStartup { get; set; }
+    public bool RepairReturnsDisabled { get; set; }
     public bool FailWrites { get; set; }
     public int WriteCount { get; private set; }
     public int CloseWriteCount { get; private set; }
     public int PresentationWriteCount { get; private set; }
     public int LaunchWriteCount { get; private set; }
+    public int RepairWriteCount { get; private set; }
     public WebSettingsSnapshotValues Read() => new(new("en-US", "English"), ShowLogsInSidebar,
-        MainWindowCloseBehavior.ToString(), "Ask before closing.", LaunchAtLogin, CanConfigureLaunchAtLogin, StartupPresentationMode.ToString(), "Task Scheduler", "Healthy", "Startup registration is healthy.");
+        MainWindowCloseBehavior.ToString(), "Ask before closing.", LaunchAtLogin, CanConfigureLaunchAtLogin, CanRepairStartup, StartupPresentationMode.ToString(), "Task Scheduler", CanRepairStartup ? "Degraded" : "Healthy", CanRepairStartup ? "Startup registration requires repair." : "Startup registration is healthy.");
     public Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -487,6 +519,14 @@ file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapsh
         if (!CanConfigureLaunchAtLogin) return Task.FromResult(WebSettingsMutationResult.Unavailable);
         if (FailWrites) return Task.FromResult(WebSettingsMutationResult.Failed);
         LaunchWriteCount++; LaunchAtLogin = value;
+        return Task.FromResult(WebSettingsMutationResult.Succeeded);
+    }
+    public Task<WebSettingsMutationResult> RepairStartupAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CanRepairStartup) return Task.FromResult(WebSettingsMutationResult.Unavailable);
+        if (FailWrites) return Task.FromResult(WebSettingsMutationResult.Failed);
+        RepairWriteCount++; CanRepairStartup = false; LaunchAtLogin = !RepairReturnsDisabled;
         return Task.FromResult(WebSettingsMutationResult.Succeeded);
     }
 }

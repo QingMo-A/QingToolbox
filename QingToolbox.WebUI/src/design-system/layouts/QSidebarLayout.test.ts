@@ -4,7 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import QSidebarLayout from './QSidebarLayout.vue'
 import { useSettingsStore } from '../../app/settingsStore'
 
-const snapshot=(showLogsInSidebar:boolean)=>({generatedAt:new Date().toISOString(),language:{code:'en-US',displayName:'English'},showLogsInSidebar,mainWindowCloseBehavior:'Ask' as const,closeBehaviorMessage:'',launchAtLogin:false,canConfigureLaunchAtLogin:true,startupPresentationMode:'FloatingBadge' as const,startupBackend:'None',startupStatus:'Unavailable',startupMessage:''})
+const snapshot=(showLogsInSidebar:boolean)=>({generatedAt:new Date().toISOString(),language:{code:'en-US',displayName:'English'},showLogsInSidebar,mainWindowCloseBehavior:'Ask' as const,closeBehaviorMessage:'',launchAtLogin:false,canConfigureLaunchAtLogin:true,canRepairStartup:false,startupPresentationMode:'FloatingBadge' as const,startupBackend:'None',startupStatus:'Unavailable',startupMessage:''})
 
 describe('QSidebarLayout icons', () => {
   it('uses the native Fluent navigation glyphs and the product brand mark', () => {

@@ -1108,10 +1108,33 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand]
     private async Task RepairStartupAsync()
     {
-        if(!CanConfigureWindowsStartup)return;IsStartupSettingsBusy=true;
-        try{var state=await startupRegistrationService.RepairAsync();ApplyRegistrationHealth(state);LaunchAtLogin=state.MatchesCurrentExecutable;StartupSettingsMessage=localization.GetString(state.DiagnosticCode);}
-        catch{StartupSettingsMessage=localization.GetString("startup.registrationFailed");}
-        finally{IsStartupSettingsBusy=false;}
+        _ = await RepairStartupRegistrationCoreAsync(CancellationToken.None);
+    }
+
+    public Task<WebSettingsMutationResult> RepairStartupFromWebAsync(CancellationToken cancellationToken) =>
+        RepairStartupRegistrationCoreAsync(cancellationToken);
+
+    private async Task<WebSettingsMutationResult> RepairStartupRegistrationCoreAsync(CancellationToken cancellationToken)
+    {
+        if (!CanConfigureWindowsStartup || !CanRepairStartup) return WebSettingsMutationResult.Unavailable;
+        IsStartupSettingsBusy = true;
+        try
+        {
+            await startupRegistrationService.RepairAsync(cancellationToken);
+            ApplyRegistrationSnapshot(await startupRegistrationService.GetSnapshotAsync(cancellationToken));
+            return _lastStartupRegistrationState is { } confirmed && IsStartupRepairRequired(confirmed.Health)
+                ? WebSettingsMutationResult.Failed : WebSettingsMutationResult.Succeeded;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch
+        {
+            try { ApplyRegistrationSnapshot(await startupRegistrationService.GetSnapshotAsync(cancellationToken)); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch { }
+            StartupSettingsMessage = localization.GetString("startup.registrationFailed");
+            return WebSettingsMutationResult.Failed;
+        }
+        finally { IsStartupSettingsBusy = false; }
     }
 
     [RelayCommand]
@@ -1153,9 +1176,12 @@ public sealed partial class MainWindowViewModel(
         StartupHealthDisplay = localization.GetString(state.DiagnosticCode);
         CanTestStartup = state.Backend == StartupRegistrationBackendKind.TaskScheduler &&
                          state.Health == StartupRegistrationHealth.Healthy && !IsStartupSettingsBusy;
-        CanRepairStartup = state.Health is not StartupRegistrationHealth.Healthy and
-            not StartupRegistrationHealth.Disabled && !IsStartupSettingsBusy;
+        CanRepairStartup = IsStartupRepairRequired(state.Health) && !IsStartupSettingsBusy;
     }
+    private static bool IsStartupRepairRequired(StartupRegistrationHealth health) =>
+        health is not StartupRegistrationHealth.Healthy and
+            not StartupRegistrationHealth.HealthyRegistryFallback and
+            not StartupRegistrationHealth.Disabled;
     private void ApplyRegistrationSnapshot(WindowsStartupRegistrationSnapshot snapshot)
     {
         var state = snapshot.EffectiveBackend == StartupRegistrationBackendKind.RegistryRun

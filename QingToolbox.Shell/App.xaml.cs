@@ -290,6 +290,7 @@ public partial class App : Application
                 services.AddSingleton<IWebCommandHandler, WebSetMainWindowCloseBehaviorCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetStartupPresentationModeCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetLaunchAtLoginCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebRepairStartupRegistrationCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebReadyCommandHandler>();
                 services.AddSingleton<WebBridgeDispatcher>();
                 services.AddSingleton<WebBridgeHost>();

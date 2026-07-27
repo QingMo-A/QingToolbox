@@ -253,6 +253,26 @@ public sealed class WebSetLaunchAtLoginCommandHandler(IWebSettingsMutation mutat
     }
 }
 
+public sealed class WebRepairStartupRegistrationCommandHandler(IWebSettingsMutation mutation,
+    WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "settings.repairStartupRegistration";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string>();
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        if (!mutation.CanRepairStartup)
+            throw new WebBridgeValidationException("SettingsMutationUnavailable", "Windows startup registration does not currently require repair.");
+        var result = await mutation.RepairStartupAsync(context.SessionCancellation);
+        return result switch
+        {
+            WebSettingsMutationResult.Succeeded when !mutation.CanRepairStartup => snapshots.Create(),
+            WebSettingsMutationResult.Unavailable => throw new WebBridgeValidationException("SettingsMutationUnavailable", "Windows startup registration does not currently require repair."),
+            _ => throw new WebBridgeValidationException("SettingsMutationFailed", "The Windows startup registration could not be repaired.")
+        };
+    }
+}
+
 public sealed class WebReadyCommandHandler(WebAppSnapshotProvider snapshots, Lazy<WebAssetIdentity> assets,
     WebActivationSession activation) : IWebCommandHandler
 {
