@@ -11,6 +11,12 @@ import QBadge from '../design-system/components/QBadge.vue'
 import QEmptyState from '../design-system/components/QEmptyState.vue'
 import QSkeleton from '../design-system/components/QSkeleton.vue'
 import QIcon from '../design-system/components/QIcon.vue'
+import {
+  isLoadedState,
+  isNotLoadedState,
+  isRunningState,
+  summarizeModuleStates,
+} from '../modules/moduleStateSummary'
 
 const client = inject<ModuleClient>('moduleClient')!
 const app = useAppStore()
@@ -81,18 +87,15 @@ const startupMessage = (state: ModuleSnapshotItem['startupAuthorizationState']) 
   Unavailable: 'The module payload could not be verified, so startup authorization cannot be changed.',
   Missing: 'The saved startup authorization no longer matches an available module.'
 }[state])
-const cardCanLoad = (module: ModuleSnapshotItem) => ['NotLoaded', 'Unloaded'].includes(module.runtimeState) && module.canLoad
-const cardCanActivate = (module: ModuleSnapshotItem) => ['Loaded', 'Deactivated'].includes(module.runtimeState) && module.canActivate
-const cardCanOpen = (module: ModuleSnapshotItem) => ['Loaded', 'Running', 'Deactivated'].includes(module.runtimeState) && module.canOpen && !module.isExecutionBlocked
+const cardCanLoad = (module: ModuleSnapshotItem) => isNotLoadedState(module.runtimeState) && module.canLoad
+const cardCanActivate = (module: ModuleSnapshotItem) => isLoadedState(module.runtimeState) && module.canActivate
+const cardCanOpen = (module: ModuleSnapshotItem) => (isLoadedState(module.runtimeState) || isRunningState(module.runtimeState)) && module.canOpen && !module.isExecutionBlocked
 const operationFailureMessage = (module: ModuleSnapshotItem, operation: ModuleOperation) => operation === 'open'
   ? `The ${module.displayName} window could not be opened.`
   : `${module.displayName} could not be ${operation === 'load' ? 'loaded' : operation === 'activate' ? 'activated' : operation === 'deactivate' ? 'deactivated' : 'unloaded'}.`
 const openDetails = (moduleId: string) => { store.selectedModuleId = moduleId }
 watch(() => app.bridge, bridge => { if (bridge === 'Connected' && store.status === 'idle') void refresh() }, { immediate: true })
-const failed = computed(() => store.modules.filter(x => x.errorCount > 0 || !x.isValid).length)
-const notLoaded = computed(() => store.modules.filter(x => x.runtimeState === 'NotLoaded').length)
-const loaded = computed(() => store.modules.filter(x => x.runtimeState === 'Loaded').length)
-const running = computed(() => store.modules.filter(x => x.runtimeState === 'Running').length)
+const summary = computed(() => summarizeModuleStates(store.modules))
 const hasConfirmedSnapshot = computed(() => store.lastUpdatedAt !== null)
 const hostOperationsAvailable = computed(() => app.bridge === 'Connected' && store.status === 'ready')
 const canRefresh = computed(() => app.bridge === 'Connected' && store.status !== 'loading')
@@ -123,12 +126,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeOnEscape))
       <span v-else>Found {{ store.modules.length }} module{{ store.modules.length === 1 ? '' : 's' }}.</span>
     </section>
     <section v-if="hasConfirmedSnapshot" class="wpf-module-summary">
-      <article><label>Total</label><strong>{{ store.modules.length }}</strong></article>
-      <article><label>Valid</label><strong class="success">{{ store.modules.filter(x => x.isValid).length }}</strong></article>
-      <article><label>Failed</label><strong class="warning">{{ failed }}</strong></article>
-      <article><label>Not loaded</label><strong class="accent">{{ notLoaded }}</strong></article>
-      <article><label>Loaded</label><strong class="info">{{ loaded }}</strong></article>
-      <article><label>Running</label><strong class="success">{{ running }}</strong></article>
+      <article><label>Total</label><strong>{{ summary.total }}</strong></article>
+      <article><label>Valid</label><strong class="success">{{ summary.valid }}</strong></article>
+      <article><label>Issues</label><strong class="warning">{{ summary.issues }}</strong></article>
+      <article><label>Not loaded</label><strong class="accent">{{ summary.notLoaded }}</strong></article>
+      <article><label>Loaded</label><strong class="info">{{ summary.loaded }}</strong></article>
+      <article><label>Running</label><strong class="success">{{ summary.running }}</strong></article>
     </section>
     <section class="wpf-module-tools">
       <label><span class="sr-only">Search modules</span><span class="wpf-search-icon"><QIcon name="search" /></span><input v-model="store.searchQuery" type="search" placeholder="Search modules…"></label>

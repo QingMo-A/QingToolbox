@@ -28,8 +28,42 @@ function page(module = item(), clientOverrides: Record<string, unknown> = {}, st
 }
 
 const cardLabels = (wrapper: ReturnType<typeof mount>) => wrapper.findAll('.wpf-module-card .module-actions .q-button').map(button => button.text())
+const summaryValues = (wrapper: ReturnType<typeof mount>) => Object.fromEntries(
+  wrapper.findAll('.wpf-module-summary article').map(article => [
+    article.get('label').text(),
+    Number(article.get('strong').text()),
+  ]),
+)
 
 describe('ModulesPage lifecycle controls', () => {
+  it('shows the unified six-part summary for a mixed snapshot', async () => {
+    const { wrapper, store } = page()
+    store.complete({
+      generatedAt: new Date().toISOString(),
+      modules: [
+        item({ id: 'not-loaded', runtimeState: 'NotLoaded' }),
+        item({ id: 'unloaded', runtimeState: 'Unloaded' }),
+        item({ id: 'loaded', runtimeState: 'Loaded' }),
+        item({ id: 'deactivated', runtimeState: 'Deactivated' }),
+        item({ id: 'running', runtimeState: 'Running' }),
+        item({ id: 'failed', runtimeState: 'Failed' }),
+        item({ id: 'invalid', runtimeState: 'Loaded', isValid: false }),
+        item({ id: 'errors', runtimeState: 'Loaded', errorCount: 1 }),
+      ],
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(summaryValues(wrapper)).toEqual({
+      Total: 8,
+      Valid: 7,
+      Issues: 3,
+      'Not loaded': 2,
+      Loaded: 4,
+      Running: 1,
+    })
+    expect(wrapper.findAll('.wpf-module-summary label').map(label => label.text())).not.toContain('Failed')
+  })
+
   it.each([
     [item(), ['Load', 'Details']],
     [item({ runtimeState: 'Unloaded' }), ['Load', 'Details']],
@@ -70,10 +104,26 @@ describe('ModulesPage lifecycle controls', () => {
     await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Load')!.trigger('click')
     expect(client.load).toHaveBeenCalledTimes(1)
     expect(useModuleStore().modules[0].runtimeState).toBe('NotLoaded')
+    expect(summaryValues(wrapper)).toMatchObject({ 'Not loaded': 1, Loaded: 0, Running: 0 })
     expect(wrapper.text()).toContain('Loading…')
     resolve({ generatedAt: new Date().toISOString(), modules: [item({ runtimeState: 'Loaded', canLoad: false, canActivate: true })] })
     await flushPromises()
     expect(useModuleStore().modules[0].runtimeState).toBe('Loaded')
+    expect(summaryValues(wrapper)).toMatchObject({ 'Not loaded': 0, Loaded: 1, Running: 0 })
+  })
+
+  it.each([
+    ['activate', item({ runtimeState: 'Loaded', canLoad: false, canActivate: true }), item({ runtimeState: 'Running', canLoad: false, canActivate: false, canOpen: true }), 'Activate', false, { 'Not loaded': 0, Loaded: 0, Running: 1 }],
+    ['deactivate', item({ runtimeState: 'Running', canLoad: false, canDeactivate: true }), item({ runtimeState: 'Deactivated', canLoad: false, canActivate: true, canUnload: true }), 'Deactivate', true, { 'Not loaded': 0, Loaded: 1, Running: 0 }],
+    ['unload', item({ runtimeState: 'Deactivated', canLoad: false, canUnload: true }), item({ runtimeState: 'Unloaded', canLoad: true }), 'Unload', true, { 'Not loaded': 1, Loaded: 0, Running: 0 }],
+  ] as const)('uses the complete host snapshot after %s', async (operation, before, after, label, details, expected) => {
+    const result = { generatedAt: new Date().toISOString(), modules: [after] }
+    const { wrapper } = page(before, { [operation]: vi.fn().mockResolvedValue(result) })
+    if (details) await wrapper.get('.module-details-button').trigger('click')
+    const scope = details ? wrapper.get('.module-detail-actions') : wrapper.get('.module-card-actions')
+    await scope.findAll('.q-button').find(button => button.text() === label)!.trigger('click')
+    await flushPromises()
+    expect(summaryValues(wrapper)).toMatchObject(expected)
   })
 
   it('opens details by mouse and keyboard and closes them with Escape', async () => {

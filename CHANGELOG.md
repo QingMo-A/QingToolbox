@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed Development Web module summaries and filters to classify unloaded, deactivated, failed, invalid, and issue-bearing modules consistently.
+
 - Fixed the Development Web module workspaces to preserve last confirmed snapshots and show safe errors during host communication failures.
 
 - Added a Ctrl+K Quick Open palette for navigating the Development Web workspace and opening module details.
