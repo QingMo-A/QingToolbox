@@ -28,8 +28,49 @@
 }
 
 .q-sidebar nav > a,
-.q-sidebar nav > button {
+.q-sidebar nav > button,
+.q-sidebar-quick-open {
   min-width: 0;
+}
+
+.q-sidebar-quick-open {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 44px;
+  padding: 0 8px;
+  margin: 8px 0 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--q-text-2);
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.q-sidebar-quick-open b {
+  width: 32px;
+  display: grid;
+  place-items: center;
+}
+
+.q-sidebar-quick-open span {
+  opacity: 0;
+  transition: opacity 160ms ease;
+  pointer-events: none;
+}
+
+.q-shell.expanded .q-sidebar-quick-open span {
+  opacity: 1;
+}
+
+.q-sidebar-quick-open:hover {
+  background: var(--q-brand-soft);
+  color: var(--q-brand);
 }
 
 .q-sidebar nav a:hover,

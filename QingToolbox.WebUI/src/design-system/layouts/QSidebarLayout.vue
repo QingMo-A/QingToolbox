@@ -4,6 +4,7 @@ import { useSettingsStore } from '../../app/settingsStore'
 import brandMark from '../../assets/QingToolbox.Mark.svg'
 import QIcon from '../components/QIcon.vue'
 
+const emit = defineEmits<{ openCommandPalette: [] }>()
 const hovered = ref(false)
 const pinned = ref(false)
 const settings = useSettingsStore()
@@ -42,6 +43,17 @@ const showLogs = computed(
           <span>Logs</span>
         </RouterLink>
       </nav>
+
+      <button
+        class="q-sidebar-quick-open"
+        type="button"
+        aria-label="Quick open"
+        title="Quick open (Ctrl+K)"
+        @click="emit('openCommandPalette')"
+      >
+        <b><QIcon name="search" /></b>
+        <span>Quick open</span>
+      </button>
 
       <div class="q-sidebar-spacer" />
 
