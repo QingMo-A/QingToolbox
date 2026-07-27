@@ -34,7 +34,7 @@ Review actual everyday workspace usage before selecting another bounded UI phase
 
 - Downloads, update checks, automatic updates, and host self-update
 - Module installation and deletion
-- Launch-at-login mutation and new Settings Bridge commands
+- Additional Settings Bridge commands, except the completed Launch-at-login mutation and the separately governed Plan 012 startup-health slices
 - Hybrid Web Windows and floating surfaces
 - Production Web Shell
 
