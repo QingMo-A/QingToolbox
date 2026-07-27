@@ -228,6 +228,31 @@ public sealed class WebSetStartupPresentationModeCommandHandler(IWebSettingsMuta
     }
 }
 
+public sealed class WebSetLaunchAtLoginCommandHandler(IWebSettingsMutation mutation,
+    WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "settings.setLaunchAtLogin";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string> { "enabled" };
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        if (!payload.TryGetProperty("enabled", out var property) ||
+            property.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            throw new WebBridgeValidationException("InvalidPayload", "A Boolean enabled value is required.");
+        var enabled = property.GetBoolean();
+        if (!mutation.CanConfigureLaunchAtLogin)
+            throw new WebBridgeValidationException("SettingsMutationUnavailable", "Windows startup registration is not available in this environment.");
+        if (mutation.LaunchAtLogin == enabled) return snapshots.Create();
+        var result = await mutation.SetLaunchAtLoginAsync(enabled, context.SessionCancellation);
+        return result switch
+        {
+            WebSettingsMutationResult.Succeeded when mutation.LaunchAtLogin == enabled => snapshots.Create(),
+            WebSettingsMutationResult.Unavailable => throw new WebBridgeValidationException("SettingsMutationUnavailable", "Windows startup registration is not available in this environment."),
+            _ => throw new WebBridgeValidationException("SettingsMutationFailed", "The Windows startup setting could not be updated.")
+        };
+    }
+}
+
 public sealed class WebReadyCommandHandler(WebAppSnapshotProvider snapshots, Lazy<WebAssetIdentity> assets,
     WebActivationSession activation) : IWebCommandHandler
 {

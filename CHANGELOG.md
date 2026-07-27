@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added a host-confirmed Launch at login control to the Development Web Settings workspace.
 - Improved the Development Web diagnostics workspace with clearer host state, safe checks, and stale-snapshot handling.
 - Improved the Development Web session logs workspace with severity summaries, local filtering, and stale-snapshot handling.
 - Reorganized the Development Web settings workspace into focused General, Window, Startup, and About sections while preserving existing host-backed settings.

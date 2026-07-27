@@ -14,22 +14,31 @@ public interface IWebSettingsMutation
     bool ShowLogsInSidebar { get; }
     MainWindowCloseBehavior MainWindowCloseBehavior { get; }
     StartupPresentationMode StartupPresentationMode { get; }
+    bool LaunchAtLogin { get; }
+    bool CanConfigureLaunchAtLogin { get; }
     Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken);
     Task SetMainWindowCloseBehaviorAsync(MainWindowCloseBehavior value, CancellationToken cancellationToken);
     Task SetStartupPresentationModeAsync(StartupPresentationMode value, CancellationToken cancellationToken);
+    Task<WebSettingsMutationResult> SetLaunchAtLoginAsync(bool value, CancellationToken cancellationToken);
 }
+
+public enum WebSettingsMutationResult { Succeeded, Unavailable, Failed }
 
 public sealed class WebSettingsMutation(MainWindowViewModel viewModel) : IWebSettingsMutation
 {
     public bool ShowLogsInSidebar => viewModel.ShowLogsInSidebar;
     public MainWindowCloseBehavior MainWindowCloseBehavior => viewModel.SelectedMainWindowCloseBehavior;
     public StartupPresentationMode StartupPresentationMode => viewModel.SelectedStartupPresentationMode;
+    public bool LaunchAtLogin => viewModel.LaunchAtLogin;
+    public bool CanConfigureLaunchAtLogin => viewModel.CanConfigureWindowsStartup;
     public Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken) =>
         viewModel.SetShowLogsInSidebarAsync(value, cancellationToken);
     public Task SetMainWindowCloseBehaviorAsync(MainWindowCloseBehavior value, CancellationToken cancellationToken) =>
         viewModel.SetMainWindowCloseBehaviorAsync(value, cancellationToken);
     public Task SetStartupPresentationModeAsync(StartupPresentationMode value, CancellationToken cancellationToken) =>
         viewModel.SetStartupPresentationModeAsync(value, cancellationToken);
+    public Task<WebSettingsMutationResult> SetLaunchAtLoginAsync(bool value, CancellationToken cancellationToken) =>
+        viewModel.SetLaunchAtLoginFromWebAsync(value, cancellationToken);
 }
 
 public sealed class WebSettingsSnapshotSource(MainWindowViewModel viewModel) : IWebSettingsSnapshotSource

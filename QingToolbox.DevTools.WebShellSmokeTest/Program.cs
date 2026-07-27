@@ -154,7 +154,7 @@ Require(loaded.Response.Success && activated.Response.Success && opened.Response
 Require(lifecycle.LoadCount == 1 && lifecycle.ActivateCount == 1 && lifecycle.OpenCount == 6 && lifecycle.DeactivateCount == 1 && lifecycle.UnloadCount == 1 && lifecycle.LastModuleId == "qing.test", "Each accepted lifecycle request must call only its explicit adapter once.");
 Require(WebBridgeProtocol.Version == 4, "Lifecycle commands must preserve protocol version 4.");
 var unsupportedOperations = new WebBridgeDispatcher([]);
-foreach (var command in new[] { "modules.remove", "settings.setLaunchAtLogin", "startup.repair", "startup.test" })
+foreach (var command in new[] { "modules.remove", "startup.repair", "startup.test" })
 {
     var unsupported = await unsupportedOperations.DispatchAsync(LifecycleRequest(command, new { moduleId = "qing.test" }), new(11, CancellationToken.None));
     Require(!unsupported.Response.Success && unsupported.Response.Error?.Code == "UnknownCommand", "UI-3D must not register unrelated module or startup commands.");
@@ -314,6 +314,35 @@ var failedPresentation = await presentationDispatcher.DispatchAsync(Presentation
 Require(!failedPresentation.Response.Success && failedPresentation.Response.Error?.Code == "HandlerFailed" && mutationSource.StartupPresentationMode == StartupPresentationMode.FloatingBadge, "A failed startup presentation write must preserve authority and return a safe error.");
 Require(!JsonSerializer.Serialize(failedPresentation.Response).Contains(root, StringComparison.OrdinalIgnoreCase) && WebBridgeProtocol.Version == 4, "Startup presentation failure must not expose paths and protocol version must remain 4.");
 
+Console.WriteLine("Verifying host-confirmed Launch at login mutation...");
+mutationSource.FailWrites = false;
+var launchDispatcher = new WebBridgeDispatcher([new WebSetLaunchAtLoginCommandHandler(
+    mutationSource, new WebSettingsSnapshotProvider(mutationSource, TimeProvider.System), settingsActivation)]);
+string LaunchRequest(object payload) => JsonSerializer.Serialize(new { protocolVersion = 4, requestId = Guid.NewGuid(), command = "settings.setLaunchAtLogin", payload });
+foreach (var payload in new object[] { new { }, new { enabled = "true" }, new { enabled = true, extra = true } })
+{
+    var rejectedLaunch = await launchDispatcher.DispatchAsync(LaunchRequest(payload), new(31, CancellationToken.None));
+    Require(!rejectedLaunch.Response.Success && rejectedLaunch.Response.Error?.Code == "InvalidPayload", "Launch at login must reject malformed payloads.");
+}
+var inactiveLaunch = await new WebBridgeDispatcher([new WebSetLaunchAtLoginCommandHandler(mutationSource,
+    new WebSettingsSnapshotProvider(mutationSource, TimeProvider.System), inactiveSettings)])
+    .DispatchAsync(LaunchRequest(new { enabled = false }), new(32, CancellationToken.None));
+Require(!inactiveLaunch.Response.Success && inactiveLaunch.Response.Error?.Code == "BridgeNotActivated", "Launch at login must require activation.");
+var launchDisabled = await launchDispatcher.DispatchAsync(LaunchRequest(new { enabled = false }), new(31, CancellationToken.None));
+var launchEnabled = await launchDispatcher.DispatchAsync(LaunchRequest(new { enabled = true }), new(31, CancellationToken.None));
+Require(launchDisabled.Response.Success && launchEnabled.Response.Success && mutationSource.LaunchWriteCount == 2 &&
+    ((WebSettingsSnapshot)launchEnabled.Response.Payload).LaunchAtLogin, "Launch at login must call its adapter once and return a full confirmed snapshot.");
+_ = await launchDispatcher.DispatchAsync(LaunchRequest(new { enabled = true }), new(31, CancellationToken.None));
+Require(mutationSource.LaunchWriteCount == 2, "Unchanged Launch at login requests must not write again.");
+mutationSource.CanConfigureLaunchAtLogin = false;
+var unavailableLaunch = await launchDispatcher.DispatchAsync(LaunchRequest(new { enabled = false }), new(31, CancellationToken.None));
+Require(!unavailableLaunch.Response.Success && unavailableLaunch.Response.Error?.Code == "SettingsMutationUnavailable", "Unavailable startup registration must map safely.");
+mutationSource.CanConfigureLaunchAtLogin = true; mutationSource.FailWrites = true;
+var failedLaunch = await launchDispatcher.DispatchAsync(LaunchRequest(new { enabled = false }), new(31, CancellationToken.None));
+var failedLaunchJson = JsonSerializer.Serialize(failedLaunch.Response);
+Require(!failedLaunch.Response.Success && failedLaunch.Response.Error?.Code == "SettingsMutationFailed" && mutationSource.LaunchAtLogin, "Failed startup writes must preserve confirmed state.");
+Require(!failedLaunchJson.Contains(root, StringComparison.OrdinalIgnoreCase) && !failedLaunchJson.Contains("Registry", StringComparison.OrdinalIgnoreCase) && WebBridgeProtocol.Version == 4, "Launch failures must not expose paths and must preserve protocol v4.");
+
 Console.WriteLine("Verifying immutable runtime assets, TOCTOU resistance and limits...");
 var sourceAssets = Path.Combine(AppContext.BaseDirectory, "WebUI");
 var valid = new WebAssetIdentity(sourceAssets);
@@ -419,12 +448,15 @@ file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapsh
     public bool ShowLogsInSidebar { get; private set; } = initialValue;
     public MainWindowCloseBehavior MainWindowCloseBehavior { get; private set; } = MainWindowCloseBehavior.Ask;
     public StartupPresentationMode StartupPresentationMode { get; private set; } = StartupPresentationMode.FloatingBadge;
+    public bool LaunchAtLogin { get; private set; } = true;
+    public bool CanConfigureLaunchAtLogin { get; set; } = true;
     public bool FailWrites { get; set; }
     public int WriteCount { get; private set; }
     public int CloseWriteCount { get; private set; }
     public int PresentationWriteCount { get; private set; }
+    public int LaunchWriteCount { get; private set; }
     public WebSettingsSnapshotValues Read() => new(new("en-US", "English"), ShowLogsInSidebar,
-        MainWindowCloseBehavior.ToString(), "Ask before closing.", true, true, StartupPresentationMode.ToString(), "Task Scheduler", "Healthy", "Startup registration is healthy.");
+        MainWindowCloseBehavior.ToString(), "Ask before closing.", LaunchAtLogin, CanConfigureLaunchAtLogin, StartupPresentationMode.ToString(), "Task Scheduler", "Healthy", "Startup registration is healthy.");
     public Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -448,5 +480,13 @@ file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapsh
         PresentationWriteCount++;
         StartupPresentationMode = value;
         return Task.CompletedTask;
+    }
+    public Task<WebSettingsMutationResult> SetLaunchAtLoginAsync(bool value, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CanConfigureLaunchAtLogin) return Task.FromResult(WebSettingsMutationResult.Unavailable);
+        if (FailWrites) return Task.FromResult(WebSettingsMutationResult.Failed);
+        LaunchWriteCount++; LaunchAtLogin = value;
+        return Task.FromResult(WebSettingsMutationResult.Succeeded);
     }
 }

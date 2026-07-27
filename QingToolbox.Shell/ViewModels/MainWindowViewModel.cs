@@ -1530,6 +1530,32 @@ public sealed partial class MainWindowViewModel(
         }
     }
 
+    public async Task<WebSettingsMutationResult> SetLaunchAtLoginFromWebAsync(bool enabled, CancellationToken cancellationToken)
+    {
+        if (!CanConfigureWindowsStartup) return WebSettingsMutationResult.Unavailable;
+        if (LaunchAtLogin == enabled) return WebSettingsMutationResult.Succeeded;
+        IsStartupSettingsBusy = true;
+        try
+        {
+            await startupRegistrationService.SetEnabledAsync(enabled, cancellationToken);
+            var snapshot = await startupRegistrationService.GetSnapshotAsync(cancellationToken);
+            ApplyRegistrationSnapshot(snapshot);
+            if (LaunchAtLogin != enabled) return WebSettingsMutationResult.Failed;
+            StartupSettingsMessage = localization.GetString(enabled ? "startup.registrationEnabled" : "startup.registrationDisabled");
+            return WebSettingsMutationResult.Succeeded;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch
+        {
+            try { ApplyRegistrationSnapshot(await startupRegistrationService.GetSnapshotAsync(cancellationToken)); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch { }
+            StartupSettingsMessage = localization.GetString("startup.registrationFailed");
+            return WebSettingsMutationResult.Failed;
+        }
+        finally { IsStartupSettingsBusy = false; }
+    }
+
     public async Task SetStartupPresentationModeAsync(
         StartupPresentationMode value,
         CancellationToken cancellationToken = default)

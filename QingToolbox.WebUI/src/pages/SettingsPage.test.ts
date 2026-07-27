@@ -17,6 +17,7 @@ type PageOptions = {
   getImpl?: () => Promise<SettingsSnapshot>; logsImpl?: (value: boolean) => Promise<SettingsSnapshot>
   closeImpl?: (value: 'Ask'|'MinimizeToNotificationArea'|'ExitApplication') => Promise<SettingsSnapshot>
   startupImpl?: (value: 'MainWindow'|'Minimized'|'FloatingBadge') => Promise<SettingsSnapshot>
+  launchImpl?: (value: boolean) => Promise<SettingsSnapshot>
 }
 
 function page(options: PageOptions = {}) {
@@ -30,9 +31,10 @@ function page(options: PageOptions = {}) {
   const setShowLogsInSidebar = vi.fn(options.logsImpl ?? (async value => ({ ...snapshot, showLogsInSidebar: value })))
   const setMainWindowCloseBehavior = vi.fn(options.closeImpl ?? (async value => ({ ...snapshot, mainWindowCloseBehavior: value })))
   const setStartupPresentationMode = vi.fn(options.startupImpl ?? (async value => ({ ...snapshot, startupPresentationMode: value })))
-  const wrapper = mount(SettingsPage, { global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode } } } })
+  const setLaunchAtLogin = vi.fn(options.launchImpl ?? (async value => ({ ...snapshot, launchAtLogin: value, generatedAt: '2026-07-25T13:00:00Z' })))
+  const wrapper = mount(SettingsPage, { global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, setLaunchAtLogin } } } })
   wrappers.push(wrapper)
-  return { wrapper, app, settings, getSnapshot, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, theme: useThemeStore(), toast: useToastStore() }
+  return { wrapper, app, settings, getSnapshot, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, setLaunchAtLogin, theme: useThemeStore(), toast: useToastStore() }
 }
 
 async function openSection(wrapper: VueWrapper, title: string) {
@@ -57,7 +59,9 @@ describe('SettingsPage information architecture', () => {
   it('preserves startup presentation after failure', async () => { const x = page({ startupImpl: async () => { throw new Error('denied') } }); await openSection(x.wrapper, 'Startup'); await x.wrapper.get('[aria-label="Startup presentation mode"]').findAll('[role="radio"]')[0].trigger('click'); await flushPromises(); expect(x.settings.snapshot?.startupPresentationMode).toBe('FloatingBadge'); expect(x.wrapper.text()).toContain('startup presentation preference was not changed') })
   it('shows startup backend and status badge', async () => { const x = page(); await openSection(x.wrapper, 'Startup'); expect(x.wrapper.text()).toContain('Registry Run'); expect(x.wrapper.get('.startup-health-card .q-badge').text()).toBe('Healthy'); expect(x.wrapper.get('.startup-health-card .q-badge').classes()).toContain('is-success') })
   it('refreshes the full snapshot from Refresh status', async () => { const x = page(); await openSection(x.wrapper, 'Startup'); await x.wrapper.get('.startup-health-actions button').trigger('click'); await flushPromises(); expect(x.getSnapshot).toHaveBeenCalledTimes(1) })
-  it('does not expose a launch-at-login switch', async () => { const x = page(); await openSection(x.wrapper, 'Startup'); expect(x.wrapper.text()).toContain('Launch at login'); expect(x.wrapper.find('[role="switch"]').exists()).toBe(false) })
+  it('shows and enables the host-confirmed launch-at-login switch', async () => { let resolve!:(value:SettingsSnapshot)=>void; const pending=new Promise<SettingsSnapshot>(done=>{resolve=done}); const x = page({launchImpl:()=>pending}); await openSection(x.wrapper, 'Startup'); const control=x.wrapper.get('.windows-startup-card [role="switch"]'); expect(control.attributes('aria-checked')).toBe('false'); await control.trigger('click'); expect(control.attributes('aria-checked')).toBe('false'); expect(x.setLaunchAtLogin).toHaveBeenCalledWith(true); resolve({...snapshot,launchAtLogin:true,generatedAt:'2026-07-25T13:00:00Z'}); await flushPromises(); expect(x.settings.snapshot?.launchAtLogin).toBe(true); expect(x.toast.message).toContain('will start when you sign in') })
+  it('disables launch at login when unavailable and shows safe guidance', async () => { const x=page(); x.settings.complete({...snapshot,canConfigureLaunchAtLogin:false}); await openSection(x.wrapper,'Startup'); expect(x.wrapper.get('.windows-startup-card [role="switch"]').attributes('disabled')).toBeDefined(); expect(x.wrapper.text()).toContain('Windows startup registration is not available in this environment.') })
+  it('preserves launch state and reports a safe failure', async () => { const x=page({launchImpl:async()=>{throw new Error('HKCU private path')}}); await openSection(x.wrapper,'Startup'); await x.wrapper.get('.windows-startup-card [role="switch"]').trigger('click'); await flushPromises(); expect(x.settings.snapshot?.launchAtLogin).toBe(false); expect(x.toast.message).toBe('The Windows startup setting could not be updated.'); expect(x.wrapper.text()).not.toContain('HKCU') })
   it('shows brand, Preview, host version, environment, and bridge in About', async () => { const x = page(); await openSection(x.wrapper, 'About'); const text = x.wrapper.text(); expect(text).toContain('QingToolbox'); expect(text).toContain('Preview'); expect(text).toContain('0.2.0-alpha'); expect(text).toContain('Development'); expect(text).toContain('Connected'); expect(x.wrapper.find('.settings-about img').exists()).toBe(true) })
   it('keeps About available without a Settings snapshot', async () => { const x = page({ bridge: 'Connecting', status: 'idle', hasSnapshot: false }); await openSection(x.wrapper, 'About'); expect(x.wrapper.text()).toContain('Modular Windows toolbox.'); expect(x.wrapper.text()).toContain('Connecting') })
   it('keeps old content visible while refreshing', () => { const x = page({ status: 'loading', hasSnapshot: true }); expect(x.wrapper.text()).toContain('English'); expect(x.wrapper.text()).toContain('Refreshing host configuration…'); expect(x.wrapper.find('.settings-host-placeholder').exists()).toBe(false) })
