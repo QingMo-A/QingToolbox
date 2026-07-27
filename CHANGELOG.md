@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Improved the Development Web session logs workspace with severity summaries, local filtering, and stale-snapshot handling.
 - Reorganized the Development Web settings workspace into focused General, Window, Startup, and About sections while preserving existing host-backed settings.
 - Added an actionable Development Web home dashboard with module health, running-module previews, and workspace navigation.
 - Added fingerprint-bound module startup authorization to the Development Web module details workspace.
