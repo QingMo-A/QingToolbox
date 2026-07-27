@@ -30,11 +30,14 @@ Turn the Development Web workspace into a useful everyday entry point without ex
 
 Review actual everyday workspace usage before selecting another bounded UI phase.
 
+Host-confirmed Launch at login and the bounded startup-registration repair action were delivered as
+independently reviewed narrow additions after Plan 011 completed. They are not registered Plan 011 slices.
+
 ## Deferred
 
 - Downloads, update checks, automatic updates, and host self-update
 - Module installation and deletion
-- Additional Settings Bridge commands, except the completed Launch-at-login mutation and the separately governed Plan 012 startup-health slices
+- Additional Settings Bridge commands beyond the completed Launch-at-login and bounded startup-registration repair actions
 - Hybrid Web Windows and floating surfaces
 - Production Web Shell
 

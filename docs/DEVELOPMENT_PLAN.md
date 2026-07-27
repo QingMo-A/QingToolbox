@@ -16,19 +16,22 @@
 - UI-2A / Plan 009: Implementation Complete; Development-only read-only module center and visual foundation.
 - UI-2A preserves protocol v4 and projects authoritative C# module state without module side effects.
 - UI-3 / Plan 010: Implementation Complete.
-- UI-4A / Plan 011: Implementation Complete. Remaining downloads, updates, and floating-surface work remains deferred.
-- UI-4B / Plan 012: Planned; restore native Startup health detail and explicit Development Web operations in three reviewed slices.
-- Production Web UI: Deferred. Preview 2 release work and UI modernization remain independent tracks.
+- UI-4A / Plan 011: Implementation Complete.
+- Production Web UI: Deferred.
+- Downloads, updates, and floating surfaces remain deferred.
+- Preview 2 release work and UI modernization remain independent tracks.
 
 The Development Vue workspace currently contains Home, Modules, Running, Session Logs, Settings,
 and Development Diagnostics. Plan 009's original boundary remains the read-only module center and
 visual foundation; Running, Logs, Settings, and the three narrow settings mutations added afterward
 are incremental implementation, not a retroactive expansion of Plan 009.
 
-The existing settings mutations include `ShowLogsInSidebar`, `MainWindowCloseBehavior`,
-`StartupPresentationMode`, and host-confirmed `LaunchAtLogin`. Plan 012 is the sole current authority
-for additional Development Web startup-health commands. All other new Settings Bridge commands remain
-deferred. B2.1 boundaries, session security, environment isolation, and native fallback stay frozen.
+The completed Development Web Settings mutations are limited to `ShowLogsInSidebar`,
+`MainWindowCloseBehavior`, `StartupPresentationMode`, host-confirmed `LaunchAtLogin`, and the bounded
+startup-registration repair action. These completed additions do not authorize further Startup health
+parity work or additional Settings Bridge commands. Any future user-visible Settings feature must be
+selected and reviewed independently. B2.1 boundaries, session security, environment isolation, and
+native fallback stay frozen.
 
 ## 1. 项目定位
 

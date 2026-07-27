@@ -60,11 +60,6 @@ Read these plans in order unless the user says otherwise:
     - Reorganize Settings into focused everyday-workspace sections.
     - **Implementation Complete — Home Dashboard and Settings information architecture delivered.**
 
-12. [`012-development-web-startup-health-parity.md`](012-development-web-startup-health-parity.md)
-    - Restore native Startup health detail and explicit operations in Development Web Settings.
-    - Deliver read-only health projection, diagnostic operations, and missing-authorization cleanup as separate slices.
-    - **Planned — implementation proceeds through UI-4B1, UI-4B2, and UI-4B3.**
-
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 
 ## Branch rule
