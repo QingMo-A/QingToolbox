@@ -113,7 +113,7 @@ The recommended independent commit is:
 [test] cover complete lifecycle state transitions
 ```
 
-Completing this prerequisite does not change Plan 012 from Draft to Active.
+Completing this prerequisite only clears the gate for UI-5A1; it does not complete any Plan 012 localization slice.
 
 ## 5. Architecture boundary
 
