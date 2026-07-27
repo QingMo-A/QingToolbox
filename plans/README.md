@@ -64,11 +64,11 @@ Read these plans in order unless the user says otherwise:
     - Establish host-confirmed language selection and reactive localization across the Development Web workspace.
     - Deliver the work as three bounded slices: language setting, Vue localization foundation, and complete workspace coverage.
     - Keep module-summary correctness as an independent P1 prerequisite instead of hiding the Bug inside the localization phase.
-    - **Draft — Pending User Approval; this entry does not yet authorize implementation.**
+    - **Active — User approved; implementation begins with the independent P1 module-summary correction before UI-5A1.**
 
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 
-A plan marked `Draft — Pending User Approval` is review material only. Codex must not implement its slices until the user explicitly approves the plan and an execution prompt selects one bounded slice.
+A plan marked `Draft — Pending User Approval` is review material only. Codex must not implement its slices until the user explicitly approves the plan and an execution prompt selects one bounded slice. An active plan still authorizes only the single slice selected by the current Codex prompt.
 
 ## Branch rule
 
