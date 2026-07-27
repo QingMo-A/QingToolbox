@@ -23,6 +23,12 @@ activation.AcceptSessionPing(1, sessionToken, generationOne.Token);
 activation.AcceptSessionPing(1, sessionToken, generationOne.Token);
 Reject(() => activation.AcceptActivationPing(1, nonce, generationOne.Token), "InvalidBridgePhase");
 Reject(() => activation.AcceptSessionPing(1, "wrong", generationOne.Token), "InvalidSessionToken");
+activation.Begin(1);
+Reject(() => activation.AcceptSessionPing(1, sessionToken, generationOne.Token), "BridgeNotActivated");
+var reloadNonce = activation.IssueChallenge(1, generationOne.Token);
+var reloadToken = activation.AcceptActivationPing(1, reloadNonce, generationOne.Token);
+Require(reloadToken != sessionToken, "A page reload must issue a fresh session token.");
+activation.AcceptSessionPing(1, reloadToken, generationOne.Token);
 
 activation.Begin(2);
 using var generationTwo = new CancellationTokenSource();

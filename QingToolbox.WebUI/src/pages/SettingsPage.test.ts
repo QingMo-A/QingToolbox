@@ -68,11 +68,23 @@ describe('SettingsPage', () => {
     expect(ready.getSnapshot).not.toHaveBeenCalled()
   })
   it('renders host language close and startup values', () => {
-    const text = page('Connected', 'ready').wrapper.text()
+    const wrapper = page('Connected', 'ready').wrapper
+    const text = wrapper.text()
     expect(text).toContain('English')
     expect(text).toContain('Ask')
     expect(text).toContain('Registry Run')
     expect(text).toContain('Healthy')
+    expect(wrapper.get('.startup-health-card').text()).toContain('Startup health')
+    expect(wrapper.get('.startup-health-actions button').text()).toContain('Refresh status')
+  })
+  it('preserves the native Settings about section at the bottom', () => {
+    const wrapper = page('Connected', 'ready').wrapper
+    const about = wrapper.get('[aria-label="About QingToolbox"]')
+    expect(about.text()).toContain('QingToolbox')
+    expect(about.text()).toContain('Preview')
+    expect(about.text()).toContain('0.2.0-alpha')
+    expect(about.text()).toContain('Modular Windows toolbox.')
+    expect(about.find('img').exists()).toBe(true)
   })
   it('keeps language and launch registration read-only while exposing only supported controls', () => {
     const wrapper = page('Connected', 'ready').wrapper

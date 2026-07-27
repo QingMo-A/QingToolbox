@@ -158,7 +158,8 @@ public sealed class WebShellInitializer(
         {
             if (string.Equals(args.Uri, "about:blank", StringComparison.OrdinalIgnoreCase)) return;
             if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) || !navigation.IsAllowed(uri)) { log.Warning("WebShell", "Main navigation denied by policy."); args.Cancel = true; }
-            else log.Information("WebShell", $"Main navigation allowed; path={uri.AbsolutePath}.");
+            else if (!bridge.RestartPageSession(core, generation)) { log.Warning("WebShell", "Main navigation rejected because its bridge generation is stale."); args.Cancel = true; }
+            else log.Information("WebShell", $"Main navigation allowed with a fresh page session; path={uri.AbsolutePath}.");
         }
         core.NavigationStarting += OnNavigationStarting;
         core.AddWebResourceRequestedFilter("http://*/*", CoreWebView2WebResourceContext.All);

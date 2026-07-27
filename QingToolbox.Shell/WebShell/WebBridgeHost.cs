@@ -34,6 +34,18 @@ public sealed class WebBridgeHost(WebBridgeDispatcher dispatcher, WebAppSnapshot
     }
 
     public void Detach() { lock (_sync) DetachCore(); }
+    public bool RestartPageSession(CoreWebView2 core, long generation)
+    {
+        lock (_sync)
+        {
+            if (_disposed || !ReferenceEquals(core, _core) || generation != _generation) return false;
+            _session?.Cancel();
+            _session?.Dispose();
+            _session = new CancellationTokenSource();
+            activation.Begin(generation);
+            return true;
+        }
+    }
     public void PublishHostEvent(string name) => PostCurrent(new WebBridgeEvent(WebBridgeProtocol.Version, "app.hostEvent", new { name }));
     public void PublishSnapshot() => PostCurrent(new WebBridgeEvent(WebBridgeProtocol.Version, "app.snapshot", snapshots.Create()));
 
