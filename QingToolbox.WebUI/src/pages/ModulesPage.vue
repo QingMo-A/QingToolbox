@@ -29,6 +29,14 @@ async function refresh(showToast = false) {
   }
 }
 
+async function resyncAfterOperationFailure() {
+  try {
+    store.complete(await client.getSnapshot())
+  } catch {
+    store.fail(new Error('The host could not confirm the current module state.'))
+  }
+}
+
 async function operate(module: ModuleSnapshotItem, operation: ModuleOperation) {
   if (!hostOperationsAvailable.value) return
   if (!store.beginOperation(module.id, operation)) return
@@ -42,7 +50,7 @@ async function operate(module: ModuleSnapshotItem, operation: ModuleOperation) {
     toast.show(operation === 'open' ? `${module.displayName} window opened or focused.` : `${module.displayName} ${operation === 'load' ? 'loaded' : operation === 'activate' ? 'activated' : operation === 'deactivate' ? 'deactivated' : 'unloaded'}.`, 'success')
   } catch {
     toast.show(operationFailureMessage(module, operation), 'error')
-    try { store.complete(await client.getSnapshot()) } catch { /* preserve the original operation error and snapshot */ }
+    await resyncAfterOperationFailure()
   } finally {
     store.endOperation(module.id)
   }
@@ -60,7 +68,7 @@ async function setStartupAuthorization(module: ModuleSnapshotItem, enabled: bool
     toast.show(enabled ? `${module.displayName} will start with QingToolbox.` : `${module.displayName} will no longer start with QingToolbox.`, 'success')
   } catch {
     toast.show(`Startup authorization for ${module.displayName} could not be updated.`, 'error')
-    try { store.complete(await client.getSnapshot()) } catch { /* preserve original operation failure */ }
+    await resyncAfterOperationFailure()
   } finally {
     store.endOperation(module.id)
   }

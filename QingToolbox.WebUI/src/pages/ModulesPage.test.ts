@@ -105,11 +105,17 @@ describe('ModulesPage lifecycle controls', () => {
   it('preserves the host snapshot and resyncs once after an operation failure', async () => {
     const before = item()
     const getSnapshot = vi.fn().mockRejectedValue(new Error('resync failed'))
-    const { wrapper } = page(before, { load: vi.fn().mockRejectedValue(new Error('ModuleBusy: busy')), getSnapshot })
+    const { wrapper, store } = page(before, { load: vi.fn().mockRejectedValue(new Error('ModuleBusy: busy')), getSnapshot })
     await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Load')!.trigger('click')
     await flushPromises()
     expect(useModuleStore().modules[0]).toEqual(before)
     expect(getSnapshot).toHaveBeenCalledTimes(1)
+    expect(store.status).toBe('error')
+    expect(store.lastUpdatedAt).not.toBeNull()
+    expect(store.error).toBe('The host could not confirm the current module state.')
+    expect(wrapper.get('[role="status"]').text()).toBe('The host could not refresh modules. Showing the last confirmed snapshot.')
+    expect(wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Load')!.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.module-details-button').attributes('disabled')).toBeUndefined()
     expect(useToastStore().message).toBe('Text Tools could not be loaded.')
     expect(useToastStore().message).not.toContain('ModuleBusy')
   })
@@ -200,7 +206,16 @@ describe('ModulesPage lifecycle controls', () => {
     expect(useToastStore().message).not.toContain('SecretCode')
     expect(getSnapshot).toHaveBeenCalledTimes(1)
     expect(store.modules[0]).toEqual(module)
+    expect(store.status).toBe('error')
+    expect(store.error).toBe('The host could not confirm the current module state.')
+    expect(wrapper.text()).not.toContain('resync secret')
     expect(client[operation as keyof typeof client]).toHaveBeenCalledTimes(1)
+    if (details) {
+      expect(wrapper.get('.wpf-module-details').text()).toContain('Module information')
+      for (const button of wrapper.findAll('.module-detail-actions .q-button')) expect(button.attributes('disabled')).toBeDefined()
+      await wrapper.get('.wpf-back').trigger('click')
+      expect(wrapper.find('.wpf-module-details').exists()).toBe(false)
+    }
   })
 
   it('uses a safe startup authorization failure and preserves the snapshot', async () => {
@@ -214,6 +229,51 @@ describe('ModulesPage lifecycle controls', () => {
     expect(useToastStore().message).not.toContain('FingerprintMismatch')
     expect(getSnapshot).toHaveBeenCalledTimes(1)
     expect(store.modules[0]).toEqual(module)
+    expect(store.status).toBe('error')
+    expect(store.modules[0].isStartupEnabled).toBe(false)
+    expect(wrapper.get('.q-switch').attributes('disabled')).toBeDefined()
+  })
+
+  it('uses a successful resync snapshot without replacing the operation error toast', async () => {
+    const confirmed = item({ runtimeState: 'Loaded', canLoad: false, canActivate: true })
+    const generatedAt = '2026-07-27T12:00:00.000Z'
+    const getSnapshot = vi.fn().mockResolvedValue({ generatedAt, modules: [confirmed] })
+    const { wrapper, store } = page(item(), { load: vi.fn().mockRejectedValue(new Error('operation failed')), getSnapshot })
+    await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Load')!.trigger('click')
+    await flushPromises()
+    expect(store.modules).toEqual([confirmed])
+    expect(store.status).toBe('ready')
+    expect(store.lastUpdatedAt).toBe(generatedAt)
+    expect(wrapper.get('[role="status"]').text()).toBe('Found 1 module.')
+    expect(useToastStore().message).toBe('Text Tools could not be loaded.')
+    expect(getSnapshot).toHaveBeenCalledTimes(1)
+  })
+
+  it('prioritizes a bridge disconnect after failed operation resynchronization', async () => {
+    const getSnapshot = vi.fn().mockRejectedValue(new Error('private resync failure'))
+    const { wrapper, app } = page(item(), { load: vi.fn().mockRejectedValue(new Error('private operation failure')), getSnapshot })
+    await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Load')!.trigger('click')
+    await flushPromises()
+    app.bridge = 'Disconnected'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('[role="status"]').text()).toBe('The host is disconnected. Showing the last confirmed module snapshot.')
+    expect(wrapper.text()).not.toContain('private resync failure')
+  })
+
+  it('allows one explicit refresh to recover after failed operation resynchronization', async () => {
+    const recovered = item({ runtimeState: 'Loaded', canLoad: false, canActivate: true })
+    const getSnapshot = vi.fn()
+      .mockRejectedValueOnce(new Error('confirmation failed'))
+      .mockResolvedValueOnce({ generatedAt: '2026-07-27T12:30:00.000Z', modules: [recovered] })
+    const { wrapper, store } = page(item(), { load: vi.fn().mockRejectedValue(new Error('operation failed')), getSnapshot })
+    await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Load')!.trigger('click')
+    await flushPromises()
+    expect(store.status).toBe('error')
+    await wrapper.get('.wpf-page-header .q-button').trigger('click')
+    await flushPromises()
+    expect(getSnapshot).toHaveBeenCalledTimes(2)
+    expect(store.status).toBe('ready')
+    expect(store.modules).toEqual([recovered])
   })
 
   it('keeps the old snapshot and safe page state after a refresh failure', async () => {

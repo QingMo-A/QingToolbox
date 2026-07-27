@@ -22,6 +22,13 @@ async function refresh() {
   try { modules.complete(await client.getSnapshot()) }
   catch (error) { modules.fail(error) }
 }
+async function resyncAfterOperationFailure() {
+  try {
+    modules.complete(await client.getSnapshot())
+  } catch {
+    modules.fail(new Error('The host could not confirm the current module state.'))
+  }
+}
 watch(() => app.bridge, bridge => { if (bridge === 'Connected' && modules.status === 'idle') void refresh() }, { immediate: true })
 async function viewDetails(id: string) { modules.selectedModuleId = id; await router.push('/modules') }
 async function operate(module: ModuleSnapshotItem, operation: 'open' | 'deactivate' | 'unload') {
@@ -33,7 +40,7 @@ async function operate(module: ModuleSnapshotItem, operation: 'open' | 'deactiva
     toast.show(operation === 'open' ? `${module.displayName} window opened or focused.` : `${module.displayName} ${operation === 'deactivate' ? 'deactivated' : 'unloaded'}.`, 'success')
   } catch {
     toast.show(operation === 'open' ? `The ${module.displayName} window could not be opened.` : `${module.displayName} could not be ${operation === 'deactivate' ? 'deactivated' : 'unloaded'}.`, 'error')
-    try { modules.complete(await client.getSnapshot()) } catch { /* preserve original operation failure */ }
+    await resyncAfterOperationFailure()
   } finally { modules.endOperation(module.id) }
 }
 const hasConfirmedSnapshot = computed(() => modules.lastUpdatedAt !== null)

@@ -106,6 +106,10 @@ describe('RunningModulesPage', () => {
     expect(modules.modules[0].runtimeState).toBe('Running')
     expect(deactivate).toHaveBeenCalledTimes(1)
     expect(getSnapshot).toHaveBeenCalledTimes(1)
+    expect(modules.status).toBe('error')
+    expect(modules.lastUpdatedAt).not.toBeNull()
+    expect(modules.error).toBe('The host could not confirm the current module state.')
+    expect(wrapper.get('[role="status"]').text()).toBe('The host could not refresh running modules. Showing the last confirmed snapshot.')
   })
 
   it('uses a native focusable button for keyboard detail navigation', async () => {
@@ -190,5 +194,24 @@ describe('RunningModulesPage', () => {
     expect(getSnapshot).toHaveBeenCalledTimes(1)
     expect(modules.modules[0].runtimeState).toBe('Running')
     expect(wrapper.text()).toContain('Running module description')
+    expect(modules.status).toBe('error')
+    expect(modules.error).toBe('The host could not confirm the current module state.')
+    expect(wrapper.text()).not.toContain('resync path')
+    for (const button of wrapper.findAll('.running-module-action .q-button')) expect(button.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.running-details-link').attributes('disabled')).toBeUndefined()
+  })
+
+  it('uses a successful resync snapshot and removes cards no longer running', async () => {
+    const resynced = { generatedAt: '2026-07-27T12:00:00.000Z', modules: snapshot.modules.map(module => module.id === 'Running module' ? { ...module, runtimeState: 'Unloaded', canOpen: false, canDeactivate: false, canUnload: false } : module) }
+    const getSnapshot = vi.fn().mockResolvedValue(resynced)
+    const { wrapper, modules } = await page('ready', { unload: vi.fn().mockRejectedValue(new Error('operation failed')), getSnapshot })
+    await wrapper.findAll('.running-module-action button').find(button => button.text() === 'Unload')!.trigger('click')
+    await flushPromises()
+    expect(modules.status).toBe('ready')
+    expect(modules.lastUpdatedAt).toBe(resynced.generatedAt)
+    expect(wrapper.text()).not.toContain('Running module description')
+    expect(wrapper.find('[role="status"]').exists()).toBe(false)
+    expect(useToastStore().message).toBe('Running module could not be unloaded.')
+    expect(getSnapshot).toHaveBeenCalledTimes(1)
   })
 })
