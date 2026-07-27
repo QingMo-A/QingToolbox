@@ -1,7 +1,7 @@
 # Plan 012: Development Web Localization
 
 ```text
-Status: Draft — Pending User Approval
+Status: Active — User Approved; prerequisite P1 pending
 Track: UI Modernization / UI-5
 Environment: Development only
 ```
