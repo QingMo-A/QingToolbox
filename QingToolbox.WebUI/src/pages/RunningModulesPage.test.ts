@@ -6,6 +6,7 @@ import RunningModulesPage from './RunningModulesPage.vue'
 import { router as appRouter } from '../app/router'
 import { useAppStore } from '../app/store'
 import { useModuleStore } from '../app/moduleStore'
+import { useToastStore } from '../app/toastStore'
 
 const mounted: VueWrapper[] = []
 afterEach(() => mounted.splice(0).forEach(wrapper => wrapper.unmount()))
@@ -13,14 +14,16 @@ afterEach(() => mounted.splice(0).forEach(wrapper => wrapper.unmount()))
 const item = (id: string, runtimeState: string) => ({ id, displayName: id, displayDescription: `${id} description`, version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState, isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canLoad: false, canActivate: false, canOpen: runtimeState === 'Running', canDeactivate: runtimeState === 'Running', canUnload: runtimeState === 'Running', isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled' as const, canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false })
 const snapshot = { generatedAt: new Date().toISOString(), modules: [item('Running module', 'Running'), item('Loaded module', 'Loaded'), item('Waiting module', 'NotLoaded'), item('Failed module', 'Failed')] }
 
-async function page(status: 'idle'|'loading'|'ready'|'error' = 'ready', clientOverrides: Record<string, unknown> = {}) {
+async function page(status: 'idle'|'loading'|'ready'|'error' = 'ready', clientOverrides: Record<string, unknown> = {}, options: { confirmed?: boolean; bridge?: string } = {}) {
   const pinia = createPinia()
   setActivePinia(pinia)
-  useAppStore().bridge = 'Connected'
+  useAppStore().bridge = options.bridge ?? 'Connected'
   const modules = useModuleStore()
-  modules.status = status
-  if (status === 'ready') modules.complete(snapshot)
-  if (status === 'error') modules.fail(new Error('offline'))
+  const confirmed = options.confirmed ?? status === 'ready'
+  if (confirmed) modules.complete(snapshot)
+  if (status === 'loading') modules.begin()
+  else if (status === 'error') modules.fail(new Error('Bridge.Secret: offline'))
+  else modules.status = status
   const getSnapshot = vi.fn(async () => snapshot)
   const open = vi.fn(async () => snapshot)
   const deactivate = vi.fn(async () => ({ generatedAt: new Date().toISOString(), modules: snapshot.modules.map(module => module.id === 'Running module' ? { ...module, runtimeState: 'Deactivated', canActivate: true, canOpen: true, canDeactivate: false, canUnload: true } : module) }))
@@ -135,8 +138,57 @@ describe('RunningModulesPage', () => {
     loading.wrapper.unmount()
     const failed = await page('error')
     expect(failed.wrapper.text()).toContain('Running modules are unavailable')
+    expect(failed.wrapper.text()).toContain('The host could not provide the current module snapshot.')
+    expect(failed.wrapper.text()).not.toContain('Bridge.Secret')
     await failed.wrapper.get('button').trigger('click')
     await flushPromises()
     expect(failed.getSnapshot).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['loading', 'Refreshing module state. Showing the last confirmed snapshot.'],
+    ['error', 'The host could not refresh running modules. Showing the last confirmed snapshot.'],
+  ] as const)('keeps running cards visible during stale %s state', async (status, message) => {
+    const { wrapper, modules } = await page(status, {}, { confirmed: true })
+    expect(wrapper.text()).toContain('Running module description')
+    expect(wrapper.get('[role="status"]').text()).toBe(message)
+    expect(wrapper.text()).not.toContain('Bridge.Secret')
+    expect(modules.lastUpdatedAt).not.toBeNull()
+    for (const button of wrapper.findAll('.running-module-action .q-button')) expect(button.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.running-details-link').attributes('disabled')).toBeUndefined()
+  })
+
+  it('keeps the last running snapshot visible while disconnected', async () => {
+    const { wrapper } = await page('error', {}, { confirmed: true, bridge: 'Disconnected' })
+    expect(wrapper.text()).toContain('Running module description')
+    expect(wrapper.get('[role="status"]').text()).toBe('The host is disconnected. Showing the last confirmed running-module snapshot.')
+    expect(wrapper.text()).not.toContain('Bridge.Secret')
+  })
+
+  it('describes an empty stale snapshot without claiming live state', async () => {
+    const { wrapper, modules } = await page()
+    modules.complete({ generatedAt: new Date().toISOString(), modules: [] })
+    modules.fail(new Error('hidden'))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('No running modules were present in the last confirmed snapshot.')
+    expect(wrapper.text()).not.toContain('No modules are currently running')
+  })
+
+  it.each([
+    ['open', 'Open', 'The Running module window could not be opened.'],
+    ['deactivate', 'Deactivate', 'Running module could not be deactivated.'],
+    ['unload', 'Unload', 'Running module could not be unloaded.'],
+  ] as const)('uses a safe %s failure, resyncs once, and preserves the card', async (operation, label, expected) => {
+    const getSnapshot = vi.fn().mockRejectedValue(new Error('resync path'))
+    const failure = vi.fn().mockRejectedValue(new Error('Bridge.SecretCode: internal details'))
+    const { wrapper, modules } = await page('ready', { [operation]: failure, getSnapshot })
+    await wrapper.findAll('.running-module-action button').find(button => button.text() === label)!.trigger('click')
+    await flushPromises()
+    expect(useToastStore().message).toBe(expected)
+    expect(useToastStore().message).not.toContain('SecretCode')
+    expect(failure).toHaveBeenCalledTimes(1)
+    expect(getSnapshot).toHaveBeenCalledTimes(1)
+    expect(modules.modules[0].runtimeState).toBe('Running')
+    expect(wrapper.text()).toContain('Running module description')
   })
 })

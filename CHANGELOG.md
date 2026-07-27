@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed the Development Web module workspaces to preserve last confirmed snapshots and show safe errors during host communication failures.
+
 - Added a Ctrl+K Quick Open palette for navigating the Development Web workspace and opening module details.
 
 - Added a host-confirmed repair action for unhealthy Windows startup registrations in Development Web Settings.
