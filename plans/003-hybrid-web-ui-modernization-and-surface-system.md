@@ -1117,26 +1117,23 @@ WPF UserControl
 
 Vue provides the entry point and state projection, not the module view renderer.
 
-## UI-4: Settings, home, downloads, updates, and floating surfaces
+## UI-4: Development Web everyday workspace
 
 ```text
-Status: Deferred
+Status: Active — Phased Implementation
 Priority: P2
+Plan: Plan 011
+Current slice: UI-4A1 Home Dashboard complete
 ```
 
-Suggested migration order:
+Current migration order:
 
 ```text
-Settings
-Home
-Download tasks
-Independent download floating window
-Update checks
-Update details
-Diagnostics
+Home Dashboard — complete
+Settings information-architecture review — next, not started
 ```
 
-Automatic module installation must not be exposed until the complete Production-safe Stage B boundary exists.
+Downloads, updates and floating surfaces remain deferred. Automatic module installation must not be exposed until the complete Production-safe Stage B boundary exists.
 
 ## UI-5: Default Shell migration evaluation
 

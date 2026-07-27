@@ -55,6 +55,11 @@ Read these plans in order unless the user says otherwise:
     - Deliver Load/Activate, Open, Deactivate/Unload, and startup authorization as separate tasks.
     - **Implementation Complete — Load/Activate, Open/Focus, Deactivate/Unload, and startup authorization delivered.**
 
+11. [`011-development-web-everyday-workspace.md`](011-development-web-everyday-workspace.md)
+    - Deliver a useful host-backed Home dashboard.
+    - Continue later with a focused Settings information-architecture review.
+    - **In Progress — UI-4A1 Home Dashboard complete.**
+
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 
 ## Branch rule

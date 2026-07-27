@@ -1,0 +1,37 @@
+# Plan 011: Development Web Everyday Workspace
+
+```text
+Status: In Progress
+Track: UI Modernization / UI-4
+Environment: Development only
+```
+
+Depends on:
+
+- UI-1 Engineering Complete — Frozen
+- UI-2A / Plan 009 Implementation Complete
+- UI-3 / Plan 010 Implementation Complete
+
+## Product goal
+
+Turn the Development Web workspace into a useful everyday entry point without expanding frozen host, runtime, or Bridge boundaries.
+
+## Registered slices
+
+### UI-4A1 Home Dashboard
+
+**Implementation Complete.** Home projects the existing App and Module snapshots into a welcome area, module overview, actionable attention categories, running-module preview, and existing workspace destinations.
+
+### UI-4A2 Settings information-architecture review
+
+**Not started.** Review the current Settings information architecture before selecting a focused follow-up slice.
+
+## Deferred
+
+- Downloads, update checks, automatic updates, and host self-update
+- Module installation and deletion
+- Launch-at-login mutation and new Settings Bridge commands
+- Hybrid Web Windows and floating surfaces
+- Production Web Shell
+
+This plan does not authorize changes to the frozen Bridge session, module runtime, activation, or native fallback boundaries.
