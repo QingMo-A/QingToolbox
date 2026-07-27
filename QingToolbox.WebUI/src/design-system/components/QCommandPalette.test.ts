@@ -3,10 +3,12 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import QCommandPalette from './QCommandPalette.vue'
+import QIcon from './QIcon.vue'
 import { useModuleStore } from '../../app/moduleStore'
 import type { ModuleSnapshotItem } from '../../contracts/modules'
 
 const wrappers: VueWrapper[] = []
+const scrollIntoView = vi.fn()
 const moduleItem = (id: string, state = 'NotLoaded'): ModuleSnapshotItem => ({
   id, displayName: id === 'qing.alpha' ? 'Alpha Tools' : 'Beta Tools',
   displayDescription: id === 'qing.alpha' ? 'Format useful text' : 'Monitor a server',
@@ -19,6 +21,11 @@ const moduleItem = (id: string, state = 'NotLoaded'): ModuleSnapshotItem => ({
 })
 
 beforeEach(() => {
+  scrollIntoView.mockReset()
+  Object.defineProperty(Element.prototype, 'scrollIntoView', {
+    configurable: true,
+    value: scrollIntoView,
+  })
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: vi.fn(function(this: HTMLDialogElement) { this.setAttribute('open', '') }),
@@ -65,6 +72,28 @@ describe('QCommandPalette', () => {
     expect(wrapper.text()).toContain('Running now')
   })
 
+  it('exposes one combobox controlling a listbox and a real active option', async () => {
+    const { wrapper } = await palette()
+    const input = wrapper.get('input')
+    expect(input.attributes('role')).toBe('combobox')
+    expect(input.attributes('aria-autocomplete')).toBe('list')
+    expect(input.attributes('aria-controls')).toBe('quick-open-results')
+    expect(wrapper.get('#quick-open-results').attributes('role')).toBe('listbox')
+    const activeId = input.attributes('aria-activedescendant')
+    expect(activeId).toBe('quick-open-result-0')
+    expect(wrapper.findAll(`#${activeId}`)).toHaveLength(1)
+    expect(wrapper.get(`#${activeId}`).attributes('role')).toBe('option')
+  })
+
+  it('uses the corresponding navigation icon for each page result', async () => {
+    const { wrapper } = await palette()
+    const iconNames = wrapper.findAll('section')[0]
+      .findAllComponents(QIcon)
+      .map((icon: VueWrapper) => (icon.props() as { name: string }).name)
+    expect(iconNames).toEqual(['home', 'modules', 'running', 'logs', 'settings', 'diagnostics'])
+    expect(new Set(iconNames).size).toBe(6)
+  })
+
   it.each([
     ['Modules', 'Browse and manage installed modules'],
     ['alpha tools', 'Alpha Tools'],
@@ -92,6 +121,7 @@ describe('QCommandPalette', () => {
     await wrapper.get('input').setValue('nothing-matches-this')
     expect(wrapper.text()).toContain('No results')
     expect(wrapper.text()).toContain('module ID')
+    expect(wrapper.get('input').attributes('aria-activedescendant')).toBeUndefined()
   })
 
   it('navigates pages and closes without requesting data', async () => {
@@ -127,11 +157,58 @@ describe('QCommandPalette', () => {
     expect(router.currentRoute.value.path).toBe('/settings')
   })
 
+  it('reveals keyboard selections without moving focus away from search', async () => {
+    const { wrapper } = await palette()
+    const input = wrapper.get('input')
+    scrollIntoView.mockClear()
+
+    await input.trigger('keydown', { key: 'ArrowDown' })
+    await flushPromises()
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest' })
+    expect(input.attributes('aria-activedescendant')).toBe('quick-open-result-1')
+    expect(document.activeElement).toBe(input.element)
+
+    await input.trigger('keydown', { key: 'ArrowUp' })
+    await flushPromises()
+    expect(input.attributes('aria-activedescendant')).toBe('quick-open-result-0')
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest' })
+    expect(document.activeElement).toBe(input.element)
+  })
+
+  it('reveals wrapped first and last results and query-reset selections', async () => {
+    const { wrapper } = await palette()
+    const input = wrapper.get('input')
+    scrollIntoView.mockClear()
+
+    await input.trigger('keydown', { key: 'ArrowUp' })
+    await flushPromises()
+    expect(input.attributes('aria-activedescendant')).toBe('quick-open-result-6')
+
+    await input.trigger('keydown', { key: 'ArrowDown' })
+    await flushPromises()
+    expect(input.attributes('aria-activedescendant')).toBe('quick-open-result-0')
+
+    await input.setValue('settings')
+    await flushPromises()
+    expect(input.attributes('aria-activedescendant')).toBe('quick-open-result-0')
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest' })
+  })
+
+  it('does not reveal an option when the query has no results', async () => {
+    const { wrapper } = await palette()
+    scrollIntoView.mockClear()
+    await wrapper.get('input').setValue('nothing-matches-this')
+    await flushPromises()
+    expect(scrollIntoView).not.toHaveBeenCalled()
+  })
+
   it('closes through Escape, the explicit button, and prop synchronization', async () => {
     const { wrapper } = await palette()
     await wrapper.get('dialog').trigger('cancel')
     expect(wrapper.emitted('close')).toBeTruthy()
+    await wrapper.setProps({ open: false }); await flushPromises()
     await wrapper.setProps({ open: true }); await flushPromises()
+    expect(wrapper.get('input').attributes('aria-activedescendant')).toBe('quick-open-result-0')
     await wrapper.get('[aria-label="Close Quick Open"]').trigger('click')
     await wrapper.setProps({ open: false }); await flushPromises()
     expect(HTMLDialogElement.prototype.close).toHaveBeenCalled()

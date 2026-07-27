@@ -11,21 +11,23 @@ const router = useRouter()
 const moduleStore = useModuleStore()
 const dialog = ref<HTMLDialogElement | null>(null)
 const input = ref<HTMLInputElement | null>(null)
+const resultsContainer = ref<HTMLElement | null>(null)
 const query = ref('')
 const activeIndex = ref(-1)
 let previousFocus: HTMLElement | null = null
 
-type PageResult = { kind: 'page'; title: string; description: string; path: string }
+type PageIconName = 'home' | 'modules' | 'running' | 'logs' | 'settings' | 'diagnostics'
+type PageResult = { kind: 'page'; title: string; description: string; path: string; icon: PageIconName }
 type ModuleResult = { kind: 'module'; module: ModuleSnapshotItem }
 type Result = PageResult | ModuleResult
 
 const pages: PageResult[] = [
-  { kind: 'page', title: 'Home', description: 'Workspace overview', path: '/' },
-  { kind: 'page', title: 'Modules', description: 'Browse and manage installed modules', path: '/modules' },
-  { kind: 'page', title: 'Running modules', description: 'Review active modules', path: '/running' },
-  { kind: 'page', title: 'Session logs', description: 'Review current session events', path: '/logs' },
-  { kind: 'page', title: 'Settings', description: 'Manage workspace preferences', path: '/settings' },
-  { kind: 'page', title: 'Development diagnostics', description: 'Inspect the Web Shell and host connection', path: '/diagnostics' },
+  { kind: 'page', title: 'Home', description: 'Workspace overview', path: '/', icon: 'home' },
+  { kind: 'page', title: 'Modules', description: 'Browse and manage installed modules', path: '/modules', icon: 'modules' },
+  { kind: 'page', title: 'Running modules', description: 'Review active modules', path: '/running', icon: 'running' },
+  { kind: 'page', title: 'Session logs', description: 'Review current session events', path: '/logs', icon: 'logs' },
+  { kind: 'page', title: 'Settings', description: 'Manage workspace preferences', path: '/settings', icon: 'settings' },
+  { kind: 'page', title: 'Development diagnostics', description: 'Inspect the Web Shell and host connection', path: '/diagnostics', icon: 'diagnostics' },
 ]
 
 const normalizedQuery = computed(() => query.value.trim().toLocaleLowerCase())
@@ -55,15 +57,19 @@ async function syncOpen(open: boolean) {
       previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
       element.showModal()
     }
+    activeIndex.value = results.value.length ? 0 : -1
     await nextTick()
     input.value?.focus()
+    await revealActiveResult()
   } else if (element.open) {
     element.close()
   }
 }
 watch(() => props.open, syncOpen)
-watch(results, value => { activeIndex.value = value.length ? 0 : -1 })
-watch(query, () => { activeIndex.value = results.value.length ? 0 : -1 })
+watch(results, async value => {
+  activeIndex.value = value.length ? 0 : -1
+  await revealActiveResult()
+}, { immediate: true })
 
 function close() {
   if (dialog.value?.open) dialog.value.close()
@@ -83,6 +89,14 @@ function move(delta: number) {
   const count = results.value.length
   if (!count) { activeIndex.value = -1; return }
   activeIndex.value = (activeIndex.value + delta + count) % count
+  void revealActiveResult()
+}
+async function revealActiveResult() {
+  await nextTick()
+  if (!props.open || !dialog.value?.open || !resultsContainer.value) return
+  const index = activeIndex.value
+  if (index < 0) return
+  dialog.value.querySelector<HTMLElement>(`#${resultId(index)}`)?.scrollIntoView({ block: 'nearest' })
 }
 async function select(result: Result) {
   if (result.kind === 'page') {
@@ -121,6 +135,8 @@ onBeforeUnmount(() => {
           ref="input"
           v-model="query"
           type="search"
+          role="combobox"
+          aria-autocomplete="list"
           aria-label="Search pages and modules"
           placeholder="Search pages and modules"
           :aria-expanded="true"
@@ -133,7 +149,7 @@ onBeforeUnmount(() => {
       <button type="button" class="q-command-close" aria-label="Close Quick Open" @click="close"><QIcon name="close" /></button>
     </header>
 
-    <div id="quick-open-results" class="q-command-results" role="listbox" aria-label="Quick Open results">
+    <div ref="resultsContainer" id="quick-open-results" class="q-command-results" role="listbox" aria-label="Quick Open results">
       <template v-if="results.length">
         <section v-if="pageResults.length">
           <h3>Pages</h3>
@@ -148,7 +164,7 @@ onBeforeUnmount(() => {
             @mouseenter="activeIndex = results.indexOf(page)"
             @click="select(page)"
           >
-            <span class="q-command-result-icon"><QIcon name="search" /></span>
+            <span class="q-command-result-icon"><QIcon :name="page.icon" /></span>
             <span><strong>{{ page.title }}</strong><small>{{ page.description }}</small></span>
             <em>{{ page.path }}</em>
           </button>
@@ -191,7 +207,7 @@ onBeforeUnmount(() => {
 kbd{padding:4px 7px;border:1px solid var(--q-border);border-radius:6px;background:var(--q-surface-soft);color:var(--q-text-2);font-size:11px;white-space:nowrap}
 .q-command-close{width:36px;height:36px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--q-text-2);display:grid;place-items:center;cursor:pointer}
 .q-command-close:hover{background:var(--q-brand-soft);color:var(--q-brand)}
-.q-command-results{max-height:480px;padding:10px;overflow:auto}
+.q-command-results{max-height:480px;padding:10px;overflow:auto;scroll-padding-block:8px;overscroll-behavior:contain}
 .q-command-results section+section{margin-top:10px}
 .q-command-results h3{margin:5px 9px 6px;color:var(--q-text-3);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
 .q-command-results button{display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;gap:11px;width:100%;min-height:56px;padding:8px 10px;border:0;border-radius:9px;background:transparent;color:var(--q-text);text-align:left;cursor:pointer}
