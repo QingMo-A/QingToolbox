@@ -1,7 +1,7 @@
 # Plan 012: Development Web Localization
 
 ```text
-Status: Active — User Approved; prerequisite P1, UI-5A1 and UI-5A2 implementation complete
+Status: Implementation Complete
 Track: UI Modernization / UI-5
 Environment: Development only
 Prerequisite P1: Implementation Complete (`9f63a9d69e424738b420ddc9305b8b482f56c198`)
@@ -9,11 +9,11 @@ UI-5A1: Implementation Complete
 UI-5A1 Commit: `3f2645f963d51747cf9655d785a5038dcbb7d31a`
 UI-5A2: Implementation Complete
 UI-5A2 Commit: `ed1a3172ce8a65cdffc9ab561939c3d7c4075a96`
-UI-5A3: In Progress
+UI-5A3: Implementation Complete
 UI-5A3A Module workspaces: Implementation Complete
 UI-5A3A Commit: `3ddedcb7849831f865e40cc82ed998b908d623a9`
 UI-5A3B1 Read-only workspaces: Implementation Complete
-Next: UI-5A3B2 Settings localization and module metadata refresh
+UI-5A3B2 Settings localization and module metadata refresh: Implementation Complete
 ```
 
 Depends on:
@@ -655,3 +655,20 @@ After UI-5A3 passes targeted tests and manual language checks, stop localization
 Do not continue adding theoretical locale infrastructure, remote language packs, complex plural engines, arbitrary culture discovery, or translation-management services unless a real product requirement appears.
 
 The next product task must be selected independently from observed user-visible needs.
+
+## 14. Implementation completion
+
+```text
+Prerequisite P1: Implementation Complete
+UI-5A1: Implementation Complete
+UI-5A2: Implementation Complete
+UI-5A3A: Implementation Complete
+UI-5A3B1: Implementation Complete
+UI-5A3B2: Implementation Complete
+```
+
+All current Development Web workspaces now have English and Simplified Chinese primary UI coverage.
+
+Successful language changes refresh one complete host-localized Module Snapshot. If that refresh fails, the confirmed language and prior module data remain available with safe localized feedback.
+
+Plan 012 is complete.

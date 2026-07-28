@@ -5,6 +5,7 @@
 - Localized the Development Web Home, Session Logs, and Diagnostics workspaces in English and Simplified Chinese.
 - Localized the Development Web Modules and Running workspaces in English and Simplified Chinese.
 - Added reactive English and Simplified Chinese localization to the Development Web shell, navigation, and Quick Open.
+- Completed English and Simplified Chinese localization for the Development Web workspace and synchronized localized module metadata after language changes.
 - Added host-confirmed language selection to the Development Web Settings workspace.
 
 - Fixed Development Web module summaries and filters to classify unloaded, deactivated, failed, invalid, and issue-bearing modules consistently.

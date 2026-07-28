@@ -10,7 +10,7 @@ import QBadge from '../design-system/components/QBadge.vue'
 import QIcon from '../design-system/components/QIcon.vue'
 import QSkeleton from '../design-system/components/QSkeleton.vue'
 import { useLocalization } from '../localization/localization'
-import { logLevelKey } from '../presentation/workspacePresentation'
+import { bridgeStateKey, logLevelKey } from '../presentation/workspacePresentation'
 
 type LogLevelFilter = 'All' | LogLevel
 
@@ -22,6 +22,10 @@ const levelFilter = ref<LogLevelFilter>('All')
 const levels: LogLevelFilter[] = ['All', 'Information', 'Warning', 'Error']
 const { currentLocale, t } = useLocalization()
 const levelLabel=(level:LogLevelFilter)=>level==='All'?t('logs.severity.all'):t(logLevelKey(level))
+const bridgeLabel = computed(() => {
+  const key = bridgeStateKey(app.bridge)
+  return key ? t(key) : app.bridge
+})
 
 const hasSnapshot = computed(() => logs.generatedAt !== null)
 const refreshed = computed(() => logs.generatedAt ? new Date(logs.generatedAt).toLocaleTimeString(currentLocale.value) : null)
@@ -67,7 +71,7 @@ watch(() => app.bridge, bridge => {
 
       <div v-if="snapshotNotice" class="logs-snapshot-notice" role="status"><QIcon :name="logs.status === 'error' ? 'statusWarning' : 'statusInfo'" /><span>{{snapshotNotice}}</span><QButton v-if="logs.status === 'error' && app.bridge === 'Connected'" @click="refresh">{{t('logs.retry')}}</QButton></div>
 
-      <section v-if="!hasSnapshot && app.bridge !== 'Connected'" class="q-empty logs-state"><div class="q-empty-icon"><QIcon name="logs" :size="28" /></div><h3>{{t('logs.waiting')}}</h3><p>{{t('logs.waitingHint')}}</p><QBadge tone="warning">{{ app.bridge }}</QBadge></section>
+      <section v-if="!hasSnapshot && app.bridge !== 'Connected'" class="q-empty logs-state"><div class="q-empty-icon"><QIcon name="logs" :size="28" /></div><h3>{{t('logs.waiting')}}</h3><p>{{t('logs.waitingHint')}}</p><QBadge tone="warning">{{ bridgeLabel }}</QBadge></section>
       <section v-else-if="!hasSnapshot && logs.status === 'loading'" class="logs-skeleton" :aria-label="t('logs.loading')"><QSkeleton v-for="item in 6" :key="item" /></section>
       <section v-else-if="!hasSnapshot && logs.status === 'error'" class="q-empty logs-state"><div class="q-empty-icon"><QIcon name="statusDanger" :size="28" /></div><h3>{{t('logs.unavailable')}}</h3><p>{{t('logs.unavailableHint')}}</p><QButton @click="refresh"><QIcon name="refresh" /> {{t('logs.retry')}}</QButton></section>
 

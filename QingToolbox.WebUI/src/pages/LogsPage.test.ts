@@ -22,14 +22,14 @@ const snapshot: LogSnapshot = { generatedAt: '2026-07-25T12:00:04Z', entries: [
 type PageOptions = { bridge?: 'Connecting'|'Connected'|'Unavailable'; status?: 'idle'|'loading'|'ready'|'error'; hasSnapshot?: boolean; data?: LogSnapshot; getImpl?: () => Promise<LogSnapshot> }
 function page(options: PageOptions = {}) {
   const pinia = createPinia(); setActivePinia(pinia)
-  useAppStore().bridge = options.bridge ?? 'Connected'
+  const app = useAppStore(); app.bridge = options.bridge ?? 'Connected'
   const logs = useLogStore(); const status = options.status ?? 'ready'; const hasSnapshot = options.hasSnapshot ?? status === 'ready'
   if (hasSnapshot) logs.complete(options.data ?? snapshot)
   if (status === 'loading') logs.begin(); else if (status === 'error') logs.fail(new Error('private failure detail')); else logs.status = status
   const getSnapshot = vi.fn(options.getImpl ?? (async () => snapshot))
   const wrapper = mount(LogsPage, { global: { plugins: [pinia], provide: { logClient: { getSnapshot } } } })
   wrappers.push(wrapper)
-  return { wrapper, logs, getSnapshot }
+  return { wrapper, app, logs, getSnapshot }
 }
 
 const severityButtons = (wrapper: VueWrapper) => wrapper.findAll('.logs-severity-overview button')
@@ -40,6 +40,7 @@ describe('LogsPage everyday workspace', () => {
   it('loads once from connected idle state', async () => { const x = page({ status: 'idle', hasSnapshot: false }); await flushPromises(); expect(x.getSnapshot).toHaveBeenCalledTimes(1) })
   it('does not reload a ready snapshot automatically', async () => { const x = page(); await flushPromises(); expect(x.getSnapshot).not.toHaveBeenCalled() })
   it('shows the snapshot refresh time', () => expect(page().wrapper.text()).toContain('Last refreshed'))
+  it('formats log times with the effective locale', async () => { const format=vi.spyOn(Date.prototype,'toLocaleTimeString').mockReturnValue('localized-time'); const x=page(); expect(format).toHaveBeenCalledWith('en-US'); chinese(); await x.wrapper.vm.$nextTick(); expect(format.mock.calls.some(call=>call[0]==='zh-CN')).toBe(true); format.mockRestore() })
   it('computes the All count', () => expect(severityButtons(page().wrapper)[0].text()).toContain('4'))
   it('computes the Information count', () => expect(severityButtons(page().wrapper)[1].text()).toContain('2'))
   it('computes the Warning count', () => expect(severityButtons(page().wrapper)[2].text()).toContain('1'))
@@ -59,6 +60,9 @@ describe('LogsPage everyday workspace', () => {
   it('maps all levels to existing badge tones', () => { const badges = page().wrapper.findAll('.logs-row .q-badge'); expect(badges[0].classes()).toContain('is-info'); expect(badges[1].classes()).toContain('is-warning'); expect(badges[2].classes()).toContain('is-danger') })
   it('shows a valid empty snapshot state and zero overview counts', () => { const x = page({ data: { generatedAt: snapshot.generatedAt, entries: [] } }); expect(x.wrapper.text()).toContain('No session entries yet'); expect(severityButtons(x.wrapper).map(x => x.text())).toEqual(expect.arrayContaining([expect.stringContaining('All0'), expect.stringContaining('Information0'), expect.stringContaining('Warning0'), expect.stringContaining('Error0')])) })
   it('waits for a disconnected host without a snapshot', () => { const x = page({ bridge: 'Connecting', status: 'idle', hasSnapshot: false }); expect(x.wrapper.text()).toContain('Waiting for the host'); expect(x.wrapper.find('.logs-severity-overview').exists()).toBe(false) })
+  it('localizes the waiting bridge badge in Chinese', async () => { const x=page({bridge:'Connecting',status:'idle',hasSnapshot:false}); chinese(); await x.wrapper.vm.$nextTick(); expect(x.wrapper.get('.logs-state .q-badge').text()).toBe('正在连接') })
+  it('keeps the English waiting bridge badge in English', () => expect(page({bridge:'Connecting',status:'idle',hasSnapshot:false}).wrapper.get('.logs-state .q-badge').text()).toBe('Connecting'))
+  it('falls back to an unknown bridge state verbatim', async () => { const x=page({bridge:'Connecting',status:'idle',hasSnapshot:false}); x.app.bridge='FutureState' as typeof x.app.bridge; await x.wrapper.vm.$nextTick(); expect(x.wrapper.get('.logs-state .q-badge').text()).toBe('FutureState') })
   it('shows skeletons while initially loading', () => expect(page({ status: 'loading', hasSnapshot: false }).wrapper.findAll('.q-skeleton')).toHaveLength(6))
   it('shows a safe initial error and Retry', async () => { const x = page({ status: 'error', hasSnapshot: false }); expect(x.wrapper.text()).toContain('The current session log snapshot could not be read.'); expect(x.wrapper.text()).not.toContain('private failure detail'); await x.wrapper.get('.logs-state button').trigger('click'); await flushPromises(); expect(x.getSnapshot).toHaveBeenCalledTimes(1) })
   it('keeps old entries visible while refreshing', () => { const x = page({ status: 'loading', hasSnapshot: true }); expect(x.wrapper.findAll('.logs-row')).toHaveLength(4); expect(x.wrapper.text()).toContain('Refreshing session logs…'); expect(x.wrapper.find('.logs-skeleton').exists()).toBe(false) })
