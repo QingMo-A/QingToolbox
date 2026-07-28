@@ -20,9 +20,10 @@ public sealed record WebAppSnapshot(string EnvironmentKind, string EnvironmentDi
 public sealed record WebPingResponse(bool Pong, DateTimeOffset HostTime, string? SessionToken, bool Activated);
 public sealed record WebModuleSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList<WebModuleSnapshotItem> Modules);
 public sealed record WebModuleImportResponse(string Disposition, string? ImportedModuleId, WebModuleSnapshot Snapshot);
+public sealed record WebModuleManagementResponse(string Disposition, WebModuleSnapshot Snapshot);
 public sealed record WebModuleSnapshotItem(string Id, string DisplayName, string DisplayDescription, string Version,
     string Author, string RuntimeType, string LoadMode, string RuntimeState, bool IsValid, int ErrorCount,
-    IReadOnlyList<string> Errors, IReadOnlyList<string> Permissions, string MinimumHostVersion, bool IsUserInstalled,
+    IReadOnlyList<string> Errors, IReadOnlyList<string> Permissions, string MinimumHostVersion, bool IsUserInstalled, bool CanRemove,
     bool CanLoad, bool CanActivate, bool CanOpen, bool CanDeactivate, bool CanUnload, bool IsBusy, bool IsExecutionBlocked,
     bool IsStartupEnabled, string StartupAuthorizationState, bool CanChangeStartupAuthorization, bool IsStartupAuthorizationBusy);
 public sealed record WebLogSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList<WebLogSnapshotEntry> Entries);

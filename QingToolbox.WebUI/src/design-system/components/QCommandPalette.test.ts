@@ -17,7 +17,7 @@ const moduleItem = (id: string, state = 'NotLoaded'): ModuleSnapshotItem => ({
   version: '1.0.0', author: id === 'qing.alpha' ? 'QingMo-A' : 'Example Author',
   runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState: state,
   isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2.0-alpha',
-  isUserInstalled: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false,
+  isUserInstalled: true, canRemove: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false,
   canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false,
   startupAuthorizationState: 'NotEnabled', canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false,
 })

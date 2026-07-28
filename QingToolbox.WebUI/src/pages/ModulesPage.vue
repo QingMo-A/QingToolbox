@@ -31,6 +31,7 @@ const store = useModuleStore()
 const toast = useToastStore()
 const { t } = useLocalization()
 const isImporting = ref(false)
+const removeConfirmationModuleId = ref<string|null>(null)
 type AnimatedLifecycleSuccess = 'load' | 'unload'
 const lifecycleSuccessOperations = reactive(new Map<string, AnimatedLifecycleSuccess>())
 const revealingLifecycleActions = reactive(new Set<string>())
@@ -139,6 +140,36 @@ async function setStartupAuthorization(module: ModuleSnapshotItem, enabled: bool
   }
 }
 
+async function openModuleDirectory(module: ModuleSnapshotItem) {
+  if (!hostOperationsAvailable.value || !store.beginOperation(module.id, 'openDirectory')) return
+  try {
+    await client.openDirectory(module.id)
+    toast.show(t('modules.management.opened'), 'success')
+  } catch {
+    toast.show(t('modules.management.openFailed'), 'error')
+  } finally {
+    store.endOperation(module.id)
+  }
+}
+
+async function removeModule(module: ModuleSnapshotItem) {
+  if (!hostOperationsAvailable.value || !module.canRemove || !store.beginOperation(module.id, 'remove')) return
+  try {
+    const result = await client.remove(module.id)
+    store.complete(result.snapshot)
+    store.selectedModuleId = null
+    removeConfirmationModuleId.value = null
+    toast.show(t(result.disposition === 'SucceededWithWarning'
+      ? 'modules.management.removeWarning'
+      : 'modules.management.removed'), result.disposition === 'SucceededWithWarning' ? 'warning' : 'success')
+  } catch {
+    toast.show(t('modules.management.removeFailed'), 'error')
+    await resyncAfterOperationFailure()
+  } finally {
+    store.endOperation(module.id)
+  }
+}
+
 const startupMessage = (state: ModuleSnapshotItem['startupAuthorizationState']) => t(startupAuthorizationMessageKey(state))
 function availableLifecycleOperations(module: ModuleSnapshotItem): LifecycleModuleOperation[] {
   const operations: LifecycleModuleOperation[] = []
@@ -165,6 +196,7 @@ const openDetailsFromCard = (event: MouseEvent, moduleId: string) => {
   openDetails(moduleId)
 }
 watch(() => app.bridge, bridge => { if (bridge === 'Connected' && store.status === 'idle') void refresh() }, { immediate: true })
+watch(() => store.selectedModuleId, () => { removeConfirmationModuleId.value = null })
 const summary = computed(() => summarizeModuleStates(store.modules))
 const hasConfirmedSnapshot = computed(() => store.lastUpdatedAt !== null)
 const hostOperationsAvailable = computed(() => app.bridge === 'Connected' && store.status === 'ready')
@@ -181,6 +213,7 @@ const tone = (module: { isValid: boolean; runtimeState: string }) => !module.isV
 const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') store.selectedModuleId = null }
 onMounted(() => window.addEventListener('keydown', closeOnEscape))
 onBeforeUnmount(() => {
+  removeConfirmationModuleId.value = null
   window.removeEventListener('keydown', closeOnEscape)
   for (const timers of lifecycleFeedbackTimers.values())
     for (const timer of timers) window.clearTimeout(timer)
@@ -261,6 +294,24 @@ onBeforeUnmount(() => {
         <h3>{{ t('modules.details.information') }}</h3>
         <dl class="wpf-detail-grid"><div><dt>{{ t('modules.details.runtime') }}</dt><dd>{{ store.selectedModule.runtimeType }}</dd></div><div><dt>{{ t('modules.details.loadMode') }}</dt><dd>{{ store.selectedModule.loadMode }}</dd></div><div><dt>{{ t('modules.details.author') }}</dt><dd>{{ store.selectedModule.author }}</dd></div><div><dt>{{ t('modules.details.permissions') }}</dt><dd>{{ store.selectedModule.permissions.length ? store.selectedModule.permissions.join(', ') : t('modules.details.noneDeclared') }}</dd></div><div><dt>{{ t('modules.details.moduleId') }}</dt><dd>{{ store.selectedModule.id }}</dd></div><div><dt>{{ t('modules.details.minimumHostVersion') }}</dt><dd>{{ store.selectedModule.minimumHostVersion }}</dd></div><div><dt>{{ t('modules.details.userInstalled') }}</dt><dd>{{ t(store.selectedModule.isUserInstalled ? 'modules.details.yes' : 'modules.details.no') }}</dd></div><div><dt>{{ t('modules.details.valid') }}</dt><dd>{{ t(store.selectedModule.isValid ? 'modules.details.yes' : 'modules.details.no') }}</dd></div></dl>
         <template v-if="store.selectedModule.errors.length"><h3>{{ t('modules.details.issues') }}</h3><ul><li v-for="error in store.selectedModule.errors" :key="error">{{ error }}</li></ul></template>
+        <div class="wpf-detail-divider" />
+        <section class="module-management">
+          <h3>{{ t('modules.management.title') }}</h3>
+          <p>{{ t('modules.management.description') }}</p>
+          <div class="module-management-actions">
+            <QButton variant="secondary" :aria-busy="store.operations[store.selectedModule.id] === 'openDirectory'" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="openModuleDirectory(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'openDirectory'" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="folder" />{{ t(store.operations[store.selectedModule.id] === 'openDirectory' ? 'modules.management.opening' : 'modules.management.openFolder') }}</QButton>
+            <QButton v-if="store.selectedModule.isUserInstalled" class="module-remove-entry" variant="ghost" :disabled="!hostOperationsAvailable || !store.selectedModule.canRemove || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="removeConfirmationModuleId = store.selectedModule.id"><QIcon name="remove" />{{ t('modules.management.removeModule') }}</QButton>
+          </div>
+          <div v-if="removeConfirmationModuleId === store.selectedModule.id" class="module-remove-confirmation">
+            <strong>{{ t('modules.management.confirmTitle', { name: store.selectedModule.displayName }) }}</strong>
+            <p>{{ t('modules.management.confirmDescription') }}</p>
+            <small>{{ t('modules.management.reimportHint') }}</small>
+            <div>
+              <QButton variant="secondary" :disabled="store.operations[store.selectedModule.id] === 'remove'" @click="removeConfirmationModuleId = null">{{ t('modules.management.cancel') }}</QButton>
+              <QButton class="module-remove-confirm" variant="secondary" :aria-busy="store.operations[store.selectedModule.id] === 'remove'" :disabled="!store.selectedModule.canRemove || store.operations[store.selectedModule.id] === 'remove'" @click="removeModule(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'remove'" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="remove" />{{ t(store.operations[store.selectedModule.id] === 'remove' ? 'modules.management.removing' : 'modules.management.confirmRemove') }}</QButton>
+            </div>
+          </div>
+        </section>
       </aside>
     </div>
   </QPage>
@@ -297,6 +348,19 @@ onBeforeUnmount(() => {
 .module-startup > p, .module-startup-status { color: var(--q-text-2); font-size: 12px; }
 .module-startup .settings-switch-row { margin-top: 8px; }
 .module-startup-status { margin-top: 4px; }
+.module-management>p { margin: -7px 0 12px; color: var(--q-text-2); font-size: 12px; }
+.module-management-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.module-management-actions .q-button { gap: 7px; white-space: nowrap; }
+.module-remove-entry { color: var(--q-danger); }
+.module-remove-entry:hover:not(:disabled) { border-color: color-mix(in srgb,var(--q-danger) 45%,var(--q-border)); background: color-mix(in srgb,var(--q-danger) 7%,var(--q-surface)); color: var(--q-danger); }
+.module-remove-confirmation { margin-top: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb,var(--q-danger) 32%,var(--q-border)); border-radius: 11px; background: color-mix(in srgb,var(--q-danger) 6%,var(--q-surface)); }
+.module-remove-confirmation strong,.module-remove-confirmation small { display: block; }
+.module-remove-confirmation p { margin: 5px 0; color: var(--q-text-2); font-size: 12px; line-height: 1.45; }
+.module-remove-confirmation small { color: var(--q-text-3); }
+.module-remove-confirmation>div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.module-remove-confirm { border-color: color-mix(in srgb,var(--q-danger) 55%,var(--q-border)); color: var(--q-danger); }
+.module-remove-confirm:hover:not(:disabled) { border-color: var(--q-danger); background: color-mix(in srgb,var(--q-danger) 10%,var(--q-surface)); color: var(--q-danger); }
+:global(.q-toast.is-warning) { background: var(--q-warning); }
 @keyframes module-operation-spin { to { transform: rotate(360deg); } }
 @keyframes module-lifecycle-ring-draw { to { stroke-dashoffset: 0; } }
 @keyframes module-lifecycle-check-draw { to { stroke-dashoffset: 0; } }

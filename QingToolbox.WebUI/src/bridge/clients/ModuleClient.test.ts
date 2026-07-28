@@ -13,4 +13,15 @@ describe('ModuleClient lifecycle commands',()=>{
     request.mockResolvedValue({...result,packagePath:'C:/private/module.qmod'})
     await expect(new ModuleClient({request} as any).importModule()).rejects.toThrow('validation failed')
   })
+  it('sends module management commands with only the module ID',async()=>{
+    const result={disposition:'Succeeded',snapshot}
+    const request=vi.fn().mockResolvedValue(result)
+    const client=new ModuleClient({request} as any)
+    await expect(client.openDirectory('qing.folder')).resolves.toEqual(result)
+    await expect(client.remove('qing.remove')).resolves.toEqual(result)
+    expect(request).toHaveBeenNthCalledWith(1,'modules.openDirectory',{moduleId:'qing.folder'})
+    expect(request).toHaveBeenNthCalledWith(2,'modules.remove',{moduleId:'qing.remove'})
+    request.mockResolvedValue({...result,directoryPath:'C:/private'})
+    await expect(client.openDirectory('qing.folder')).rejects.toThrow('validation failed')
+  })
 })

@@ -23,6 +23,7 @@ const item = (runtimeState: string, overrides: Partial<ModuleSnapshotItem> = {})
   permissions: [],
   minimumHostVersion: '0.2',
   isUserInstalled: true,
+  canRemove: true,
   canLoad: false,
   canActivate: false,
   canOpen: false,

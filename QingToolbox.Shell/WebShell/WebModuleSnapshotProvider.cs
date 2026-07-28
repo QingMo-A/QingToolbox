@@ -25,6 +25,7 @@ public sealed class WebModuleSnapshotSource(MainWindowViewModel viewModel) : IWe
             module.Module.Manifest.Permissions.Select(permission => permission.ToString()).ToArray(),
             module.MinimumHostVersion,
             module.IsUserInstalled,
+            module.CanRemove,
             module.CanLoad,
             module.CanActivate,
             module.CanOpen,

@@ -70,6 +70,63 @@ public sealed class WebModuleImportCommandHandler(
     }
 }
 
+public abstract class WebModuleManagementCommandHandler(
+    IWebModuleManagementOperations operations,
+    WebModuleSnapshotProvider snapshots,
+    WebActivationSession activation) : IWebCommandHandler
+{
+    protected IWebModuleManagementOperations Operations { get; } = operations;
+    public abstract string Command { get; }
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } =
+        new HashSet<string>(StringComparer.Ordinal) { "moduleId" };
+    protected abstract Task<WebModuleManagementResult> ExecuteAsync(string moduleId, CancellationToken cancellationToken);
+
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        if (!payload.TryGetProperty("moduleId", out var property) || property.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(property.GetString()))
+            throw new WebBridgeValidationException("InvalidPayload", "A non-empty module ID is required.");
+
+        var result = await ExecuteAsync(property.GetString()!, context.SessionCancellation);
+        return result switch
+        {
+            WebModuleManagementResult.Succeeded or WebModuleManagementResult.SucceededWithWarning =>
+                new WebModuleManagementResponse(result.ToString(), snapshots.Create()),
+            WebModuleManagementResult.NotFound => throw SafeError("ModuleNotFound"),
+            WebModuleManagementResult.Busy => throw SafeError("ModuleBusy"),
+            WebModuleManagementResult.Unavailable => throw SafeError("ModuleOperationUnavailable"),
+            WebModuleManagementResult.ExecutionBlocked => throw SafeError("ModuleExecutionBlocked"),
+            _ => throw SafeError("ModuleOperationFailed")
+        };
+    }
+
+    private static WebBridgeValidationException SafeError(string code) =>
+        new(code, "The host could not complete the module management operation.");
+}
+
+public sealed class WebModuleOpenDirectoryCommandHandler(
+    IWebModuleManagementOperations operations,
+    WebModuleSnapshotProvider snapshots,
+    WebActivationSession activation)
+    : WebModuleManagementCommandHandler(operations, snapshots, activation)
+{
+    public override string Command => "modules.openDirectory";
+    protected override Task<WebModuleManagementResult> ExecuteAsync(string moduleId, CancellationToken cancellationToken) =>
+        Operations.OpenDirectoryAsync(moduleId, cancellationToken);
+}
+
+public sealed class WebModuleRemoveCommandHandler(
+    IWebModuleManagementOperations operations,
+    WebModuleSnapshotProvider snapshots,
+    WebActivationSession activation)
+    : WebModuleManagementCommandHandler(operations, snapshots, activation)
+{
+    public override string Command => "modules.remove";
+    protected override Task<WebModuleManagementResult> ExecuteAsync(string moduleId, CancellationToken cancellationToken) =>
+        Operations.RemoveAsync(moduleId, cancellationToken);
+}
+
 public abstract class WebModuleLifecycleCommandHandler(
     WebModuleSnapshotProvider snapshots,
     WebActivationSession activation) : IWebCommandHandler

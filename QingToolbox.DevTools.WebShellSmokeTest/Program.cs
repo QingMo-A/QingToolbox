@@ -127,7 +127,7 @@ var extraPayload = JsonSerializer.Serialize(new { protocolVersion = 4, requestId
 var extraResult = await moduleDispatcher.DispatchAsync(extraPayload, new(11, CancellationToken.None));
 Require(!extraResult.Response.Success && extraResult.Response.Error?.Code == "InvalidPayload", "Module projection must reject additional payload properties.");
 var moduleSnapshot = (WebModuleSnapshot)moduleResult.Response.Payload;
-Require(moduleSnapshot.Modules[0] is { CanLoad: false, CanActivate: false, CanOpen: true, CanDeactivate: true, CanUnload: true, IsBusy: false, IsExecutionBlocked: false, IsStartupEnabled: false, StartupAuthorizationState: "ChangedNeedsConfirmation", CanChangeStartupAuthorization: true, IsStartupAuthorizationBusy: false }, "Module projection must include host lifecycle and startup authorization capabilities.");
+Require(moduleSnapshot.Modules[0] is { CanRemove: true, CanLoad: false, CanActivate: false, CanOpen: true, CanDeactivate: true, CanUnload: true, IsBusy: false, IsExecutionBlocked: false, IsStartupEnabled: false, StartupAuthorizationState: "ChangedNeedsConfirmation", CanChangeStartupAuthorization: true, IsStartupAuthorizationBusy: false }, "Module projection must include host management, lifecycle and startup authorization capabilities.");
 
 Console.WriteLine("Verifying explicit host-confirmed module lifecycle commands...");
 var lifecycle = new LifecycleOperations();
@@ -207,8 +207,52 @@ Require(!failedImport.Response.Success && failedImport.Response.Error?.Code == "
         !JsonSerializer.Serialize(failedImport.Response).Contains(root, StringComparison.OrdinalIgnoreCase),
     "Import failures must use the existing safe bridge error without exposing local paths.");
 Require(WebBridgeProtocol.Version == 4, "Module import must preserve protocol version 4.");
+
+Console.WriteLine("Verifying safe module management bridge boundaries...");
+var managementOperations = new ManagementOperations();
+var managementDispatcher = new WebBridgeDispatcher([
+    new WebModuleOpenDirectoryCommandHandler(managementOperations, lifecycleProvider, moduleActivation),
+    new WebModuleRemoveCommandHandler(managementOperations, lifecycleProvider, moduleActivation)]);
+foreach (var command in new[] { "modules.openDirectory", "modules.remove" })
+{
+    foreach (var payload in new object[] { new { }, new { moduleId = 42 }, new { moduleId = "" }, new { moduleId = "qing.test", directoryPath = root } })
+    {
+        var malformed = await managementDispatcher.DispatchAsync(LifecycleRequest(command, payload), new(11, CancellationToken.None));
+        Require(!malformed.Response.Success && malformed.Response.Error?.Code == "InvalidPayload", $"{command} must accept only a non-empty moduleId.");
+    }
+}
+var openedDirectory = await managementDispatcher.DispatchAsync(LifecycleRequest("modules.openDirectory", new { moduleId = "qing.test" }), new(11, CancellationToken.None));
+Require(openedDirectory.Response.Success && openedDirectory.Response.Payload is WebModuleManagementResponse { Disposition: "Succeeded", Snapshot.Modules.Count: 1 } && managementOperations.OpenCount == 1,
+    "Opening a module directory must use the management adapter and return no path.");
+managementOperations.NextResult = WebModuleManagementResult.SucceededWithWarning;
+var removedModule = await managementDispatcher.DispatchAsync(LifecycleRequest("modules.remove", new { moduleId = "qing.test" }), new(11, CancellationToken.None));
+Require(removedModule.Response.Success && removedModule.Response.Payload is WebModuleManagementResponse { Disposition: "SucceededWithWarning", Snapshot.Modules.Count: 1 } && managementOperations.RemoveCount == 1,
+    "Module removal must preserve partial-success semantics with a complete snapshot.");
+var managementJson = JsonSerializer.Serialize(new[] { openedDirectory.Response, removedModule.Response });
+Require(!managementJson.Contains(root, StringComparison.OrdinalIgnoreCase) && !managementJson.Contains("DirectoryPath", StringComparison.OrdinalIgnoreCase),
+    "Module management responses must not expose local paths.");
+managementOperations.NextResult = WebModuleManagementResult.Unavailable;
+var unavailableRemoval = await managementDispatcher.DispatchAsync(LifecycleRequest("modules.remove", new { moduleId = "qing.builtin" }), new(11, CancellationToken.None));
+Require(!unavailableRemoval.Response.Success && unavailableRemoval.Response.Error?.Code == "ModuleOperationUnavailable",
+    "A host-rejected built-in removal must remain unavailable through Web.");
+foreach (var (outcome, code) in new[]
+{
+    (WebModuleManagementResult.NotFound, "ModuleNotFound"),
+    (WebModuleManagementResult.Busy, "ModuleBusy"),
+    (WebModuleManagementResult.ExecutionBlocked, "ModuleExecutionBlocked"),
+    (WebModuleManagementResult.Failed, "ModuleOperationFailed")
+})
+{
+    managementOperations.NextResult = outcome;
+    var failed = await managementDispatcher.DispatchAsync(LifecycleRequest("modules.remove", new { moduleId = "qing.test" }), new(11, CancellationToken.None));
+    Require(!failed.Response.Success && failed.Response.Error?.Code == code &&
+            !JsonSerializer.Serialize(failed.Response).Contains(root, StringComparison.OrdinalIgnoreCase),
+        $"Management result {outcome} must map to the safe {code} error.");
+}
+Require(WebBridgeProtocol.Version == 4, "Module management must preserve protocol version 4.");
+
 var unsupportedOperations = new WebBridgeDispatcher([]);
-foreach (var command in new[] { "modules.remove", "startup.repair", "startup.test" })
+foreach (var command in new[] { "startup.repair", "startup.test" })
 {
     var unsupported = await unsupportedOperations.DispatchAsync(LifecycleRequest(command, new { moduleId = "qing.test" }), new(11, CancellationToken.None));
     Require(!unsupported.Response.Success && unsupported.Response.Error?.Code == "UnknownCommand", "UI-3D must not register unrelated module or startup commands.");
@@ -557,7 +601,7 @@ file sealed class SnapshotSource : IWebModuleSnapshotSource
     {
         ReadCount++;
         return [new("qing.test", "Test", "Safe description", "1.0.0", "Qing", "OutOfProcess", "Manual",
-            "Running", true, 0, [], ["Clipboard"], "0.2.0-alpha", true, false, false, true, true, true, false, false,
+            "Running", true, 0, [], ["Clipboard"], "0.2.0-alpha", true, true, false, false, true, true, true, false, false,
             false, "ChangedNeedsConfirmation", true, false)];
     }
 }
@@ -594,6 +638,16 @@ file sealed class ImportOperations : IWebModuleImportOperations
         if (Failure is not null) throw Failure;
         return Task.FromResult(NextResult);
     }
+}
+file sealed class ManagementOperations : IWebModuleManagementOperations
+{
+    public WebModuleManagementResult NextResult { get; set; } = WebModuleManagementResult.Succeeded;
+    public int OpenCount { get; private set; }
+    public int RemoveCount { get; private set; }
+    public Task<WebModuleManagementResult> OpenDirectoryAsync(string moduleId, CancellationToken cancellationToken)
+    { cancellationToken.ThrowIfCancellationRequested(); OpenCount++; return Task.FromResult(NextResult); }
+    public Task<WebModuleManagementResult> RemoveAsync(string moduleId, CancellationToken cancellationToken)
+    { cancellationToken.ThrowIfCancellationRequested(); RemoveCount++; return Task.FromResult(NextResult); }
 }
 file sealed class StartupAuthorizationOperations : IWebModuleStartupAuthorizationOperations
 {

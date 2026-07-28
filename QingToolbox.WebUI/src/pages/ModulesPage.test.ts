@@ -10,7 +10,7 @@ import { useSettingsStore } from '../app/settingsStore'
 import type { EffectiveLanguageCode, LanguageCode, SettingsSnapshot } from '../contracts/settings'
 
 const item = (overrides: Partial<ModuleSnapshotItem> = {}): ModuleSnapshotItem => ({
-  id: 'qing.text', displayName: 'Text Tools', displayDescription: 'Formatting tools', version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState: 'NotLoaded', isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false, canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled', canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false, ...overrides
+  id: 'qing.text', displayName: 'Text Tools', displayDescription: 'Formatting tools', version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState: 'NotLoaded', isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canRemove: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false, canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled', canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false, ...overrides
 })
 const mounted: ReturnType<typeof mount>[] = []
 afterEach(() => { mounted.splice(0).forEach(x => x.unmount()); document.body.innerHTML = ''; vi.restoreAllMocks() })
@@ -32,7 +32,7 @@ function page(module = item(), clientOverrides: Record<string, unknown> = {}, st
   else if (state.status === 'error') store.fail(new Error('Bridge.Internal: secret failure'))
   else if (state.status === 'idle') store.status = 'idle'
   const snapshot = () => ({ generatedAt: new Date().toISOString(), modules: [module] })
-  const client = { getSnapshot: vi.fn(async () => snapshot()), importModule: vi.fn(async () => ({ disposition: 'Cancelled', importedModuleId: null, snapshot: snapshot() })), load: vi.fn(async () => snapshot()), activate: vi.fn(async () => snapshot()), open: vi.fn(async () => snapshot()), deactivate: vi.fn(async () => snapshot()), unload: vi.fn(async () => snapshot()), setStartupAuthorization: vi.fn(async () => snapshot()), ...clientOverrides }
+  const client = { getSnapshot: vi.fn(async () => snapshot()), importModule: vi.fn(async () => ({ disposition: 'Cancelled', importedModuleId: null, snapshot: snapshot() })), load: vi.fn(async () => snapshot()), activate: vi.fn(async () => snapshot()), open: vi.fn(async () => snapshot()), deactivate: vi.fn(async () => snapshot()), unload: vi.fn(async () => snapshot()), setStartupAuthorization: vi.fn(async () => snapshot()), openDirectory: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: snapshot() })), remove: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: { generatedAt: new Date().toISOString(), modules: [] } })), ...clientOverrides }
   const wrapper = mount(ModulesPage, { attachTo: document.body, global: { plugins: [pinia], provide: { moduleClient: client } } }); mounted.push(wrapper)
   return { wrapper, client, app, store }
 }
@@ -582,5 +582,80 @@ describe('ModulesPage lifecycle controls', () => {
     expect(wrapper.text()).toContain('FutureState')
     store.complete({ generatedAt: new Date().toISOString(), modules: [item({ runtimeState: 'Failed', isValid: false, canLoad: false })] }); await wrapper.vm.$nextTick()
     expect(wrapper.get('.module-card-badges').text()).toContain('无效')
+  })
+
+  it('shows management in details, opens folders once, and hides removal for built-in modules', async () => {
+    let resolve!: (value: unknown) => void
+    const openDirectory = vi.fn(() => new Promise(resolveResult => { resolve = resolveResult }))
+    const { wrapper } = page(item({ isUserInstalled: false, canRemove: false }), { openDirectory })
+    await wrapper.get('.wpf-module-card').trigger('click')
+    expect(wrapper.get('.module-management').text()).toContain('Module management')
+    expect(wrapper.find('.module-remove-entry').exists()).toBe(false)
+    const open = wrapper.get('.module-management-actions .q-button')
+    await open.trigger('click'); await open.trigger('click')
+    expect(openDirectory).toHaveBeenCalledTimes(1)
+    expect(openDirectory).toHaveBeenCalledWith('qing.text')
+    resolve({ disposition: 'Succeeded', snapshot: { generatedAt: new Date().toISOString(), modules: [item({ isUserInstalled: false, canRemove: false })] } })
+    await flushPromises()
+    expect(useToastStore().message).toBe('Module folder opened.')
+  })
+
+  it('requires inline confirmation and applies the authoritative removal snapshot', async () => {
+    let resolve!: (value: unknown) => void
+    const remove = vi.fn(() => new Promise(resolveResult => { resolve = resolveResult }))
+    const { wrapper, store } = page(item(), { remove })
+    await wrapper.get('.wpf-module-card').trigger('click')
+    await wrapper.get('.module-remove-entry').trigger('click')
+    expect(remove).not.toHaveBeenCalled()
+    expect(wrapper.get('.module-remove-confirmation').text()).toContain('Remove Text Tools?')
+    await wrapper.get('.module-remove-confirm').trigger('click')
+    expect(remove).toHaveBeenCalledTimes(1)
+    expect(remove).toHaveBeenCalledWith('qing.text')
+    expect(wrapper.get('.module-remove-confirm').text()).toContain('Removing…')
+    expect(wrapper.get('.q-switch').attributes('disabled')).toBeDefined()
+    resolve({ disposition: 'Succeeded', snapshot: { generatedAt: new Date().toISOString(), modules: [] } })
+    await flushPromises()
+    expect(store.modules).toEqual([])
+    expect(store.selectedModuleId).toBeNull()
+    expect(useToastStore().message).toBe('Module removed.')
+  })
+
+  it('cancels confirmation, closes it on selection changes, and respects host canRemove', async () => {
+    const { wrapper, store, client } = page(item({ canRemove: false }))
+    await wrapper.get('.wpf-module-card').trigger('click')
+    const removeEntry = wrapper.get('.module-remove-entry')
+    expect(removeEntry.attributes('disabled')).toBeDefined()
+    store.modules[0] = { ...store.modules[0], canRemove: true }; await wrapper.vm.$nextTick()
+    await wrapper.get('.module-remove-entry').trigger('click')
+    await wrapper.findAll('.module-remove-confirmation .q-button')[0].trigger('click')
+    expect(wrapper.find('.module-remove-confirmation').exists()).toBe(false)
+    expect(client.remove).not.toHaveBeenCalled()
+    await wrapper.get('.module-remove-entry').trigger('click')
+    store.selectedModuleId = null; await wrapper.vm.$nextTick()
+    expect(wrapper.find('.module-remove-confirmation').exists()).toBe(false)
+  })
+
+  it('shows the localized warning result without exposing host details', async () => {
+    const remove = vi.fn(async () => ({ disposition: 'SucceededWithWarning', snapshot: { generatedAt: new Date().toISOString(), modules: [] } }))
+    const { wrapper } = page(item(), { remove }, { language: 'zh-CN', effectiveLanguage: 'zh-CN' })
+    await wrapper.get('.wpf-module-card').trigger('click')
+    expect(wrapper.get('.module-management').text()).toContain('模块管理')
+    await wrapper.get('.module-remove-entry').trigger('click')
+    expect(wrapper.get('.module-remove-confirmation').text()).toContain('保留模块数据')
+    await wrapper.get('.module-remove-confirm').trigger('click'); await flushPromises()
+    expect(useToastStore().kind).toBe('warning')
+    expect(useToastStore().message).toBe('模块程序已移除，但启动授权清理失败。')
+  })
+
+  it('keeps selection and resynchronizes after a failed removal', async () => {
+    const getSnapshot = vi.fn(async () => ({ generatedAt: new Date().toISOString(), modules: [item()] }))
+    const { wrapper, store } = page(item(), { remove: vi.fn().mockRejectedValue(new Error('C:/private/module')), getSnapshot })
+    await wrapper.get('.wpf-module-card').trigger('click')
+    await wrapper.get('.module-remove-entry').trigger('click')
+    await wrapper.get('.module-remove-confirm').trigger('click'); await flushPromises()
+    expect(getSnapshot).toHaveBeenCalledTimes(1)
+    expect(store.selectedModuleId).toBe('qing.text')
+    expect(useToastStore().message).toBe('Could not remove the module.')
+    expect(useToastStore().message).not.toContain('C:/private')
   })
 })

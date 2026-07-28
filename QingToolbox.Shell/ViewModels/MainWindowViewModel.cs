@@ -267,6 +267,22 @@ public sealed partial class MainWindowViewModel(
     private void OpenModuleDirectory(DiscoveredModuleViewModel? module)
     {
         if (module is null) return;
+        _ = OpenModuleDirectoryCore(module);
+    }
+
+    public Task<WebModuleManagementResult> OpenModuleDirectoryFromWebAsync(
+        string moduleId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var module = Modules.FirstOrDefault(item => string.Equals(item.Id, moduleId, StringComparison.Ordinal));
+        return Task.FromResult(module is null
+            ? WebModuleManagementResult.NotFound
+            : OpenModuleDirectoryCore(module));
+    }
+
+    private WebModuleManagementResult OpenModuleDirectoryCore(DiscoveredModuleViewModel module)
+    {
         try
         {
             var directory = Path.GetFullPath(module.ModuleDirectory);
@@ -277,11 +293,13 @@ public sealed partial class MainWindowViewModel(
                 UseShellExecute = true
             });
             StatusMessage = localization.GetString("status.moduleDirectoryOpened", module.DisplayName);
+            return WebModuleManagementResult.Succeeded;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
             System.ComponentModel.Win32Exception or ArgumentException or NotSupportedException)
         {
             StatusMessage = localization.GetString("status.moduleDirectoryOpenFailed", module.DisplayName);
+            return WebModuleManagementResult.Failed;
         }
     }
 
@@ -1079,30 +1097,60 @@ public sealed partial class MainWindowViewModel(
         };
         if (dialog.ShowDialog() != true) return;
 
+        await RemoveModuleCoreAsync(module, CancellationToken.None);
+    }
+
+    public async Task<WebModuleManagementResult> RemoveModuleFromWebAsync(
+        string moduleId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var module = Modules.FirstOrDefault(item => string.Equals(item.Id, moduleId, StringComparison.Ordinal));
+        if (module is null) return WebModuleManagementResult.NotFound;
+        if (module.IsBusy) return WebModuleManagementResult.Busy;
+        if (module.IsExecutionBlocked) return WebModuleManagementResult.ExecutionBlocked;
+        if (!module.IsUserInstalled || !module.CanRemove ||
+            !IsDirectChildOf(module.ModuleDirectory, applicationPaths.UserModulesDirectory))
+            return WebModuleManagementResult.Unavailable;
+
+        return await RemoveModuleCoreAsync(module, cancellationToken);
+    }
+
+    private async Task<WebModuleManagementResult> RemoveModuleCoreAsync(
+        DiscoveredModuleViewModel module,
+        CancellationToken cancellationToken)
+    {
+        if (module.IsBusy) return WebModuleManagementResult.Busy;
+        if (module.IsExecutionBlocked) return WebModuleManagementResult.ExecutionBlocked;
+        if (!module.IsUserInstalled || !module.CanRemove ||
+            !IsDirectChildOf(module.ModuleDirectory, applicationPaths.UserModulesDirectory))
+            return WebModuleManagementResult.Unavailable;
+
         module.IsBusy = true;
         try
         {
-            await using var executionLease = await executionGate.EnterExecutionAsync(moduleId);
-            if (IsOutOfProcessWpf(moduleId))
+            await using var executionLease = await executionGate.EnterExecutionAsync(module.Id, cancellationToken);
+            if (IsOutOfProcessWpf(module.Id))
             {
-                if (!await moduleProcessBroker.CommandAsync(moduleId, "CloseWindow", CancellationToken.None) ||
-                    !await moduleProcessBroker.CommandAsync(moduleId, "Deactivate", CancellationToken.None) ||
-                    !await moduleProcessBroker.ShutdownAsync(moduleId, CancellationToken.None) ||
-                    !moduleProcessBroker.VerifyExited(moduleId) || moduleProcessBroker.HasSession(moduleId))
+                if (!await moduleProcessBroker.CommandAsync(module.Id, "CloseWindow", cancellationToken) ||
+                    !await moduleProcessBroker.CommandAsync(module.Id, "Deactivate", cancellationToken) ||
+                    !await moduleProcessBroker.ShutdownAsync(module.Id, cancellationToken) ||
+                    !moduleProcessBroker.VerifyExited(module.Id) || moduleProcessBroker.HasSession(module.Id))
                     throw new IOException("The module worker did not exit cleanly; removal was cancelled.");
             }
             else
             {
-                moduleWindowManager.CloseWindow(moduleId);
-                var record = runtimeManager.GetRecord(moduleId);
-                if (record?.State.ToString() == "Running") await runtimeManager.DeactivateAsync(moduleId);
-                record = runtimeManager.GetRecord(moduleId);
+                moduleWindowManager.CloseWindow(module.Id);
+                var record = runtimeManager.GetRecord(module.Id);
+                if (record?.State.ToString() == "Running") await runtimeManager.DeactivateAsync(module.Id);
+                record = runtimeManager.GetRecord(module.Id);
                 if (record?.State.ToString() is "Loaded" or "Deactivated" or "Failed")
-                    await runtimeManager.UnloadAsync(moduleId);
+                    await runtimeManager.UnloadAsync(module.Id);
             }
 
             var removal = await ModuleProgramRemoval.DeleteAsync(
-                moduleId, module.ModuleDirectory, applicationPaths.UserModulesDirectory, settingsService);
+                module.Id, module.ModuleDirectory, applicationPaths.UserModulesDirectory, settingsService,
+                CancellationToken.None);
 
             if (removal.Status == ModuleProgramRemovalStatus.ProgramDeletionFailed)
             {
@@ -1110,7 +1158,7 @@ public sealed partial class MainWindowViewModel(
                 module.RuntimeError = removal.FailureCode ?? string.Empty;
                 StatusMessage = localization.GetString(
                     "status.moduleRemoveFailed", module.DisplayName, removal.FailureCode ?? string.Empty);
-                return;
+                return WebModuleManagementResult.Failed;
             }
 
             SelectedModule = null;
@@ -1118,18 +1166,24 @@ public sealed partial class MainWindowViewModel(
             StatusMessage = removal.Status == ModuleProgramRemovalStatus.Completed
                 ? localization.GetString("status.moduleRemoved", module.DisplayName)
                 : localization.GetString("status.moduleRemoveAuthorizationFailed", module.DisplayName);
+            return removal.Status == ModuleProgramRemovalStatus.Completed
+                ? WebModuleManagementResult.Succeeded
+                : WebModuleManagementResult.SucceededWithWarning;
         }
         catch (ModuleExecutionBlockedException)
         {
-            module.UpdateExecutionReadiness(executionGate.GetReadiness(moduleId));
+            module.UpdateExecutionReadiness(executionGate.GetReadiness(module.Id));
             StatusMessage = localization.GetString(
                 "status.moduleBlockedByRecovery",
                 module.DisplayName);
+            return WebModuleManagementResult.ExecutionBlocked;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception)
         {
             RefreshRuntimeProjection(module);
             StatusMessage = localization.GetString("status.moduleRemoveFailed", module.DisplayName, exception.Message);
+            return WebModuleManagementResult.Failed;
         }
         finally
         {
