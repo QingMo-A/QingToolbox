@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added reactive English and Simplified Chinese localization to the Development Web shell, navigation, and Quick Open.
 - Added host-confirmed language selection to the Development Web Settings workspace.
 
 - Fixed Development Web module summaries and filters to classify unloaded, deactivated, failed, invalid, and issue-bearing modules consistently.

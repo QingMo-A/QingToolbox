@@ -4,11 +4,14 @@ import { useRouter } from 'vue-router'
 import { useModuleStore } from '../../app/moduleStore'
 import type { ModuleSnapshotItem } from '../../contracts/modules'
 import QIcon from './QIcon.vue'
+import { useLocalization, translate } from '../../localization/localization'
+import type { TranslationKey } from '../../localization/messages/en-US'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const router = useRouter()
 const moduleStore = useModuleStore()
+const { t } = useLocalization()
 const dialog = ref<HTMLDialogElement | null>(null)
 const input = ref<HTMLInputElement | null>(null)
 const resultsContainer = ref<HTMLElement | null>(null)
@@ -17,23 +20,33 @@ const activeIndex = ref(-1)
 let previousFocus: HTMLElement | null = null
 
 type PageIconName = 'home' | 'modules' | 'running' | 'logs' | 'settings' | 'diagnostics'
-type PageResult = { kind: 'page'; title: string; description: string; path: string; icon: PageIconName }
+type PageResultDefinition = { kind: 'page'; titleKey: TranslationKey; descriptionKey: TranslationKey; path: string; icon: PageIconName }
+type PageResult = { kind: 'page'; title: string; description: string; englishTitle: string; englishDescription: string; path: string; icon: PageIconName }
 type ModuleResult = { kind: 'module'; module: ModuleSnapshotItem }
 type Result = PageResult | ModuleResult
 
-const pages: PageResult[] = [
-  { kind: 'page', title: 'Home', description: 'Workspace overview', path: '/', icon: 'home' },
-  { kind: 'page', title: 'Modules', description: 'Browse and manage installed modules', path: '/modules', icon: 'modules' },
-  { kind: 'page', title: 'Running modules', description: 'Review active modules', path: '/running', icon: 'running' },
-  { kind: 'page', title: 'Session logs', description: 'Review current session events', path: '/logs', icon: 'logs' },
-  { kind: 'page', title: 'Settings', description: 'Manage workspace preferences', path: '/settings', icon: 'settings' },
-  { kind: 'page', title: 'Development diagnostics', description: 'Inspect the Web Shell and host connection', path: '/diagnostics', icon: 'diagnostics' },
+const pageDefinitions: PageResultDefinition[] = [
+  { kind: 'page', titleKey: 'navigation.home', descriptionKey: 'page.home.description', path: '/', icon: 'home' },
+  { kind: 'page', titleKey: 'navigation.modules', descriptionKey: 'page.modules.description', path: '/modules', icon: 'modules' },
+  { kind: 'page', titleKey: 'navigation.running', descriptionKey: 'page.running.description', path: '/running', icon: 'running' },
+  { kind: 'page', titleKey: 'navigation.logs', descriptionKey: 'page.logs.description', path: '/logs', icon: 'logs' },
+  { kind: 'page', titleKey: 'navigation.settings', descriptionKey: 'page.settings.description', path: '/settings', icon: 'settings' },
+  { kind: 'page', titleKey: 'navigation.diagnostics', descriptionKey: 'page.diagnostics.description', path: '/diagnostics', icon: 'diagnostics' },
 ]
+const pages = computed<PageResult[]>(() => pageDefinitions.map(page => ({
+  kind: page.kind,
+  title: t(page.titleKey),
+  description: t(page.descriptionKey),
+  englishTitle: translate('en-US', page.titleKey),
+  englishDescription: translate('en-US', page.descriptionKey),
+  path: page.path,
+  icon: page.icon,
+})))
 
 const normalizedQuery = computed(() => query.value.trim().toLocaleLowerCase())
 const pageResults = computed(() => {
   const term = normalizedQuery.value
-  return term ? pages.filter(page => [page.title, page.description, page.path].some(value => value.toLocaleLowerCase().includes(term))) : pages
+  return term ? pages.value.filter(page => [page.title, page.description, page.englishTitle, page.englishDescription, page.path].some(value => value.toLocaleLowerCase().includes(term))) : pages.value
 })
 const moduleResults = computed(() => {
   const term = normalizedQuery.value
@@ -130,15 +143,15 @@ onBeforeUnmount(() => {
     <header>
       <QIcon name="search" :size="22" />
       <div class="q-command-search">
-        <h2 id="quick-open-title" class="sr-only">Quick open</h2>
+        <h2 id="quick-open-title" class="sr-only">{{ t('quickOpen.title') }}</h2>
         <input
           ref="input"
           v-model="query"
           type="search"
           role="combobox"
           aria-autocomplete="list"
-          aria-label="Search pages and modules"
-          placeholder="Search pages and modules"
+          :aria-label="t('quickOpen.searchLabel')"
+          :placeholder="t('quickOpen.searchPlaceholder')"
           :aria-expanded="true"
           aria-controls="quick-open-results"
           :aria-activedescendant="activeIndex >= 0 ? resultId(activeIndex) : undefined"
@@ -146,13 +159,13 @@ onBeforeUnmount(() => {
         />
       </div>
       <kbd>Ctrl K</kbd>
-      <button type="button" class="q-command-close" aria-label="Close Quick Open" @click="close"><QIcon name="close" /></button>
+      <button type="button" class="q-command-close" :aria-label="t('quickOpen.closeLabel')" @click="close"><QIcon name="close" /></button>
     </header>
 
-    <div ref="resultsContainer" id="quick-open-results" class="q-command-results" role="listbox" aria-label="Quick Open results">
+    <div ref="resultsContainer" id="quick-open-results" class="q-command-results" role="listbox" :aria-label="t('quickOpen.resultsLabel')">
       <template v-if="results.length">
         <section v-if="pageResults.length">
-          <h3>Pages</h3>
+          <h3>{{ t('quickOpen.pages') }}</h3>
           <button
             v-for="page in pageResults"
             :id="resultId(results.indexOf(page))"
@@ -170,7 +183,7 @@ onBeforeUnmount(() => {
           </button>
         </section>
         <section v-if="moduleResults.length">
-          <h3>{{ normalizedQuery ? 'Modules' : 'Running now' }}</h3>
+          <h3>{{ normalizedQuery ? t('quickOpen.modules') : t('quickOpen.runningNow') }}</h3>
           <button
             v-for="module in moduleResults"
             :id="resultId(results.findIndex(result => result.kind === 'module' && result.module.id === module.id))"
@@ -189,12 +202,12 @@ onBeforeUnmount(() => {
         </section>
       </template>
       <div v-else class="q-command-empty">
-        <strong>No results</strong>
-        <p>Try a page name, module name, author, or module ID.</p>
+        <strong>{{ t('quickOpen.noResults') }}</strong>
+        <p>{{ t('quickOpen.noResultsHint') }}</p>
       </div>
     </div>
 
-    <footer><span>↑↓ Navigate</span><span>Enter Open</span><span>Esc Close</span></footer>
+    <footer><span>{{ t('quickOpen.navigateHint') }}</span><span>{{ t('quickOpen.openHint') }}</span><span>{{ t('quickOpen.closeHint') }}</span></footer>
   </dialog>
 </template>
 

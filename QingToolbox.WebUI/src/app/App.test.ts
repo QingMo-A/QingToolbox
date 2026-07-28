@@ -1,18 +1,38 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import App from './App.vue'
+import { useSettingsStore } from './settingsStore'
+import type { EffectiveLanguageCode, LanguageCode, SettingsSnapshot } from '../contracts/settings'
 
 const wrappers: VueWrapper[] = []
-afterEach(() => wrappers.splice(0).forEach(wrapper => wrapper.unmount()))
+const originalTitle = document.title
+const originalLanguage = document.documentElement.lang
+afterEach(() => {
+  wrappers.splice(0).forEach(wrapper => wrapper.unmount())
+  document.title = originalTitle
+  document.documentElement.lang = originalLanguage
+})
+
+const snapshot = (code: LanguageCode, effectiveCode: EffectiveLanguageCode): SettingsSnapshot => ({
+  generatedAt: new Date().toISOString(), language: { code, effectiveCode, displayName: code, options: [
+    { code: 'system', displayName: 'System Default', nativeName: '跟随系统' }, { code: 'zh-CN', displayName: 'Simplified Chinese', nativeName: '简体中文' }, { code: 'en-US', displayName: 'English', nativeName: 'English' },
+  ] }, showLogsInSidebar: true, mainWindowCloseBehavior: 'Ask', closeBehaviorMessage: '', launchAtLogin: false,
+  canConfigureLaunchAtLogin: true, canRepairStartup: false, startupPresentationMode: 'FloatingBadge', startupBackend: 'None', startupStatus: 'Unavailable', startupMessage: '',
+})
 
 function app() {
   const pinia = createPinia(); setActivePinia(pinia)
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/', component: { template: '<div />' } }, { path: '/modules', component: { template: '<div />' } },
+  ] })
   const preventDefault = vi.fn()
+  const getSnapshot = vi.fn()
   const wrapper = mount(App, {
     global: {
-      plugins: [pinia],
-      provide: { settingsClient: { getSnapshot: vi.fn() } },
+      plugins: [pinia, router],
+      provide: { settingsClient: { getSnapshot } },
       stubs: {
         RouterView: { template: '<div />' },
         QToast: { template: '<div />' },
@@ -22,7 +42,7 @@ function app() {
     },
   })
   wrappers.push(wrapper)
-  return { wrapper, preventDefault }
+  return { wrapper, preventDefault, router, getSnapshot, settings: useSettingsStore() }
 }
 
 describe('App Quick Open integration', () => {
@@ -59,5 +79,19 @@ describe('App Quick Open integration', () => {
     wrapper.unmount()
     expect(remove).toHaveBeenCalledWith('keydown', expect.any(Function))
     remove.mockRestore()
+  })
+
+  it('updates html language and the current route title reactively without requesting settings', async () => {
+    const { wrapper, router, getSnapshot, settings } = app()
+    expect(document.documentElement.lang).toBe('en-US')
+    expect(document.title).toBe('Home · QingToolbox')
+    settings.complete(snapshot('system', 'zh-CN')); await wrapper.vm.$nextTick()
+    expect(document.documentElement.lang).toBe('zh-CN')
+    expect(document.title).toBe('首页 · QingToolbox')
+    await router.push('/modules'); await wrapper.vm.$nextTick()
+    expect(document.title).toBe('模块 · QingToolbox')
+    settings.complete(snapshot('en-US', 'en-US')); await wrapper.vm.$nextTick()
+    expect(document.title).toBe('Modules · QingToolbox')
+    expect(getSnapshot).not.toHaveBeenCalled()
   })
 })

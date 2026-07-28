@@ -6,6 +6,8 @@ import QCommandPalette from './QCommandPalette.vue'
 import QIcon from './QIcon.vue'
 import { useModuleStore } from '../../app/moduleStore'
 import type { ModuleSnapshotItem } from '../../contracts/modules'
+import { useSettingsStore } from '../../app/settingsStore'
+import type { EffectiveLanguageCode, LanguageCode, SettingsSnapshot } from '../../contracts/settings'
 
 const wrappers: VueWrapper[] = []
 const scrollIntoView = vi.fn()
@@ -18,6 +20,12 @@ const moduleItem = (id: string, state = 'NotLoaded'): ModuleSnapshotItem => ({
   isUserInstalled: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false,
   canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false,
   startupAuthorizationState: 'NotEnabled', canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false,
+})
+const settingsSnapshot = (code: LanguageCode, effectiveCode: EffectiveLanguageCode): SettingsSnapshot => ({
+  generatedAt: new Date().toISOString(), language: { code, effectiveCode, displayName: code, options: [
+    { code: 'system', displayName: 'System Default', nativeName: '跟随系统' }, { code: 'zh-CN', displayName: 'Simplified Chinese', nativeName: '简体中文' }, { code: 'en-US', displayName: 'English', nativeName: 'English' },
+  ] }, showLogsInSidebar: true, mainWindowCloseBehavior: 'Ask', closeBehaviorMessage: '', launchAtLogin: false,
+  canConfigureLaunchAtLogin: true, canRepairStartup: false, startupPresentationMode: 'FloatingBadge', startupBackend: 'None', startupStatus: 'Unavailable', startupMessage: '',
 })
 
 beforeEach(() => {
@@ -59,7 +67,7 @@ async function palette(open = true) {
   const wrapper = mount(QCommandPalette, { attachTo: document.body, props: { open }, global: { plugins: [pinia, router] } })
   wrappers.push(wrapper)
   await flushPromises()
-  return { wrapper, store, router }
+  return { wrapper, store, router, settings: useSettingsStore() }
 }
 
 describe('QCommandPalette', () => {
@@ -220,5 +228,39 @@ describe('QCommandPalette', () => {
     await wrapper.get('input').setValue('modules')
     expect(wrapper.findAll('[role="option"]').every(result => result.element.tagName === 'BUTTON')).toBe(true)
     expect(wrapper.get('[role="option"]').attributes('aria-selected')).toBe('true')
+  })
+
+  it('shows all six localized page titles and descriptions and updates while open', async () => {
+    const { wrapper, settings } = await palette()
+    expect(wrapper.text()).toContain('Home'); expect(wrapper.text()).toContain('Development diagnostics')
+    settings.complete(settingsSnapshot('system', 'zh-CN')); await flushPromises()
+    for (const value of ['首页','模块','运行中模块','会话日志','设置','开发诊断','浏览和管理已安装模块']) expect(wrapper.text()).toContain(value)
+    expect(wrapper.get('input').attributes('aria-label')).toBe('搜索页面和模块')
+    expect(wrapper.get('input').attributes('placeholder')).toBe('搜索页面和模块')
+    expect(wrapper.get('#quick-open-results').attributes('aria-label')).toBe('快速打开结果')
+    expect(wrapper.get('[aria-label="关闭快速打开"]').element.tagName).toBe('BUTTON')
+    expect(wrapper.text()).toContain('↑↓ 导航'); expect(wrapper.text()).toContain('Enter 打开'); expect(wrapper.text()).toContain('Esc 关闭')
+  })
+
+  it.each([
+    ['模块', '模块'],
+    ['管理', '模块'],
+    ['Modules', '模块'],
+    ['installed', '模块'],
+    ['/modules', '模块'],
+  ])('finds the localized Modules page with %s', async (query, expected) => {
+    const { wrapper, settings } = await palette(); settings.complete(settingsSnapshot('zh-CN', 'zh-CN')); await flushPromises()
+    await wrapper.get('input').setValue(query); expect(wrapper.text()).toContain(expected)
+  })
+
+  it('keeps module metadata and runtime state host-authored in Chinese mode', async () => {
+    const { wrapper, settings } = await palette(); settings.complete(settingsSnapshot('zh-CN', 'zh-CN')); await flushPromises()
+    expect(wrapper.text()).toContain('Alpha Tools'); expect(wrapper.text()).toContain('Format useful text'); expect(wrapper.text()).toContain('Running')
+  })
+
+  it('localizes group and empty-state labels without changing keyboard behavior', async () => {
+    const { wrapper, settings } = await palette(); settings.complete(settingsSnapshot('zh-CN', 'zh-CN')); await flushPromises()
+    expect(wrapper.text()).toContain('页面'); expect(wrapper.text()).toContain('当前运行')
+    await wrapper.get('input').setValue('nothing-matches-this'); expect(wrapper.text()).toContain('没有结果'); expect(wrapper.text()).toContain('模块 ID')
   })
 })
