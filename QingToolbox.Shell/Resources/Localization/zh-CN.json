@@ -1,6 +1,7 @@
 {
   "app.name": "QingToolbox",
   "app.subtitle": "模块化 Windows 工具箱",
+  "webShell.preparingWorkspace": "正在准备工作区……",
   "nav.home": "首页",
   "nav.modules": "模块",
   "nav.running": "运行中",

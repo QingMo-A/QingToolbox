@@ -30,7 +30,9 @@ public partial class MainWindow : Window
     private readonly ModuleTransactionRecoveryCoordinator _moduleRecovery;
     private readonly SessionLogService _sessionLog;
     private readonly IWebShellInitializer _webShellInitializer;
+    private readonly WebWorkspacePresentationState _webWorkspacePresentation;
     private Task? _backgroundStartupTask;
+    private long _workspaceTransitionVersion;
     private int _closeRequestPending;
     private WindowState _notificationAreaRestoreState = WindowState.Normal;
 
@@ -66,9 +68,11 @@ public partial class MainWindow : Window
         _moduleRecovery = moduleRecovery;
         _sessionLog = sessionLog;
         _webShellInitializer = webShellInitializer;
+        _webWorkspacePresentation = new WebWorkspacePresentationState(webShellInitializer.IsAllowed);
         _startupSession.Attach(this, floatingBadgeManager);
         _floatingBadgeManager.Attach(this);
         DataContext = viewModel;
+        ApplyWorkspacePresentation(_webWorkspacePresentation.Snapshot);
         Loaded += OnLoaded;
         SizeChanged += OnSizeChanged;
         Closing += OnClosing;
@@ -133,11 +137,9 @@ public partial class MainWindow : Window
 
     private void AttachPreparingWebShell(Microsoft.Web.WebView2.Wpf.WebView2 webView)
     {
+        if (!_webWorkspacePresentation.TryPrepare(_startupSession.State == StartupSessionState.Exiting)) return;
         DevelopmentWebWorkspace.Content = webView;
-        DevelopmentWebWorkspace.Opacity = 0;
-        DevelopmentWebWorkspace.IsHitTestVisible = false;
-        DevelopmentWebWorkspace.Visibility = Visibility.Visible;
-        NativeWorkspace.Visibility = Visibility.Visible;
+        ApplyWorkspacePresentation(_webWorkspacePresentation.Snapshot);
     }
 
     private void ShowReadyWebShell(Microsoft.Web.WebView2.Wpf.WebView2 webView)
@@ -145,11 +147,9 @@ public partial class MainWindow : Window
         if (_startupSession.State == StartupSessionState.Exiting) return;
         Dispatcher.InvokeAsync(() =>
         {
+            if (!_webWorkspacePresentation.TryShowReady(_startupSession.State == StartupSessionState.Exiting)) return;
             DevelopmentWebWorkspace.Content = webView;
-            DevelopmentWebWorkspace.Opacity = 1;
-            DevelopmentWebWorkspace.IsHitTestVisible = true;
-            DevelopmentWebWorkspace.Visibility = Visibility.Visible;
-            NativeWorkspace.Visibility = Visibility.Collapsed;
+            ShowReadyWorkspacePresentation();
         });
     }
 
@@ -157,14 +157,74 @@ public partial class MainWindow : Window
     {
         Dispatcher.InvokeAsync(() =>
         {
+            _webWorkspacePresentation.ShowNativeFallback();
             DevelopmentWebWorkspace.Content = null;
-            DevelopmentWebWorkspace.Opacity = 0;
-            DevelopmentWebWorkspace.IsHitTestVisible = false;
-            DevelopmentWebWorkspace.Visibility = Visibility.Collapsed;
-            NativeWorkspace.Visibility = Visibility.Visible;
+            ApplyWorkspacePresentation(_webWorkspacePresentation.Snapshot);
             _viewModel.StatusMessage =
                 $"Development Web Shell unavailable ({failureCode}); native workspace restored.";
         });
+    }
+
+    private void ShowReadyWorkspacePresentation()
+    {
+        var snapshot = _webWorkspacePresentation.Snapshot;
+        if (!SystemParameters.ClientAreaAnimation)
+        {
+            ApplyWorkspacePresentation(snapshot);
+            return;
+        }
+
+        var transitionVersion = ++_workspaceTransitionVersion;
+        CancelWorkspaceAnimations();
+        NativeWorkspace.Visibility = Visibility.Collapsed;
+        WebShellStartupSurface.Visibility = Visibility.Visible;
+        WebShellStartupSurface.Opacity = 1;
+        DevelopmentWebWorkspace.Visibility = Visibility.Visible;
+        DevelopmentWebWorkspace.Opacity = 0;
+        DevelopmentWebWorkspace.IsHitTestVisible = false;
+
+        var duration = TimeSpan.FromMilliseconds(190);
+        var easing = new CubicEase { EasingMode = EasingMode.EaseInOut };
+        var startupFade = new DoubleAnimation(1, 0, duration)
+        {
+            EasingFunction = easing,
+            FillBehavior = FillBehavior.HoldEnd
+        };
+        var webFade = new DoubleAnimation(0, 1, duration)
+        {
+            EasingFunction = easing,
+            FillBehavior = FillBehavior.HoldEnd
+        };
+        webFade.Completed += (_, _) =>
+        {
+            if (transitionVersion != _workspaceTransitionVersion ||
+                _startupSession.State == StartupSessionState.Exiting ||
+                _webWorkspacePresentation.Phase != WebWorkspacePresentationPhase.Ready)
+                return;
+
+            ApplyWorkspacePresentation(_webWorkspacePresentation.Snapshot);
+        };
+
+        WebShellStartupSurface.BeginAnimation(OpacityProperty, startupFade);
+        DevelopmentWebWorkspace.BeginAnimation(OpacityProperty, webFade);
+    }
+
+    private void ApplyWorkspacePresentation(WebWorkspacePresentationSnapshot snapshot)
+    {
+        ++_workspaceTransitionVersion;
+        CancelWorkspaceAnimations();
+        NativeWorkspace.Visibility = snapshot.ShowNativeWorkspace ? Visibility.Visible : Visibility.Collapsed;
+        WebShellStartupSurface.Opacity = snapshot.ShowStartupSurface ? 1 : 0;
+        WebShellStartupSurface.Visibility = snapshot.ShowStartupSurface ? Visibility.Visible : Visibility.Collapsed;
+        DevelopmentWebWorkspace.Opacity = snapshot.EnableWebWorkspace ? 1 : 0;
+        DevelopmentWebWorkspace.IsHitTestVisible = snapshot.EnableWebWorkspace;
+        DevelopmentWebWorkspace.Visibility = snapshot.AttachWebWorkspace ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void CancelWorkspaceAnimations()
+    {
+        WebShellStartupSurface.BeginAnimation(OpacityProperty, null);
+        DevelopmentWebWorkspace.BeginAnimation(OpacityProperty, null);
     }
 
     private async Task PresentCriticalStartupAsync()

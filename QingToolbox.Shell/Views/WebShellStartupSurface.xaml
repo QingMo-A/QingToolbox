@@ -1,0 +1,66 @@
+<UserControl x:Class="QingToolbox.Shell.Views.WebShellStartupSurface"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svgc="http://sharpvectors.codeplex.com/svgc/"
+             Focusable="False"
+             IsHitTestVisible="False"
+             Background="#F3F7FD">
+    <UserControl.Resources>
+        <Storyboard x:Key="LoadingStoryboard" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="LoadingRotation"
+                             Storyboard.TargetProperty="Angle"
+                             From="0"
+                             To="360"
+                             Duration="0:0:1.15"/>
+        </Storyboard>
+    </UserControl.Resources>
+
+    <Grid Background="#F3F7FD">
+        <StackPanel HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Focusable="False">
+            <Border Width="70"
+                    Height="70"
+                    HorizontalAlignment="Center"
+                    CornerRadius="18"
+                    Background="#E8F0FF">
+                <svgc:SvgViewbox Width="52"
+                                 Height="52"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"
+                                 Source="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.Mark.svg"/>
+            </Border>
+            <TextBlock Margin="0,18,0,0"
+                       HorizontalAlignment="Center"
+                       FontFamily="Segoe UI Variable Display, Segoe UI"
+                       FontSize="24"
+                       FontWeight="SemiBold"
+                       Foreground="#10213D"
+                       Text="QingToolbox"/>
+            <TextBlock Margin="0,7,0,0"
+                       HorizontalAlignment="Center"
+                       FontFamily="Segoe UI Variable Text, Segoe UI"
+                       FontSize="13"
+                       Foreground="#50637E"
+                       Text="{Binding Strings[webShell.preparingWorkspace]}"/>
+            <Grid Width="28"
+                  Height="28"
+                  Margin="0,22,0,0"
+                  HorizontalAlignment="Center">
+                <Ellipse Stroke="#DCE6F3"
+                         StrokeThickness="2.4"/>
+                <Path Data="M14,1.2 A12.8,12.8 0 0 1 26.8,14"
+                      Stroke="#2563EB"
+                      StrokeThickness="2.4"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round">
+                    <Path.RenderTransform>
+                        <RotateTransform x:Name="LoadingRotation"
+                                         CenterX="14"
+                                         CenterY="14"/>
+                    </Path.RenderTransform>
+                </Path>
+            </Grid>
+        </StackPanel>
+    </Grid>
+</UserControl>

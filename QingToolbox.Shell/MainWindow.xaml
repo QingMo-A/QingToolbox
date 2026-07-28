@@ -4,6 +4,7 @@
         xmlns:svgc="http://sharpvectors.codeplex.com/svgc/"
         xmlns:behaviors="clr-namespace:QingToolbox.Shell.Behaviors"
         xmlns:controls="clr-namespace:QingToolbox.Shell.Controls"
+        xmlns:views="clr-namespace:QingToolbox.Shell.Views"
         xmlns:windowing="clr-namespace:QingToolbox.Shell.Windowing"
         xmlns:settings="clr-namespace:QingToolbox.Core.Settings;assembly=QingToolbox.Core"
         Title="{Binding Title}"
@@ -1654,6 +1655,12 @@
         <ContentControl x:Name="DevelopmentWebWorkspace"
                         Grid.Row="1"
                         Visibility="Collapsed"
-                        Background="#F7FAFF"/>
+                        Opacity="0"
+                        IsHitTestVisible="False"
+                        Background="#F3F7FD"/>
+        <views:WebShellStartupSurface x:Name="WebShellStartupSurface"
+                                      Grid.Row="1"
+                                      Visibility="Collapsed"
+                                      Opacity="0"/>
     </Grid>
 </Window>

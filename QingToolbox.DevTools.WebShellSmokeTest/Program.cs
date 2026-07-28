@@ -12,6 +12,32 @@ Require(!new WebShellState(ApplicationExecutionEnvironment.Production()).IsEnvir
 Require(new WebShellState(dev).IsEnvironmentAllowed, "Development must allow Web Shell.");
 Require(!new WebShellState(ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.ModuleTest, "WebShellSmoke", root)).IsEnvironmentAllowed, "ModuleTest must disable Web Shell.");
 
+Console.WriteLine("Verifying native Web workspace presentation transitions...");
+var developmentPresentation = new WebWorkspacePresentationState(webShellAllowed: true);
+Require(developmentPresentation.Phase == WebWorkspacePresentationPhase.Preparing &&
+        developmentPresentation.Snapshot is { ShowNativeWorkspace: false, ShowStartupSurface: true, AttachWebWorkspace: true, EnableWebWorkspace: false },
+    "Development must start on the native startup surface with an attached but hidden Web workspace.");
+Require(developmentPresentation.TryPrepare(isExiting: false), "A live Development session must accept the preparing WebView.");
+Require(developmentPresentation.TryShowReady(isExiting: false) &&
+        developmentPresentation.Snapshot is { ShowNativeWorkspace: false, ShowStartupSurface: false, AttachWebWorkspace: true, EnableWebWorkspace: true },
+    "Only the ready transition may expose and enable the Web workspace.");
+developmentPresentation.ShowNativeFallback();
+Require(developmentPresentation.Snapshot is { ShowNativeWorkspace: true, ShowStartupSurface: false, AttachWebWorkspace: false, EnableWebWorkspace: false },
+    "A Web failure must restore only the native workspace.");
+
+var slowReadyPresentation = new WebWorkspacePresentationState(webShellAllowed: true);
+Require(slowReadyPresentation.TryPrepare(isExiting: false) && slowReadyPresentation.Phase == WebWorkspacePresentationPhase.Preparing,
+    "A slow ready handshake must keep the startup surface visible.");
+Require(!slowReadyPresentation.TryShowReady(isExiting: true) && slowReadyPresentation.Phase == WebWorkspacePresentationPhase.Preparing,
+    "An exiting session must reject a delayed ready callback.");
+var fastReadyPresentation = new WebWorkspacePresentationState(webShellAllowed: true);
+Require(fastReadyPresentation.TryShowReady(isExiting: false) && fastReadyPresentation.Phase == WebWorkspacePresentationPhase.Ready,
+    "A fast ready handshake must transition directly from the startup surface without exposing native content.");
+var nativePresentation = new WebWorkspacePresentationState(webShellAllowed: false);
+Require(nativePresentation.Phase == WebWorkspacePresentationPhase.Native &&
+        !nativePresentation.TryPrepare(isExiting: false) && !nativePresentation.TryShowReady(isExiting: false),
+    "Production and ModuleTest presentation must remain native-only.");
+
 var activation = new WebActivationSession();
 using var generationOne = new CancellationTokenSource();
 activation.Begin(1);

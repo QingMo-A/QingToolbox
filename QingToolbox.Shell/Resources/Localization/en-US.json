@@ -1,6 +1,7 @@
 {
   "app.name": "QingToolbox",
   "app.subtitle": "Modular Windows toolbox",
+  "webShell.preparingWorkspace": "Preparing your workspace…",
   "nav.home": "Home",
   "nav.modules": "Modules",
   "nav.running": "Running",
