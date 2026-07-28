@@ -139,19 +139,29 @@ describe('ModulesPage lifecycle controls', () => {
   })
 
   it('does not optimistically change runtime state while card Unload is pending', async () => {
-    let resolve!: (value: unknown) => void
-    const pending = new Promise(value => { resolve = value })
-    const loaded = item({ runtimeState: 'Loaded', canLoad: false, canActivate: true, canOpen: true, canUnload: true })
-    const unload = vi.fn(() => pending)
-    const { wrapper } = page(loaded, { unload })
-    await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Unload')!.trigger('click')
-    expect(unload).toHaveBeenCalledWith('qing.text')
-    expect(useModuleStore().modules[0].runtimeState).toBe('Loaded')
-    expect(cardLabels(wrapper)).toEqual(['Open', 'Activate', 'Unloading…'])
-    resolve({ generatedAt: new Date().toISOString(), modules: [item({ runtimeState: 'Unloaded', canLoad: true })] })
-    await flushPromises()
-    expect(useModuleStore().modules[0].runtimeState).toBe('Unloaded')
-    expect(cardLabels(wrapper)).toEqual(['Load'])
+    vi.useFakeTimers()
+    try {
+      let resolve!: (value: unknown) => void
+      const pending = new Promise(value => { resolve = value })
+      const loaded = item({ runtimeState: 'Loaded', canLoad: false, canActivate: true, canOpen: true, canUnload: true })
+      const unload = vi.fn(() => pending)
+      const { wrapper } = page(loaded, { unload })
+      await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Unload')!.trigger('click')
+      expect(unload).toHaveBeenCalledWith('qing.text')
+      expect(useModuleStore().modules[0].runtimeState).toBe('Loaded')
+      expect(cardLabels(wrapper)).toEqual(['Open', 'Activate', 'Unloading…'])
+      resolve({ generatedAt: new Date().toISOString(), modules: [item({ runtimeState: 'Unloaded', canLoad: true })] })
+      await flushPromises()
+      expect(useModuleStore().modules[0].runtimeState).toBe('Unloaded')
+      expect(wrapper.get('.module-lifecycle-success').classes()).toContain('is-unload')
+      expect(cardLabels(wrapper)).toEqual([])
+      vi.advanceTimersByTime(1400)
+      await wrapper.vm.$nextTick()
+      expect(cardLabels(wrapper)).toEqual(['Load'])
+      expect(wrapper.get('.module-card-lifecycle-actions').classes()).toContain('is-revealing')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('groups runtime and startup badges without duplicating startup controls on cards', async () => {
@@ -203,21 +213,23 @@ describe('ModulesPage lifecycle controls', () => {
       await wrapper.get('.module-card-actions .q-button').trigger('click')
       expect(wrapper.get('.module-operation-spinner').classes()).toContain('module-operation-spinner')
       expect(wrapper.get('.module-card-actions').text()).toContain('Loading…')
-      expect(wrapper.find('.module-load-success').exists()).toBe(false)
+      expect(wrapper.find('.module-lifecycle-success').exists()).toBe(false)
 
       resolve({ generatedAt: new Date().toISOString(), modules: [loaded] })
       await flushPromises()
 
       expect(store.modules[0].runtimeState).toBe('Loaded')
-      const success = wrapper.get('.module-load-success')
+      const success = wrapper.get('.module-lifecycle-success')
+      expect(success.classes()).not.toContain('is-unload')
       expect(success.find('circle').attributes('pathLength')).toBe('100')
       expect(success.find('path').attributes('pathLength')).toBe('100')
       expect(wrapper.findAll('.module-card-actions .q-button')).toHaveLength(0)
 
       vi.advanceTimersByTime(1400)
       await wrapper.vm.$nextTick()
-      expect(wrapper.find('.module-load-success').exists()).toBe(false)
+      expect(wrapper.find('.module-lifecycle-success').exists()).toBe(false)
       expect(cardLabels(wrapper)).toEqual(['Open', 'Activate', 'Unload'])
+      expect(wrapper.get('.module-card-lifecycle-actions').classes()).toContain('is-revealing')
     } finally {
       vi.useRealTimers()
     }
@@ -300,7 +312,7 @@ describe('ModulesPage lifecycle controls', () => {
     expect(store.error).toBe('The host could not confirm the current module state.')
     expect(wrapper.get('[role="status"]').text()).toBe('The host could not refresh modules. Showing the last confirmed snapshot.')
     expect(wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Load')!.attributes('disabled')).toBeDefined()
-    expect(wrapper.find('.module-load-success').exists()).toBe(false)
+    expect(wrapper.find('.module-lifecycle-success').exists()).toBe(false)
     await wrapper.get('.wpf-module-card').trigger('click')
     expect(wrapper.find('.wpf-module-details').exists()).toBe(true)
     expect(useToastStore().message).toBe('Text Tools could not be loaded.')

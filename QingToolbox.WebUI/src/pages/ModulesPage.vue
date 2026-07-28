@@ -30,18 +30,32 @@ const app = useAppStore()
 const store = useModuleStore()
 const toast = useToastStore()
 const { t } = useLocalization()
-const loadSuccessModules = reactive(new Set<string>())
-const loadSuccessTimers = new Map<string, number>()
-const loadSuccessDurationMs = 1400
+type AnimatedLifecycleSuccess = 'load' | 'unload'
+const lifecycleSuccessOperations = reactive(new Map<string, AnimatedLifecycleSuccess>())
+const revealingLifecycleActions = reactive(new Set<string>())
+const lifecycleFeedbackTimers = new Map<string, number[]>()
+const lifecycleSuccessDurationMs = 1400
+const lifecycleRevealDurationMs = 260
 
-function showLoadSuccess(moduleId: string) {
-  const existingTimer = loadSuccessTimers.get(moduleId)
-  if (existingTimer !== undefined) window.clearTimeout(existingTimer)
-  loadSuccessModules.add(moduleId)
-  loadSuccessTimers.set(moduleId, window.setTimeout(() => {
-    loadSuccessModules.delete(moduleId)
-    loadSuccessTimers.delete(moduleId)
-  }, loadSuccessDurationMs))
+function clearLifecycleFeedbackTimers(moduleId: string) {
+  for (const timer of lifecycleFeedbackTimers.get(moduleId) ?? []) window.clearTimeout(timer)
+  lifecycleFeedbackTimers.delete(moduleId)
+}
+
+function showLifecycleSuccess(moduleId: string, operation: AnimatedLifecycleSuccess) {
+  clearLifecycleFeedbackTimers(moduleId)
+  revealingLifecycleActions.delete(moduleId)
+  lifecycleSuccessOperations.set(moduleId, operation)
+  const timers: number[] = []
+  timers.push(window.setTimeout(() => {
+    lifecycleSuccessOperations.delete(moduleId)
+    revealingLifecycleActions.add(moduleId)
+    timers.push(window.setTimeout(() => {
+      revealingLifecycleActions.delete(moduleId)
+      lifecycleFeedbackTimers.delete(moduleId)
+    }, lifecycleRevealDurationMs))
+  }, lifecycleSuccessDurationMs))
+  lifecycleFeedbackTimers.set(moduleId, timers)
 }
 
 async function refresh(showToast = false) {
@@ -74,7 +88,7 @@ async function operate(module: ModuleSnapshotItem, operation: LifecycleModuleOpe
           : operation === 'deactivate' ? await client.deactivate(module.id)
             : await client.unload(module.id)
     store.complete(snapshot)
-    if (operation === 'load') showLoadSuccess(module.id)
+    if (operation === 'load' || operation === 'unload') showLifecycleSuccess(module.id, operation)
     toast.show(t(moduleOperationSuccessKey(operation), { name: module.displayName }), 'success')
   } catch {
     toast.show(t(moduleOperationFailureKey(operation), { name: module.displayName }), 'error')
@@ -144,8 +158,9 @@ const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') st
 onMounted(() => window.addEventListener('keydown', closeOnEscape))
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', closeOnEscape)
-  for (const timer of loadSuccessTimers.values()) window.clearTimeout(timer)
-  loadSuccessTimers.clear()
+  for (const timers of lifecycleFeedbackTimers.values())
+    for (const timer of timers) window.clearTimeout(timer)
+  lifecycleFeedbackTimers.clear()
 })
 </script>
 
@@ -192,11 +207,11 @@ onBeforeUnmount(() => {
             <p>{{ module.displayDescription }}</p>
             <p v-if="module.isExecutionBlocked" class="module-operation-blocked">{{ t('modules.card.operationsBlocked') }}</p>
             <div class="module-actions module-card-actions">
-              <div class="module-card-lifecycle-actions">
-                <span v-if="loadSuccessModules.has(module.id)" class="module-load-success" aria-hidden="true">
+              <div class="module-card-lifecycle-actions" :class="{ 'is-revealing': revealingLifecycleActions.has(module.id) }">
+                <span v-if="lifecycleSuccessOperations.has(module.id)" class="module-lifecycle-success" :class="{ 'is-unload': lifecycleSuccessOperations.get(module.id) === 'unload' }" aria-hidden="true">
                   <svg viewBox="0 0 36 36" width="34" height="34">
-                    <circle class="module-load-success-ring" cx="18" cy="18" r="14" pathLength="100" />
-                    <path class="module-load-success-check" d="M10.5 18.5 15.7 23.5 25.8 12.8" pathLength="100" />
+                    <circle class="module-lifecycle-success-ring" cx="18" cy="18" r="14" pathLength="100" />
+                    <path class="module-lifecycle-success-check" d="M10.5 18.5 15.7 23.5 25.8 12.8" pathLength="100" />
                   </svg>
                 </span>
                 <template v-else>
@@ -230,11 +245,15 @@ onBeforeUnmount(() => {
 .module-card-lifecycle-actions { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .module-card-actions .q-button { white-space: nowrap; }
 .module-operation-spinner { width: 14px; height: 14px; margin-inline-end: 7px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: module-operation-spin 650ms linear infinite; }
-.module-load-success { display: grid; place-items: center; width: 66px; height: 38px; color: var(--q-success); animation: module-load-success-presence 1400ms cubic-bezier(.2,.75,.25,1) both; }
-.module-load-success svg { display: block; overflow: visible; }
-.module-load-success-ring,.module-load-success-check { fill: none; stroke: currentColor; stroke-dasharray: 100; stroke-dashoffset: 100; }
-.module-load-success-ring { stroke-width: 2.1; stroke-dashoffset: -100; transform: rotate(-90deg); transform-box: fill-box; transform-origin: center; animation: module-load-ring-draw 680ms cubic-bezier(.35,.05,.2,1) 100ms forwards; }
-.module-load-success-check { stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; animation: module-load-check-draw 360ms cubic-bezier(.25,.8,.3,1) 100ms forwards; }
+.module-lifecycle-success { display: grid; place-items: center; width: 66px; height: 38px; color: var(--q-success); animation: module-lifecycle-success-presence 1400ms cubic-bezier(.2,.75,.25,1) both; }
+.module-lifecycle-success.is-unload { color: var(--q-danger); }
+.module-lifecycle-success svg { display: block; overflow: visible; }
+.module-lifecycle-success-ring,.module-lifecycle-success-check { fill: none; stroke: currentColor; stroke-dasharray: 100; stroke-dashoffset: 100; }
+.module-lifecycle-success-ring { stroke-width: 2.1; stroke-dashoffset: -100; transform: rotate(-90deg); transform-box: fill-box; transform-origin: center; animation: module-lifecycle-ring-draw 680ms cubic-bezier(.35,.05,.2,1) 100ms forwards; }
+.module-lifecycle-success-check { stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; animation: module-lifecycle-check-draw 360ms cubic-bezier(.25,.8,.3,1) 100ms forwards; }
+.module-card-lifecycle-actions.is-revealing .q-button { animation: module-lifecycle-actions-reveal 220ms cubic-bezier(.2,.75,.25,1) both; }
+.module-card-lifecycle-actions.is-revealing .q-button:nth-child(2) { animation-delay: 30ms; }
+.module-card-lifecycle-actions.is-revealing .q-button:nth-child(3) { animation-delay: 60ms; }
 .module-card-lifecycle-actions .q-button.is-primary { border-color: var(--q-brand); background: var(--q-brand); color: #fff; }
 .module-card-lifecycle-actions .q-button.is-primary:hover { border-color: color-mix(in srgb, var(--q-brand) 82%, #000); background: color-mix(in srgb, var(--q-brand) 88%, #000); color: #fff; }
 .module-card-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
@@ -247,20 +266,25 @@ onBeforeUnmount(() => {
 .module-startup .settings-switch-row { margin-top: 8px; }
 .module-startup-status { margin-top: 4px; }
 @keyframes module-operation-spin { to { transform: rotate(360deg); } }
-@keyframes module-load-ring-draw { to { stroke-dashoffset: 0; } }
-@keyframes module-load-check-draw { to { stroke-dashoffset: 0; } }
-@keyframes module-load-success-presence {
+@keyframes module-lifecycle-ring-draw { to { stroke-dashoffset: 0; } }
+@keyframes module-lifecycle-check-draw { to { stroke-dashoffset: 0; } }
+@keyframes module-lifecycle-success-presence {
   0% { opacity: 0; transform: scale(.88); }
   10% { opacity: 1; transform: scale(1.04); }
   18%, 78% { opacity: 1; transform: scale(1); }
   100% { opacity: 0; transform: scale(.72); }
 }
+@keyframes module-lifecycle-actions-reveal {
+  from { opacity: 0; transform: translateY(4px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 @media (prefers-reduced-motion: reduce) {
   .module-operation-spinner { animation-duration: 1200ms; }
-  .module-load-success { animation-name: module-load-success-reduced; }
-  .module-load-success-ring,.module-load-success-check { stroke-dashoffset: 0; animation: none; }
+  .module-lifecycle-success { animation-name: module-lifecycle-success-reduced; }
+  .module-lifecycle-success-ring,.module-lifecycle-success-check { stroke-dashoffset: 0; animation: none; }
+  .module-card-lifecycle-actions.is-revealing .q-button { animation: none; }
 }
-@keyframes module-load-success-reduced { 0%, 82% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes module-lifecycle-success-reduced { 0%, 82% { opacity: 1; } 100% { opacity: 0; } }
 @media (max-width: 650px) {
   .module-actions { row-gap: 8px; }
   .module-card-lifecycle-actions { flex-basis: 100%; }
