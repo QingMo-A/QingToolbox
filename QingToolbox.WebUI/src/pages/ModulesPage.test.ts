@@ -87,6 +87,18 @@ describe('ModulesPage lifecycle controls', () => {
     expect(cardLabels(wrapper)).toEqual(expected)
   })
 
+  it('keeps lifecycle actions and the trailing Details entry in separate visual groups', () => {
+    const running = item({ runtimeState: 'Running', canLoad: false, canOpen: true, canDeactivate: true, canUnload: true })
+    const { wrapper } = page(running)
+    const actionBar = wrapper.get('.module-card-actions')
+    expect(actionBar.findAll(':scope > div')).toHaveLength(2)
+    expect(actionBar.get('.module-card-lifecycle-actions').findAll('.q-button').map(button => button.text()))
+      .toEqual(['Open', 'Deactivate', 'Unload'])
+    expect(actionBar.get('.module-card-details-actions').findAll('.q-button').map(button => button.text()))
+      .toEqual(['Details'])
+    expect(cardLabels(wrapper)).toEqual(['Open', 'Deactivate', 'Unload', 'Details'])
+  })
+
   it('uses the same lifecycle operation order on the card and in details', async () => {
     const { wrapper } = page(item({ runtimeState: 'Running', canLoad: false, canOpen: true, canDeactivate: true, canUnload: true }))
     expect(cardLabels(wrapper)).toEqual(['Open', 'Deactivate', 'Unload', 'Details'])
@@ -157,6 +169,7 @@ describe('ModulesPage lifecycle controls', () => {
     expect(actions.find(button => button.text() === 'Open')!.classes()).toContain('is-primary')
     expect(actions.find(button => button.text() === 'Deactivate')!.classes()).toContain('is-secondary')
     expect(actions.find(button => button.text() === 'Unload')!.classes()).toContain('is-secondary')
+    expect(actions.find(button => button.text() === 'Details')!.classes()).toContain('is-ghost')
   })
 
   it('shows card deactivate and unload labels in Chinese', () => {

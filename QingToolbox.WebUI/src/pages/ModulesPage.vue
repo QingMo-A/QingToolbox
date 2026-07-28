@@ -169,8 +169,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeOnEscape))
             <p>{{ module.displayDescription }}</p>
             <p v-if="module.isExecutionBlocked" class="module-operation-blocked">{{ t('modules.card.operationsBlocked') }}</p>
             <div class="module-actions module-card-actions">
-              <QButton v-for="operation in availableLifecycleOperations(module)" :key="operation" :variant="isPrimaryLifecycleOperation(operation) ? 'primary' : 'secondary'" :disabled="!hostOperationsAvailable || !!store.operations[module.id] || module.isBusy" @click="operate(module, operation)">{{ operationLabel(module, operation) }}</QButton>
-              <QButton class="module-details-button" @click="openDetails(module.id)" @keydown.enter.prevent="openDetails(module.id)" @keydown.space.prevent="openDetails(module.id)">{{ t('modules.card.details') }}</QButton>
+              <div class="module-card-lifecycle-actions">
+                <QButton v-for="operation in availableLifecycleOperations(module)" :key="operation" :variant="isPrimaryLifecycleOperation(operation) ? 'primary' : 'secondary'" :disabled="!hostOperationsAvailable || !!store.operations[module.id] || module.isBusy" @click="operate(module, operation)">{{ operationLabel(module, operation) }}</QButton>
+              </div>
+              <div class="module-card-details-actions">
+                <QButton variant="ghost" class="module-details-button" @click="openDetails(module.id)" @keydown.enter.prevent="openDetails(module.id)" @keydown.space.prevent="openDetails(module.id)">{{ t('modules.card.details') }}</QButton>
+              </div>
             </div>
             <div class="module-card-meta"><span>{{ t('modules.card.runtime') }}: <strong>{{ runtimeLabel(module) }}</strong></span><span :class="{ issue: module.errorCount }">{{ issueLabel(module.errorCount) }}</span></div>
           </article>
@@ -199,6 +203,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeOnEscape))
 
 <style scoped>
 .module-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.module-card-actions { align-items: center; gap: 10px 16px; min-height: 38px; }
+.module-card-lifecycle-actions { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.module-card-details-actions { display: flex; flex: 0 0 auto; margin-inline-start: auto; }
+.module-card-actions .q-button { white-space: nowrap; }
+.module-card-lifecycle-actions .q-button.is-primary { border-color: var(--q-brand); background: var(--q-brand); color: #fff; }
+.module-card-lifecycle-actions .q-button.is-primary:hover { border-color: color-mix(in srgb, var(--q-brand) 82%, #000); background: color-mix(in srgb, var(--q-brand) 88%, #000); color: #fff; }
+.module-details-button.is-ghost { padding-inline: 10px; border-color: transparent; background: transparent; color: var(--q-brand); }
+.module-details-button.is-ghost:hover { border-color: color-mix(in srgb, var(--q-brand) 24%, transparent); background: var(--q-brand-soft); }
 .module-card-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .module-card-badges .q-badge { padding: 5px 9px; }
 .module-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 13px; color: var(--q-text-2); font-size: 12px; }
@@ -211,6 +223,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeOnEscape))
 .module-startup-status { margin-top: 4px; }
 @media (max-width: 650px) {
   .module-actions { row-gap: 8px; }
+  .module-card-actions { align-items: flex-end; }
+  .module-card-lifecycle-actions { flex-basis: 100%; }
+  .module-card-details-actions { justify-content: flex-end; width: 100%; }
   .module-card-badges { grid-column: 1 / -1; justify-content: flex-start; }
 }
 </style>
