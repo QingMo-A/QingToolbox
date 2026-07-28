@@ -17,10 +17,11 @@
 - UI-2A preserves protocol v4 and projects authoritative C# module state without module side effects.
 - UI-3 / Plan 010: Implementation Complete.
 - UI-4A / Plan 011: Implementation Complete.
-- Plan 012: Active; prerequisite P1, UI-5A1 and UI-5A2 reactive Development Web shell localization are Implementation Complete.
+- Plan 012: Active; prerequisite P1, UI-5A1, UI-5A2 and UI-5A3A Development Web module workspace localization are Implementation Complete; UI-5A3 remains In Progress.
 - Plan 012 prerequisite P1 commit: `9f63a9d69e424738b420ddc9305b8b482f56c198`.
 - Plan 012 UI-5A1 commit: `3f2645f963d51747cf9655d785a5038dcbb7d31a`.
-- Plan 012 next bounded slice: UI-5A3 Complete Development workspace localization; UI-5A3 has not started.
+- Plan 012 UI-5A2 commit: `ed1a3172ce8a65cdffc9ab561939c3d7c4075a96`.
+- Plan 012 next bounded slice: UI-5A3B Home, Logs, Settings, Diagnostics and module metadata refresh; UI-5A3 is not complete.
 - Production Web UI: Deferred.
 - Downloads, updates, and floating surfaces remain deferred.
 - Preview 2 release work and UI modernization remain independent tracks.

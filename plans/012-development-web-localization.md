@@ -8,7 +8,10 @@ Prerequisite P1: Implementation Complete (`9f63a9d69e424738b420ddc9305b8b482f56c
 UI-5A1: Implementation Complete
 UI-5A1 Commit: `3f2645f963d51747cf9655d785a5038dcbb7d31a`
 UI-5A2: Implementation Complete
-Next: UI-5A3 Complete Development workspace localization
+UI-5A2 Commit: `ed1a3172ce8a65cdffc9ab561939c3d7c4075a96`
+UI-5A3: In Progress
+UI-5A3A Module workspaces: Implementation Complete
+Next: UI-5A3B Home, Logs, Settings, Diagnostics and module metadata refresh
 ```
 
 Depends on:

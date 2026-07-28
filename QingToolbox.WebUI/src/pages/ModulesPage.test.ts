@@ -6,6 +6,8 @@ import { useAppStore } from '../app/store'
 import { useModuleStore } from '../app/moduleStore'
 import { useToastStore } from '../app/toastStore'
 import type { ModuleSnapshotItem } from '../contracts/modules'
+import { useSettingsStore } from '../app/settingsStore'
+import type { EffectiveLanguageCode, LanguageCode, SettingsSnapshot } from '../contracts/settings'
 
 const item = (overrides: Partial<ModuleSnapshotItem> = {}): ModuleSnapshotItem => ({
   id: 'qing.text', displayName: 'Text Tools', displayDescription: 'Formatting tools', version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState: 'NotLoaded', isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false, canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled', canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false, ...overrides
@@ -13,9 +15,17 @@ const item = (overrides: Partial<ModuleSnapshotItem> = {}): ModuleSnapshotItem =
 const mounted: ReturnType<typeof mount>[] = []
 afterEach(() => { mounted.splice(0).forEach(x => x.unmount()); document.body.innerHTML = ''; vi.restoreAllMocks() })
 
-function page(module = item(), clientOverrides: Record<string, unknown> = {}, state: { confirmed?: boolean; status?: 'idle'|'loading'|'ready'|'error'; bridge?: string } = {}) {
+const settingsSnapshot = (code: LanguageCode, effectiveCode: EffectiveLanguageCode): SettingsSnapshot => ({
+  generatedAt: new Date().toISOString(), language: { code, effectiveCode, displayName: code, options: [
+    { code: 'system', displayName: 'System Default', nativeName: '跟随系统' }, { code: 'zh-CN', displayName: 'Simplified Chinese', nativeName: '简体中文' }, { code: 'en-US', displayName: 'English', nativeName: 'English' },
+  ] }, showLogsInSidebar: true, mainWindowCloseBehavior: 'Ask', closeBehaviorMessage: '', launchAtLogin: false,
+  canConfigureLaunchAtLogin: true, canRepairStartup: false, startupPresentationMode: 'FloatingBadge', startupBackend: 'None', startupStatus: 'Unavailable', startupMessage: '',
+})
+
+function page(module = item(), clientOverrides: Record<string, unknown> = {}, state: { confirmed?: boolean; status?: 'idle'|'loading'|'ready'|'error'; bridge?: string; language?: LanguageCode; effectiveLanguage?: EffectiveLanguageCode } = {}) {
   const pinia = createPinia(); setActivePinia(pinia)
   const app = useAppStore(); app.bridge = state.bridge ?? 'Connected'
+  if (state.language || state.effectiveLanguage) useSettingsStore().complete(settingsSnapshot(state.language ?? state.effectiveLanguage ?? 'en-US', state.effectiveLanguage ?? 'en-US'))
   const store = useModuleStore()
   if (state.confirmed !== false) store.complete({ generatedAt: new Date().toISOString(), modules: [module] })
   if (state.status === 'loading') store.begin()
@@ -335,5 +345,62 @@ describe('ModulesPage lifecycle controls', () => {
     expect(wrapper.text()).toContain('Text Tools')
     expect(wrapper.text()).not.toContain('Bridge.Timeout')
     expect(useToastStore().message).toBe('The host could not refresh modules.')
+  })
+
+  it.each([
+    ['system', 'zh-CN'],
+    ['zh-CN', 'zh-CN'],
+  ] as const)('localizes the complete module workspace for %s with effective %s', async (language, effectiveLanguage) => {
+    const module = item({ errorCount: 1, permissions: ['network'], errors: ['Host supplied issue'], startupAuthorizationState: 'Enabled', isStartupEnabled: true })
+    const { wrapper } = page(module, {}, { language, effectiveLanguage })
+    expect(wrapper.text()).toContain('模块'); expect(wrapper.text()).toContain('发现、浏览和查看工具箱模块。')
+    expect(wrapper.text()).toContain('总计'); expect(wrapper.text()).toContain('有效'); expect(wrapper.text()).toContain('未加载')
+    expect(wrapper.get('input').attributes('placeholder')).toBe('搜索模块…')
+    expect(wrapper.findAll('.filters button').map(button => button.text())).toEqual(['全部','运行中','未加载','有问题','无效'])
+    expect(wrapper.text()).toContain('随工具箱启动'); expect(wrapper.text()).toContain('1 个问题')
+    await wrapper.get('.module-details-button').trigger('click')
+    expect(wrapper.text()).toContain('模块操作'); expect(wrapper.text()).toContain('启动'); expect(wrapper.text()).toContain('模块信息')
+    expect(wrapper.text()).not.toContain('未声明')
+    for (const hostValue of ['Text Tools','Formatting tools','Qing','qing.text','network','Host supplied issue','OutOfProcess','Manual']) expect(wrapper.text()).toContain(hostValue)
+  })
+
+  it('updates the mounted page reactively without clearing module workspace state', async () => {
+    const { wrapper, store } = page(item())
+    store.searchQuery = 'Text'; store.stateFilter = 'notLoaded'; store.selectedModuleId = 'qing.text'
+    useSettingsStore().complete(settingsSnapshot('system','zh-CN')); await wrapper.vm.$nextTick()
+    expect(wrapper.text()).not.toContain('正在刷新模块状态')
+    expect(wrapper.text()).toContain('模块信息'); expect(store.searchQuery).toBe('Text'); expect(store.stateFilter).toBe('notLoaded'); expect(store.selectedModuleId).toBe('qing.text')
+    expect(store.modules).toHaveLength(1)
+  })
+
+  it('translates every startup authorization explanation', async () => {
+    const { wrapper, store } = page(item(), {}, { language: 'zh-CN', effectiveLanguage: 'zh-CN' })
+    store.selectedModuleId = 'qing.text'
+    const cases = [
+      ['NotEnabled','未获自动启动授权'], ['Enabled','已获随 QingToolbox 启动的授权'],
+      ['ChangedNeedsConfirmation','模块内容已变化'], ['Unavailable','无法验证模块内容'], ['Missing','已无法匹配可用模块'],
+    ] as const
+    for (const [state, expected] of cases) {
+      store.modules[0] = { ...store.modules[0], startupAuthorizationState: state }; await wrapper.vm.$nextTick()
+      expect(wrapper.get('.module-startup-status').text()).toContain(expected)
+    }
+  })
+
+  it('uses localized safe operation and startup Toasts with the public module name', async () => {
+    const failure = vi.fn().mockRejectedValue(new Error('SecretCode: private path'))
+    const { wrapper } = page(item(), { load: failure, getSnapshot: vi.fn().mockRejectedValue(new Error('private')) }, { language: 'zh-CN', effectiveLanguage: 'zh-CN' })
+    await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === '加载')!.trigger('click'); await flushPromises()
+    expect(useToastStore().message).toBe('无法加载 Text Tools。'); expect(useToastStore().message).not.toContain('SecretCode')
+    const startupFailure = vi.fn().mockRejectedValue(new Error('private'))
+    const second = page(item(), { setStartupAuthorization: startupFailure, getSnapshot: vi.fn().mockRejectedValue(new Error('private')) }, { language: 'zh-CN', effectiveLanguage: 'zh-CN' })
+    await second.wrapper.get('.module-details-button').trigger('click'); await second.wrapper.get('.q-switch').trigger('click'); await flushPromises()
+    expect(useToastStore().message).toBe('无法更新 Text Tools 的启动授权。')
+  })
+
+  it('keeps unknown runtime states host-authored while translating known and invalid states', async () => {
+    const { wrapper, store } = page(item({ runtimeState: 'FutureState', canLoad: false }), {}, { language: 'zh-CN', effectiveLanguage: 'zh-CN' })
+    expect(wrapper.text()).toContain('FutureState')
+    store.complete({ generatedAt: new Date().toISOString(), modules: [item({ runtimeState: 'Failed', isValid: false, canLoad: false })] }); await wrapper.vm.$nextTick()
+    expect(wrapper.get('.module-card-badges').text()).toContain('无效')
   })
 })

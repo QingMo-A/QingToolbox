@@ -7,16 +7,25 @@ import { router as appRouter } from '../app/router'
 import { useAppStore } from '../app/store'
 import { useModuleStore } from '../app/moduleStore'
 import { useToastStore } from '../app/toastStore'
+import { useSettingsStore } from '../app/settingsStore'
+import type { EffectiveLanguageCode, LanguageCode, SettingsSnapshot } from '../contracts/settings'
 
 const mounted: VueWrapper[] = []
 afterEach(() => mounted.splice(0).forEach(wrapper => wrapper.unmount()))
 
 const item = (id: string, runtimeState: string) => ({ id, displayName: id, displayDescription: `${id} description`, version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState, isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canLoad: false, canActivate: false, canOpen: runtimeState === 'Running', canDeactivate: runtimeState === 'Running', canUnload: runtimeState === 'Running', isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled' as const, canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false })
 const snapshot = { generatedAt: new Date().toISOString(), modules: [item('Running module', 'Running'), item('Loaded module', 'Loaded'), item('Waiting module', 'NotLoaded'), item('Failed module', 'Failed')] }
+const settingsSnapshot = (code: LanguageCode, effectiveCode: EffectiveLanguageCode): SettingsSnapshot => ({
+  generatedAt: new Date().toISOString(), language: { code, effectiveCode, displayName: code, options: [
+    { code: 'system', displayName: 'System Default', nativeName: '跟随系统' }, { code: 'zh-CN', displayName: 'Simplified Chinese', nativeName: '简体中文' }, { code: 'en-US', displayName: 'English', nativeName: 'English' },
+  ] }, showLogsInSidebar: true, mainWindowCloseBehavior: 'Ask', closeBehaviorMessage: '', launchAtLogin: false,
+  canConfigureLaunchAtLogin: true, canRepairStartup: false, startupPresentationMode: 'FloatingBadge', startupBackend: 'None', startupStatus: 'Unavailable', startupMessage: '',
+})
 
-async function page(status: 'idle'|'loading'|'ready'|'error' = 'ready', clientOverrides: Record<string, unknown> = {}, options: { confirmed?: boolean; bridge?: string } = {}) {
+async function page(status: 'idle'|'loading'|'ready'|'error' = 'ready', clientOverrides: Record<string, unknown> = {}, options: { confirmed?: boolean; bridge?: string; language?: LanguageCode; effectiveLanguage?: EffectiveLanguageCode } = {}) {
   const pinia = createPinia()
   setActivePinia(pinia)
+  if (options.language || options.effectiveLanguage) useSettingsStore().complete(settingsSnapshot(options.language ?? options.effectiveLanguage ?? 'en-US', options.effectiveLanguage ?? 'en-US'))
   useAppStore().bridge = options.bridge ?? 'Connected'
   const modules = useModuleStore()
   const confirmed = options.confirmed ?? status === 'ready'
@@ -213,5 +222,37 @@ describe('RunningModulesPage', () => {
     expect(wrapper.find('[role="status"]').exists()).toBe(false)
     expect(useToastStore().message).toBe('Running module could not be unloaded.')
     expect(getSnapshot).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([['system','zh-CN'],['zh-CN','zh-CN']] as const)('localizes the running workspace for %s with effective %s', async (language, effectiveLanguage) => {
+    const { wrapper } = await page('ready', {}, { language, effectiveLanguage })
+    expect(wrapper.text()).toContain('运行中模块'); expect(wrapper.text()).toContain('宿主运行时中当前处于活动状态的模块。')
+    expect(wrapper.text()).toContain('运行方式'); expect(wrapper.text()).toContain('作者'); expect(wrapper.text()).toContain('运行中')
+    expect(wrapper.findAll('.running-module-action button').map(button => button.text())).toEqual(['打开','停用','卸载','查看详情'])
+    for (const hostValue of ['Running module','Running module description','OutOfProcess','Qing']) expect(wrapper.text()).toContain(hostValue)
+  })
+
+  it('reactively changes labels without clearing running cards', async () => {
+    const { wrapper, modules } = await page()
+    useSettingsStore().complete(settingsSnapshot('system','zh-CN')); await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('运行中模块'); expect(wrapper.text()).toContain('Running module description'); expect(modules.runningModules).toHaveLength(1)
+  })
+
+  it('localizes live, stale, unavailable, and disconnected states', async () => {
+    const live = await page('ready', {}, { language: 'zh-CN', effectiveLanguage: 'zh-CN' }); live.modules.complete({ generatedAt: new Date().toISOString(), modules: [] }); await live.wrapper.vm.$nextTick()
+    expect(live.wrapper.text()).toContain('当前没有正在运行的模块'); expect(live.wrapper.text()).toContain('前往模块')
+    live.modules.fail(new Error('hidden')); await live.wrapper.vm.$nextTick(); expect(live.wrapper.text()).toContain('上次确认的快照中没有运行中模块')
+    live.wrapper.unmount()
+    const unavailable = await page('error', {}, { language: 'zh-CN', effectiveLanguage: 'zh-CN' }); expect(unavailable.wrapper.text()).toContain('运行中模块不可用'); expect(unavailable.wrapper.text()).toContain('重试')
+    unavailable.wrapper.unmount()
+    const disconnected = await page('error', {}, { confirmed: true, bridge: 'Disconnected', language: 'zh-CN', effectiveLanguage: 'zh-CN' }); expect(disconnected.wrapper.get('[role="status"]').text()).toContain('宿主已断开连接')
+  })
+
+  it('uses the shared localized operation Toast and preserves detail navigation', async () => {
+    const failure = vi.fn().mockRejectedValue(new Error('SecretCode: hidden'))
+    const resync = vi.fn().mockRejectedValue(new Error('hidden'))
+    const { wrapper } = await page('ready', { open: failure, getSnapshot: resync }, { language: 'zh-CN', effectiveLanguage: 'zh-CN' })
+    await wrapper.findAll('.running-module-action button').find(button => button.text() === '打开')!.trigger('click'); await flushPromises()
+    expect(useToastStore().message).toBe('无法打开 Running module 窗口。'); expect(useToastStore().message).not.toContain('SecretCode'); expect(resync).toHaveBeenCalledTimes(1)
   })
 })
