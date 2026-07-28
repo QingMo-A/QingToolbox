@@ -193,8 +193,8 @@ onBeforeUnmount(() => {
     <header class="wpf-page-header">
       <div><h1>{{ t('modules.page.title') }}</h1><p>{{ t('modules.page.description') }}</p></div>
       <div class="module-page-actions">
-        <QButton @click="importModule" :disabled="!hostOperationsAvailable || isImporting"><span v-if="isImporting" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="import" /> {{ t(isImporting ? 'modules.page.importing' : 'modules.page.import') }}</QButton>
-        <QButton @click="refresh(true)" :disabled="!canRefresh"><QIcon name="refresh" /> {{ t(store.status === 'loading' ? 'modules.page.refreshing' : 'modules.page.refresh') }}</QButton>
+        <QButton class="module-import-button" variant="primary" :aria-busy="isImporting" @click="importModule" :disabled="!hostOperationsAvailable || isImporting"><span v-if="isImporting" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="import" /> {{ t(isImporting ? 'modules.page.importing' : 'modules.page.import') }}</QButton>
+        <QButton class="module-refresh-button" variant="secondary" @click="refresh(true)" :disabled="!canRefresh"><QIcon name="refresh" /> {{ t(store.status === 'loading' ? 'modules.page.refreshing' : 'modules.page.refresh') }}</QButton>
       </div>
     </header>
     <section class="wpf-status-strip" role="status" aria-live="polite">
@@ -219,7 +219,7 @@ onBeforeUnmount(() => {
       <section class="wpf-module-list">
         <div v-if="store.status === 'loading' && !hasConfirmedSnapshot" class="wpf-module-stack"><QSkeleton v-for="n in 3" :key="n" /></div>
         <QEmptyState v-else-if="store.status === 'error' && !hasConfirmedSnapshot" :title="t('modules.empty.unavailable')" :description="t('modules.empty.unavailableDescription')"><QButton :disabled="!canRefresh" @click="refresh()">{{ t('modules.empty.retry') }}</QButton></QEmptyState>
-        <QEmptyState v-else-if="store.visibleModules.length === 0" :title="t(store.modules.length ? 'modules.empty.noResults' : 'modules.empty.noInstalled')" :description="t(store.modules.length ? 'modules.empty.searchHint' : 'modules.empty.importHint')"><QButton v-if="store.modules.length === 0" :disabled="!hostOperationsAvailable || isImporting" @click="importModule"><span v-if="isImporting" class="module-operation-spinner" aria-hidden="true" />{{ t(isImporting ? 'modules.page.importing' : 'modules.page.import') }}</QButton></QEmptyState>
+        <QEmptyState v-else-if="store.visibleModules.length === 0" :title="t(store.modules.length ? 'modules.empty.noResults' : 'modules.empty.noInstalled')" :description="t(store.modules.length ? 'modules.empty.searchHint' : 'modules.empty.importHint')"><QButton v-if="store.modules.length === 0" class="module-import-button" variant="primary" :aria-busy="isImporting" :disabled="!hostOperationsAvailable || isImporting" @click="importModule"><span v-if="isImporting" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="import" /> {{ t(isImporting ? 'modules.page.importing' : 'modules.page.import') }}</QButton></QEmptyState>
         <div v-else class="wpf-module-stack">
           <article v-for="module in store.visibleModules" :key="module.id" class="wpf-module-card" :class="{ selected: store.selectedModuleId === module.id }" tabindex="0" :aria-label="`${t('modules.card.details')}: ${module.displayName}`" @click="openDetailsFromCard($event, module.id)" @keydown.enter.self.prevent="openDetails(module.id)" @keydown.space.self.prevent="openDetails(module.id)">
             <header>
@@ -267,7 +267,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.module-page-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.module-page-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 0; }
+.module-page-actions .q-button { flex: 0 0 auto; margin-top: 0; white-space: nowrap; }
+.module-import-button { min-width: 136px; gap: 7px; }
+.module-import-button.is-primary { border-color: var(--q-brand); background: var(--q-brand); color: #fff; }
+.module-import-button.is-primary:hover:not(:disabled) { border-color: color-mix(in srgb, var(--q-brand) 82%, #000); background: color-mix(in srgb, var(--q-brand) 88%, #000); color: #fff; }
 .module-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .module-card-actions { align-items: center; min-height: 38px; }
 .module-card-lifecycle-actions { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 8px; min-width: 0; }
@@ -314,6 +318,7 @@ onBeforeUnmount(() => {
 }
 @keyframes module-lifecycle-success-reduced { 0%, 82% { opacity: 1; } 100% { opacity: 0; } }
 @media (max-width: 650px) {
+  .module-page-actions { justify-self: start; justify-content: flex-start; width: 100%; }
   .module-actions { row-gap: 8px; }
   .module-card-lifecycle-actions { flex-basis: 100%; }
   .module-card-badges { grid-column: 1 / -1; justify-content: flex-start; }
