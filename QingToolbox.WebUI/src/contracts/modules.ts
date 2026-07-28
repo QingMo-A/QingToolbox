@@ -7,6 +7,11 @@ export interface ModuleSnapshotItem {
   isStartupEnabled: boolean; startupAuthorizationState: StartupAuthorizationState; canChangeStartupAuthorization: boolean; isStartupAuthorizationBusy: boolean
 }
 export interface ModuleSnapshot { generatedAt: string; modules: ModuleSnapshotItem[] }
+export interface ModuleImportResult {
+  disposition: 'Imported'|'Cancelled'
+  importedModuleId: string|null
+  snapshot: ModuleSnapshot
+}
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string')
 const isItem = (value: any): value is ModuleSnapshotItem => !!value &&
   ['id','displayName','displayDescription','version','author','runtimeType','loadMode','runtimeState','minimumHostVersion'].every(key => typeof value[key] === 'string') &&
@@ -19,3 +24,11 @@ const isItem = (value: any): value is ModuleSnapshotItem => !!value &&
 export const isModuleSnapshot = (value: any): value is ModuleSnapshot => !!value &&
   typeof value.generatedAt === 'string' && !Number.isNaN(Date.parse(value.generatedAt)) &&
   Array.isArray(value.modules) && value.modules.every(isItem)
+export const isModuleImportResult = (value: any): value is ModuleImportResult => !!value &&
+  typeof value === 'object' && Object.keys(value).length === 3 &&
+  ['disposition', 'importedModuleId', 'snapshot'].every(key => Object.prototype.hasOwnProperty.call(value, key)) &&
+  (value.disposition === 'Imported' || value.disposition === 'Cancelled') &&
+  (value.importedModuleId === null || typeof value.importedModuleId === 'string') &&
+  (value.disposition === 'Imported' ? typeof value.importedModuleId === 'string' && value.importedModuleId.length > 0 : value.importedModuleId === null) &&
+  isModuleSnapshot(value.snapshot) &&
+  (value.disposition !== 'Imported' || value.snapshot.modules.some((module: ModuleSnapshotItem) => module.id === value.importedModuleId))

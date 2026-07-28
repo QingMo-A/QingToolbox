@@ -1719,6 +1719,28 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand]
     private async Task ImportModuleAsync()
     {
+        try
+        {
+            var result = await ImportModuleFromWebAsync(CancellationToken.None);
+            if (result.Disposition == WebModuleImportDisposition.Imported)
+            {
+                var importedModule = Modules.FirstOrDefault(module => module.Id == result.ImportedModuleId);
+                StatusMessage = localization.GetString(
+                    "status.moduleImportedNextStep",
+                    importedModule?.DisplayName ?? result.ImportedModuleId ?? string.Empty);
+            }
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = localization.GetString(
+                "status.moduleImportFailed",
+                exception.Message);
+        }
+    }
+
+    public async Task<WebModuleImportOperationResult> ImportModuleFromWebAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         var dialog = new OpenFileDialog
         {
             Title = localization.GetString("modules.importDialogTitle"),
@@ -1728,29 +1750,17 @@ public sealed partial class MainWindowViewModel(
         };
         if (dialog.ShowDialog() != true)
         {
-            return;
+            return new(WebModuleImportDisposition.Cancelled, null);
         }
 
-        try
-        {
-            var moduleId = await modulePackageImporter.ImportAsync(
-                dialog.FileName,
-                applicationPaths.UserModulesDirectory,
-                Modules.Select(module => module.Id).ToArray());
-            await RefreshModulesAsync();
-            var importedModule = Modules.FirstOrDefault(
-                module => module.Id == moduleId);
-            SelectedModule = importedModule;
-            SelectedNavigationKey = "Modules";
-            StatusMessage = localization.GetString(
-                "status.moduleImportedNextStep",
-                importedModule?.DisplayName ?? moduleId);
-        }
-        catch (Exception exception)
-        {
-            StatusMessage = localization.GetString(
-                "status.moduleImportFailed",
-                exception.Message);
-        }
+        var moduleId = await modulePackageImporter.ImportAsync(
+            dialog.FileName,
+            applicationPaths.UserModulesDirectory,
+            Modules.Select(module => module.Id).ToArray(),
+            cancellationToken);
+        await RefreshModulesCoreAsync(cancellationToken);
+        SelectedModule = Modules.FirstOrDefault(module => module.Id == moduleId);
+        SelectedNavigationKey = "Modules";
+        return new(WebModuleImportDisposition.Imported, moduleId);
     }
 }

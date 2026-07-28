@@ -1,9 +1,14 @@
 import type { RequestClient } from '../protocol/RequestClient'
-import { isModuleSnapshot, type ModuleSnapshot } from '../../contracts/modules'
+import { isModuleImportResult, isModuleSnapshot, type ModuleImportResult, type ModuleSnapshot } from '../../contracts/modules'
 
 export class ModuleClient {
   constructor(private readonly requests: RequestClient) {}
   getSnapshot() { return this.requestSnapshot('modules.getSnapshot') }
+  async importModule(): Promise<ModuleImportResult> {
+    const value = await this.requests.request<unknown>('modules.import', {})
+    if (!isModuleImportResult(value)) throw new Error('Module import result validation failed.')
+    return value
+  }
   load(moduleId: string) { return this.requestSnapshot('modules.load', { moduleId }) }
   activate(moduleId: string) { return this.requestSnapshot('modules.activate', { moduleId }) }
   open(moduleId: string) { return this.requestSnapshot('modules.open', { moduleId }) }

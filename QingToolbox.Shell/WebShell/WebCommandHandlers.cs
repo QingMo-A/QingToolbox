@@ -51,6 +51,25 @@ public sealed class WebModuleSnapshotCommandHandler(WebModuleSnapshotProvider sn
     }
 }
 
+public sealed class WebModuleImportCommandHandler(
+    IWebModuleImportOperations operations,
+    WebModuleSnapshotProvider snapshots,
+    WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "modules.import";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string>();
+
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        var result = await operations.ImportAsync(context.SessionCancellation);
+        return new WebModuleImportResponse(
+            result.Disposition.ToString(),
+            result.ImportedModuleId,
+            snapshots.Create());
+    }
+}
+
 public abstract class WebModuleLifecycleCommandHandler(
     WebModuleSnapshotProvider snapshots,
     WebActivationSession activation) : IWebCommandHandler

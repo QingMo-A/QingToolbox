@@ -180,6 +180,33 @@ var unloaded = await lifecycleDispatcher.DispatchAsync(LifecycleRequest("modules
 Require(loaded.Response.Success && activated.Response.Success && opened.Response.Success && deactivated.Response.Success && unloaded.Response.Success && unloaded.Response.Payload is WebModuleSnapshot, "Successful lifecycle commands must return complete snapshots.");
 Require(lifecycle.LoadCount == 1 && lifecycle.ActivateCount == 1 && lifecycle.OpenCount == 6 && lifecycle.DeactivateCount == 1 && lifecycle.UnloadCount == 1 && lifecycle.LastModuleId == "qing.test", "Each accepted lifecycle request must call only its explicit adapter once.");
 Require(WebBridgeProtocol.Version == 4, "Lifecycle commands must preserve protocol version 4.");
+
+Console.WriteLine("Verifying native-picker module import bridge boundaries...");
+var importOperations = new ImportOperations();
+var importDispatcher = new WebBridgeDispatcher([
+    new WebModuleImportCommandHandler(importOperations, lifecycleProvider, moduleActivation)]);
+var cancelledImport = await importDispatcher.DispatchAsync(
+    LifecycleRequest("modules.import", new { }), new(11, CancellationToken.None));
+Require(cancelledImport.Response.Success && cancelledImport.Response.Payload is WebModuleImportResponse
+    { Disposition: "Cancelled", ImportedModuleId: null, Snapshot.Modules.Count: 1 },
+    "Cancelling the native picker must return a non-error result with a complete snapshot.");
+importOperations.NextResult = new(WebModuleImportDisposition.Imported, "qing.imported");
+var importedModule = await importDispatcher.DispatchAsync(
+    LifecycleRequest("modules.import", new { }), new(11, CancellationToken.None));
+Require(importedModule.Response.Success && importedModule.Response.Payload is WebModuleImportResponse
+    { Disposition: "Imported", ImportedModuleId: "qing.imported", Snapshot.Modules.Count: 1 } && importOperations.CallCount == 2,
+    "A successful native import must return the imported ID and complete authoritative snapshot.");
+var importWithPath = await importDispatcher.DispatchAsync(
+    LifecycleRequest("modules.import", new { packagePath = root }), new(11, CancellationToken.None));
+Require(!importWithPath.Response.Success && importWithPath.Response.Error?.Code == "InvalidPayload" && importOperations.CallCount == 2,
+    "Web module import must reject frontend-supplied paths before invoking the adapter.");
+importOperations.Failure = new IOException($"Synthetic failure at {root}");
+var failedImport = await importDispatcher.DispatchAsync(
+    LifecycleRequest("modules.import", new { }), new(11, CancellationToken.None));
+Require(!failedImport.Response.Success && failedImport.Response.Error?.Code == "HandlerFailed" &&
+        !JsonSerializer.Serialize(failedImport.Response).Contains(root, StringComparison.OrdinalIgnoreCase),
+    "Import failures must use the existing safe bridge error without exposing local paths.");
+Require(WebBridgeProtocol.Version == 4, "Module import must preserve protocol version 4.");
 var unsupportedOperations = new WebBridgeDispatcher([]);
 foreach (var command in new[] { "modules.remove", "startup.repair", "startup.test" })
 {
@@ -553,6 +580,20 @@ file sealed class LifecycleOperations : IWebModuleLifecycleOperations
     { cancellationToken.ThrowIfCancellationRequested(); DeactivateCount++; LastModuleId = moduleId; return Task.FromResult(NextResult); }
     public Task<WebModuleLifecycleResult> UnloadAsync(string moduleId, CancellationToken cancellationToken)
     { cancellationToken.ThrowIfCancellationRequested(); UnloadCount++; LastModuleId = moduleId; return Task.FromResult(NextResult); }
+}
+file sealed class ImportOperations : IWebModuleImportOperations
+{
+    public WebModuleImportOperationResult NextResult { get; set; } =
+        new(WebModuleImportDisposition.Cancelled, null);
+    public Exception? Failure { get; set; }
+    public int CallCount { get; private set; }
+    public Task<WebModuleImportOperationResult> ImportAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CallCount++;
+        if (Failure is not null) throw Failure;
+        return Task.FromResult(NextResult);
+    }
 }
 file sealed class StartupAuthorizationOperations : IWebModuleStartupAuthorizationOperations
 {

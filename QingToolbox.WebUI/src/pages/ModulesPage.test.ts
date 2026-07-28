@@ -32,7 +32,7 @@ function page(module = item(), clientOverrides: Record<string, unknown> = {}, st
   else if (state.status === 'error') store.fail(new Error('Bridge.Internal: secret failure'))
   else if (state.status === 'idle') store.status = 'idle'
   const snapshot = () => ({ generatedAt: new Date().toISOString(), modules: [module] })
-  const client = { getSnapshot: vi.fn(async () => snapshot()), load: vi.fn(async () => snapshot()), activate: vi.fn(async () => snapshot()), open: vi.fn(async () => snapshot()), deactivate: vi.fn(async () => snapshot()), unload: vi.fn(async () => snapshot()), setStartupAuthorization: vi.fn(async () => snapshot()), ...clientOverrides }
+  const client = { getSnapshot: vi.fn(async () => snapshot()), importModule: vi.fn(async () => ({ disposition: 'Cancelled', importedModuleId: null, snapshot: snapshot() })), load: vi.fn(async () => snapshot()), activate: vi.fn(async () => snapshot()), open: vi.fn(async () => snapshot()), deactivate: vi.fn(async () => snapshot()), unload: vi.fn(async () => snapshot()), setStartupAuthorization: vi.fn(async () => snapshot()), ...clientOverrides }
   const wrapper = mount(ModulesPage, { attachTo: document.body, global: { plugins: [pinia], provide: { moduleClient: client } } }); mounted.push(wrapper)
   return { wrapper, client, app, store }
 }
@@ -46,6 +46,41 @@ const summaryValues = (wrapper: ReturnType<typeof mount>) => Object.fromEntries(
 )
 
 describe('ModulesPage lifecycle controls', () => {
+  it('imports once through the native picker and selects the confirmed module', async () => {
+    let resolve!: (value: unknown) => void
+    const imported = item({ id: 'qing.imported', displayName: 'Imported Tool' })
+    const importModule = vi.fn(() => new Promise(value => { resolve = value }))
+    const load = vi.fn()
+    const { wrapper, store } = page(item(), { importModule, load })
+    store.searchQuery = 'hidden'; store.stateFilter = 'running'
+    const button = wrapper.findAll('.wpf-page-header .q-button').find(item => item.text().includes('Import module'))!
+    await button.trigger('click'); await button.trigger('click')
+    expect(importModule).toHaveBeenCalledTimes(1)
+    expect(button.text()).toContain('Importing…')
+    expect(button.attributes('disabled')).toBeDefined()
+    resolve({ disposition: 'Imported', importedModuleId: imported.id, snapshot: { generatedAt: new Date().toISOString(), modules: [imported] } })
+    await flushPromises()
+    expect(store.selectedModuleId).toBe(imported.id)
+    expect(store.searchQuery).toBe(''); expect(store.stateFilter).toBe('all')
+    expect(useToastStore().message).toBe('Imported Tool was imported.')
+    expect(load).not.toHaveBeenCalled()
+  })
+
+  it('keeps page state unchanged when native import is cancelled', async () => {
+    const { wrapper, store } = page(item())
+    store.searchQuery = 'Text'; store.stateFilter = 'notLoaded'; store.selectedModuleId = 'qing.text'
+    await wrapper.findAll('.wpf-page-header .q-button').find(item => item.text().includes('Import module'))!.trigger('click')
+    await flushPromises()
+    expect(store.searchQuery).toBe('Text'); expect(store.stateFilter).toBe('notLoaded'); expect(store.selectedModuleId).toBe('qing.text')
+    expect(useToastStore().message).toBe('')
+  })
+
+  it('offers localized import from the empty module state', async () => {
+    const { wrapper, store } = page(item(), {}, { language: 'zh-CN', effectiveLanguage: 'zh-CN' })
+    store.complete({ generatedAt: new Date().toISOString(), modules: [] }); await wrapper.vm.$nextTick()
+    expect(wrapper.findAll('.wpf-page-header .q-button').some(button => button.text().includes('导入模块'))).toBe(true)
+    expect(wrapper.get('.q-empty .q-button').text()).toBe('导入模块')
+  })
   it('shows the unified six-part summary for a mixed snapshot', async () => {
     const { wrapper, store } = page()
     store.complete({
@@ -458,7 +493,7 @@ describe('ModulesPage lifecycle controls', () => {
     await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Load')!.trigger('click')
     await flushPromises()
     expect(store.status).toBe('error')
-    await wrapper.get('.wpf-page-header .q-button').trigger('click')
+    await wrapper.findAll('.wpf-page-header .q-button').find(button => button.text().includes('Refresh'))!.trigger('click')
     await flushPromises()
     expect(getSnapshot).toHaveBeenCalledTimes(2)
     expect(store.status).toBe('ready')
@@ -468,7 +503,7 @@ describe('ModulesPage lifecycle controls', () => {
   it('keeps the old snapshot and safe page state after a refresh failure', async () => {
     const getSnapshot = vi.fn().mockRejectedValue(new Error('Bridge.Timeout: endpoint'))
     const { wrapper, store } = page(item(), { getSnapshot })
-    await wrapper.get('.wpf-page-header .q-button').trigger('click')
+    await wrapper.findAll('.wpf-page-header .q-button').find(button => button.text().includes('Refresh'))!.trigger('click')
     await flushPromises()
     expect(store.status).toBe('error')
     expect(wrapper.text()).toContain('Text Tools')

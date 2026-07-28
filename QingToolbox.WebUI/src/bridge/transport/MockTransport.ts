@@ -35,6 +35,7 @@ export class MockTransport implements Transport {
     }
     if(message.command==='app.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');return this.ok(message,snapshot)}
     if(message.command==='modules.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length)return this.error(message,'InvalidPayload');return this.ok(message,this.moduleSnapshot())}
+    if(message.command==='modules.import'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length)return this.error(message,'InvalidPayload');return this.ok(message,{disposition:'Cancelled',importedModuleId:null,snapshot:this.moduleSnapshot()})}
     if(message.command==='modules.load'||message.command==='modules.activate'||message.command==='modules.open'||message.command==='modules.deactivate'||message.command==='modules.unload'){
       if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated')
       if(Object.keys(message.payload).length!==1||typeof message.payload.moduleId!=='string'||!message.payload.moduleId.trim())return this.error(message,'InvalidPayload')

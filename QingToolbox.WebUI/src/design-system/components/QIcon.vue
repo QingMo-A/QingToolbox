@@ -11,6 +11,7 @@ type QIconName =
   | 'pin'
   | 'unpin'
   | 'refresh'
+  | 'import'
   | 'statusSuccess'
   | 'statusInfo'
   | 'statusWarning'
@@ -59,6 +60,11 @@ const fluentGlyph = computed(() => fluentGlyphs[props.name])
     <template v-if="name === 'refresh'">
       <path d="M16.5 7A7 7 0 1 0 17 11" />
       <path d="M13 3h4v4" />
+    </template>
+    <template v-else-if="name === 'import'">
+      <path d="M10 3v9" />
+      <path d="m6.5 8.5 3.5 3.5 3.5-3.5" />
+      <path d="M4 13.5v2.5h12v-2.5" />
     </template>
     <template v-else-if="name === 'statusSuccess'">
       <circle cx="10" cy="10" r="7" />

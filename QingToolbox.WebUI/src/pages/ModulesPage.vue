@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type { ModuleClient } from '../bridge/clients/ModuleClient'
 import { useAppStore } from '../app/store'
 import { useModuleStore, type ModuleFilter } from '../app/moduleStore'
@@ -30,6 +30,7 @@ const app = useAppStore()
 const store = useModuleStore()
 const toast = useToastStore()
 const { t } = useLocalization()
+const isImporting = ref(false)
 type AnimatedLifecycleSuccess = 'load' | 'unload'
 const lifecycleSuccessOperations = reactive(new Map<string, AnimatedLifecycleSuccess>())
 const revealingLifecycleActions = reactive(new Set<string>())
@@ -59,7 +60,7 @@ function showLifecycleSuccess(moduleId: string, operation: AnimatedLifecycleSucc
 }
 
 async function refresh(showToast = false) {
-  if (app.bridge !== 'Connected' || store.status === 'loading') return
+  if (app.bridge !== 'Connected' || store.status === 'loading' || isImporting.value) return
   store.begin()
   try {
     store.complete(await client.getSnapshot())
@@ -67,6 +68,29 @@ async function refresh(showToast = false) {
   } catch (error) {
     store.fail(error)
     toast.show(t('modules.toast.refreshFailed'), 'error')
+  }
+}
+
+async function importModule() {
+  if (!hostOperationsAvailable.value || isImporting.value) return
+  isImporting.value = true
+  try {
+    const result = await client.importModule()
+    if (result.disposition === 'Cancelled') return
+    const imported = result.snapshot.modules.find(module => module.id === result.importedModuleId)
+    if (!imported) throw new Error('Imported module is missing from the host snapshot.')
+    store.complete(result.snapshot)
+    store.selectedModuleId = imported.id
+    if (!store.visibleModules.some(module => module.id === imported.id)) {
+      store.searchQuery = ''
+      store.stateFilter = 'all'
+    }
+    toast.show(t('modules.toast.imported', { name: imported.displayName }), 'success')
+  } catch {
+    toast.show(t('modules.toast.importFailed'), 'error')
+    await resyncAfterOperationFailure()
+  } finally {
+    isImporting.value = false
   }
 }
 
@@ -144,7 +168,7 @@ watch(() => app.bridge, bridge => { if (bridge === 'Connected' && store.status =
 const summary = computed(() => summarizeModuleStates(store.modules))
 const hasConfirmedSnapshot = computed(() => store.lastUpdatedAt !== null)
 const hostOperationsAvailable = computed(() => app.bridge === 'Connected' && store.status === 'ready')
-const canRefresh = computed(() => app.bridge === 'Connected' && store.status !== 'loading')
+const canRefresh = computed(() => app.bridge === 'Connected' && store.status !== 'loading' && !isImporting.value)
 const snapshotStatusMessage = computed(() => {
   if (!hasConfirmedSnapshot.value) return null
   if (app.bridge !== 'Connected') return t('modules.status.disconnected')
@@ -168,7 +192,10 @@ onBeforeUnmount(() => {
   <QPage class="modules-page">
     <header class="wpf-page-header">
       <div><h1>{{ t('modules.page.title') }}</h1><p>{{ t('modules.page.description') }}</p></div>
-      <QButton @click="refresh(true)" :disabled="!canRefresh"><QIcon name="refresh" /> {{ t(store.status === 'loading' ? 'modules.page.refreshing' : 'modules.page.refresh') }}</QButton>
+      <div class="module-page-actions">
+        <QButton @click="importModule" :disabled="!hostOperationsAvailable || isImporting"><span v-if="isImporting" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="import" /> {{ t(isImporting ? 'modules.page.importing' : 'modules.page.import') }}</QButton>
+        <QButton @click="refresh(true)" :disabled="!canRefresh"><QIcon name="refresh" /> {{ t(store.status === 'loading' ? 'modules.page.refreshing' : 'modules.page.refresh') }}</QButton>
+      </div>
     </header>
     <section class="wpf-status-strip" role="status" aria-live="polite">
       <span v-if="snapshotStatusMessage">{{ snapshotStatusMessage }}</span>
@@ -192,7 +219,7 @@ onBeforeUnmount(() => {
       <section class="wpf-module-list">
         <div v-if="store.status === 'loading' && !hasConfirmedSnapshot" class="wpf-module-stack"><QSkeleton v-for="n in 3" :key="n" /></div>
         <QEmptyState v-else-if="store.status === 'error' && !hasConfirmedSnapshot" :title="t('modules.empty.unavailable')" :description="t('modules.empty.unavailableDescription')"><QButton :disabled="!canRefresh" @click="refresh()">{{ t('modules.empty.retry') }}</QButton></QEmptyState>
-        <QEmptyState v-else-if="store.visibleModules.length === 0" :title="t(store.modules.length ? 'modules.empty.noResults' : 'modules.empty.noInstalled')" :description="t(store.modules.length ? 'modules.empty.searchHint' : 'modules.empty.importHint')" />
+        <QEmptyState v-else-if="store.visibleModules.length === 0" :title="t(store.modules.length ? 'modules.empty.noResults' : 'modules.empty.noInstalled')" :description="t(store.modules.length ? 'modules.empty.searchHint' : 'modules.empty.importHint')"><QButton v-if="store.modules.length === 0" :disabled="!hostOperationsAvailable || isImporting" @click="importModule"><span v-if="isImporting" class="module-operation-spinner" aria-hidden="true" />{{ t(isImporting ? 'modules.page.importing' : 'modules.page.import') }}</QButton></QEmptyState>
         <div v-else class="wpf-module-stack">
           <article v-for="module in store.visibleModules" :key="module.id" class="wpf-module-card" :class="{ selected: store.selectedModuleId === module.id }" tabindex="0" :aria-label="`${t('modules.card.details')}: ${module.displayName}`" @click="openDetailsFromCard($event, module.id)" @keydown.enter.self.prevent="openDetails(module.id)" @keydown.space.self.prevent="openDetails(module.id)">
             <header>
@@ -240,6 +267,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.module-page-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .module-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .module-card-actions { align-items: center; min-height: 38px; }
 .module-card-lifecycle-actions { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 8px; min-width: 0; }
