@@ -75,49 +75,48 @@ describe('ModulesPage lifecycle controls', () => {
   })
 
   it.each([
-    [item(), ['Load', 'Details']],
-    [item({ runtimeState: 'Unloaded' }), ['Load', 'Details']],
-    [item({ runtimeState: 'Loaded', canLoad: false, canActivate: true, canOpen: true, canUnload: true }), ['Activate', 'Open', 'Unload', 'Details']],
-    [item({ runtimeState: 'Running', canLoad: false, canOpen: true, canDeactivate: true, canUnload: true }), ['Open', 'Deactivate', 'Unload', 'Details']],
-    [item({ runtimeState: 'Deactivated', canLoad: false, canActivate: true, canOpen: true, canUnload: true }), ['Activate', 'Open', 'Unload', 'Details']],
-    [item({ runtimeState: 'Failed', isValid: false, canLoad: false, errorCount: 1, errors: ['failed'] }), ['Details']],
-    [item({ runtimeState: 'FutureFailure', isValid: false, canLoad: false, canUnload: true, errorCount: 1 }), ['Unload', 'Details']],
+    [item(), ['Load']],
+    [item({ runtimeState: 'Unloaded' }), ['Load']],
+    [item({ runtimeState: 'Loaded', canLoad: false, canActivate: true, canOpen: true, canUnload: true }), ['Open', 'Activate', 'Unload']],
+    [item({ runtimeState: 'Running', canLoad: false, canOpen: true, canDeactivate: true, canUnload: true }), ['Open', 'Deactivate', 'Unload']],
+    [item({ runtimeState: 'Deactivated', canLoad: false, canActivate: true, canOpen: true, canUnload: true }), ['Open', 'Activate', 'Unload']],
+    [item({ runtimeState: 'Failed', isValid: false, canLoad: false, errorCount: 1, errors: ['failed'] }), []],
+    [item({ runtimeState: 'FutureFailure', isValid: false, canLoad: false, canUnload: true, errorCount: 1 }), ['Unload']],
   ])('shows every host-confirmed card action in stable order', (module, expected) => {
     const { wrapper } = page(module as ModuleSnapshotItem)
     expect(cardLabels(wrapper)).toEqual(expected)
   })
 
-  it('keeps lifecycle actions and the trailing Details entry in separate visual groups', () => {
+  it('keeps only lifecycle actions in the card action region', () => {
     const running = item({ runtimeState: 'Running', canLoad: false, canOpen: true, canDeactivate: true, canUnload: true })
     const { wrapper } = page(running)
     const actionBar = wrapper.get('.module-card-actions')
-    expect(actionBar.findAll(':scope > div')).toHaveLength(2)
+    expect(actionBar.findAll(':scope > div')).toHaveLength(1)
     expect(actionBar.get('.module-card-lifecycle-actions').findAll('.q-button').map(button => button.text()))
       .toEqual(['Open', 'Deactivate', 'Unload'])
-    expect(actionBar.get('.module-card-details-actions').findAll('.q-button').map(button => button.text()))
-      .toEqual(['Details'])
-    expect(cardLabels(wrapper)).toEqual(['Open', 'Deactivate', 'Unload', 'Details'])
+    expect(actionBar.find('.module-details-button').exists()).toBe(false)
+    expect(cardLabels(wrapper)).toEqual(['Open', 'Deactivate', 'Unload'])
   })
 
-  it('uses the same lifecycle operation order on the card and in details', async () => {
+  it('opens a read-only lifecycle detail panel from the card surface', async () => {
     const { wrapper } = page(item({ runtimeState: 'Running', canLoad: false, canOpen: true, canDeactivate: true, canUnload: true }))
-    expect(cardLabels(wrapper)).toEqual(['Open', 'Deactivate', 'Unload', 'Details'])
-    await wrapper.get('.module-details-button').trigger('click')
+    expect(cardLabels(wrapper)).toEqual(['Open', 'Deactivate', 'Unload'])
+    await wrapper.get('.wpf-module-card').trigger('click')
     const details = wrapper.get('.wpf-module-details')
-    expect(details.text()).toContain('Module actions')
-    expect(details.findAll('.module-detail-actions .q-button').map(button => button.text())).toEqual(cardLabels(wrapper).slice(0, -1))
+    expect(details.text()).not.toContain('Module actions')
+    expect(details.find('.module-detail-actions').exists()).toBe(false)
     expect(details.text()).toContain('Module information')
   })
 
   it('hides execution-sensitive actions when the host reports execution blocked', async () => {
     const blocked = item({ runtimeState: 'Running', canLoad: false, canActivate: true, canOpen: true, canDeactivate: true, canUnload: true, isExecutionBlocked: true })
     const { wrapper } = page(blocked)
-    expect(cardLabels(wrapper)).toEqual(['Activate', 'Details'])
-    await wrapper.get('.module-details-button').trigger('click')
-    expect(wrapper.findAll('.module-detail-actions .q-button').map(button => button.text())).toEqual(['Activate'])
+    expect(cardLabels(wrapper)).toEqual(['Activate'])
+    await wrapper.get('.wpf-module-card').trigger('click')
+    expect(wrapper.find('.module-detail-actions').exists()).toBe(false)
   })
 
-  it('keeps Details available and locks every lifecycle action while one card operation is pending', async () => {
+  it('keeps card details available and locks every lifecycle action while one operation is pending', async () => {
     let resolve!: (value: unknown) => void
     const pending = new Promise(value => { resolve = value })
     const running = item({ runtimeState: 'Running', canLoad: false, canOpen: true, canDeactivate: true, canUnload: true })
@@ -126,16 +125,17 @@ describe('ModulesPage lifecycle controls', () => {
     const { wrapper } = page(running, { deactivate, unload })
     await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Deactivate')!.trigger('click')
     const actions = wrapper.findAll('.module-card-actions .q-button')
-    expect(actions.map(button => button.text())).toEqual(['Open', 'Deactivating…', 'Unload', 'Details'])
-    expect(actions.slice(0, -1).every(button => button.attributes('disabled') !== undefined)).toBe(true)
-    expect(actions.at(-1)!.attributes('disabled')).toBeUndefined()
+    expect(actions.map(button => button.text())).toEqual(['Open', 'Deactivating…', 'Unload'])
+    expect(actions.every(button => button.attributes('disabled') !== undefined)).toBe(true)
+    await wrapper.get('.wpf-module-card').trigger('click')
+    expect(wrapper.find('.wpf-module-details').exists()).toBe(true)
     await actions.find(button => button.text() === 'Unload')!.trigger('click')
     expect(deactivate).toHaveBeenCalledTimes(1)
     expect(unload).not.toHaveBeenCalled()
     expect(useModuleStore().modules[0].runtimeState).toBe('Running')
     resolve({ generatedAt: new Date().toISOString(), modules: [item({ runtimeState: 'Deactivated', canLoad: false, canActivate: true, canOpen: true, canUnload: true })] })
     await flushPromises()
-    expect(cardLabels(wrapper)).toEqual(['Activate', 'Open', 'Unload', 'Details'])
+    expect(cardLabels(wrapper)).toEqual(['Open', 'Activate', 'Unload'])
   })
 
   it('does not optimistically change runtime state while card Unload is pending', async () => {
@@ -147,11 +147,11 @@ describe('ModulesPage lifecycle controls', () => {
     await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Unload')!.trigger('click')
     expect(unload).toHaveBeenCalledWith('qing.text')
     expect(useModuleStore().modules[0].runtimeState).toBe('Loaded')
-    expect(cardLabels(wrapper)).toEqual(['Activate', 'Open', 'Unloading…', 'Details'])
+    expect(cardLabels(wrapper)).toEqual(['Open', 'Activate', 'Unloading…'])
     resolve({ generatedAt: new Date().toISOString(), modules: [item({ runtimeState: 'Unloaded', canLoad: true })] })
     await flushPromises()
     expect(useModuleStore().modules[0].runtimeState).toBe('Unloaded')
-    expect(cardLabels(wrapper)).toEqual(['Load', 'Details'])
+    expect(cardLabels(wrapper)).toEqual(['Load'])
   })
 
   it('groups runtime and startup badges without duplicating startup controls on cards', async () => {
@@ -159,7 +159,7 @@ describe('ModulesPage lifecycle controls', () => {
     expect(wrapper.get('.module-card-badges').text()).toContain('Running')
     expect(wrapper.get('.module-card-badges').text()).toContain('Starts on launch')
     expect(wrapper.find('.q-switch').exists()).toBe(false)
-    await wrapper.get('.module-details-button').trigger('click')
+    await wrapper.get('.wpf-module-card').trigger('click')
     expect(wrapper.get('.q-switch').attributes('role')).toBe('switch')
   })
 
@@ -169,13 +169,12 @@ describe('ModulesPage lifecycle controls', () => {
     expect(actions.find(button => button.text() === 'Open')!.classes()).toContain('is-primary')
     expect(actions.find(button => button.text() === 'Deactivate')!.classes()).toContain('is-secondary')
     expect(actions.find(button => button.text() === 'Unload')!.classes()).toContain('is-secondary')
-    expect(actions.find(button => button.text() === 'Details')!.classes()).toContain('is-ghost')
   })
 
   it('shows card deactivate and unload labels in Chinese', () => {
     const running = item({ runtimeState: 'Running', canLoad: false, canOpen: true, canDeactivate: true, canUnload: true })
     const { wrapper } = page(running, {}, { language: 'zh-CN', effectiveLanguage: 'zh-CN' })
-    expect(cardLabels(wrapper)).toEqual(['打开', '停用', '卸载', '详情'])
+    expect(cardLabels(wrapper)).toEqual(['打开', '停用', '卸载'])
   })
 
   it('loads from the card without optimistic runtime changes', async () => {
@@ -193,28 +192,82 @@ describe('ModulesPage lifecycle controls', () => {
     expect(summaryValues(wrapper)).toMatchObject({ 'Not loaded': 0, Loaded: 1, Running: 0 })
   })
 
+  it('shows a fixed load-success animation only after the confirmed snapshot, then reveals the next actions', async () => {
+    vi.useFakeTimers()
+    try {
+      let resolve!: (value: unknown) => void
+      const pending = new Promise(value => { resolve = value })
+      const loaded = item({ runtimeState: 'Loaded', canLoad: false, canActivate: true, canOpen: true, canUnload: true })
+      const { wrapper, store } = page(item(), { load: vi.fn(() => pending) })
+
+      await wrapper.get('.module-card-actions .q-button').trigger('click')
+      expect(wrapper.get('.module-operation-spinner').classes()).toContain('module-operation-spinner')
+      expect(wrapper.get('.module-card-actions').text()).toContain('Loading…')
+      expect(wrapper.find('.module-load-success').exists()).toBe(false)
+
+      resolve({ generatedAt: new Date().toISOString(), modules: [loaded] })
+      await flushPromises()
+
+      expect(store.modules[0].runtimeState).toBe('Loaded')
+      const success = wrapper.get('.module-load-success')
+      expect(success.find('circle').attributes('pathLength')).toBe('100')
+      expect(success.find('path').attributes('pathLength')).toBe('100')
+      expect(wrapper.findAll('.module-card-actions .q-button')).toHaveLength(0)
+
+      vi.advanceTimersByTime(1400)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.module-load-success').exists()).toBe(false)
+      expect(cardLabels(wrapper)).toEqual(['Open', 'Activate', 'Unload'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows the localized loading spinner in Chinese', async () => {
+    const pending = new Promise(() => {})
+    const { wrapper } = page(item(), { load: vi.fn(() => pending) }, { language: 'zh-CN', effectiveLanguage: 'zh-CN' })
+    await wrapper.get('.module-card-actions .q-button').trigger('click')
+    expect(wrapper.get('.module-operation-spinner').classes()).toContain('module-operation-spinner')
+    expect(wrapper.get('.module-card-actions').text()).toContain('正在加载…')
+  })
+
   it.each([
-    ['activate', item({ runtimeState: 'Loaded', canLoad: false, canActivate: true }), item({ runtimeState: 'Running', canLoad: false, canActivate: false, canOpen: true }), 'Activate', false, { 'Not loaded': 0, Loaded: 0, Running: 1 }],
-    ['deactivate', item({ runtimeState: 'Running', canLoad: false, canDeactivate: true }), item({ runtimeState: 'Deactivated', canLoad: false, canActivate: true, canUnload: true }), 'Deactivate', false, { 'Not loaded': 0, Loaded: 1, Running: 0 }],
-    ['unload', item({ runtimeState: 'Deactivated', canLoad: false, canUnload: true }), item({ runtimeState: 'Unloaded', canLoad: true }), 'Unload', false, { 'Not loaded': 1, Loaded: 0, Running: 0 }],
-  ] as const)('uses the complete host snapshot after %s', async (operation, before, after, label, details, expected) => {
+    ['activate', item({ runtimeState: 'Loaded', canLoad: false, canActivate: true }), item({ runtimeState: 'Running', canLoad: false, canActivate: false, canOpen: true }), 'Activate', { 'Not loaded': 0, Loaded: 0, Running: 1 }],
+    ['deactivate', item({ runtimeState: 'Running', canLoad: false, canDeactivate: true }), item({ runtimeState: 'Deactivated', canLoad: false, canActivate: true, canUnload: true }), 'Deactivate', { 'Not loaded': 0, Loaded: 1, Running: 0 }],
+    ['unload', item({ runtimeState: 'Deactivated', canLoad: false, canUnload: true }), item({ runtimeState: 'Unloaded', canLoad: true }), 'Unload', { 'Not loaded': 1, Loaded: 0, Running: 0 }],
+  ] as const)('uses the complete host snapshot after %s', async (operation, before, after, label, expected) => {
     const result = { generatedAt: new Date().toISOString(), modules: [after] }
     const { wrapper } = page(before, { [operation]: vi.fn().mockResolvedValue(result) })
-    if (details) await wrapper.get('.module-details-button').trigger('click')
-    const scope = details ? wrapper.get('.module-detail-actions') : wrapper.get('.module-card-actions')
-    await scope.findAll('.q-button').find(button => button.text() === label)!.trigger('click')
+    await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === label)!.trigger('click')
     await flushPromises()
     expect(summaryValues(wrapper)).toMatchObject(expected)
   })
 
   it('opens details by mouse and keyboard and closes them with Escape', async () => {
     const { wrapper } = page()
-    const details = wrapper.get('.module-details-button')
-    expect(details.element.tagName).toBe('BUTTON')
-    await details.trigger('keydown', { key: 'Enter' })
+    const card = wrapper.get('.wpf-module-card')
+    expect(card.attributes('tabindex')).toBe('0')
+    expect(card.attributes('aria-label')).toContain('Text Tools')
+    await card.trigger('click')
     expect(useModuleStore().selectedModuleId).toBe('qing.text')
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await wrapper.vm.$nextTick()
+    expect(useModuleStore().selectedModuleId).toBeNull()
+    await card.trigger('keydown', { key: 'Enter' })
+    expect(useModuleStore().selectedModuleId).toBe('qing.text')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await wrapper.vm.$nextTick()
+    expect(useModuleStore().selectedModuleId).toBeNull()
+    await card.trigger('keydown', { key: ' ' })
+    expect(useModuleStore().selectedModuleId).toBe('qing.text')
+  })
+
+  it('does not open details when a lifecycle action is clicked', async () => {
+    const load = vi.fn().mockResolvedValue({ generatedAt: new Date().toISOString(), modules: [item()] })
+    const { wrapper } = page(item(), { load })
+    await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Load')!.trigger('click')
+    await flushPromises()
+    expect(load).toHaveBeenCalledWith('qing.text')
     expect(useModuleStore().selectedModuleId).toBeNull()
   })
 
@@ -223,11 +276,12 @@ describe('ModulesPage lifecycle controls', () => {
     const pending = new Promise(value => { resolve = value })
     const setStartupAuthorization = vi.fn(() => pending)
     const { wrapper } = page(item(), { setStartupAuthorization })
-    await wrapper.get('.module-details-button').trigger('click')
+    await wrapper.get('.wpf-module-card').trigger('click')
     await wrapper.get('.q-switch').trigger('click')
     expect(setStartupAuthorization).toHaveBeenCalledWith('qing.text', true)
     expect(useModuleStore().modules[0].isStartupEnabled).toBe(false)
-    expect(wrapper.text()).toContain('Authorizing…')
+    expect(wrapper.get('.q-switch').attributes('aria-busy')).toBe('true')
+    expect(wrapper.get('.q-switch em').text()).toBe('Off')
     resolve({ generatedAt: new Date().toISOString(), modules: [item({ isStartupEnabled: true, startupAuthorizationState: 'Enabled' })] })
     await flushPromises()
     expect(useToastStore().message).toBe('Text Tools will start with QingToolbox.')
@@ -246,7 +300,9 @@ describe('ModulesPage lifecycle controls', () => {
     expect(store.error).toBe('The host could not confirm the current module state.')
     expect(wrapper.get('[role="status"]').text()).toBe('The host could not refresh modules. Showing the last confirmed snapshot.')
     expect(wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Load')!.attributes('disabled')).toBeDefined()
-    expect(wrapper.get('.module-details-button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.module-load-success').exists()).toBe(false)
+    await wrapper.get('.wpf-module-card').trigger('click')
+    expect(wrapper.find('.wpf-module-details').exists()).toBe(true)
     expect(useToastStore().message).toBe('Text Tools could not be loaded.')
     expect(useToastStore().message).not.toContain('ModuleBusy')
   })
@@ -274,9 +330,7 @@ describe('ModulesPage lifecycle controls', () => {
     expect(store.lastUpdatedAt).not.toBeNull()
     const load = wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Load')!
     expect(load.attributes('disabled')).toBeDefined()
-    const details = wrapper.get('.module-details-button')
-    expect(details.attributes('disabled')).toBeUndefined()
-    await details.trigger('click')
+    await wrapper.get('.wpf-module-card').trigger('click')
     expect(wrapper.text()).toContain('Module information')
     expect(wrapper.get('.q-switch').attributes('disabled')).toBeDefined()
   })
@@ -285,9 +339,9 @@ describe('ModulesPage lifecycle controls', () => {
     const running = item({ runtimeState: 'Running', canLoad: false, canOpen: true, canDeactivate: true, canUnload: true })
     const { wrapper } = page(running, {}, { status: 'error' })
     expect(wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Open')!.attributes('disabled')).toBeDefined()
-    await wrapper.get('.module-details-button').trigger('click')
-    for (const button of wrapper.findAll('.module-detail-actions .q-button')) expect(button.attributes('disabled')).toBeDefined()
-    expect(wrapper.get('.module-details-button').attributes('disabled')).toBeUndefined()
+    await wrapper.get('.wpf-module-card').trigger('click')
+    expect(wrapper.find('.module-detail-actions').exists()).toBe(false)
+    expect(wrapper.find('.wpf-module-details').exists()).toBe(true)
   })
 
   it('keeps the snapshot visible while disconnected and prioritizes the disconnect notice', async () => {
@@ -304,7 +358,7 @@ describe('ModulesPage lifecycle controls', () => {
   it('keeps ready connected lifecycle operations available', async () => {
     const { wrapper } = page()
     expect(wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === 'Load')!.attributes('disabled')).toBeUndefined()
-    expect(wrapper.get('.module-details-button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('.wpf-module-card').attributes('tabindex')).toBe('0')
   })
 
   it('keeps search, filtering, and details browsing available with a stale snapshot', async () => {
@@ -316,22 +370,20 @@ describe('ModulesPage lifecycle controls', () => {
     expect(store.searchQuery).toBe('Text')
     expect(store.stateFilter).toBe('notLoaded')
     expect(wrapper.text()).toContain('Text Tools')
-    await wrapper.get('.module-details-button').trigger('click')
+    await wrapper.get('.wpf-module-card').trigger('click')
     expect(wrapper.text()).toContain('Module information')
   })
 
   it.each([
-    ['load', item(), 'Load', false, 'Text Tools could not be loaded.'],
-    ['activate', item({ runtimeState: 'Loaded', canLoad: false, canActivate: true }), 'Activate', false, 'Text Tools could not be activated.'],
-    ['open', item({ runtimeState: 'Loaded', canLoad: false, canOpen: true }), 'Open', false, 'The Text Tools window could not be opened.'],
-    ['deactivate', item({ runtimeState: 'Running', canLoad: false, canDeactivate: true }), 'Deactivate', false, 'Text Tools could not be deactivated.'],
-    ['unload', item({ runtimeState: 'Running', canLoad: false, canUnload: true }), 'Unload', false, 'Text Tools could not be unloaded.'],
-  ] as const)('uses a safe %s failure message and resyncs once', async (operation, module, label, details, expected) => {
+    ['load', item(), 'Load', 'Text Tools could not be loaded.'],
+    ['activate', item({ runtimeState: 'Loaded', canLoad: false, canActivate: true }), 'Activate', 'Text Tools could not be activated.'],
+    ['open', item({ runtimeState: 'Loaded', canLoad: false, canOpen: true }), 'Open', 'The Text Tools window could not be opened.'],
+    ['deactivate', item({ runtimeState: 'Running', canLoad: false, canDeactivate: true }), 'Deactivate', 'Text Tools could not be deactivated.'],
+    ['unload', item({ runtimeState: 'Running', canLoad: false, canUnload: true }), 'Unload', 'Text Tools could not be unloaded.'],
+  ] as const)('uses a safe %s failure message and resyncs once', async (operation, module, label, expected) => {
     const getSnapshot = vi.fn().mockRejectedValue(new Error('resync secret'))
     const { wrapper, client, store } = page(module, { [operation]: vi.fn().mockRejectedValue(new Error('Bridge.SecretCode: internal path')), getSnapshot })
-    if (details) await wrapper.get('.module-details-button').trigger('click')
-    const scope = details ? wrapper.get('.module-detail-actions') : wrapper.get('.module-card-actions')
-    await scope.findAll('.q-button').find(button => button.text() === label)!.trigger('click')
+    await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === label)!.trigger('click')
     await flushPromises()
     expect(useToastStore().message).toBe(expected)
     expect(useToastStore().message).not.toContain('SecretCode')
@@ -341,19 +393,13 @@ describe('ModulesPage lifecycle controls', () => {
     expect(store.error).toBe('The host could not confirm the current module state.')
     expect(wrapper.text()).not.toContain('resync secret')
     expect(client[operation as keyof typeof client]).toHaveBeenCalledTimes(1)
-    if (details) {
-      expect(wrapper.get('.wpf-module-details').text()).toContain('Module information')
-      for (const button of wrapper.findAll('.module-detail-actions .q-button')) expect(button.attributes('disabled')).toBeDefined()
-      await wrapper.get('.wpf-back').trigger('click')
-      expect(wrapper.find('.wpf-module-details').exists()).toBe(false)
-    }
   })
 
   it('uses a safe startup authorization failure and preserves the snapshot', async () => {
     const module = item()
     const getSnapshot = vi.fn().mockRejectedValue(new Error('resync secret'))
     const { wrapper, store } = page(module, { setStartupAuthorization: vi.fn().mockRejectedValue(new Error('FingerprintMismatch: path')), getSnapshot })
-    await wrapper.get('.module-details-button').trigger('click')
+    await wrapper.get('.wpf-module-card').trigger('click')
     await wrapper.get('.q-switch').trigger('click')
     await flushPromises()
     expect(useToastStore().message).toBe('Startup authorization for Text Tools could not be updated.')
@@ -429,8 +475,8 @@ describe('ModulesPage lifecycle controls', () => {
     expect(wrapper.get('input').attributes('placeholder')).toBe('搜索模块…')
     expect(wrapper.findAll('.filters button').map(button => button.text())).toEqual(['全部','运行中','未加载','有问题','无效'])
     expect(wrapper.text()).toContain('随工具箱启动'); expect(wrapper.text()).toContain('1 个问题')
-    await wrapper.get('.module-details-button').trigger('click')
-    expect(wrapper.text()).toContain('模块操作'); expect(wrapper.text()).toContain('启动'); expect(wrapper.text()).toContain('模块信息')
+    await wrapper.get('.wpf-module-card').trigger('click')
+    expect(wrapper.text()).not.toContain('模块操作'); expect(wrapper.text()).toContain('启动'); expect(wrapper.text()).toContain('模块信息')
     expect(wrapper.text()).not.toContain('未声明')
     for (const hostValue of ['Text Tools','Formatting tools','Qing','qing.text','network','Host supplied issue','OutOfProcess','Manual']) expect(wrapper.text()).toContain(hostValue)
   })
@@ -464,7 +510,7 @@ describe('ModulesPage lifecycle controls', () => {
     expect(useToastStore().message).toBe('无法加载 Text Tools。'); expect(useToastStore().message).not.toContain('SecretCode')
     const startupFailure = vi.fn().mockRejectedValue(new Error('private'))
     const second = page(item(), { setStartupAuthorization: startupFailure, getSnapshot: vi.fn().mockRejectedValue(new Error('private')) }, { language: 'zh-CN', effectiveLanguage: 'zh-CN' })
-    await second.wrapper.get('.module-details-button').trigger('click'); await second.wrapper.get('.q-switch').trigger('click'); await flushPromises()
+    await second.wrapper.get('.wpf-module-card').trigger('click'); await second.wrapper.get('.q-switch').trigger('click'); await flushPromises()
     expect(useToastStore().message).toBe('无法更新 Text Tools 的启动授权。')
   })
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
 import type { ModuleClient } from '../bridge/clients/ModuleClient'
 import { useAppStore } from '../app/store'
 import { useModuleStore, type ModuleFilter } from '../app/moduleStore'
@@ -30,6 +30,19 @@ const app = useAppStore()
 const store = useModuleStore()
 const toast = useToastStore()
 const { t } = useLocalization()
+const loadSuccessModules = reactive(new Set<string>())
+const loadSuccessTimers = new Map<string, number>()
+const loadSuccessDurationMs = 1400
+
+function showLoadSuccess(moduleId: string) {
+  const existingTimer = loadSuccessTimers.get(moduleId)
+  if (existingTimer !== undefined) window.clearTimeout(existingTimer)
+  loadSuccessModules.add(moduleId)
+  loadSuccessTimers.set(moduleId, window.setTimeout(() => {
+    loadSuccessModules.delete(moduleId)
+    loadSuccessTimers.delete(moduleId)
+  }, loadSuccessDurationMs))
+}
 
 async function refresh(showToast = false) {
   if (app.bridge !== 'Connected' || store.status === 'loading') return
@@ -61,6 +74,7 @@ async function operate(module: ModuleSnapshotItem, operation: LifecycleModuleOpe
           : operation === 'deactivate' ? await client.deactivate(module.id)
             : await client.unload(module.id)
     store.complete(snapshot)
+    if (operation === 'load') showLoadSuccess(module.id)
     toast.show(t(moduleOperationSuccessKey(operation), { name: module.displayName }), 'success')
   } catch {
     toast.show(t(moduleOperationFailureKey(operation), { name: module.displayName }), 'error')
@@ -91,8 +105,8 @@ const startupMessage = (state: ModuleSnapshotItem['startupAuthorizationState']) 
 function availableLifecycleOperations(module: ModuleSnapshotItem): LifecycleModuleOperation[] {
   const operations: LifecycleModuleOperation[] = []
   if (module.canLoad) operations.push('load')
-  if (module.canActivate) operations.push('activate')
   if (module.canOpen && !module.isExecutionBlocked) operations.push('open')
+  if (module.canActivate) operations.push('activate')
   if (module.canDeactivate && !module.isExecutionBlocked) operations.push('deactivate')
   if (module.canUnload && !module.isExecutionBlocked) operations.push('unload')
   return operations
@@ -107,6 +121,11 @@ const runtimeLabel = (module: ModuleSnapshotItem) => {
 const issueLabel = (count: number) => count === 0 ? t('modules.card.noIssues')
   : t(count === 1 ? 'modules.card.oneIssue' : 'modules.card.manyIssues', { count })
 const openDetails = (moduleId: string) => { store.selectedModuleId = moduleId }
+const openDetailsFromCard = (event: MouseEvent, moduleId: string) => {
+  const target = event.target
+  if (target instanceof Element && target.closest('button, a, input, select, textarea, [role="button"], [role="switch"]')) return
+  openDetails(moduleId)
+}
 watch(() => app.bridge, bridge => { if (bridge === 'Connected' && store.status === 'idle') void refresh() }, { immediate: true })
 const summary = computed(() => summarizeModuleStates(store.modules))
 const hasConfirmedSnapshot = computed(() => store.lastUpdatedAt !== null)
@@ -123,7 +142,11 @@ const filterValues: ModuleFilter[] = ['all', 'running', 'notLoaded', 'issues', '
 const tone = (module: { isValid: boolean; runtimeState: string }) => !module.isValid ? 'danger' : module.runtimeState === 'Running' ? 'success' : module.runtimeState === 'NotLoaded' ? 'neutral' : 'info'
 const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') store.selectedModuleId = null }
 onMounted(() => window.addEventListener('keydown', closeOnEscape))
-onBeforeUnmount(() => window.removeEventListener('keydown', closeOnEscape))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', closeOnEscape)
+  for (const timer of loadSuccessTimers.values()) window.clearTimeout(timer)
+  loadSuccessTimers.clear()
+})
 </script>
 
 <template>
@@ -156,7 +179,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeOnEscape))
         <QEmptyState v-else-if="store.status === 'error' && !hasConfirmedSnapshot" :title="t('modules.empty.unavailable')" :description="t('modules.empty.unavailableDescription')"><QButton :disabled="!canRefresh" @click="refresh()">{{ t('modules.empty.retry') }}</QButton></QEmptyState>
         <QEmptyState v-else-if="store.visibleModules.length === 0" :title="t(store.modules.length ? 'modules.empty.noResults' : 'modules.empty.noInstalled')" :description="t(store.modules.length ? 'modules.empty.searchHint' : 'modules.empty.importHint')" />
         <div v-else class="wpf-module-stack">
-          <article v-for="module in store.visibleModules" :key="module.id" class="wpf-module-card" :class="{ selected: store.selectedModuleId === module.id }">
+          <article v-for="module in store.visibleModules" :key="module.id" class="wpf-module-card" :class="{ selected: store.selectedModuleId === module.id }" tabindex="0" :aria-label="`${t('modules.card.details')}: ${module.displayName}`" @click="openDetailsFromCard($event, module.id)" @keydown.enter.self.prevent="openDetails(module.id)" @keydown.space.self.prevent="openDetails(module.id)">
             <header>
               <span class="module-icon">{{ module.displayName.slice(0, 1).toUpperCase() }}</span>
               <div><h2>{{ module.displayName }} <small>v{{ module.version }}</small></h2></div>
@@ -170,10 +193,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeOnEscape))
             <p v-if="module.isExecutionBlocked" class="module-operation-blocked">{{ t('modules.card.operationsBlocked') }}</p>
             <div class="module-actions module-card-actions">
               <div class="module-card-lifecycle-actions">
-                <QButton v-for="operation in availableLifecycleOperations(module)" :key="operation" :variant="isPrimaryLifecycleOperation(operation) ? 'primary' : 'secondary'" :disabled="!hostOperationsAvailable || !!store.operations[module.id] || module.isBusy" @click="operate(module, operation)">{{ operationLabel(module, operation) }}</QButton>
-              </div>
-              <div class="module-card-details-actions">
-                <QButton variant="ghost" class="module-details-button" @click="openDetails(module.id)" @keydown.enter.prevent="openDetails(module.id)" @keydown.space.prevent="openDetails(module.id)">{{ t('modules.card.details') }}</QButton>
+                <span v-if="loadSuccessModules.has(module.id)" class="module-load-success" aria-hidden="true">
+                  <svg viewBox="0 0 36 36" width="34" height="34">
+                    <circle class="module-load-success-ring" cx="18" cy="18" r="14" pathLength="100" />
+                    <path class="module-load-success-check" d="M10.5 18.5 15.7 23.5 25.8 12.8" pathLength="100" />
+                  </svg>
+                </span>
+                <template v-else>
+                  <QButton v-for="operation in availableLifecycleOperations(module)" :key="operation" :variant="isPrimaryLifecycleOperation(operation) ? 'primary' : 'secondary'" :disabled="!hostOperationsAvailable || !!store.operations[module.id] || module.isBusy" @click="operate(module, operation)"><span v-if="operation === 'load' && store.operations[module.id] === 'load'" class="module-operation-spinner" aria-hidden="true" />{{ operationLabel(module, operation) }}</QButton>
+                </template>
               </div>
             </div>
             <div class="module-card-meta"><span>{{ t('modules.card.runtime') }}: <strong>{{ runtimeLabel(module) }}</strong></span><span :class="{ issue: module.errorCount }">{{ issueLabel(module.errorCount) }}</span></div>
@@ -186,12 +214,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeOnEscape))
         <QBadge :tone="tone(store.selectedModule)">{{ runtimeLabel(store.selectedModule) }}</QBadge>
         <p>{{ store.selectedModule.displayDescription }}</p>
         <p v-if="store.selectedModule.isExecutionBlocked" class="module-operation-blocked">{{ t('modules.card.operationsBlocked') }}</p>
-        <h3>{{ t('modules.details.actions') }}</h3>
-        <div class="module-actions module-detail-actions">
-          <QButton v-for="operation in availableLifecycleOperations(store.selectedModule)" :key="operation" :variant="isPrimaryLifecycleOperation(operation) ? 'primary' : 'secondary'" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="operate(store.selectedModule, operation)">{{ operationLabel(store.selectedModule, operation) }}</QButton>
-        </div>
-        <div class="wpf-detail-divider" />
-        <section class="module-startup"><h3>{{ t('modules.details.startup') }}</h3><p>{{ t('modules.details.startupDescription') }}</p><div class="settings-switch-row"><div><strong>{{ t('modules.details.startWithToolbox') }}</strong><small>{{ t('modules.details.startupNextLaunch') }}</small></div><button class="q-switch" type="button" role="switch" :aria-checked="store.selectedModule.isStartupEnabled" :disabled="!hostOperationsAvailable || !store.selectedModule.canChangeStartupAuthorization || store.selectedModule.isStartupAuthorizationBusy || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="setStartupAuthorization(store.selectedModule, !store.selectedModule.isStartupEnabled)"><span /><em>{{ store.operations[store.selectedModule.id] === 'startupAuthorization' ? t(store.selectedModule.isStartupEnabled ? 'modules.startup.disabling' : 'modules.startup.authorizing') : t(store.selectedModule.isStartupEnabled ? 'modules.startup.on' : 'modules.startup.off') }}</em></button></div><p class="module-startup-status">{{ startupMessage(store.selectedModule.startupAuthorizationState) }}</p></section>
+        <section class="module-startup"><h3>{{ t('modules.details.startup') }}</h3><p>{{ t('modules.details.startupDescription') }}</p><div class="settings-switch-row"><div><strong>{{ t('modules.details.startWithToolbox') }}</strong><small>{{ t('modules.details.startupNextLaunch') }}</small></div><button class="q-switch" type="button" role="switch" :aria-checked="store.selectedModule.isStartupEnabled" :aria-busy="store.operations[store.selectedModule.id] === 'startupAuthorization'" :disabled="!hostOperationsAvailable || !store.selectedModule.canChangeStartupAuthorization || store.selectedModule.isStartupAuthorizationBusy || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="setStartupAuthorization(store.selectedModule, !store.selectedModule.isStartupEnabled)"><span /><em>{{ t(store.selectedModule.isStartupEnabled ? 'modules.startup.on' : 'modules.startup.off') }}</em></button></div><p class="module-startup-status">{{ startupMessage(store.selectedModule.startupAuthorizationState) }}</p></section>
         <div class="wpf-detail-divider" />
         <h3>{{ t('modules.details.information') }}</h3>
         <dl class="wpf-detail-grid"><div><dt>{{ t('modules.details.runtime') }}</dt><dd>{{ store.selectedModule.runtimeType }}</dd></div><div><dt>{{ t('modules.details.loadMode') }}</dt><dd>{{ store.selectedModule.loadMode }}</dd></div><div><dt>{{ t('modules.details.author') }}</dt><dd>{{ store.selectedModule.author }}</dd></div><div><dt>{{ t('modules.details.permissions') }}</dt><dd>{{ store.selectedModule.permissions.length ? store.selectedModule.permissions.join(', ') : t('modules.details.noneDeclared') }}</dd></div><div><dt>{{ t('modules.details.moduleId') }}</dt><dd>{{ store.selectedModule.id }}</dd></div><div><dt>{{ t('modules.details.minimumHostVersion') }}</dt><dd>{{ store.selectedModule.minimumHostVersion }}</dd></div><div><dt>{{ t('modules.details.userInstalled') }}</dt><dd>{{ t(store.selectedModule.isUserInstalled ? 'modules.details.yes' : 'modules.details.no') }}</dd></div><div><dt>{{ t('modules.details.valid') }}</dt><dd>{{ t(store.selectedModule.isValid ? 'modules.details.yes' : 'modules.details.no') }}</dd></div></dl>
@@ -203,29 +226,44 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeOnEscape))
 
 <style scoped>
 .module-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
-.module-card-actions { align-items: center; gap: 10px 16px; min-height: 38px; }
+.module-card-actions { align-items: center; min-height: 38px; }
 .module-card-lifecycle-actions { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 8px; min-width: 0; }
-.module-card-details-actions { display: flex; flex: 0 0 auto; margin-inline-start: auto; }
 .module-card-actions .q-button { white-space: nowrap; }
+.module-operation-spinner { width: 14px; height: 14px; margin-inline-end: 7px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: module-operation-spin 650ms linear infinite; }
+.module-load-success { display: grid; place-items: center; width: 66px; height: 38px; color: var(--q-success); animation: module-load-success-presence 1400ms cubic-bezier(.2,.75,.25,1) both; }
+.module-load-success svg { display: block; overflow: visible; }
+.module-load-success-ring,.module-load-success-check { fill: none; stroke: currentColor; stroke-dasharray: 100; stroke-dashoffset: 100; }
+.module-load-success-ring { stroke-width: 2.1; stroke-dashoffset: -100; transform: rotate(-90deg); transform-box: fill-box; transform-origin: center; animation: module-load-ring-draw 680ms cubic-bezier(.35,.05,.2,1) 100ms forwards; }
+.module-load-success-check { stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; animation: module-load-check-draw 360ms cubic-bezier(.25,.8,.3,1) 100ms forwards; }
 .module-card-lifecycle-actions .q-button.is-primary { border-color: var(--q-brand); background: var(--q-brand); color: #fff; }
 .module-card-lifecycle-actions .q-button.is-primary:hover { border-color: color-mix(in srgb, var(--q-brand) 82%, #000); background: color-mix(in srgb, var(--q-brand) 88%, #000); color: #fff; }
-.module-details-button.is-ghost { padding-inline: 10px; border-color: transparent; background: transparent; color: var(--q-brand); }
-.module-details-button.is-ghost:hover { border-color: color-mix(in srgb, var(--q-brand) 24%, transparent); background: var(--q-brand-soft); }
 .module-card-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .module-card-badges .q-badge { padding: 5px 9px; }
 .module-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 13px; color: var(--q-text-2); font-size: 12px; }
 .module-card-meta strong { color: var(--q-brand); }
 .module-card-meta .issue, .module-operation-blocked { color: var(--q-color-warning, #9a5b00); }
 .module-operation-blocked { font-size: 12px; }
-.module-detail-actions { margin-bottom: 0; }
 .module-startup > p, .module-startup-status { color: var(--q-text-2); font-size: 12px; }
 .module-startup .settings-switch-row { margin-top: 8px; }
 .module-startup-status { margin-top: 4px; }
+@keyframes module-operation-spin { to { transform: rotate(360deg); } }
+@keyframes module-load-ring-draw { to { stroke-dashoffset: 0; } }
+@keyframes module-load-check-draw { to { stroke-dashoffset: 0; } }
+@keyframes module-load-success-presence {
+  0% { opacity: 0; transform: scale(.88); }
+  10% { opacity: 1; transform: scale(1.04); }
+  18%, 78% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(.72); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .module-operation-spinner { animation-duration: 1200ms; }
+  .module-load-success { animation-name: module-load-success-reduced; }
+  .module-load-success-ring,.module-load-success-check { stroke-dashoffset: 0; animation: none; }
+}
+@keyframes module-load-success-reduced { 0%, 82% { opacity: 1; } 100% { opacity: 0; } }
 @media (max-width: 650px) {
   .module-actions { row-gap: 8px; }
-  .module-card-actions { align-items: flex-end; }
   .module-card-lifecycle-actions { flex-basis: 100%; }
-  .module-card-details-actions { justify-content: flex-end; width: 100%; }
   .module-card-badges { grid-column: 1 / -1; justify-content: flex-start; }
 }
 </style>
