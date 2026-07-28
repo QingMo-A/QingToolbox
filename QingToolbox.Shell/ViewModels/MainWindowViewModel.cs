@@ -62,6 +62,7 @@ public sealed partial class MainWindowViewModel(
     private int _presentationSaveVersion;
     private readonly SemaphoreSlim _presentationSaveGate = new(1, 1);
     private readonly SemaphoreSlim _closeBehaviorSaveGate = new(1, 1);
+    private readonly SemaphoreSlim _languageChangeGate = new(1, 1);
     private readonly CancellationTokenSource _updateCancellation = new();
     private CancellationTokenSource? _automaticUpdateDelay;
     private readonly Dictionary<string, (string Version, ModuleUpdateResult Result)> _updateResults = new(StringComparer.Ordinal);
@@ -71,6 +72,7 @@ public sealed partial class MainWindowViewModel(
     private DateTimeOffset? _moduleUpdateLastCheckedAt;
     private StartupPresentationMode _persistedStartupPresentationMode;
     private bool _suppressCloseBehaviorSave;
+    private bool _suppressLanguageSelectionChange;
     private MainWindowCloseBehavior _persistedCloseBehavior = MainWindowCloseBehavior.Ask;
     private int _closeBehaviorSaveVersion;
     private bool _logSettingInitialized;
@@ -309,12 +311,70 @@ public sealed partial class MainWindowViewModel(
 
     partial void OnSelectedLanguageCodeChanged(string value)
     {
-        _ = ChangeLanguageAsync(value);
+        if (!_suppressLanguageSelectionChange)
+            _ = ChangeLanguageFromNativeAsync(value);
     }
 
-    private async Task ChangeLanguageAsync(string languageCode)
+    private async Task ChangeLanguageFromNativeAsync(string languageCode)
     {
-        await localizationManager.SetLanguageAsync(languageCode);
+        try
+        {
+            if (await ApplyLanguageSelectionAsync(languageCode, CancellationToken.None) !=
+                WebSettingsMutationResult.Succeeded)
+                RestoreSelectedLanguageCode();
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"Could not change QingToolbox language: {exception.GetType().Name}");
+            RestoreSelectedLanguageCode();
+        }
+    }
+
+    public Task<WebSettingsMutationResult> SetLanguageFromWebAsync(
+        string languageCode,
+        CancellationToken cancellationToken) =>
+        ApplyLanguageSelectionAsync(languageCode, cancellationToken);
+
+    private async Task<WebSettingsMutationResult> ApplyLanguageSelectionAsync(
+        string languageCode,
+        CancellationToken cancellationToken)
+    {
+        if (!localizationManager.SupportedLanguages.Any(option =>
+                string.Equals(option.Code, languageCode, StringComparison.Ordinal)))
+            return WebSettingsMutationResult.Failed;
+
+        await _languageChangeGate.WaitAsync(cancellationToken);
+        try
+        {
+            try
+            {
+                await localizationManager.SetLanguageAsync(languageCode, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine($"Could not persist QingToolbox language: {exception.GetType().Name}");
+                RestoreSelectedLanguageCode();
+                return WebSettingsMutationResult.Failed;
+            }
+
+            ApplyLocalizedPresentation(languageCode);
+            return localizationManager.ConfiguredLanguageCode == languageCode &&
+                   SelectedLanguageCode == languageCode
+                ? WebSettingsMutationResult.Succeeded
+                : WebSettingsMutationResult.Failed;
+        }
+        finally
+        {
+            _languageChangeGate.Release();
+        }
+    }
+
+    private void ApplyLocalizedPresentation(string languageCode)
+    {
         foreach (var module in Modules)
         {
             module.RefreshLocalization();
@@ -341,6 +401,18 @@ public sealed partial class MainWindowViewModel(
         StatusMessage = localization.GetString(
             "status.languageChanged",
             option?.DisplayText ?? languageCode);
+        SetSelectedLanguageCode(languageCode);
+    }
+
+    private void RestoreSelectedLanguageCode() =>
+        SetSelectedLanguageCode(localizationManager.ConfiguredLanguageCode);
+
+    private void SetSelectedLanguageCode(string languageCode)
+    {
+        if (SelectedLanguageCode == languageCode) return;
+        _suppressLanguageSelectionChange = true;
+        try { SelectedLanguageCode = languageCode; }
+        finally { _suppressLanguageSelectionChange = false; }
     }
 
     partial void OnIsCheckingModuleUpdatesChanged(bool value) => OnPropertyChanged(nameof(CanCheckModuleUpdates));

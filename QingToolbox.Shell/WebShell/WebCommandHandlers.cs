@@ -164,6 +164,36 @@ public sealed class WebSettingsSnapshotCommandHandler(WebSettingsSnapshotProvide
     { activation.RequireActivated(context.Generation, context.SessionCancellation); return Task.FromResult<object>(snapshots.Create()); }
 }
 
+public sealed class WebSetLanguageCommandHandler(IWebSettingsMutation mutation,
+    WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "settings.setLanguage";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string> { "languageCode" };
+
+    public async Task<object> HandleAsync(
+        JsonElement payload,
+        WebBridgeRequestContext context,
+        CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        if (!payload.TryGetProperty("languageCode", out var property) || property.ValueKind != JsonValueKind.String)
+            throw new WebBridgeValidationException("InvalidPayload", "A supported language code is required.");
+
+        var languageCode = property.GetString();
+        if (languageCode is not ("system" or "zh-CN" or "en-US"))
+            throw new WebBridgeValidationException("InvalidPayload", "A supported language code is required.");
+
+        if (mutation.LanguageCode == languageCode) return snapshots.Create();
+        var result = await mutation.SetLanguageAsync(languageCode, context.SessionCancellation);
+        if (result == WebSettingsMutationResult.Succeeded && mutation.LanguageCode == languageCode)
+            return snapshots.Create();
+
+        throw new WebBridgeValidationException(
+            "SettingsMutationFailed",
+            "The language setting could not be updated.");
+    }
+}
+
 public sealed class WebSetShowLogsInSidebarCommandHandler(IWebSettingsMutation mutation,
     WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
 {

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added host-confirmed language selection to the Development Web Settings workspace.
+
 - Fixed Development Web module summaries and filters to classify unloaded, deactivated, failed, invalid, and issue-bearing modules consistently.
 
 - Fixed the Development Web module workspaces to preserve last confirmed snapshots and show safe errors during host communication failures.

@@ -56,18 +56,22 @@ public sealed class LocalizationManager(UserSettingsService settingsService)
         ApplyCulture(ResolveCulture(ConfiguredLanguageCode), raiseEvent: false);
     }
 
-    public async Task SetLanguageAsync(string languageCode)
+    public async Task SetLanguageAsync(
+        string languageCode,
+        CancellationToken cancellationToken = default)
     {
-        if (!SupportedCodes.Contains(languageCode))
-        {
-            languageCode = "system";
-        }
+        var normalizedCode = SupportedLanguages.FirstOrDefault(option =>
+            string.Equals(option.Code, languageCode, StringComparison.OrdinalIgnoreCase))?.Code ?? "system";
 
-        var culture = ResolveCulture(languageCode);
-        var changed = ConfiguredLanguageCode != languageCode ||
+        var culture = ResolveCulture(normalizedCode);
+        var changed = ConfiguredLanguageCode != normalizedCode ||
                       CurrentCulture.Name != culture.Name;
-        ConfiguredLanguageCode = languageCode;
-        await settingsService.UpdateAsync(settings => settings.Language = languageCode);
+        if (!changed) return;
+
+        await settingsService.UpdateAsync(
+            settings => settings.Language = normalizedCode,
+            cancellationToken);
+        ConfiguredLanguageCode = normalizedCode;
         ApplyCulture(culture, changed);
     }
 

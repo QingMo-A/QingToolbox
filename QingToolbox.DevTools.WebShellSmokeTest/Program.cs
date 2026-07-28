@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using QingToolbox.Core.Settings;
+using QingToolbox.Core.Localization;
 using QingToolbox.Shell.Startup;
 using QingToolbox.Shell.WebShell;
 
@@ -218,7 +219,12 @@ var settingsRequest = JsonSerializer.Serialize(new { protocolVersion = WebBridge
 var settingsResult = await settingsDispatcher.DispatchAsync(settingsRequest, new(31, CancellationToken.None));
 Require(settingsResult.Response.Success && settingsSource.ReadCount == 1, "Settings projection must read its authoritative source once.");
 var settingsSnapshot = (WebSettingsSnapshot)settingsResult.Response.Payload;
-Require(settingsSnapshot.Language.Code == "en-US" && settingsSnapshot.Language.DisplayName == "English", "Settings DTO must include the current language.");
+Require(settingsSnapshot.Language.Code == "en-US" && settingsSnapshot.Language.EffectiveCode == "en-US" &&
+        settingsSnapshot.Language.DisplayName == "English", "Settings DTO must include configured and effective language state.");
+Require(settingsSnapshot.Language.Options.Count == 3 &&
+        settingsSnapshot.Language.Options.Select(option => option.Code).Distinct(StringComparer.Ordinal).Count() == 3 &&
+        settingsSnapshot.Language.Options.Select(option => option.Code).SequenceEqual(["system", "zh-CN", "en-US"]),
+    "Settings DTO must include every unique supported language option.");
 Require(!settingsSnapshot.ShowLogsInSidebar && settingsSnapshot.MainWindowCloseBehavior == "Ask", "Settings DTO must include navigation and close behavior.");
 Require(settingsSnapshot.LaunchAtLogin && settingsSnapshot.CanConfigureLaunchAtLogin && settingsSnapshot.StartupPresentationMode == "FloatingBadge" && settingsSnapshot.StartupBackend == "Task Scheduler" && settingsSnapshot.StartupStatus == "Healthy", "Settings DTO must include safe startup state.");
 Require(settingsSource.WriteCount == 0, "Reading settings must not invoke a write operation.");
@@ -231,6 +237,86 @@ var extraSettingsPayload = JsonSerializer.Serialize(new { protocolVersion = 4, r
 var extraSettingsResult = await settingsDispatcher.DispatchAsync(extraSettingsPayload, new(31, CancellationToken.None));
 Require(!extraSettingsResult.Response.Success && extraSettingsResult.Response.Error?.Code == "InvalidPayload", "Settings projection must reject additional payload properties.");
 Require(WebBridgeProtocol.Version == 4, "Settings projection must preserve protocol version 4.");
+
+Console.WriteLine("Verifying host-confirmed language mutation...");
+var languageSource = new SettingsMutationSource(false);
+var languageDispatcher = new WebBridgeDispatcher([new WebSetLanguageCommandHandler(
+    languageSource, new WebSettingsSnapshotProvider(languageSource, TimeProvider.System), settingsActivation)]);
+string LanguageRequest(object payload) => JsonSerializer.Serialize(new { protocolVersion = 4, requestId = Guid.NewGuid(), command = "settings.setLanguage", payload });
+foreach (var payload in new object[] { new { }, new { languageCode = 1 }, new { languageCode = "" }, new { languageCode = "zh-cn" }, new { languageCode = "EN-US" }, new { languageCode = "fr-FR" }, new { languageCode = "en-US", extra = true } })
+{
+    var rejectedLanguage = await languageDispatcher.DispatchAsync(LanguageRequest(payload), new(31, CancellationToken.None));
+    Require(!rejectedLanguage.Response.Success && rejectedLanguage.Response.Error?.Code == "InvalidPayload", "Language mutation must reject malformed, unsupported or ambiguous payloads.");
+}
+var inactiveLanguage = await new WebBridgeDispatcher([new WebSetLanguageCommandHandler(languageSource,
+    new WebSettingsSnapshotProvider(languageSource, TimeProvider.System), inactiveSettings)])
+    .DispatchAsync(LanguageRequest(new { languageCode = "zh-CN" }), new(32, CancellationToken.None));
+Require(!inactiveLanguage.Response.Success && inactiveLanguage.Response.Error?.Code == "BridgeNotActivated", "Language mutation must require activation.");
+foreach (var languageCode in new[] { "system", "zh-CN", "en-US" })
+{
+    var changed = await languageDispatcher.DispatchAsync(LanguageRequest(new { languageCode }), new(31, CancellationToken.None));
+    var changedSnapshot = (WebSettingsSnapshot)changed.Response.Payload;
+    Require(changed.Response.Success && languageSource.LanguageCode == languageCode && changedSnapshot.Language.Code == languageCode &&
+            changedSnapshot.ShowLogsInSidebar == languageSource.ShowLogsInSidebar && changedSnapshot.MainWindowCloseBehavior == languageSource.MainWindowCloseBehavior.ToString(),
+        "Language mutation must return a complete host-confirmed snapshot without changing other settings.");
+}
+Require(languageSource.LanguageWriteCount == 3, "Each changed supported language must be persisted once.");
+_ = await languageDispatcher.DispatchAsync(LanguageRequest(new { languageCode = "en-US" }), new(31, CancellationToken.None));
+Require(languageSource.LanguageWriteCount == 3, "An unchanged language request must not write again.");
+languageSource.FailWrites = true;
+var failedLanguage = await languageDispatcher.DispatchAsync(LanguageRequest(new { languageCode = "zh-CN" }), new(31, CancellationToken.None));
+var failedLanguageJson = JsonSerializer.Serialize(failedLanguage.Response);
+Require(!failedLanguage.Response.Success && failedLanguage.Response.Error?.Code == "SettingsMutationFailed" && languageSource.LanguageCode == "en-US",
+    "A failed language mutation must preserve the previous confirmed language.");
+Require(!failedLanguageJson.Contains(root, StringComparison.OrdinalIgnoreCase) && !failedLanguageJson.Contains("IOException", StringComparison.OrdinalIgnoreCase) &&
+        WebBridgeProtocol.Version == 4, "Language failures must remain safe and preserve protocol v4.");
+
+Console.WriteLine("Verifying transactional LocalizationManager language persistence...");
+var languageTransactionRoot = Path.Combine(Path.GetTempPath(), "QingToolbox-LanguageSmoke-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(languageTransactionRoot);
+try
+{
+    var settingsPath = Path.Combine(languageTransactionRoot, "settings.json");
+    using var settingsService = new UserSettingsService(settingsPath);
+    var localizationManager = new LocalizationManager(settingsService);
+    await localizationManager.InitializeAsync(languageTransactionRoot, "en-US");
+    var cultureChanges = 0;
+    localizationManager.CultureChanged += (_, _) => cultureChanges++;
+
+    await localizationManager.SetLanguageAsync("en-US");
+    Require(!File.Exists(settingsPath) && cultureChanges == 0, "An unchanged configured and effective language must not write or raise an event.");
+
+    await localizationManager.SetLanguageAsync("zh-CN");
+    var persisted = await settingsService.ReadAsync();
+    Require(persisted.Language == "zh-CN" && localizationManager.ConfiguredLanguageCode == "zh-CN" &&
+            localizationManager.CurrentLanguageCode == "zh-CN" && cultureChanges == 1,
+        "A successful language save must commit persistence before in-memory language state.");
+
+    var blockingParent = Path.Combine(languageTransactionRoot, "blocking-parent");
+    await File.WriteAllTextAsync(blockingParent, "not a directory");
+    using var failingSettings = new UserSettingsService(Path.Combine(blockingParent, "settings.json"));
+    var failingManager = new LocalizationManager(failingSettings);
+    await failingManager.InitializeAsync(languageTransactionRoot, "en-US");
+    var failedEvents = 0;
+    failingManager.CultureChanged += (_, _) => failedEvents++;
+    try { await failingManager.SetLanguageAsync("zh-CN"); throw new InvalidOperationException("Expected deterministic settings failure."); }
+    catch (IOException) { }
+    Require(failingManager.ConfiguredLanguageCode == "en-US" && failingManager.CurrentLanguageCode == "en-US" && failedEvents == 0,
+        "A failed language save must preserve configured and effective state without raising an event.");
+
+    using var languageCancellation = new CancellationTokenSource();
+    languageCancellation.Cancel();
+    try { await failingManager.SetLanguageAsync("zh-CN", languageCancellation.Token); throw new InvalidOperationException("Expected language cancellation."); }
+    catch (OperationCanceledException) { }
+    Require(failingManager.ConfiguredLanguageCode == "en-US" && failingManager.CurrentLanguageCode == "en-US" && failedEvents == 0,
+        "A cancelled language save must preserve configured and effective state.");
+
+    await localizationManager.SetLanguageAsync("en-US");
+}
+finally
+{
+    Directory.Delete(languageTransactionRoot, recursive: true);
+}
 
 Console.WriteLine("Verifying the single safe settings mutation...");
 var mutationSource = new SettingsMutationSource(false);
@@ -468,12 +554,13 @@ file sealed class SettingsSnapshotSource : IWebSettingsSnapshotSource
     public WebSettingsSnapshotValues Read()
     {
         ReadCount++;
-        return new(new("en-US", "English"), false, "Ask", "Ask before closing.", true, true, false,
+        return new(SettingsLanguages.Create("en-US", "en-US"), false, "Ask", "Ask before closing.", true, true, false,
             "FloatingBadge", "Task Scheduler", "Healthy", "Startup registration is healthy.");
     }
 }
 file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapshotSource, IWebSettingsMutation
 {
+    public string LanguageCode { get; private set; } = "en-US";
     public bool ShowLogsInSidebar { get; private set; } = initialValue;
     public MainWindowCloseBehavior MainWindowCloseBehavior { get; private set; } = MainWindowCloseBehavior.Ask;
     public StartupPresentationMode StartupPresentationMode { get; private set; } = StartupPresentationMode.FloatingBadge;
@@ -487,8 +574,17 @@ file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapsh
     public int PresentationWriteCount { get; private set; }
     public int LaunchWriteCount { get; private set; }
     public int RepairWriteCount { get; private set; }
-    public WebSettingsSnapshotValues Read() => new(new("en-US", "English"), ShowLogsInSidebar,
+    public int LanguageWriteCount { get; private set; }
+    public WebSettingsSnapshotValues Read() => new(SettingsLanguages.Create(LanguageCode, LanguageCode == "system" ? "en-US" : LanguageCode), ShowLogsInSidebar,
         MainWindowCloseBehavior.ToString(), "Ask before closing.", LaunchAtLogin, CanConfigureLaunchAtLogin, CanRepairStartup, StartupPresentationMode.ToString(), "Task Scheduler", CanRepairStartup ? "Degraded" : "Healthy", CanRepairStartup ? "Startup registration requires repair." : "Startup registration is healthy.");
+    public Task<WebSettingsMutationResult> SetLanguageAsync(string languageCode, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (FailWrites) return Task.FromResult(WebSettingsMutationResult.Failed);
+        LanguageWriteCount++;
+        LanguageCode = languageCode;
+        return Task.FromResult(WebSettingsMutationResult.Succeeded);
+    }
     public Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -528,5 +624,21 @@ file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapsh
         if (FailWrites) return Task.FromResult(WebSettingsMutationResult.Failed);
         RepairWriteCount++; CanRepairStartup = false; LaunchAtLogin = !RepairReturnsDisabled;
         return Task.FromResult(WebSettingsMutationResult.Succeeded);
+    }
+}
+
+file static class SettingsLanguages
+{
+    private static readonly WebSettingsLanguageOption[] Options =
+    [
+        new("system", "System Default", "跟随系统"),
+        new("zh-CN", "Simplified Chinese", "简体中文"),
+        new("en-US", "English", "English")
+    ];
+
+    public static WebSettingsLanguage Create(string code, string effectiveCode)
+    {
+        var selected = Options.First(option => option.Code == code);
+        return new(code, effectiveCode, selected.DisplayName, Options);
     }
 }

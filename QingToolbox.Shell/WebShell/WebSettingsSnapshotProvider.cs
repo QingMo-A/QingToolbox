@@ -1,4 +1,5 @@
 using QingToolbox.Core.Settings;
+using QingToolbox.Core.Localization;
 using QingToolbox.Shell.ViewModels;
 
 namespace QingToolbox.Shell.WebShell;
@@ -11,12 +12,14 @@ public sealed record WebSettingsSnapshotValues(WebSettingsLanguage Language, boo
 public interface IWebSettingsSnapshotSource { WebSettingsSnapshotValues Read(); }
 public interface IWebSettingsMutation
 {
+    string LanguageCode { get; }
     bool ShowLogsInSidebar { get; }
     MainWindowCloseBehavior MainWindowCloseBehavior { get; }
     StartupPresentationMode StartupPresentationMode { get; }
     bool LaunchAtLogin { get; }
     bool CanConfigureLaunchAtLogin { get; }
     bool CanRepairStartup { get; }
+    Task<WebSettingsMutationResult> SetLanguageAsync(string languageCode, CancellationToken cancellationToken);
     Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken);
     Task SetMainWindowCloseBehaviorAsync(MainWindowCloseBehavior value, CancellationToken cancellationToken);
     Task SetStartupPresentationModeAsync(StartupPresentationMode value, CancellationToken cancellationToken);
@@ -28,12 +31,15 @@ public enum WebSettingsMutationResult { Succeeded, Unavailable, Failed }
 
 public sealed class WebSettingsMutation(MainWindowViewModel viewModel) : IWebSettingsMutation
 {
+    public string LanguageCode => viewModel.SelectedLanguageCode;
     public bool ShowLogsInSidebar => viewModel.ShowLogsInSidebar;
     public MainWindowCloseBehavior MainWindowCloseBehavior => viewModel.SelectedMainWindowCloseBehavior;
     public StartupPresentationMode StartupPresentationMode => viewModel.SelectedStartupPresentationMode;
     public bool LaunchAtLogin => viewModel.LaunchAtLogin;
     public bool CanConfigureLaunchAtLogin => viewModel.CanConfigureWindowsStartup;
     public bool CanRepairStartup => viewModel.CanRepairStartup;
+    public Task<WebSettingsMutationResult> SetLanguageAsync(string languageCode, CancellationToken cancellationToken) =>
+        viewModel.SetLanguageFromWebAsync(languageCode, cancellationToken);
     public Task SetShowLogsInSidebarAsync(bool value, CancellationToken cancellationToken) =>
         viewModel.SetShowLogsInSidebarAsync(value, cancellationToken);
     public Task SetMainWindowCloseBehaviorAsync(MainWindowCloseBehavior value, CancellationToken cancellationToken) =>
@@ -46,14 +52,19 @@ public sealed class WebSettingsMutation(MainWindowViewModel viewModel) : IWebSet
         viewModel.RepairStartupFromWebAsync(cancellationToken);
 }
 
-public sealed class WebSettingsSnapshotSource(MainWindowViewModel viewModel) : IWebSettingsSnapshotSource
+public sealed class WebSettingsSnapshotSource(
+    MainWindowViewModel viewModel,
+    LocalizationManager localizationManager) : IWebSettingsSnapshotSource
 {
     public WebSettingsSnapshotValues Read()
     {
-        var language = viewModel.LanguageOptions.FirstOrDefault(option =>
-            string.Equals(option.Code, viewModel.SelectedLanguageCode, StringComparison.OrdinalIgnoreCase));
+        var language = localizationManager.SupportedLanguages.First(option =>
+            string.Equals(option.Code, localizationManager.ConfiguredLanguageCode, StringComparison.OrdinalIgnoreCase));
+        var options = localizationManager.SupportedLanguages
+            .Select(option => new WebSettingsLanguageOption(option.Code, option.DisplayName, option.NativeName))
+            .ToArray();
         return new(
-            new(viewModel.SelectedLanguageCode, language?.DisplayText ?? viewModel.SelectedLanguageCode),
+            new(language.Code, localizationManager.CurrentLanguageCode, language.DisplayName, options),
             viewModel.ShowLogsInSidebar,
             viewModel.SelectedMainWindowCloseBehavior.ToString(),
             viewModel.CloseBehaviorMessage,

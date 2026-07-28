@@ -64,7 +64,7 @@ Read these plans in order unless the user says otherwise:
     - Establish host-confirmed language selection and reactive localization across the Development Web workspace.
     - Deliver the work as three bounded slices: language setting, Vue localization foundation, and complete workspace coverage.
     - Keep module-summary correctness as an independent P1 prerequisite instead of hiding the Bug inside the localization phase.
-    - **Active — User approved; implementation begins with the independent P1 module-summary correction before UI-5A1.**
+    - **Active — User approved; prerequisite P1 and UI-5A1 are implementation complete. Next: UI-5A2 Reactive Vue localization foundation.**
 
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 

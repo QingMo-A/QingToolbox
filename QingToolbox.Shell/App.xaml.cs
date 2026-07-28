@@ -286,6 +286,7 @@ public partial class App : Application
                 services.AddSingleton<IWebCommandHandler, WebSetModuleStartupAuthorizationCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebLogSnapshotCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSettingsSnapshotCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebSetLanguageCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetShowLogsInSidebarCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetMainWindowCloseBehaviorCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetStartupPresentationModeCommandHandler>();

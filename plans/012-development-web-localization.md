@@ -1,9 +1,12 @@
 # Plan 012: Development Web Localization
 
 ```text
-Status: Active — User Approved; prerequisite P1 pending
+Status: Active — User Approved; prerequisite P1 and UI-5A1 implementation complete
 Track: UI Modernization / UI-5
 Environment: Development only
+Prerequisite P1: Implementation Complete (`9f63a9d69e424738b420ddc9305b8b482f56c198`)
+UI-5A1: Implementation Complete
+Next: UI-5A2 Reactive Vue localization foundation
 ```
 
 Depends on:
@@ -200,6 +203,10 @@ Plan 012 is delivered in three bounded slices. Each slice requires a separate or
 ---
 
 ## UI-5A1: Host-confirmed language setting
+
+```text
+Implementation Complete
+```
 
 ### Goal
 

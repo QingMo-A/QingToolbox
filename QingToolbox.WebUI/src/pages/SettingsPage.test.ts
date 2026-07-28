@@ -6,14 +6,20 @@ import { useAppStore } from '../app/store'
 import { useSettingsStore } from '../app/settingsStore'
 import { useThemeStore } from '../app/themeStore'
 import { useToastStore } from '../app/toastStore'
-import type { SettingsSnapshot } from '../contracts/settings'
+import type { LanguageCode, SettingsSnapshot } from '../contracts/settings'
 
 const wrappers: VueWrapper[] = []
 afterEach(() => wrappers.splice(0).forEach(wrapper => wrapper.unmount()))
 
-const snapshot: SettingsSnapshot = { generatedAt: '2026-07-25T12:00:00Z', language: { code: 'en-US', displayName: 'English' }, showLogsInSidebar: true, mainWindowCloseBehavior: 'Ask', closeBehaviorMessage: 'Ask before closing.', launchAtLogin: false, canConfigureLaunchAtLogin: true, canRepairStartup: false, startupPresentationMode: 'FloatingBadge', startupBackend: 'Registry Run', startupStatus: 'Healthy', startupMessage: 'Registration is healthy.' }
+const languageOptions = [
+  { code: 'system' as const, displayName: 'System Default', nativeName: '跟随系统' },
+  { code: 'zh-CN' as const, displayName: 'Simplified Chinese', nativeName: '简体中文' },
+  { code: 'en-US' as const, displayName: 'English', nativeName: 'English' },
+]
+const snapshot: SettingsSnapshot = { generatedAt: '2026-07-25T12:00:00Z', language: { code: 'en-US', effectiveCode: 'en-US', displayName: 'English', options: languageOptions }, showLogsInSidebar: true, mainWindowCloseBehavior: 'Ask', closeBehaviorMessage: 'Ask before closing.', launchAtLogin: false, canConfigureLaunchAtLogin: true, canRepairStartup: false, startupPresentationMode: 'FloatingBadge', startupBackend: 'Registry Run', startupStatus: 'Healthy', startupMessage: 'Registration is healthy.' }
 type PageOptions = {
   bridge?: 'Connecting'|'Connected'|'Unavailable'; status?: 'idle'|'loading'|'ready'|'error'; hasSnapshot?: boolean
+  languageImpl?: (value: LanguageCode) => Promise<SettingsSnapshot>
   getImpl?: () => Promise<SettingsSnapshot>; logsImpl?: (value: boolean) => Promise<SettingsSnapshot>
   closeImpl?: (value: 'Ask'|'MinimizeToNotificationArea'|'ExitApplication') => Promise<SettingsSnapshot>
   startupImpl?: (value: 'MainWindow'|'Minimized'|'FloatingBadge') => Promise<SettingsSnapshot>
@@ -29,14 +35,15 @@ function page(options: PageOptions = {}) {
   if (hasSnapshot) settings.complete(snapshot)
   if (status === 'loading') settings.begin(); else if (status === 'error') settings.fail(new Error('offline')); else settings.status = status
   const getSnapshot = vi.fn(options.getImpl ?? (async () => snapshot))
+  const setLanguage = vi.fn(options.languageImpl ?? (async value => ({ ...snapshot, language: { ...snapshot.language, code: value, effectiveCode: value === 'system' ? 'en-US' : value, displayName: languageOptions.find(option => option.code === value)!.displayName } })))
   const setShowLogsInSidebar = vi.fn(options.logsImpl ?? (async value => ({ ...snapshot, showLogsInSidebar: value })))
   const setMainWindowCloseBehavior = vi.fn(options.closeImpl ?? (async value => ({ ...snapshot, mainWindowCloseBehavior: value })))
   const setStartupPresentationMode = vi.fn(options.startupImpl ?? (async value => ({ ...snapshot, startupPresentationMode: value })))
   const setLaunchAtLogin = vi.fn(options.launchImpl ?? (async value => ({ ...snapshot, launchAtLogin: value, generatedAt: '2026-07-25T13:00:00Z' })))
   const repairStartupRegistration = vi.fn(options.repairImpl ?? (async () => ({ ...snapshot, launchAtLogin: true, canRepairStartup: false, generatedAt: '2026-07-25T13:00:00Z' })))
-  const wrapper = mount(SettingsPage, { global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, setLaunchAtLogin, repairStartupRegistration } } } })
+  const wrapper = mount(SettingsPage, { global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, setLaunchAtLogin, repairStartupRegistration } } } })
   wrappers.push(wrapper)
-  return { wrapper, app, settings, getSnapshot, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, setLaunchAtLogin, repairStartupRegistration, theme: useThemeStore(), toast: useToastStore() }
+  return { wrapper, app, settings, getSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, setLaunchAtLogin, repairStartupRegistration, theme: useThemeStore(), toast: useToastStore() }
 }
 
 async function openSection(wrapper: VueWrapper, title: string) {
@@ -51,7 +58,11 @@ describe('SettingsPage information architecture', () => {
   it('marks the active section accessibly', async () => { const x = page(); expect(x.wrapper.findAll('.settings-section-nav button')[0].attributes('aria-current')).toBe('page'); await openSection(x.wrapper, 'About'); expect(x.wrapper.findAll('.settings-section-nav button')[3].attributes('aria-current')).toBe('page') })
   it('does not request a snapshot when switching sections', async () => { const x = page(); await openSection(x.wrapper, 'Window'); await openSection(x.wrapper, 'Startup'); await openSection(x.wrapper, 'About'); expect(x.getSnapshot).not.toHaveBeenCalled() })
   it('shows Appearance, Language, and Navigation in General', () => { const text = page().wrapper.text(); expect(text).toContain('Appearance'); expect(text).toContain('Language'); expect(text).toContain('Navigation'); expect(text).toContain('Show logs in sidebar') })
-  it('keeps Language read-only and identifies it as a host setting', () => { const wrapper = page().wrapper; expect(wrapper.text()).toContain('Host setting'); expect(wrapper.text()).toContain('English'); expect(wrapper.find('select').exists()).toBe(false); expect(wrapper.find('input').exists()).toBe(false) })
+  it('renders the three host-provided language choices and confirmed selection', () => { const wrapper = page().wrapper; const group=wrapper.get('[aria-label="Language preference"]'); expect(group.findAll('[role="radio"]')).toHaveLength(3); expect(group.text()).toContain('跟随系统'); expect(group.text()).toContain('简体中文'); expect(group.text()).toContain('English'); expect(group.findAll('[role="radio"]').map(option=>option.attributes('aria-checked'))).toEqual(['false','false','true']); expect(wrapper.text()).toContain('Effective languageEnglish') })
+  it('does not request the already configured language', async()=>{const x=page();await x.wrapper.get('[aria-label="Language preference"]').findAll('[role="radio"]')[2].trigger('click');expect(x.setLanguage).not.toHaveBeenCalled()})
+  it('keeps the old language while pending and applies the confirmed snapshot',async()=>{let resolve!:(value:SettingsSnapshot)=>void;const pending=new Promise<SettingsSnapshot>(done=>resolve=done);const x=page({languageImpl:()=>pending});const choices=x.wrapper.get('[aria-label="Language preference"]').findAll('[role="radio"]');await choices[1].trigger('click');expect(x.setLanguage).toHaveBeenCalledWith('zh-CN');expect(x.settings.snapshot?.language.code).toBe('en-US');expect(choices[2].attributes('aria-checked')).toBe('true');expect(x.wrapper.text()).toContain('Saving…');expect(choices.every(option=>option.attributes('disabled')!==undefined)).toBe(true);expect(x.wrapper.get('[role="switch"]').attributes('disabled')).toBeDefined();await x.wrapper.findAll('.settings-theme button')[1].trigger('click');expect(x.theme.mode).toBe('light');await openSection(x.wrapper,'Window');expect(x.wrapper.get('[aria-label="Main window close behavior"]').findAll('button').every(option=>option.attributes('disabled')!==undefined)).toBe(true);await openSection(x.wrapper,'Startup');expect(x.wrapper.get('[aria-label="Startup presentation mode"]').findAll('button').every(option=>option.attributes('disabled')!==undefined)).toBe(true);resolve({...snapshot,language:{...snapshot.language,code:'zh-CN',effectiveCode:'zh-CN',displayName:'Simplified Chinese'}});await flushPromises();expect(x.settings.snapshot?.language.code).toBe('zh-CN');expect(x.toast.message).toBe('Language preference saved.')})
+  it('restores the old snapshot and hides language failure details',async()=>{const x=page({languageImpl:async()=>{throw new Error('C:\\private\\settings.json')}});await x.wrapper.get('[aria-label="Language preference"]').findAll('[role="radio"]')[0].trigger('click');await flushPromises();expect(x.settings.snapshot?.language.code).toBe('en-US');expect(x.settings.status).toBe('ready');expect(x.settings.languageError).toBe('The language setting could not be updated.');expect(x.toast.message).toBe('The language setting could not be updated.');expect(x.wrapper.text()).not.toContain('settings.json')})
+  it('disables language choices while disconnected and leaves English page copy in UI-5A1',()=>{const x=page({bridge:'Unavailable'});expect(x.wrapper.get('[aria-label="Language preference"]').findAll('[role="radio"]').every(option=>option.attributes('disabled')!==undefined)).toBe(true);expect(x.wrapper.text()).toContain('Choose the language preference saved by the host.');expect(x.wrapper.text()).toContain('Navigation')})
   it('changes Appearance locally without a host request', async () => { const x = page({ bridge: 'Connecting', status: 'idle', hasSnapshot: false }); await x.wrapper.findAll('.settings-theme button')[2].trigger('click'); expect(x.theme.mode).toBe('dark'); expect(x.getSnapshot).not.toHaveBeenCalled(); expect(x.setShowLogsInSidebar).not.toHaveBeenCalled() })
   it('shows three close behavior radios in Window', async () => { const x = page(); await openSection(x.wrapper, 'Window'); expect(x.wrapper.get('[aria-label="Main window close behavior"]').findAll('[role="radio"]')).toHaveLength(3) })
   it('persists close behavior', async () => { const x = page(); await openSection(x.wrapper, 'Window'); await x.wrapper.get('[aria-label="Main window close behavior"]').findAll('[role="radio"]')[2].trigger('click'); await flushPromises(); expect(x.setMainWindowCloseBehavior).toHaveBeenCalledWith('ExitApplication'); expect(x.settings.snapshot?.mainWindowCloseBehavior).toBe('ExitApplication'); expect(x.toast.kind).toBe('success') })

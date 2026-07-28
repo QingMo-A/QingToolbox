@@ -17,6 +17,9 @@
 - UI-2A preserves protocol v4 and projects authoritative C# module state without module side effects.
 - UI-3 / Plan 010: Implementation Complete.
 - UI-4A / Plan 011: Implementation Complete.
+- Plan 012: Active; prerequisite P1 and UI-5A1 host-confirmed Development Web language selection are Implementation Complete.
+- Plan 012 prerequisite P1 commit: `9f63a9d69e424738b420ddc9305b8b482f56c198`.
+- Plan 012 next bounded slice: UI-5A2 Reactive Vue localization foundation; UI-5A2 and UI-5A3 have not started.
 - Production Web UI: Deferred.
 - Downloads, updates, and floating surfaces remain deferred.
 - Preview 2 release work and UI modernization remain independent tracks.
@@ -26,7 +29,7 @@ and Development Diagnostics. Plan 009's original boundary remains the read-only 
 visual foundation; Running, Logs, Settings, and the three narrow settings mutations added afterward
 are incremental implementation, not a retroactive expansion of Plan 009.
 
-The completed Development Web Settings mutations are limited to `ShowLogsInSidebar`,
+The completed Development Web Settings mutations are limited to host-confirmed `Language`, `ShowLogsInSidebar`,
 `MainWindowCloseBehavior`, `StartupPresentationMode`, host-confirmed `LaunchAtLogin`, and the bounded
 startup-registration repair action. These completed additions do not authorize further Startup health
 parity work or additional Settings Bridge commands. Any future user-visible Settings feature must be

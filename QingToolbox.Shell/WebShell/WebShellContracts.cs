@@ -30,7 +30,9 @@ public sealed record WebSettingsSnapshot(DateTimeOffset GeneratedAt, WebSettings
     bool ShowLogsInSidebar, string MainWindowCloseBehavior, string CloseBehaviorMessage,
     bool LaunchAtLogin, bool CanConfigureLaunchAtLogin, bool CanRepairStartup, string StartupPresentationMode,
     string StartupBackend, string StartupStatus, string StartupMessage);
-public sealed record WebSettingsLanguage(string Code, string DisplayName);
+public sealed record WebSettingsLanguage(string Code, string EffectiveCode, string DisplayName,
+    IReadOnlyList<WebSettingsLanguageOption> Options);
+public sealed record WebSettingsLanguageOption(string Code, string DisplayName, string NativeName);
 public sealed record WebAssetManifest(int SchemaVersion, string AssetBuildId, string PackageLockSha256,
     string SourceTreeSha256, IReadOnlyList<WebAssetFile> OutputFiles);
 public sealed record WebAssetFile(string Path, long Size, string Sha256);
