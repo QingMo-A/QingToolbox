@@ -12,9 +12,6 @@ import QEmptyState from '../design-system/components/QEmptyState.vue'
 import QSkeleton from '../design-system/components/QSkeleton.vue'
 import QIcon from '../design-system/components/QIcon.vue'
 import {
-  isLoadedState,
-  isNotLoadedState,
-  isRunningState,
   summarizeModuleStates,
 } from '../modules/moduleStateSummary'
 import { useLocalization } from '../localization/localization'
@@ -91,9 +88,17 @@ async function setStartupAuthorization(module: ModuleSnapshotItem, enabled: bool
 }
 
 const startupMessage = (state: ModuleSnapshotItem['startupAuthorizationState']) => t(startupAuthorizationMessageKey(state))
-const cardCanLoad = (module: ModuleSnapshotItem) => isNotLoadedState(module.runtimeState) && module.canLoad
-const cardCanActivate = (module: ModuleSnapshotItem) => isLoadedState(module.runtimeState) && module.canActivate
-const cardCanOpen = (module: ModuleSnapshotItem) => (isLoadedState(module.runtimeState) || isRunningState(module.runtimeState)) && module.canOpen && !module.isExecutionBlocked
+function availableLifecycleOperations(module: ModuleSnapshotItem): LifecycleModuleOperation[] {
+  const operations: LifecycleModuleOperation[] = []
+  if (module.canLoad) operations.push('load')
+  if (module.canActivate) operations.push('activate')
+  if (module.canOpen && !module.isExecutionBlocked) operations.push('open')
+  if (module.canDeactivate && !module.isExecutionBlocked) operations.push('deactivate')
+  if (module.canUnload && !module.isExecutionBlocked) operations.push('unload')
+  return operations
+}
+const isPrimaryLifecycleOperation = (operation: LifecycleModuleOperation) =>
+  operation === 'load' || operation === 'activate' || operation === 'open'
 const runtimeLabel = (module: ModuleSnapshotItem) => {
   if (!module.isValid) return t('moduleState.invalid')
   const key = moduleRuntimeStateKey(module.runtimeState)
@@ -164,9 +169,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeOnEscape))
             <p>{{ module.displayDescription }}</p>
             <p v-if="module.isExecutionBlocked" class="module-operation-blocked">{{ t('modules.card.operationsBlocked') }}</p>
             <div class="module-actions module-card-actions">
-              <QButton v-if="cardCanLoad(module)" variant="primary" :disabled="!hostOperationsAvailable || !!store.operations[module.id] || module.isBusy" @click="operate(module, 'load')">{{ operationLabel(module, 'load') }}</QButton>
-              <QButton v-if="cardCanActivate(module)" variant="primary" :disabled="!hostOperationsAvailable || !!store.operations[module.id] || module.isBusy" @click="operate(module, 'activate')">{{ operationLabel(module, 'activate') }}</QButton>
-              <QButton v-if="cardCanOpen(module)" variant="primary" :disabled="!hostOperationsAvailable || !!store.operations[module.id] || module.isBusy" @click="operate(module, 'open')">{{ operationLabel(module, 'open') }}</QButton>
+              <QButton v-for="operation in availableLifecycleOperations(module)" :key="operation" :variant="isPrimaryLifecycleOperation(operation) ? 'primary' : 'secondary'" :disabled="!hostOperationsAvailable || !!store.operations[module.id] || module.isBusy" @click="operate(module, operation)">{{ operationLabel(module, operation) }}</QButton>
               <QButton class="module-details-button" @click="openDetails(module.id)" @keydown.enter.prevent="openDetails(module.id)" @keydown.space.prevent="openDetails(module.id)">{{ t('modules.card.details') }}</QButton>
             </div>
             <div class="module-card-meta"><span>{{ t('modules.card.runtime') }}: <strong>{{ runtimeLabel(module) }}</strong></span><span :class="{ issue: module.errorCount }">{{ issueLabel(module.errorCount) }}</span></div>
@@ -181,11 +184,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeOnEscape))
         <p v-if="store.selectedModule.isExecutionBlocked" class="module-operation-blocked">{{ t('modules.card.operationsBlocked') }}</p>
         <h3>{{ t('modules.details.actions') }}</h3>
         <div class="module-actions module-detail-actions">
-          <QButton v-if="store.selectedModule.canLoad" variant="primary" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="operate(store.selectedModule, 'load')">{{ operationLabel(store.selectedModule, 'load') }}</QButton>
-          <QButton v-if="store.selectedModule.canActivate" variant="primary" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="operate(store.selectedModule, 'activate')">{{ operationLabel(store.selectedModule, 'activate') }}</QButton>
-          <QButton v-if="store.selectedModule.canOpen && !store.selectedModule.isExecutionBlocked" variant="primary" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="operate(store.selectedModule, 'open')">{{ operationLabel(store.selectedModule, 'open') }}</QButton>
-          <QButton v-if="store.selectedModule.canDeactivate && !store.selectedModule.isExecutionBlocked" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="operate(store.selectedModule, 'deactivate')">{{ operationLabel(store.selectedModule, 'deactivate') }}</QButton>
-          <QButton v-if="store.selectedModule.canUnload && !store.selectedModule.isExecutionBlocked" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="operate(store.selectedModule, 'unload')">{{ operationLabel(store.selectedModule, 'unload') }}</QButton>
+          <QButton v-for="operation in availableLifecycleOperations(store.selectedModule)" :key="operation" :variant="isPrimaryLifecycleOperation(operation) ? 'primary' : 'secondary'" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="operate(store.selectedModule, operation)">{{ operationLabel(store.selectedModule, operation) }}</QButton>
         </div>
         <div class="wpf-detail-divider" />
         <section class="module-startup"><h3>{{ t('modules.details.startup') }}</h3><p>{{ t('modules.details.startupDescription') }}</p><div class="settings-switch-row"><div><strong>{{ t('modules.details.startWithToolbox') }}</strong><small>{{ t('modules.details.startupNextLaunch') }}</small></div><button class="q-switch" type="button" role="switch" :aria-checked="store.selectedModule.isStartupEnabled" :disabled="!hostOperationsAvailable || !store.selectedModule.canChangeStartupAuthorization || store.selectedModule.isStartupAuthorizationBusy || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="setStartupAuthorization(store.selectedModule, !store.selectedModule.isStartupEnabled)"><span /><em>{{ store.operations[store.selectedModule.id] === 'startupAuthorization' ? t(store.selectedModule.isStartupEnabled ? 'modules.startup.disabling' : 'modules.startup.authorizing') : t(store.selectedModule.isStartupEnabled ? 'modules.startup.on' : 'modules.startup.off') }}</em></button></div><p class="module-startup-status">{{ startupMessage(store.selectedModule.startupAuthorizationState) }}</p></section>
