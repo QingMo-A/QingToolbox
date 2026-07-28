@@ -10,11 +10,14 @@ import QButton from '../design-system/components/QButton.vue'
 import QBadge from '../design-system/components/QBadge.vue'
 import QIcon from '../design-system/components/QIcon.vue'
 import QSkeleton from '../design-system/components/QSkeleton.vue'
+import { useLocalization } from '../localization/localization'
+import { bridgeStateKey } from '../presentation/workspacePresentation'
 
 const app = useAppStore()
 const modules = useModuleStore()
 const client = inject<ModuleClient>('moduleClient')!
 const router = useRouter()
+const {t}=useLocalization();const bridgeLabel=(value:string)=>{const key=bridgeStateKey(value);return key?t(key):value}
 
 async function refresh() {
   modules.begin()
@@ -36,8 +39,8 @@ const hasSnapshot = computed(() => modules.lastUpdatedAt !== null)
 const waitingForHost = computed(() => app.bridge !== 'Connected' && !hasSnapshot.value && modules.modules.length === 0)
 const snapshotWarning = computed(() => {
   if (!hasSnapshot.value) return ''
-  if (modules.status === 'error') return 'Module refresh failed. The dashboard is showing the last available snapshot.'
-  if (app.bridge !== 'Connected') return 'The host is disconnected. The dashboard is showing the last available snapshot.'
+  if (modules.status === 'error') return t('home.refreshFailed')
+  if (app.bridge !== 'Connected') return t('home.disconnected')
   return ''
 })
 const environment = computed(() => app.snapshot?.environmentDisplayName || app.mode || 'Development')
@@ -66,83 +69,72 @@ const viewModule = (module: ModuleSnapshotItem) => browse('all', module.id)
   <QPage class="dashboard-page">
     <section class="dashboard-welcome">
       <div class="dashboard-welcome-copy">
-        <span class="dashboard-eyebrow">{{ environment }} workspace</span>
+        <span class="dashboard-eyebrow">{{t('home.workspace',{environment})}}</span>
         <h1>QingToolbox</h1>
-        <p>Your tools, modules, and workspace at a glance.</p>
+        <p>{{t('home.subtitle')}}</p>
         <div class="dashboard-actions">
-          <RouterLink class="q-button is-primary" to="/modules">Browse modules</RouterLink>
-          <RouterLink class="q-button" to="/running">View running</RouterLink>
+          <RouterLink class="q-button is-primary" to="/modules">{{t('home.browse')}}</RouterLink><RouterLink class="q-button" to="/running">{{t('home.viewRunning')}}</RouterLink>
         </div>
       </div>
       <dl class="dashboard-host-state">
-        <div><dt>Environment</dt><dd>{{ environment }}</dd></div>
-        <div><dt>Host version</dt><dd>{{ hostVersion }}</dd></div>
-        <div><dt>Bridge</dt><dd><QBadge :tone="app.bridge === 'Connected' ? 'success' : 'warning'">{{ app.bridge }}</QBadge></dd></div>
+        <div><dt>{{t('home.environment')}}</dt><dd>{{ environment }}</dd></div><div><dt>{{t('home.hostVersion')}}</dt><dd>{{ hostVersion }}</dd></div><div><dt>{{t('home.bridge')}}</dt><dd><QBadge :tone="app.bridge === 'Connected' ? 'success' : 'warning'">{{bridgeLabel(app.bridge)}}</QBadge></dd></div>
       </dl>
     </section>
 
     <div v-if="snapshotWarning" class="dashboard-stale-notice" role="status">
       <QIcon name="statusWarning" />
       <span>{{ snapshotWarning }}</span>
-      <QButton v-if="modules.status === 'error'" @click="refresh">Retry</QButton>
+      <QButton v-if="modules.status === 'error'" @click="refresh">{{t('home.retry')}}</QButton>
     </div>
 
     <section v-if="waitingForHost" class="q-empty dashboard-waiting" aria-live="polite">
       <div class="q-empty-icon"><QIcon name="statusInfo" :size="28" /></div>
-      <h3>Waiting for the host</h3>
-      <p>The dashboard will appear after the Development bridge is connected.</p>
-      <QBadge tone="warning">{{ app.bridge }}</QBadge>
+      <h3>{{t('home.waiting')}}</h3><p>{{t('home.waitingHint')}}</p><QBadge tone="warning">{{bridgeLabel(app.bridge)}}</QBadge>
     </section>
-    <section v-else-if="modules.status === 'loading' && !hasSnapshot" class="dashboard-loading" aria-label="Loading dashboard">
+    <section v-else-if="modules.status === 'loading' && !hasSnapshot" class="dashboard-loading" :aria-label="t('home.loading')">
       <QSkeleton v-for="item in 4" :key="item" />
     </section>
     <section v-else-if="modules.status === 'error' && !hasSnapshot" class="q-empty dashboard-full-error">
       <div class="q-empty-icon"><QIcon name="statusDanger" :size="28" /></div>
-      <h3>Workspace overview is unavailable</h3>
-      <p>The host could not provide the current module state.</p>
-      <QButton @click="refresh"><QIcon name="refresh" /> Retry</QButton>
+      <h3>{{t('home.unavailable')}}</h3><p>{{t('home.unavailableHint')}}</p><QButton @click="refresh"><QIcon name="refresh" /> {{t('home.retry')}}</QButton>
     </section>
     <template v-else>
       <section class="dashboard-overview" aria-labelledby="workspace-overview-title">
-        <h2 id="workspace-overview-title">Workspace overview</h2>
+        <h2 id="workspace-overview-title">{{t('home.overview')}}</h2>
         <div class="dashboard-overview-grid">
-          <button @click="browse('all')"><span>Total modules</span><strong>{{ modules.modules.length }}</strong><small>Browse installed modules</small></button>
-          <button @click="navigate('/running')"><span>Running</span><strong class="success">{{ modules.runningModules.length }}</strong><small>Review active modules</small></button>
-          <button @click="openPrimaryAttention"><span>Needs attention</span><strong class="warning">{{ attentionIds.size }}</strong><small>Review module health</small></button>
-          <button @click="openStartsOnLaunch"><span>Starts on launch</span><strong class="accent">{{ startupEnabled.length }}</strong><small>Review startup access</small></button>
+          <button @click="browse('all')"><span>{{t('home.total')}}</span><strong>{{modules.modules.length}}</strong><small>{{t('home.browseInstalled')}}</small></button>
+          <button @click="navigate('/running')"><span>{{t('home.running')}}</span><strong class="success">{{modules.runningModules.length}}</strong><small>{{t('home.reviewRunning')}}</small></button><button @click="openPrimaryAttention"><span>{{t('home.attention')}}</span><strong class="warning">{{attentionIds.size}}</strong><small>{{t('home.reviewHealth')}}</small></button><button @click="openStartsOnLaunch"><span>{{t('home.starts')}}</span><strong class="accent">{{startupEnabled.length}}</strong><small>{{t('home.reviewStartup')}}</small></button>
         </div>
       </section>
 
       <div class="dashboard-main-grid">
         <section class="dashboard-section dashboard-attention" aria-labelledby="attention-title">
-          <header><div><h2 id="attention-title">Needs attention</h2><p>Items that may require a decision.</p></div></header>
+          <header><div><h2 id="attention-title">{{t('home.attention')}}</h2><p>{{t('home.attentionHint')}}</p></div></header>
           <div v-if="attentionIds.size" class="dashboard-attention-list">
-            <button v-if="moduleIssues.length" @click="openIssues"><QIcon name="statusWarning" /><span><strong>Module issues</strong><small>{{ moduleIssues.length }} module{{ moduleIssues.length === 1 ? '' : 's' }} report validation or runtime issues.</small></span><em>{{ moduleIssues.length }}</em></button>
-            <button v-if="recoveryBlocked.length" @click="openBlocked"><QIcon name="statusDanger" /><span><strong>Recovery blocked</strong><small>{{ recoveryBlocked.length }} module{{ recoveryBlocked.length === 1 ? '' : 's' }} cannot continue until recovery completes.</small></span><em>{{ recoveryBlocked.length }}</em></button>
-            <button v-if="startupApproval.length" @click="openStartupApproval"><QIcon name="statusInfo" /><span><strong>Startup approval required</strong><small>{{ startupApproval.length }} changed module{{ startupApproval.length === 1 ? '' : 's' }} need renewed approval.</small></span><em>{{ startupApproval.length }}</em></button>
+            <button v-if="moduleIssues.length" @click="openIssues"><QIcon name="statusWarning" /><span><strong>{{t('home.moduleIssues')}}</strong><small>{{t(moduleIssues.length===1?'home.moduleIssueOne':'home.moduleIssueMany',{count:moduleIssues.length})}}</small></span><em>{{moduleIssues.length}}</em></button>
+            <button v-if="recoveryBlocked.length" @click="openBlocked"><QIcon name="statusDanger" /><span><strong>{{t('home.recovery')}}</strong><small>{{t(recoveryBlocked.length===1?'home.recoveryOne':'home.recoveryMany',{count:recoveryBlocked.length})}}</small></span><em>{{recoveryBlocked.length}}</em></button>
+            <button v-if="startupApproval.length" @click="openStartupApproval"><QIcon name="statusInfo" /><span><strong>{{t('home.approval')}}</strong><small>{{t(startupApproval.length===1?'home.approvalOne':'home.approvalMany',{count:startupApproval.length})}}</small></span><em>{{startupApproval.length}}</em></button>
           </div>
-          <div v-else class="dashboard-ready"><QIcon name="statusSuccess" :size="24" /><div><strong>Everything looks ready.</strong><p>No module issues currently need your attention.</p></div></div>
+          <div v-else class="dashboard-ready"><QIcon name="statusSuccess" :size="24" /><div><strong>{{t('home.ready')}}</strong><p>{{t('home.readyHint')}}</p></div></div>
         </section>
 
         <section class="dashboard-section dashboard-running" aria-labelledby="running-title">
-          <header><div><h2 id="running-title">Running now</h2><p>Modules active in the host.</p></div><RouterLink v-if="modules.runningModules.length" to="/running">View all</RouterLink></header>
+          <header><div><h2 id="running-title">{{t('home.runningNow')}}</h2><p>{{t('home.runningHint')}}</p></div><RouterLink v-if="modules.runningModules.length" to="/running">{{t('home.viewAll')}}</RouterLink></header>
           <div v-if="runningPreview.length" class="dashboard-running-list">
             <article v-for="module in runningPreview" :key="module.id">
               <span class="module-icon">{{ module.displayName.slice(0, 1).toUpperCase() }}</span>
-              <div><div class="dashboard-module-title"><strong>{{ module.displayName }}</strong><QBadge tone="success">Running</QBadge></div><small>v{{ module.version }}</small><p>{{ module.displayDescription }}</p></div>
-              <button @click="viewModule(module)">View details</button>
+              <div><div class="dashboard-module-title"><strong>{{module.displayName}}</strong><QBadge tone="success">{{t('moduleState.running')}}</QBadge></div><small>v{{module.version}}</small><p>{{module.displayDescription}}</p></div>
+              <button @click="viewModule(module)">{{t('home.details')}}</button>
             </article>
           </div>
-          <div v-else class="dashboard-running-empty"><QIcon name="running" :size="24" /><div><strong>No modules are running.</strong><p>Start one from the Modules workspace.</p><RouterLink to="/modules">Browse modules</RouterLink></div></div>
+          <div v-else class="dashboard-running-empty"><QIcon name="running" :size="24" /><div><strong>{{t('home.noneRunning')}}</strong><p>{{t('home.noneRunningHint')}}</p><RouterLink to="/modules">{{t('home.browse')}}</RouterLink></div></div>
         </section>
       </div>
 
       <section class="dashboard-destinations" aria-labelledby="destinations-title">
-        <h2 id="destinations-title">Quick destinations</h2>
+        <h2 id="destinations-title">{{t('home.destinations')}}</h2>
         <div>
-          <RouterLink to="/modules"><QIcon name="modules" /><span><strong>Modules</strong><small>Browse and manage installed modules.</small></span></RouterLink>
-          <RouterLink to="/running"><QIcon name="running" /><span><strong>Running</strong><small>Review modules active in the host.</small></span></RouterLink>
-          <RouterLink to="/settings"><QIcon name="settings" /><span><strong>Settings</strong><small>Adjust the Development workspace.</small></span></RouterLink>
+          <RouterLink to="/modules"><QIcon name="modules" /><span><strong>{{t('home.modules')}}</strong><small>{{t('home.modulesHint')}}</small></span></RouterLink><RouterLink to="/running"><QIcon name="running" /><span><strong>{{t('home.runningDestination')}}</strong><small>{{t('home.runningDestinationHint')}}</small></span></RouterLink><RouterLink to="/settings"><QIcon name="settings" /><span><strong>{{t('home.settings')}}</strong><small>{{t('home.settingsHint')}}</small></span></RouterLink>
         </div>
       </section>
     </template>

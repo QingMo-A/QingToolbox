@@ -5,6 +5,8 @@ import DevelopmentHomePage from './DevelopmentHomePage.vue'
 import { router } from '../app/router'
 import { useAppStore } from '../app/store'
 import type { AppSnapshot } from '../contracts/app'
+import {useSettingsStore}from'../app/settingsStore'
+const chinese=()=>useSettingsStore().complete({generatedAt:new Date().toISOString(),language:{code:'system',effectiveCode:'zh-CN',displayName:'System',options:[{code:'system',displayName:'System',nativeName:'跟随系统'},{code:'zh-CN',displayName:'Chinese',nativeName:'简体中文'},{code:'en-US',displayName:'English',nativeName:'English'}]},showLogsInSidebar:true,mainWindowCloseBehavior:'Ask',closeBehaviorMessage:'',launchAtLogin:false,canConfigureLaunchAtLogin:true,canRepairStartup:false,startupPresentationMode:'FloatingBadge',startupBackend:'None',startupStatus:'Unavailable',startupMessage:''})
 
 const wrappers: VueWrapper[] = []
 afterEach(() => wrappers.splice(0).forEach(wrapper => wrapper.unmount()))
@@ -26,6 +28,7 @@ function page(options: Options = {}) {
 const button = (wrapper: VueWrapper, text: string) => wrapper.findAll('button').find(item => item.text().includes(text))!
 
 describe('Development diagnostics workspace', () => {
+  it('reactively localizes diagnostics and the current semantic notice',async()=>{const x=page();await button(x.wrapper,'Ping host').trigger('click');await flushPromises();chinese();await x.wrapper.vm.$nextTick();expect(x.wrapper.text()).toContain('开发诊断');expect(x.wrapper.text()).toContain('宿主在');expect(x.wrapper.text()).toContain('Development Shell');expect(x.wrapper.text()).toContain('module.changed with a long but safe host event');expect(x.getSnapshot).not.toHaveBeenCalled()})
   it('keeps the /diagnostics route', () => expect(router.resolve('/diagnostics').matched).toHaveLength(1))
   it('uses the QPage diagnostics workspace structure', () => { const x = page().wrapper; expect(x.find('.q-page.diagnostics-page').exists()).toBe(true); expect(x.find('.diagnostics-workspace').exists()).toBe(true) })
   it('shows the Development only marker', () => expect(page().wrapper.text()).toContain('Development only'))

@@ -11,7 +11,9 @@ UI-5A2: Implementation Complete
 UI-5A2 Commit: `ed1a3172ce8a65cdffc9ab561939c3d7c4075a96`
 UI-5A3: In Progress
 UI-5A3A Module workspaces: Implementation Complete
-Next: UI-5A3B Home, Logs, Settings, Diagnostics and module metadata refresh
+UI-5A3A Commit: `3ddedcb7849831f865e40cc82ed998b908d623a9`
+UI-5A3B1 Read-only workspaces: Implementation Complete
+Next: UI-5A3B2 Settings localization and module metadata refresh
 ```
 
 Depends on:

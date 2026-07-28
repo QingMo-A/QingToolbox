@@ -21,7 +21,8 @@
 - Plan 012 prerequisite P1 commit: `9f63a9d69e424738b420ddc9305b8b482f56c198`.
 - Plan 012 UI-5A1 commit: `3f2645f963d51747cf9655d785a5038dcbb7d31a`.
 - Plan 012 UI-5A2 commit: `ed1a3172ce8a65cdffc9ab561939c3d7c4075a96`.
-- Plan 012 next bounded slice: UI-5A3B Home, Logs, Settings, Diagnostics and module metadata refresh; UI-5A3 is not complete.
+- Plan 012 UI-5A3A commit: `3ddedcb7849831f865e40cc82ed998b908d623a9`.
+- Plan 012 UI-5A3B1 read-only workspaces: Implementation Complete. Next: UI-5A3B2 Settings localization and module metadata refresh; UI-5A3 is not complete.
 - Production Web UI: Deferred.
 - Downloads, updates, and floating surfaces remain deferred.
 - Preview 2 release work and UI modernization remain independent tracks.

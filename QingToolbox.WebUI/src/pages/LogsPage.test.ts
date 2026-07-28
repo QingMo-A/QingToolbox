@@ -6,6 +6,8 @@ import { router } from '../app/router'
 import { useAppStore } from '../app/store'
 import { useLogStore } from '../app/logStore'
 import type { LogSnapshot } from '../contracts/logs'
+import {useSettingsStore}from'../app/settingsStore'
+const chinese=()=>useSettingsStore().complete({generatedAt:new Date().toISOString(),language:{code:'system',effectiveCode:'zh-CN',displayName:'System',options:[{code:'system',displayName:'System',nativeName:'跟随系统'},{code:'zh-CN',displayName:'Chinese',nativeName:'简体中文'},{code:'en-US',displayName:'English',nativeName:'English'}]},showLogsInSidebar:true,mainWindowCloseBehavior:'Ask',closeBehaviorMessage:'',launchAtLogin:false,canConfigureLaunchAtLogin:true,canRepairStartup:false,startupPresentationMode:'FloatingBadge',startupBackend:'None',startupStatus:'Unavailable',startupMessage:''})
 
 const wrappers: VueWrapper[] = []
 afterEach(() => wrappers.splice(0).forEach(wrapper => wrapper.unmount()))
@@ -33,6 +35,7 @@ function page(options: PageOptions = {}) {
 const severityButtons = (wrapper: VueWrapper) => wrapper.findAll('.logs-severity-overview button')
 
 describe('LogsPage everyday workspace', () => {
+  it('reactively localizes levels and searches Chinese and English labels without reloading',async()=>{const x=page();chinese();await x.wrapper.vm.$nextTick();expect(x.wrapper.text()).toContain('会话日志');expect(severityButtons(x.wrapper).map(b=>b.text())).toEqual(expect.arrayContaining([expect.stringContaining('全部'),expect.stringContaining('警告')]));await x.wrapper.get('input').setValue('警告');expect(x.wrapper.text()).toContain('Module response was slow');await x.wrapper.get('input').setValue('warning');expect(x.wrapper.text()).toContain('Module response was slow');expect(x.getSnapshot).not.toHaveBeenCalled()})
   it('keeps the /logs route', () => expect(router.resolve('/logs').matched).toHaveLength(1))
   it('loads once from connected idle state', async () => { const x = page({ status: 'idle', hasSnapshot: false }); await flushPromises(); expect(x.getSnapshot).toHaveBeenCalledTimes(1) })
   it('does not reload a ready snapshot automatically', async () => { const x = page(); await flushPromises(); expect(x.getSnapshot).not.toHaveBeenCalled() })

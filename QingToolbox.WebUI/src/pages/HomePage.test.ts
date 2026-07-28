@@ -6,6 +6,8 @@ import HomePage from './HomePage.vue'
 import { useAppStore } from '../app/store'
 import { useModuleStore } from '../app/moduleStore'
 import type { ModuleSnapshotItem } from '../contracts/modules'
+import {useSettingsStore}from'../app/settingsStore'
+const chinese=()=>useSettingsStore().complete({generatedAt:new Date().toISOString(),language:{code:'system',effectiveCode:'zh-CN',displayName:'System',options:[{code:'system',displayName:'System',nativeName:'跟随系统'},{code:'zh-CN',displayName:'Chinese',nativeName:'简体中文'},{code:'en-US',displayName:'English',nativeName:'English'}]},showLogsInSidebar:true,mainWindowCloseBehavior:'Ask',closeBehaviorMessage:'',launchAtLogin:false,canConfigureLaunchAtLogin:true,canRepairStartup:false,startupPresentationMode:'FloatingBadge',startupBackend:'None',startupStatus:'Unavailable',startupMessage:''})
 
 const mounted: VueWrapper[] = []
 afterEach(() => mounted.splice(0).forEach(wrapper => wrapper.unmount()))
@@ -30,6 +32,7 @@ async function page(options: { bridge?: string; status?: 'idle'|'loading'|'ready
 }
 
 describe('HomePage everyday dashboard', () => {
+  it('reactively localizes the dashboard without another module request',async()=>{const x=await page({items:[moduleItem(1,{runtimeState:'Running'})]});chinese();await x.wrapper.vm.$nextTick();expect(x.wrapper.text()).toContain('工作区概览');expect(x.wrapper.text()).toContain('当前运行');expect(x.wrapper.text()).toContain('Development 工作区');expect(x.wrapper.text()).toContain('Module 1');expect(x.getSnapshot).not.toHaveBeenCalled()})
   it('shows environment, host version, and bridge state', async () => { const { wrapper } = await page(); expect(wrapper.text()).toContain('Development workspace'); expect(wrapper.text()).toContain('0.2.0-alpha'); expect(wrapper.text()).toContain('Connected') })
   it('does not claim a healthy bridge while disconnected', async () => { const { wrapper } = await page({ bridge: 'Connecting' }); expect(wrapper.text()).toContain('Connecting'); expect(wrapper.text()).not.toContain('Running normally') })
   it('requests one snapshot for connected idle state', async () => { const getSnapshot = vi.fn(async () => ({ generatedAt: new Date().toISOString(), modules: [] })); await page({ status: 'idle', getSnapshot }); await flushPromises(); expect(getSnapshot).toHaveBeenCalledTimes(1) })
