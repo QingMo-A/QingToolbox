@@ -383,6 +383,7 @@ public partial class App : Application
         catch (Exception exception)
         {
             System.Diagnostics.Debug.WriteLine($"Application startup failed: {exception.GetType().Name}");
+            _sessionLog?.Error("Application", "Application startup failed.", exception);
             Environment.ExitCode = (int)StartupExitCode.FatalInitializationFailure;
             _serviceProvider?.GetService<StartupHealthJournal>()?.Fail(StartupPhase.MinimalServicesReady,
                 "startup.fatalInitialization", Environment.ExitCode);

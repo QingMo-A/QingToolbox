@@ -528,7 +528,7 @@
                         <StackPanel>
                             <TextBlock Text="{Binding HostUpdateStatus}" FontWeight="SemiBold" Foreground="#174EA6"/>
                             <TextBlock Margin="0,4,0,0" Foreground="#52647D">
-                                <Run Text="{Binding Strings[hostUpdate.currentVersion]}"/><Run Text=": "/><Run Text="{Binding VersionDisplay}"/>
+                                <Run Text="{Binding Strings[hostUpdate.currentVersion], Mode=OneWay}"/><Run Text=": "/><Run Text="{Binding VersionDisplay, Mode=OneWay}"/>
                             </TextBlock>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
