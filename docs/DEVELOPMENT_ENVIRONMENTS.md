@@ -4,7 +4,7 @@ QingToolbox separates the installed product, host development, and module testin
 
 ## Environments
 
-- **Production / Default** is the installed or portable product. It keeps `%APPDATA%\QingToolbox` for settings and module data and `%LOCALAPPDATA%\QingToolbox\Modules` for imported modules. A Release build with no arguments remains Production-compatible.
+- **Production / Default** is the installed product. It keeps `%APPDATA%\QingToolbox` for settings and module data and `%LOCALAPPDATA%\QingToolbox\Modules` for imported modules. A Release build with no arguments remains Production-compatible, but formal distribution is installer-only.
 - **Development** runs the current source host in `<RepoRoot>\.qingtoolbox\development\<Profile>`. It discovers the build output `Modules` directory and its sandbox `local\modules` directory.
 - **ModuleTest** runs the current source host in `<RepoRoot>\.qingtoolbox\module-test\<Profile>`. It discovers only its sandbox `local\modules` directory.
 

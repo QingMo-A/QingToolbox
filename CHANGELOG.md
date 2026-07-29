@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Retired portable ZIP distribution; future Windows releases publish only the installer and its same-name SHA256 sidecar while retaining audited installer payload generation.
+
 - Localized the Development Web Home, Session Logs, and Diagnostics workspaces in English and Simplified Chinese.
 - Localized the Development Web Modules and Running workspaces in English and Simplified Chinese.
 - Added reactive English and Simplified Chinese localization to the Development Web shell, navigation, and Quick Open.

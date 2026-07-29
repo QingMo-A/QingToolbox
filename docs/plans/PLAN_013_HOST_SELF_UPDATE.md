@@ -1,6 +1,6 @@
 # Plan 013：QingToolbox 宿主更新与一键原地升级
 
-**状态：Approved — Not Started**  
+**状态：Approved / In Progress — 013A**
 **目标分支：`toolbox`**  
 **批准决策：QingToolbox 停止将便携版作为正式分发形态，后续正式发布仅提供安装版。**
 

@@ -24,9 +24,10 @@
 - Plan 012 UI-5A3A commit: `3ddedcb7849831f865e40cc82ed998b908d623a9`.
 - Plan 012 UI-5A3B1 read-only workspaces: Implementation Complete.
 - Plan 012 UI-5A3B2 Settings localization and module metadata refresh: Implementation Complete. Successful language changes refresh one complete host-localized Module Snapshot. Plan 012 is complete.
+- Plan 013: **Approved / In Progress**. The selected substage is **013A — installer-only distribution contract**; formal Windows releases now use only the installer and its same-name SHA256 sidecar.
 - Development Web module updates now support an explicit, inline-confirmed installation of a host-authorized verified package through the frozen B1/B2.1 transaction boundary. This is manual and Development-only; it is not automatic installation.
 - Production Web UI: Deferred.
-- Production module update transactions, automatic installation, host self-update, and Production Web UI remain deferred.
+- Production module update transactions, automatic module installation, and Production Web UI remain deferred. Host self-update is now the selected Plan 013 track; only 013A is currently authorized.
 - Preview 2 release work and UI modernization remain independent tracks.
 
 The Development Vue workspace currently contains Home, Modules, Running, Session Logs, Settings,
@@ -55,7 +56,7 @@ QingToolbox 是一个面向 Windows 的模块化桌面工具箱。
 - 宿主长期稳定运行，不因单个模块故障退出。
 - 模块发现、加载、启动授权、更新和删除具有明确的安全边界。
 - Production、Development、ModuleTest 三种环境严格隔离。
-- 发布过程可复现、可审计，并通过安装器、便携包和升级测试验证。
+- 发布过程可复现、可审计，并通过安装器、宿主载荷审计和升级测试验证。
 - 优先建立可靠基础设施，再逐步加入自动安装和宿主自更新。
 
 当前开发分支：
@@ -162,7 +163,7 @@ Development 和 ModuleTest 不得注册真实 Windows 开机自启，不得污�
 - Debug 与 Release 构建。
 - Module Load、Module Update、Module Package Download、Startup Reliability Smoke Test。
 - 本地环境契约测试。
-- 便携包构建和资产 Manifest。
+- 安装器内部 publish、Host Payload Manifest 和载荷审计。
 - Inno Setup 安装器。
 - 当前版本安装、卸载和用户数据保留 Roundtrip。
 - 固定 AppId 与自有 marker 的安全旧目录发现、自定义目录原地升级，以及运行中 Shell 的成功后恢复。
@@ -194,11 +195,19 @@ Preview 2 的产品目标不是完成全部自动更新，而是证明：
 
 > QingToolbox 能可靠启动、原地升级、安全管理模块，并保留用户状态。
 
-## 5. 当前最高优先级：Preview 1 → Preview 2 原地升级门禁
+## 5. 当前选定计划：Plan 013 宿主自更新
+
+Plan 013 状态为 **Approved / In Progress**，完整边界见
+[`docs/plans/PLAN_013_HOST_SELF_UPDATE.md`](plans/PLAN_013_HOST_SELF_UPDATE.md)。
+当前只执行 **013A**：将后续正式 Windows Release 收口为安装器及其同名 `.sha256`，
+保留安装器内部 publish、Host Payload Manifest、Web 资产绑定、载荷审计和升级验证。
+013B 的 Release 检测、013C 的下载安装器、013D 的安装器交接均未开始。
+
+## 5.1 Preview 1 → Preview 2 原地升级门禁（保留的发布基础设施）
 
 这是下一阶段的唯一主线。在完成前，不进入 qmod 自动安装。
 
-### 5.1 版本与发布说明
+### 5.1.1 版本与发布说明
 
 - 将宿主版本统一升级到 `0.2.0-alpha` / `0.2.0.0`。
 - 安装器显示 `Preview 2`。
@@ -207,7 +216,7 @@ Preview 2 的产品目标不是完成全部自动更新，而是证明：
 - 不修改 `docs/releases/0.1.0-alpha.md`。
 - 不创建 tag 或 Release。
 
-### 5.2 真实旧版资产
+### 5.1.2 真实旧版资产
 
 - 只从 GitHub 官方 `v0.1.0-alpha` Release 获取旧安装器。
 - 必须验证官方 SHA256 sidecar。
@@ -216,7 +225,7 @@ Preview 2 的产品目标不是完成全部自动更新，而是证明：
 - 可以提交由官方资产生成的旧版宿主文件基线 JSON。
 - 旧 Release 缺少安装器或 Hash 时必须明确阻塞，不得猜测或伪造。
 
-### 5.3 原地覆盖升级测试
+### 5.1.3 原地覆盖升级测试
 
 新增自动化流程：
 
@@ -232,7 +241,7 @@ Preview 2 的产品目标不是完成全部自动更新，而是证明：
 10. 再次运行同版本安装器，验证 Repair Install。
 11. 卸载 Preview 2，验证安装目录删除而用户数据继续保留。
 
-### 5.4 安装器兼容保证
+### 5.1.4 安装器兼容保证
 
 - 固定 `AppId`，Preview 1 与 Preview 2 必须被识别为同一应用。
 - 显式启用 `UsePreviousAppDir=yes`。
@@ -241,7 +250,7 @@ Preview 2 的产品目标不是完成全部自动更新，而是证明：
 - 运行中的旧 Shell 可以关闭，但安装结束后只能运行新版。
 - 不得产生重复开始菜单项、桌面快捷方式或卸载入口。
 
-### 5.5 降级保护
+### 5.1.5 降级保护
 
 从 `0.2.0-alpha` 开始的新安装器必须拒绝覆盖更高版本。
 
@@ -261,7 +270,7 @@ Preview 2 的产品目标不是完成全部自动更新，而是证明：
 
 已发布的 `v0.1.0-alpha` 安装器无法追溯加入保护，这一点必须在文档中明确。
 
-### 5.6 Host Payload Manifest 与废弃文件清理
+### 5.1.6 Host Payload Manifest 与废弃文件清理
 
 生成 `host-payload.manifest.json`，记录宿主拥有的文件：
 
@@ -279,7 +288,7 @@ Manifest 不包含用户数据、具体模块、缓存、日志、DevTools、PDB
 - 禁止删除未知文件、相似文件名、用户模块或用户数据。
 - 所有路径必须通过绝对路径、穿越、ADS、UNC 和目录边界校验。
 
-### 5.7 启动和扫描残余边界
+### 5.1.7 启动和扫描残余边界
 
 随升级门禁一起收尾，不再扩展新能力：
 
@@ -311,7 +320,6 @@ Manifest 不包含用户数据、具体模块、缓存、日志、DevTools、PDB
 - Host Payload Manifest Verification
 - Obsolete Host File Cleanup Test
 - Unknown Install File Preservation Test
-- Portable ZIP Audit
 - Installer Build
 - Asset Manifest Verification
 - Preview RC Gate
@@ -453,13 +461,13 @@ frozen runtime, transaction, and capability boundaries.
 - 权限声明和能力模型。
 - 版本化测试宿主。
 
-### 8.4 更后期：宿主应用内自更新
+### 8.4 当前选定：Plan 013 宿主应用内自更新
 
-宿主自更新需要独立 Update Helper：
+宿主自更新复用现有安装器覆盖能力：
 
-`检测宿主更新 → 下载并验证安装器 → 退出宿主 → 独立 Helper 启动安装器 → 验证升级 → 失败提示或恢复`
+`检测宿主更新 → 下载并验证安装器 → 用户确认 → 启动安装器 → 退出宿主 → 安装器原地覆盖并重新打开`
 
-它不能由正在被替换的主进程直接完成，优先级低于模块事务更新。
+宿主不直接替换自身文件。Plan 013 已获批准并进入 013A；本阶段仅收口安装器唯一分发契约，不实现检测、下载或安装交接。
 
 ## 9. 提交和验证工作流
 
@@ -510,6 +518,7 @@ git log -15 --format=fuller
 请先读取并遵守仓库中的：
 
 docs/DEVELOPMENT_PLAN.md
+docs/plans/PLAN_013_HOST_SELF_UPDATE.md
 
 仓库：QingMo-A/QingToolbox
 宿主开发分支：toolbox
@@ -543,9 +552,9 @@ docs/DEVELOPMENT_PLAN.md
 - 当前只下载并验证更新包，不自动解压、安装、Import、Load 或 Activate。
 - 开发环境隔离、Smoke Tests、安装器和 Preview RC Gate。
 
-项目所有者已明确推迟剩余 Preview 2 人工发布验收。未执行项目继续保持 `Not Run`，当前最高优先级是：
-
-阶段 A：qmod 离线结构验证与安全 Staging；它不是 qmod 自动安装。
+项目所有者已明确推迟剩余 Preview 2 人工发布验收。未执行项目继续保持 `Not Run`。
+当前选定计划是 Plan 013，当前子阶段仅为 013A：正式 Windows Release 只分发安装器及其同名 SHA256；
+保留内部 publish、Host Payload Manifest、载荷审计和升级验证，不实现 013B/013C/013D。
 
 目标版本：
 
@@ -576,12 +585,12 @@ Preview 2 明确不包含：
 - Windows Service、SYSTEM 或管理员自启。
 - 稳定版 Module API。
 
-完成 Preview 2 后的路线：
+后续路线：
 
 A. qmod ZIP 结构与安全 Staging 验证，仍不安装。
 B. 0.3.0-alpha 模块事务更新、原子替换和失败回滚。
 C. 0.4.0-alpha 稳定 Module API、NuGet SDK 和模板。
-D. 更后期才实现独立 Update Helper 驱动的宿主自更新。
+D. Plan 013 已批准并进入 013A；后续 013B/013C/013D 分别实现检测、下载验证和安装器交接。
 
 每次开始工作先执行：
 

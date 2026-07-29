@@ -65,25 +65,11 @@ SmartScreen 可能显示未知发布者警告。
 %APPDATA%\QingToolbox
 ```
 
-### 便携 ZIP
+### 正式分发方式
 
-从 GitHub Release 下载 framework-dependent 的 `QingToolbox-0.2.0-alpha-win-x64.zip`，校验 SHA256
-后解压，运行 `QingToolbox.Shell.exe`。便携版需要预先安装 .NET 10 Desktop
-Runtime。二进制文件没有代码签名，Windows SmartScreen 可能显示警告。
-
-当前 Preview 的便携 ZIP 是 **framework-dependent** 版本，适合已经安装
-.NET 10 Desktop Runtime 的开发者和测试用户。运行库应从 Microsoft 官方渠道
-安装；不要将独立的 Runtime 安装程序直接塞入 ZIP 后要求用户手动执行。
-
-后续正式发布计划同时提供两种清晰命名的便携包：
-
-- `win-x64-self-contained.zip`：内含应用所需的 .NET 运行时，解压即用，作为普通
-  用户的首选下载项；它不包含 .NET SDK，也不会内置任何具体工具模块。
-- `win-x64-framework-dependent.zip`：体积较小，需要预先安装对应版本的
-  .NET Desktop Runtime，供高级用户和受控部署环境选择。
-
-在 self-contained 便携包的发布脚本和 CI 校验完成之前，项目不会把当前 ZIP
-描述成“无需运行库”版本。两类包都应继续保持 host-only，并提供独立 SHA256。
+后续正式 Windows Release 仅提供 `win-x64` 安装器及其同名 `.sha256`。安装器是
+QingToolbox 唯一受支持的正式分发方式；历史 Release 中已经存在的便携资产保持不变，
+但新版本不再生成、上传或宣传便携 ZIP。
 
 开发环境运行：
 
@@ -122,14 +108,6 @@ dotnet run --project QingToolbox.Shell
 - Preview 2 Release Notes：[`docs/releases/0.2.0-alpha.md`](docs/releases/0.2.0-alpha.md)
 - 更新记录：[`CHANGELOG.md`](CHANGELOG.md)
 
-生成 Preview 发布包：
-
-```powershell
-./scripts/publish-preview.ps1
-```
-
-输出位于 `artifacts/`，其中包含 zip 和 SHA256 文件。发布产物不提交到 Git。
-
 生成当前用户安装器（需要本机安装 Inno Setup 6）：
 
 ```powershell
@@ -139,8 +117,8 @@ dotnet run --project QingToolbox.Shell
 安装器构建说明参见 [`installer/README.md`](installer/README.md)。安装器只包含
 QingToolbox 宿主，不包含 TextTools、ScreenPin、WindowTopmost 或其他具体模块。
 
-`toolbox` 分支的 Windows CI 会构建并校验便携 ZIP 与安装器、执行模块 Smoke
-Test，并在隔离用户目录中进行静默安装—卸载往返测试。CI 上传的 Preview
+`toolbox` 分支的 Windows CI 会构建并校验安装器、执行模块 Smoke Test，并在
+隔离用户目录中进行静默安装—卸载往返测试。CI 上传的 Preview
 artifacts 仅用于验证，不会自动创建 GitHub Release、tag 或提交构建产物。
 Shell、任务栏、快捷方式和安装器现在统一使用正式 QingToolbox 品牌图标。
 
@@ -161,8 +139,8 @@ SHA256。CI 将中文 Inno Setup 翻译固定到已审核哈希，Roundtrip 使�
 
 Preview 的版本、文件版本、runtime、资产文件名和 CI artifact 名称统一由
 `Directory.Build.props` 与 `scripts/get-preview-release-metadata.ps1` 派生。
-CI 还会生成机器可读 manifest，记录构建源码 commit、ZIP 与安装器的大小和
-SHA256；官方 GitHub Actions 与 Inno 中文翻译均固定到不可变 commit。该流程
+CI 还会生成机器可读 manifest，记录构建源码 commit、安装器大小和 SHA256；
+官方 GitHub Actions 与 Inno 中文翻译均固定到不可变 commit。该流程
 继续只做发布门禁，不创建 Release 或 tag。
 
 ## 首次使用

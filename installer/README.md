@@ -74,9 +74,9 @@ and verifies that modules, data, and settings are retained. It refuses to
 overwrite an existing `settings.json`; use isolated `LOCALAPPDATA` and
 `APPDATA` values for repeatable local and CI runs.
 
-The Windows Preview validation workflow also builds both release assets,
-recomputes their SHA256 checksums, performs this roundtrip, and uploads the four
-assets for 10 days. CI installs the approved Chocolatey `innosetup` 6.7.1
+The Windows Preview validation workflow builds the installer, recomputes its
+SHA256 checksum, performs this roundtrip, and uploads that installer pair plus
+the internal validation manifest for 10 days. CI installs the approved Chocolatey `innosetup` 6.7.1
 package and obtains the Simplified Chinese message file from the official Inno
 Setup translation endpoint. It does not publish a GitHub Release.
 
@@ -110,7 +110,7 @@ and failure diagnostics remain under `TestRoot`; CI uploads only these text logs
 and then removes its isolated test/profile directories.
 
 Release versioning and asset names come from
-`scripts/get-preview-release-metadata.ps1`. After both assets are built,
+`scripts/get-preview-release-metadata.ps1`. After the installer is built,
 `scripts/write-preview-manifest.ps1` writes a JSON manifest containing the
 source commit and recomputed hashes; `scripts/verify-preview-assets.ps1`
 validates the assets, checksum files, manifest, and current Git HEAD. Official
@@ -121,7 +121,7 @@ be upgraded explicitly.
 
 Release handoff must use `scripts/build-preview-release-candidate.ps1` from a
 clean `toolbox` branch synchronized with `origin/toolbox`. The gate performs the
-complete build, smoke test, isolated installer roundtrip, schema-v2 provenance
+complete build, smoke test, isolated installer roundtrip, schema-v3 installer-only provenance
 manifest generation, and final source-state verification. See
 `docs/PREVIEW_RELEASE_PROCESS.md`. It deliberately does not create a Release or
 tag and does not upload or commit artifacts.

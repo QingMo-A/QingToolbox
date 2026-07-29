@@ -55,8 +55,6 @@ try {
         $ArtifactsRoot = Join-Path $repoRoot "artifacts"
     }
     $resolvedArtifactsRoot = [System.IO.Path]::GetFullPath($ArtifactsRoot)
-    $portable = Get-VerifiedAsset -AssetPath (
-        Join-Path $resolvedArtifactsRoot $metadata.PortableFileName)
     $installer = Get-VerifiedAsset -AssetPath (
         Join-Path $resolvedArtifactsRoot `
             "installer\output\$($metadata.InstallerFileName)")
@@ -72,13 +70,13 @@ try {
     }
     $manifest = $manifestText | ConvertFrom-Json
 
-    if ([int]$manifest.schemaVersion -ne 2 -or
+    if ([int]$manifest.schemaVersion -ne 3 -or
         $manifest.product -ne $metadata.ProductName -or
         $manifest.channel -ne "Preview" -or
         $manifest.version -ne $metadata.Version -or
         $manifest.fileVersion -ne $metadata.FileVersion -or
         $manifest.releaseDisplayName -ne $metadata.ReleaseDisplayName -or
-        $manifest.portableKind -ne "framework-dependent" -or
+        $manifest.distribution -ne "installer-only" -or
         $manifest.runtime -ne $metadata.Runtime -or
         $manifest.sourceRepository -ne "QingMo-A/QingToolbox" -or
         $manifest.sourceTreeClean -ne $true) {
@@ -94,13 +92,12 @@ try {
     }
 
     $manifestArtifacts = @($manifest.artifacts)
-    if ($manifestArtifacts.Count -ne 2 -or
-        $manifestArtifacts[0].type -ne "portable" -or
-        $manifestArtifacts[1].type -ne "installer") {
-        throw "Preview manifest must contain portable then installer artifacts."
+    if ($manifestArtifacts.Count -ne 1 -or
+        $manifestArtifacts[0].type -ne "installer") {
+        throw "Preview manifest must contain exactly one installer artifact."
     }
 
-    $expectedAssets = @($portable, $installer)
+    $expectedAssets = @($installer)
     for ($index = 0; $index -lt $expectedAssets.Count; $index++) {
         $entry = $manifestArtifacts[$index]
         $expected = $expectedAssets[$index]
@@ -113,8 +110,6 @@ try {
 
     Write-Host "Preview asset verification passed."
     Write-Host "Source:    $($manifest.sourceCommit)"
-    Write-Host "Portable:  $($portable.FileName) ($($portable.SizeBytes) bytes)"
-    Write-Host "SHA256:    $($portable.Sha256)"
     Write-Host "Installer: $($installer.FileName) ($($installer.SizeBytes) bytes)"
     Write-Host "SHA256:    $($installer.Sha256)"
     Write-Host "Manifest:  $($metadata.ManifestFileName)"

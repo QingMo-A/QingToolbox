@@ -67,15 +67,12 @@ try {
     $resolvedIscc = Resolve-CandidateIscc -ExplicitPath $IsccPath
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 
-    $portablePath = Assert-CandidateArtifactPath (Join-Path $repoRoot (
-        "artifacts\$($metadata.PortableFileName)"))
     $manifestPath = Assert-CandidateArtifactPath (Join-Path $repoRoot (
         "artifacts\$($metadata.ManifestFileName)"))
     $installerPath = Assert-CandidateArtifactPath (Join-Path $repoRoot (
         "artifacts\installer\output\$($metadata.InstallerFileName)"))
     foreach ($staleAsset in @(
-        $portablePath, "$portablePath.sha256", $manifestPath,
-        $installerPath, "$installerPath.sha256")) {
+        $manifestPath, $installerPath, "$installerPath.sha256")) {
         $verifiedStaleAsset = Assert-CandidateArtifactPath $staleAsset
         if (Test-Path -LiteralPath $verifiedStaleAsset -PathType Leaf) {
             Remove-Item -LiteralPath $verifiedStaleAsset -Force
@@ -143,12 +140,12 @@ try {
             -c Release --no-build
     }
 
-    Write-Host "`n==> Build portable Preview archive"
-    Invoke-CheckedStage -StageName "Build portable Preview archive" -Action {
-        & (Join-Path $PSScriptRoot "publish-preview.ps1")
+    Write-Host "`n==> Verify installer-only release contract"
+    Invoke-CheckedStage -StageName "Installer-only release contract" -Action {
+        & (Join-Path $PSScriptRoot "test-installer-only-release-contract.ps1")
+        & (Join-Path $PSScriptRoot "test-host-payload-contracts.ps1")
+        & (Join-Path $PSScriptRoot "test-installer-semver.ps1")
     }
-    Assert-FileExists "Build portable Preview archive" $portablePath
-    Assert-FileExists "Build portable Preview archive" "$portablePath.sha256"
 
     Write-Host "`n==> Prepare isolated Inno Setup"
     $isolatedInnoRoot = Join-Path $tempRoot "InnoSetup"
@@ -233,7 +230,6 @@ try {
     if ($manifest.sourceCommit -ne $finalSource.Commit) {
         throw "Verified manifest sourceCommit does not match current HEAD."
     }
-    $portable = Get-Item -LiteralPath $portablePath
     $installer = Get-Item -LiteralPath $installerPath
 
     Write-Host "`nPreview release candidate gate passed."
@@ -245,9 +241,6 @@ try {
     Write-Host "Branch:            $($finalSource.Branch)"
     Write-Host "Source clean:      $($finalSource.IsClean)"
     Write-Host "Origin synchronized: $($finalSource.IsOriginSynced)"
-    Write-Host "Portable:          $($portable.FullName)"
-    Write-Host "Portable size:     $($portable.Length) bytes"
-    Write-Host "Portable SHA256:   $((Get-FileHash $portable.FullName -Algorithm SHA256).Hash)"
     Write-Host "Installer:         $($installer.FullName)"
     Write-Host "Installer size:    $($installer.Length) bytes"
     Write-Host "Installer SHA256:  $((Get-FileHash $installer.FullName -Algorithm SHA256).Hash)"

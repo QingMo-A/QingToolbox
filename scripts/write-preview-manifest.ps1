@@ -49,27 +49,25 @@ try {
         $ArtifactsRoot = Join-Path $repoRoot "artifacts"
     }
     $resolvedArtifactsRoot = [System.IO.Path]::GetFullPath($ArtifactsRoot)
-    $portablePath = Join-Path $resolvedArtifactsRoot $metadata.PortableFileName
     $installerPath = Join-Path $resolvedArtifactsRoot (
         "installer\output\$($metadata.InstallerFileName)")
 
     $sourceCommit = $source.Commit
 
     $manifest = [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         product = $metadata.ProductName
         channel = "Preview"
         version = $metadata.Version
         fileVersion = $metadata.FileVersion
         releaseDisplayName = $metadata.ReleaseDisplayName
-        portableKind = $metadata.PortableKind
+        distribution = "installer-only"
         runtime = $metadata.Runtime
         sourceRepository = "QingMo-A/QingToolbox"
         sourceCommit = $sourceCommit.ToLowerInvariant()
         sourceTreeClean = $true
         generatedAtUtc = [DateTime]::UtcNow.ToString("o")
         artifacts = @(
-            (Get-VerifiedAssetRecord -Type "portable" -AssetPath $portablePath),
             (Get-VerifiedAssetRecord -Type "installer" -AssetPath $installerPath)
         )
     }

@@ -43,7 +43,6 @@ jobs:
           "version=$($metadata.Version)" | Out-File $env:GITHUB_OUTPUT -Append
           "file_version=$($metadata.FileVersion)" | Out-File $env:GITHUB_OUTPUT -Append
           "runtime=$($metadata.Runtime)" | Out-File $env:GITHUB_OUTPUT -Append
-          "portable_file=$($metadata.PortableFileName)" | Out-File $env:GITHUB_OUTPUT -Append
           "installer_file=$($metadata.InstallerFileName)" | Out-File $env:GITHUB_OUTPUT -Append
           "manifest_file=$($metadata.ManifestFileName)" | Out-File $env:GITHUB_OUTPUT -Append
           "artifact_name=$($metadata.ValidationArtifactName)" | Out-File $env:GITHUB_OUTPUT -Append
@@ -199,15 +198,12 @@ jobs:
           -c Release
           --no-build
 
-      - name: Build portable Preview archive
-        shell: pwsh
-        run: ./scripts/publish-preview.ps1
-
       - name: Verify host payload and SemVer contracts
         shell: pwsh
         run: |
           ./scripts/test-host-payload-contracts.ps1
           ./scripts/test-installer-semver.ps1
+          ./scripts/test-installer-only-release-contract.ps1
 
       - name: Install Inno Setup 6
         shell: pwsh
@@ -325,8 +321,6 @@ jobs:
           retention-days: 10
           if-no-files-found: error
           path: |
-            artifacts/${{ steps.release.outputs.portable_file }}
-            artifacts/${{ steps.release.outputs.portable_file }}.sha256
             artifacts/installer/output/${{ steps.release.outputs.installer_file }}
             artifacts/installer/output/${{ steps.release.outputs.installer_file }}.sha256
             artifacts/${{ steps.release.outputs.manifest_file }}

@@ -39,7 +39,7 @@ users, or absolute paths. MSBuild compiles its ID and manifest SHA256 into the S
 that host anchor plus the exact file set before creating WebView2. It rejects reparse points, caps
 assets at 256 files / 8 MiB each / 32 MiB total, snapshots verified bytes in memory, and serves only
 that immutable snapshot. No request reopens disk files or falls through to a virtual-host mapping.
-Portable, installer, and installed-payload tests verify the same host binding.
+Installer payload and installed-payload tests verify the same host binding.
 
 ## Verification status
 

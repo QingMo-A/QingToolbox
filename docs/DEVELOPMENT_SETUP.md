@@ -127,18 +127,7 @@ default icon and do not cause module assemblies to load.
 
 ## Preview publishing
 
-Create the framework-dependent `0.2.0-alpha` Windows x64 Preview 2 archive with:
-
-```powershell
-./scripts/publish-preview.ps1
-```
-
-To include the .NET runtime:
-
-```powershell
-./scripts/publish-preview.ps1 -SelfContained $true
-```
-
-The script publishes in Release configuration, creates
-`artifacts/QingToolbox-0.2.0-alpha-win-x64.zip`, and writes its SHA256 beside
-the archive. `artifacts/` is ignored by Git.
+Formal Windows distribution is installer-only. Build the supported `win-x64`
+installer with `./scripts/build-installer.ps1`; it retains an internal publish
+directory, payload audit, Host Payload Manifest, and Web asset binding check.
+No portable ZIP is produced. `artifacts/` remains ignored by Git.

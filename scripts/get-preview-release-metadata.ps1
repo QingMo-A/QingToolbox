@@ -34,8 +34,8 @@ function Get-PreviewReleaseMetadata {
     }
 
     $productName = "QingToolbox"
-    $portableBaseName = "$productName-$version-$Runtime"
-    $installerBaseName = "$portableBaseName-setup"
+    $releaseBaseName = "$productName-$version-$Runtime"
+    $installerBaseName = "$releaseBaseName-setup"
     $metadata = [pscustomobject]@{
         ProductName = $productName
         Version = $version
@@ -43,18 +43,14 @@ function Get-PreviewReleaseMetadata {
         PreviewNumber = [int]$previewNumber
         ReleaseDisplayName = $releaseDisplayName
         ProductDisplayName = "$productName $version $releaseDisplayName"
-        PortableKind = "framework-dependent"
         Runtime = $Runtime
-        PortableBaseName = $portableBaseName
-        PortableFileName = "$portableBaseName.zip"
         InstallerBaseName = $installerBaseName
         InstallerFileName = "$installerBaseName.exe"
-        ManifestFileName = "$portableBaseName.manifest.json"
-        ValidationArtifactName = "$productName-$version-preview-$Runtime"
+        ManifestFileName = "$releaseBaseName.release-manifest.json"
+        ValidationArtifactName = "$productName-$version-installer-$Runtime"
     }
 
     foreach ($name in @(
-        $metadata.PortableFileName,
         $metadata.InstallerFileName,
         $metadata.ManifestFileName,
         $metadata.ValidationArtifactName)) {
