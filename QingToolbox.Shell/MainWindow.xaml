@@ -519,16 +519,33 @@
                 </StackPanel>
             </Grid>
 
-            <Border Grid.Row="1"
-                    Margin="0,20,0,16"
-                    Visibility="{Binding IsModulesSelected, Converter={StaticResource BooleanToVisibilityConverter}}"
-                    Style="{StaticResource StatusMessageStyle}">
-                <StackPanel>
-                    <TextBlock Text="{Binding StatusMessage}" Foreground="#475569"/>
-                    <TextBlock Margin="0,4,0,0" Text="{Binding ModuleUpdateSummary}" Foreground="#31598F"/>
-                    <TextBlock Margin="0,2,0,0" Text="{Binding ModuleUpdateLastChecked}" FontSize="12" Foreground="#64748B"/>
-                </StackPanel>
-            </Border>
+            <StackPanel Grid.Row="1" Margin="0,20,0,16">
+                <Border Padding="16" Margin="0,0,0,10" CornerRadius="14" Background="#EEF5FF"
+                        BorderBrush="#C9DCFF" BorderThickness="1"
+                        Visibility="{Binding ShowHostUpdateBanner, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="{Binding HostUpdateStatus}" FontWeight="SemiBold" Foreground="#174EA6"/>
+                            <TextBlock Margin="0,4,0,0" Foreground="#52647D">
+                                <Run Text="{Binding Strings[hostUpdate.currentVersion]}"/><Run Text=": "/><Run Text="{Binding VersionDisplay}"/>
+                            </TextBlock>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Content="{Binding Strings[hostUpdate.later]}" Command="{Binding DismissHostUpdateBannerCommand}" Style="{StaticResource SecondaryActionButtonStyle}"/>
+                            <Button Content="{Binding Strings[hostUpdate.view]}" Command="{Binding ViewHostUpdateCommand}" Style="{StaticResource PrimaryActionButtonStyle}"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <Border Visibility="{Binding IsModulesSelected, Converter={StaticResource BooleanToVisibilityConverter}}"
+                        Style="{StaticResource StatusMessageStyle}">
+                    <StackPanel>
+                        <TextBlock Text="{Binding StatusMessage}" Foreground="#475569"/>
+                        <TextBlock Margin="0,4,0,0" Text="{Binding ModuleUpdateSummary}" Foreground="#31598F"/>
+                        <TextBlock Margin="0,2,0,0" Text="{Binding ModuleUpdateLastChecked}" FontSize="12" Foreground="#64748B"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
 
             <Grid Grid.Row="2" Margin="0,0,0,20">
                 <Grid.Style>
@@ -1645,6 +1662,20 @@
                                                Foreground="{StaticResource SecondaryTextBrush}"/>
                                 </StackPanel>
                             </Grid>
+                        </Border>
+                        <Border Margin="0,14,0,0" Padding="18" CornerRadius="14" Background="#F5F9FF" BorderBrush="#DCE7F6" BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Strings[hostUpdate.title]}" FontSize="16" FontWeight="SemiBold"/>
+                                <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Strings[hostUpdate.currentVersion]}" Foreground="{StaticResource SecondaryTextBrush}"/><TextBlock Grid.Column="1" Text="{Binding VersionDisplay}"/></Grid>
+                                <Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Strings[hostUpdate.status]}" Foreground="{StaticResource SecondaryTextBrush}"/><TextBlock Grid.Column="1" Text="{Binding HostUpdateStatus}" TextWrapping="Wrap"/></Grid>
+                                <Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Strings[hostUpdate.latestVersion]}" Foreground="{StaticResource SecondaryTextBrush}"/><TextBlock Grid.Column="1" Text="{Binding HostUpdateLatestVersion}"/></Grid>
+                                <Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Strings[hostUpdate.publishedAt]}" Foreground="{StaticResource SecondaryTextBrush}"/><TextBlock Grid.Column="1" Text="{Binding HostUpdatePublishedAt}"/></Grid>
+                                <Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Strings[hostUpdate.lastChecked]}" Foreground="{StaticResource SecondaryTextBrush}"/><TextBlock Grid.Column="1" Text="{Binding HostUpdateLastChecked}"/></Grid>
+                                <TextBlock Margin="0,10,0,0" Text="{Binding HostUpdateSummary}" TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/>
+                                <Button Margin="0,12,0,0" HorizontalAlignment="Left" Command="{Binding CheckHostUpdateCommand}" AutomationProperties.Name="{Binding Strings[hostUpdate.check]}" Style="{StaticResource SecondaryActionButtonStyle}">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" Style="{StaticResource CompactFluentIconStyle}"/><TextBlock Text="{Binding Strings[hostUpdate.check]}"/></StackPanel>
+                                </Button>
+                            </StackPanel>
                         </Border>
                     </StackPanel>
                 </Border>

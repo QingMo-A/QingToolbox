@@ -291,6 +291,7 @@ public partial class MainWindow : Window
                 _startupJournal.Mark(StartupPhase.Ready);
                 _sessionLog.Information("Startup", "Background startup pipeline completed.");
                 _webShellInitializer.PublishSnapshot();
+                _ = _viewModel.CheckHostUpdateAutomaticallyAsync(_startupSession.LifetimeToken);
             }
         }
         catch(OperationCanceledException) when(_startupSession.State==StartupSessionState.Exiting){}

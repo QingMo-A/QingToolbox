@@ -36,6 +36,7 @@ public sealed partial class MainWindowViewModel(
     ApplicationExecutionEnvironment executionEnvironment,
     ModuleUpdateCheckCoordinator moduleUpdateCoordinator,
     ModulePackageDownloadCoordinator modulePackageDownloadCoordinator,
+    HostUpdateDiscoveryService hostUpdateDiscovery,
     TimeProvider timeProvider,
     StartupHealthJournal startupHealthJournal,
     IModuleExecutionReadinessGate executionGate,
@@ -151,6 +152,12 @@ public sealed partial class MainWindowViewModel(
     [ObservableProperty] private bool _canTestStartup;
     [ObservableProperty] private bool _canRepairStartup;
     [ObservableProperty] private bool _showLogsInSidebar = executionEnvironment.IsDevelopment;
+    [ObservableProperty] private HostUpdateCheckState _hostUpdateState = HostUpdateCheckState.Idle;
+    [ObservableProperty] private string _hostUpdateLatestVersion = "—";
+    [ObservableProperty] private string _hostUpdatePublishedAt = "—";
+    [ObservableProperty] private string _hostUpdateLastChecked = "—";
+    [ObservableProperty] private string _hostUpdateSummary = string.Empty;
+    [ObservableProperty] private bool _isHostUpdateBannerDismissed;
 
     public IReadOnlyList<StartupPresentationMode> StartupPresentationModes { get; } = Enum.GetValues<StartupPresentationMode>();
     public string StartupAuthorizationSummary => localization.GetString("startup.authorizationSummary", StartupAuthorizationCount);
@@ -162,6 +169,16 @@ public sealed partial class MainWindowViewModel(
         typeof(MainWindowViewModel).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
             .InformationalVersion.Split('+')[0] ?? "0.2.0-alpha";
+    public bool IsHostUpdateAvailable => HostUpdateState == HostUpdateCheckState.UpdateAvailable;
+    public bool ShowHostUpdateBanner => executionEnvironment.IsProduction && IsHostUpdateAvailable && !IsHostUpdateBannerDismissed;
+    public string HostUpdateStatus => localization.GetString(HostUpdateState switch
+    {
+        HostUpdateCheckState.Checking => "hostUpdate.checking",
+        HostUpdateCheckState.UpToDate => "hostUpdate.upToDate",
+        HostUpdateCheckState.UpdateAvailable => "hostUpdate.available",
+        HostUpdateCheckState.Failed => "hostUpdate.failed",
+        _ => "hostUpdate.notChecked"
+    }, HostUpdateLatestVersion);
     public LocalizedText Strings { get; } = new(localization);
     public ObservableCollection<LanguageOptionViewModel> LanguageOptions { get; } =
     [
@@ -410,6 +427,7 @@ public sealed partial class MainWindowViewModel(
         OnPropertyChanged(nameof(PinLabel));
         OnPropertyChanged(nameof(StartupAuthorizationSummary));
         OnPropertyChanged(nameof(MissingStartupAuthorizationSummary));
+        OnPropertyChanged(nameof(HostUpdateStatus));
         RefreshLanguageOptionLabels();
         if (!string.IsNullOrEmpty(ModuleUpdateLastChecked))
         {
@@ -424,6 +442,55 @@ public sealed partial class MainWindowViewModel(
             "status.languageChanged",
             option?.DisplayText ?? languageCode);
         SetSelectedLanguageCode(languageCode);
+    }
+
+    partial void OnHostUpdateStateChanged(HostUpdateCheckState value)
+    {
+        OnPropertyChanged(nameof(IsHostUpdateAvailable));
+        OnPropertyChanged(nameof(ShowHostUpdateBanner));
+        OnPropertyChanged(nameof(HostUpdateStatus));
+        CheckHostUpdateCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnHostUpdateLatestVersionChanged(string value) => OnPropertyChanged(nameof(HostUpdateStatus));
+    partial void OnIsHostUpdateBannerDismissedChanged(bool value) => OnPropertyChanged(nameof(ShowHostUpdateBanner));
+
+    public async Task CheckHostUpdateAutomaticallyAsync(CancellationToken cancellationToken)
+    {
+        if (!executionEnvironment.IsProduction) return;
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+            await CheckHostUpdateCoreAsync(false, cancellationToken);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanCheckHostUpdate))]
+    private Task CheckHostUpdateAsync() => CheckHostUpdateCoreAsync(true, CancellationToken.None);
+
+    private bool CanCheckHostUpdate() => HostUpdateState != HostUpdateCheckState.Checking;
+
+    private async Task CheckHostUpdateCoreAsync(bool manual, CancellationToken cancellationToken)
+    {
+        HostUpdateState = HostUpdateCheckState.Checking;
+        var result = await hostUpdateDiscovery.CheckAsync(manual, cancellationToken);
+        HostUpdateLatestVersion = result.Release?.Version ?? "—";
+        HostUpdatePublishedAt = result.Release?.PublishedAt.LocalDateTime.ToString("g") ?? "—";
+        HostUpdateLastChecked = result.LastSuccessfulCheck?.LocalDateTime.ToString("g") ?? "—";
+        HostUpdateSummary = result.Release?.Summary ?? string.Empty;
+        HostUpdateState = result.State;
+        if (result.State == HostUpdateCheckState.UpdateAvailable) IsHostUpdateBannerDismissed = false;
+    }
+
+    [RelayCommand]
+    private void DismissHostUpdateBanner() => IsHostUpdateBannerDismissed = true;
+
+    [RelayCommand]
+    private void ViewHostUpdate()
+    {
+        IsHostUpdateBannerDismissed = true;
+        SelectedNavigationKey = "Settings";
     }
 
     private void RestoreSelectedLanguageCode() =>

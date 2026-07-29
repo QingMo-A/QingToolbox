@@ -1,6 +1,6 @@
 # Plan 013：QingToolbox 宿主更新与一键原地升级
 
-**状态：Approved / In Progress — 013A**
+**状态：Approved / In Progress — 013A and 013B Implementation Complete; next 013C**
 **目标分支：`toolbox`**  
 **批准决策：QingToolbox 停止将便携版作为正式分发形态，后续正式发布仅提供安装版。**
 
@@ -245,6 +245,8 @@ SHA256 用于检测下载损坏和资产错配，不声称能够抵御官方仓�
 
 ## 013A：安装版唯一分发契约
 
+**状态：Implementation Complete**
+
 ### 目标
 
 停止正式便携版分发，并把发布、文档和门禁统一为安装器优先，而不重构安装器内部载荷生成。
@@ -274,6 +276,13 @@ SHA256 用于检测下载损坏和资产错配，不声称能够抵御官方仓�
 - 内部宿主载荷审计仍然可用。
 
 ## 013B：Release 检测与更新提示
+
+**状态：Implementation Complete**
+
+Production 在首屏稳定后执行低优先级官方 Release 列表检查，并在 24 小时成功缓存、
+ETag/Last-Modified 条件请求、并发合并和环境隔离边界内选择最高适用版本。原生设置页
+显示“关于与更新”，新版本通过非模态横幅提示。Development 与 ModuleTest 默认不访问
+真实 GitHub。013B 不下载 sidecar 或安装器，也不启动安装流程。
 
 ### 目标
 
@@ -320,6 +329,8 @@ SHA256 用于检测下载损坏和资产错配，不声称能够抵御官方仓�
 - 中英文文案完整。
 
 ## 013C：安装器下载与 SHA256 验证
+
+**状态：Next — Not Started**
 
 ### 目标
 

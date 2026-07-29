@@ -247,6 +247,20 @@ public partial class App : Application
                 provider.GetRequiredService<ModuleUpdateCompatibilityEvaluator>(), provider.GetRequiredService<TimeProvider>(), environment.IsModuleTest));
             services.AddSingleton<IModuleUpdateChecker>(provider => provider.GetRequiredService<ModuleUpdateChecker>());
             services.AddSingleton<ModuleUpdateCheckCoordinator>();
+            services.AddSingleton(provider =>
+            {
+                var client = new HttpClient(new HttpClientHandler
+                {
+                    AutomaticDecompression = DecompressionMethods.All,
+                    UseCookies = false
+                }) { Timeout = TimeSpan.FromSeconds(10) };
+                var version = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "unknown";
+                client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("QingToolbox", version));
+                var parsed = SemanticVersion.Parse(version);
+                return new HostUpdateDiscoveryService(client,
+                    provider.GetRequiredService<ApplicationPaths>().HostUpdateCachePath,
+                    parsed, provider.GetRequiredService<TimeProvider>(), environment.IsProduction);
+            });
             services.AddSingleton<IModulePackageTransport>(_ =>
             {
                 var handler = new HttpClientHandler { AllowAutoRedirect = false, AutomaticDecompression = DecompressionMethods.None, UseCookies = false };

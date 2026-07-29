@@ -28,6 +28,7 @@ public sealed class ApplicationPaths
         LogsDirectory = Path.Combine(LocalRoot, "logs");
         WebView2UserDataDirectory = Path.Combine(LocalRoot, "webview2", environment.ProfileName);
         CacheDirectory = Path.Combine(LocalRoot, "cache");
+        HostUpdateCachePath = Path.Combine(CacheDirectory, "HostUpdates", "official-releases.json");
         QmodStagingDirectory = Path.Combine(CacheDirectory, "ModulePackages", "Staging");
         ModuleTransactionsDirectory = Path.Combine(CacheDirectory, "ModuleTransactions");
         ModuleTransactionJournalDirectory = Path.Combine(ModuleTransactionsDirectory, "Journal");
@@ -51,6 +52,7 @@ public sealed class ApplicationPaths
     public string LogsDirectory { get; }
     public string WebView2UserDataDirectory { get; }
     public string CacheDirectory { get; }
+    public string HostUpdateCachePath { get; }
     public string QmodStagingDirectory { get; }
     public string ModuleTransactionsDirectory { get; }
     public string ModuleTransactionJournalDirectory { get; }

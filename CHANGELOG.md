@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added Production-native discovery of higher official QingToolbox GitHub Releases with SemVer channel selection, installer-only asset validation, conditional caching, and a non-blocking update banner.
 - Retired portable ZIP distribution; future Windows releases publish only the installer and its same-name SHA256 sidecar while retaining audited installer payload generation.
 
 - Localized the Development Web Home, Session Logs, and Diagnostics workspaces in English and Simplified Chinese.
