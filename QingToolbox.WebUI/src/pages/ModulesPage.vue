@@ -172,6 +172,24 @@ async function removeModule(module: ModuleSnapshotItem) {
   }
 }
 
+function openInstallConfirmation(moduleId: string) {
+  removeConfirmationModuleId.value = null
+  installConfirmationModuleId.value = moduleId
+}
+
+function openRemoveConfirmation(moduleId: string) {
+  installConfirmationModuleId.value = null
+  removeConfirmationModuleId.value = moduleId
+}
+
+function closeInstallConfirmation(moduleId: string) {
+  if (store.operations[moduleId] !== 'installUpdate') installConfirmationModuleId.value = null
+}
+
+function closeRemoveConfirmation(moduleId: string) {
+  if (store.operations[moduleId] !== 'remove') removeConfirmationModuleId.value = null
+}
+
 const updateStatusKey = (status: ModuleSnapshotItem['updateStatus']): TranslationKey => `modules.update.status.${status}`
 const downloadStatusKey = (status: ModuleSnapshotItem['downloadStatus']): TranslationKey => `modules.update.download.${status}`
 const updateTone = (module: ModuleSnapshotItem) => {
@@ -343,7 +361,9 @@ const filterValues: ModuleFilter[] = ['all', 'running', 'notLoaded', 'issues', '
 const tone = (module: { isValid: boolean; runtimeState: string }) => !module.isValid ? 'danger' : module.runtimeState === 'Running' ? 'success' : module.runtimeState === 'NotLoaded' ? 'neutral' : 'info'
 const closeOnEscape = (event: KeyboardEvent) => {
   if (event.key !== 'Escape') return
-  if (installConfirmationModuleId.value) installConfirmationModuleId.value = null
+  const moduleId = store.selectedModuleId
+  if (moduleId && installConfirmationModuleId.value === moduleId) closeInstallConfirmation(moduleId)
+  else if (moduleId && removeConfirmationModuleId.value === moduleId) closeRemoveConfirmation(moduleId)
   else store.selectedModuleId = null
 }
 onMounted(() => window.addEventListener('keydown', closeOnEscape))
@@ -443,8 +463,10 @@ onBeforeUnmount(() => {
             </div>
             <div class="module-update-overall"><span>{{ t('modules.update.statusLabel') }}</span><QBadge :tone="updateTone(store.selectedModule)">{{ t(overallUpdateStatusKey(store.selectedModule)) }}</QBadge></div>
           </div>
-          <div v-if="isVerifiedUpdate(store.selectedModule)" class="module-update-detail module-update-verified" role="status"><QIcon name="statusSuccess" /><div><strong>{{ t('modules.update.verifiedTitle') }}</strong><p>{{ t('modules.update.notInstalled') }}</p></div></div>
-          <p v-if="isVerifiedUpdate(store.selectedModule) && !store.selectedModule.canInstallVerifiedUpdate" class="module-install-unavailable">{{ t('modules.update.install.unavailable') }}</p>
+          <template v-if="isVerifiedUpdate(store.selectedModule)">
+            <div class="module-update-detail module-update-verified" role="status"><QIcon name="statusSuccess" /><div><strong>{{ t('modules.update.verifiedTitle') }}</strong><p>{{ t('modules.update.notInstalled') }}</p></div></div>
+            <p v-if="!store.selectedModule.canInstallVerifiedUpdate" class="module-install-unavailable">{{ t('modules.update.install.unavailable') }}</p>
+          </template>
           <div v-else-if="hasDownloadStatus(store.selectedModule)" class="module-update-detail module-download-status" :class="`is-${updateTone(store.selectedModule)}`" role="status">
             <QIcon :name="updateTone(store.selectedModule) === 'danger' ? 'statusDanger' : updateTone(store.selectedModule) === 'warning' ? 'statusWarning' : 'statusInfo'" />
             <div><strong>{{ t(downloadStatusKey(store.selectedModule.downloadStatus)) }}</strong><span v-if="store.selectedModule.isDownloadActive && downloadProgressText(store.selectedModule)">{{ downloadProgressText(store.selectedModule) }}</span><span v-else-if="store.operations[store.selectedModule.id] === 'downloadUpdate'">{{ t('modules.update.downloading') }}</span></div>
@@ -454,13 +476,13 @@ onBeforeUnmount(() => {
           <div class="module-update-actions">
             <QButton class="module-check-update" variant="secondary" :aria-busy="store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy" :disabled="!hostOperationsAvailable || !store.selectedModule.canCheckForUpdate || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy || store.selectedModule.isUpdateCheckBusy" @click="checkModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="refresh" />{{ t(store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy ? 'modules.update.checking' : 'modules.update.check') }}</QButton>
             <QButton v-if="(store.selectedModule.canDownloadUpdate || store.selectedModule.isDownloadActive) && !isVerifiedUpdate(store.selectedModule)" class="module-download-update" variant="primary" :aria-busy="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy || store.selectedModule.isDownloadActive" @click="downloadModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="download" />{{ t(store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive ? 'modules.update.downloading' : 'modules.update.download') }}</QButton>
-            <QButton v-if="isVerifiedUpdate(store.selectedModule) && store.selectedModule.canInstallVerifiedUpdate" class="module-install-update" variant="primary" :aria-expanded="installConfirmationModuleId === store.selectedModule.id" aria-controls="module-install-confirmation" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="installConfirmationModuleId = store.selectedModule.id"><QIcon name="install" />{{ t('modules.update.install.action') }}</QButton>
+            <QButton v-if="isVerifiedUpdate(store.selectedModule) && store.selectedModule.canInstallVerifiedUpdate" class="module-install-update" variant="primary" :aria-expanded="installConfirmationModuleId === store.selectedModule.id" aria-controls="module-install-confirmation" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="openInstallConfirmation(store.selectedModule.id)"><QIcon name="install" />{{ t('modules.update.install.action') }}</QButton>
           </div>
           <div v-if="installConfirmationModuleId === store.selectedModule.id" id="module-install-confirmation" class="module-install-confirmation" role="group" aria-labelledby="module-install-confirmation-title">
             <strong id="module-install-confirmation-title">{{ t('modules.update.install.confirmTitle', { name: store.selectedModule.displayName }) }}</strong>
             <dl><div><dt>{{ t('modules.update.currentVersion') }}</dt><dd>{{ store.selectedModule.version }}</dd></div><div><dt>{{ t('modules.update.install.targetVersion') }}</dt><dd>{{ store.selectedModule.targetVersion }}</dd></div></dl>
             <ul><li>{{ t('modules.update.install.mayStop') }}</li><li>{{ t('modules.update.install.restoreRuntime') }}</li><li>{{ t('modules.update.install.rollback') }}</li><li>{{ t('modules.update.install.preserveData') }}</li></ul>
-            <div><QButton variant="secondary" :disabled="store.operations[store.selectedModule.id] === 'installUpdate'" @click="installConfirmationModuleId = null">{{ t('modules.update.install.cancel') }}</QButton><QButton class="module-install-confirm" variant="primary" :aria-busy="store.operations[store.selectedModule.id] === 'installUpdate'" :disabled="store.operations[store.selectedModule.id] === 'installUpdate'" @click="installVerifiedModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'installUpdate'" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="install" />{{ t(store.operations[store.selectedModule.id] === 'installUpdate' ? 'modules.update.install.installing' : 'modules.update.install.confirm') }}</QButton></div>
+            <div><QButton variant="secondary" :disabled="store.operations[store.selectedModule.id] === 'installUpdate'" @click="closeInstallConfirmation(store.selectedModule.id)">{{ t('modules.update.install.cancel') }}</QButton><QButton class="module-install-confirm" variant="primary" :aria-busy="store.operations[store.selectedModule.id] === 'installUpdate'" :disabled="store.operations[store.selectedModule.id] === 'installUpdate'" @click="installVerifiedModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'installUpdate'" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="install" />{{ t(store.operations[store.selectedModule.id] === 'installUpdate' ? 'modules.update.install.installing' : 'modules.update.install.confirm') }}</QButton></div>
           </div>
         </section>
         <div class="wpf-detail-divider" />
@@ -469,14 +491,14 @@ onBeforeUnmount(() => {
           <p>{{ t('modules.management.description') }}</p>
           <div class="module-management-actions">
             <QButton class="module-open-directory" variant="secondary" :aria-busy="store.operations[store.selectedModule.id] === 'openDirectory'" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="openModuleDirectory(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'openDirectory'" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="folder" />{{ t(store.operations[store.selectedModule.id] === 'openDirectory' ? 'modules.management.opening' : 'modules.management.openFolder') }}</QButton>
-            <QButton v-if="store.selectedModule.isUserInstalled" class="module-remove-entry" variant="ghost" :aria-expanded="removeConfirmationModuleId === store.selectedModule.id" aria-controls="module-remove-confirmation" :disabled="!hostOperationsAvailable || !store.selectedModule.canRemove || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="removeConfirmationModuleId = store.selectedModule.id"><QIcon name="remove" />{{ t('modules.management.removeModule') }}</QButton>
+            <QButton v-if="store.selectedModule.isUserInstalled" class="module-remove-entry" variant="ghost" :aria-expanded="removeConfirmationModuleId === store.selectedModule.id" aria-controls="module-remove-confirmation" :disabled="!hostOperationsAvailable || !store.selectedModule.canRemove || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="openRemoveConfirmation(store.selectedModule.id)"><QIcon name="remove" />{{ t('modules.management.removeModule') }}</QButton>
           </div>
           <div v-if="removeConfirmationModuleId === store.selectedModule.id" id="module-remove-confirmation" class="module-remove-confirmation" role="group" aria-labelledby="module-remove-confirmation-title">
             <strong id="module-remove-confirmation-title">{{ t('modules.management.confirmTitle', { name: store.selectedModule.displayName }) }}</strong>
             <p>{{ t('modules.management.confirmDescription') }}</p>
             <small>{{ t('modules.management.reimportHint') }}</small>
             <div>
-              <QButton variant="secondary" :disabled="store.operations[store.selectedModule.id] === 'remove'" @click="removeConfirmationModuleId = null">{{ t('modules.management.cancel') }}</QButton>
+              <QButton variant="secondary" :disabled="store.operations[store.selectedModule.id] === 'remove'" @click="closeRemoveConfirmation(store.selectedModule.id)">{{ t('modules.management.cancel') }}</QButton>
               <QButton class="module-remove-confirm" variant="secondary" :aria-busy="store.operations[store.selectedModule.id] === 'remove'" :disabled="!store.selectedModule.canRemove || store.operations[store.selectedModule.id] === 'remove'" @click="removeModule(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'remove'" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="remove" />{{ t(store.operations[store.selectedModule.id] === 'remove' ? 'modules.management.removing' : 'modules.management.confirmRemove') }}</QButton>
             </div>
           </div>
@@ -586,7 +608,7 @@ onBeforeUnmount(() => {
   .module-lifecycle-success { animation-name: module-lifecycle-success-reduced; }
   .module-lifecycle-success-ring,.module-lifecycle-success-check { stroke-dashoffset: 0; animation: none; }
   .module-card-lifecycle-actions.is-revealing .q-button { animation: none; }
-  .module-remove-confirmation { animation: none; }
+  .module-install-confirmation,.module-remove-confirmation { animation: none; }
 }
 @keyframes module-lifecycle-success-reduced { 0%, 82% { opacity: 1; } 100% { opacity: 0; } }
 @media (max-width: 650px) {
