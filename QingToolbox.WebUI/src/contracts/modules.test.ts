@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { isModuleManagementResult, isModuleSnapshot } from './modules'
 
-const module = { id:'m', displayName:'M', displayDescription:'D', version:'1', author:'A', runtimeType:'InProcess', loadMode:'Manual', runtimeState:'NotLoaded', isValid:true, errorCount:0, errors:[], permissions:[], minimumHostVersion:'0.2', isUserInstalled:true, canRemove:true, canLoad:true, canActivate:false, canOpen:false, canDeactivate:false, canUnload:false, isBusy:false, isExecutionBlocked:false, isStartupEnabled:false, startupAuthorizationState:'NotEnabled', canChangeStartupAuthorization:true, isStartupAuthorizationBusy:false }
+const module = { id:'m', displayName:'M', displayDescription:'D', version:'1', author:'A', runtimeType:'InProcess', loadMode:'Manual', runtimeState:'NotLoaded', isValid:true, errorCount:0, errors:[], permissions:[], minimumHostVersion:'0.2', isUserInstalled:true, canRemove:true, canLoad:true, canActivate:false, canOpen:false, canDeactivate:false, canUnload:false, isBusy:false, isExecutionBlocked:false, isStartupEnabled:false, startupAuthorizationState:'NotEnabled', canChangeStartupAuthorization:true, isStartupAuthorizationBusy: false, updateStatus: 'NotChecked', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: true, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'NotDownloaded', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0 }
 const snapshot = { generatedAt:new Date().toISOString(), modules:[module] }
 
 describe('module snapshot contract', () => {
@@ -18,5 +18,16 @@ describe('module snapshot contract', () => {
     expect(isModuleManagementResult({ disposition:'SucceededWithWarning', snapshot })).toBe(true)
     expect(isModuleManagementResult({ disposition:'Failed', snapshot })).toBe(false)
     expect(isModuleManagementResult({ disposition:'Succeeded', snapshot, modulePath:'C:/private' })).toBe(false)
+  })
+
+  it('strictly validates update states and finite non-negative transfer counts', () => {
+    for (const key of ['updateStatus','downloadStatus','downloadBytesReceived','downloadExpectedBytes']) {
+      const copy:any={...module}; delete copy[key]
+      expect(isModuleSnapshot({generatedAt:new Date().toISOString(),modules:[copy]})).toBe(false)
+    }
+    expect(isModuleSnapshot({generatedAt:new Date().toISOString(),modules:[{...module,updateStatus:'Unknown'}]})).toBe(false)
+    expect(isModuleSnapshot({generatedAt:new Date().toISOString(),modules:[{...module,downloadStatus:'Installed'}]})).toBe(false)
+    expect(isModuleSnapshot({generatedAt:new Date().toISOString(),modules:[{...module,downloadBytesReceived:-1}]})).toBe(false)
+    expect(isModuleSnapshot({generatedAt:new Date().toISOString(),modules:[{...module,downloadExpectedBytes:Number.NaN}]})).toBe(false)
   })
 })

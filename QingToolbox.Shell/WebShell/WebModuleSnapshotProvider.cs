@@ -1,4 +1,5 @@
 using QingToolbox.Shell.ViewModels;
+using QingToolbox.Core.Updates;
 
 namespace QingToolbox.Shell.WebShell;
 
@@ -36,7 +37,18 @@ public sealed class WebModuleSnapshotSource(MainWindowViewModel viewModel) : IWe
             module.IsStartupEnabled,
             module.StartupAuthorizationState.ToString(),
             module.CanChangeStartupAuthorization,
-            module.IsStartupAuthorizationBusy)).ToArray();
+            module.IsStartupAuthorizationBusy,
+            module.UpdateResult.Status.ToString(),
+            module.UpdateResult.TargetVersion?.ToString(),
+            string.IsNullOrWhiteSpace(module.DisplayUpdateReleaseNote) ? null : module.DisplayUpdateReleaseNote,
+            module.UpdateResult.IsFromStaleCache,
+            viewModel.CanCheckModuleUpdateFromWeb(module.Id),
+            module.UpdateResult.Status == ModuleUpdateStatus.Checking,
+            module.CanDownloadUpdate,
+            module.DownloadStatus.ToString(),
+            module.IsDownloadActive,
+            Math.Max(0, module.DownloadBytesReceived),
+            Math.Max(0, module.DownloadExpectedBytes))).ToArray();
 
     private static IReadOnlyList<string> SafeErrors(DiscoveredModuleViewModel module)
     {

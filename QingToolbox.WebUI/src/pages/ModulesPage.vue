@@ -15,6 +15,7 @@ import {
   summarizeModuleStates,
 } from '../modules/moduleStateSummary'
 import { useLocalization } from '../localization/localization'
+import type { TranslationKey } from '../localization/messages/en-US'
 import {
   moduleFilterLabelKey,
   moduleOperationFailureKey,
@@ -170,6 +171,60 @@ async function removeModule(module: ModuleSnapshotItem) {
   }
 }
 
+const updateStatusKey = (status: ModuleSnapshotItem['updateStatus']): TranslationKey => `modules.update.status.${status}`
+const downloadStatusKey = (status: ModuleSnapshotItem['downloadStatus']): TranslationKey => `modules.update.download.${status}`
+const updateTone = (module: ModuleSnapshotItem) => {
+  if (module.downloadStatus === 'Verified' || module.downloadStatus === 'AlreadyVerified' || module.updateStatus === 'UpToDate') return 'success'
+  if (['SourceUnavailable','SourceInvalid','InvalidLocalVersion'].includes(module.updateStatus) ||
+      ['SizeMismatch','HashMismatch','SourceUnavailable','SourceInvalid','UntrustedRedirect','StorageUnavailable','Failed','TransferTimedOut'].includes(module.downloadStatus)) return 'danger'
+  if (['HostUpdateRequired','ModuleApiIncompatible','HostVersionIncompatible','DisabledByEnvironment'].includes(module.updateStatus) ||
+      ['MetadataChanged','MetadataStale','Cancelled','DisabledByEnvironment'].includes(module.downloadStatus)) return 'warning'
+  return module.updateStatus === 'UpdateAvailable' ? 'info' : 'neutral'
+}
+const isVerifiedUpdate = (module: ModuleSnapshotItem) => module.downloadStatus === 'Verified' || module.downloadStatus === 'AlreadyVerified'
+const hasDownloadStatus = (module: ModuleSnapshotItem) => module.downloadStatus !== 'NotDownloaded'
+const downloadPercentage = (module: ModuleSnapshotItem) => module.downloadExpectedBytes > 0
+  ? Math.min(100, module.downloadBytesReceived * 100 / module.downloadExpectedBytes)
+  : null
+
+async function checkModuleUpdate(module: ModuleSnapshotItem) {
+  if (!hostOperationsAvailable.value || !module.canCheckForUpdate || !store.beginOperation(module.id, 'checkUpdate')) return
+  try {
+    const snapshot = await client.checkUpdate(module.id)
+    store.complete(snapshot)
+    const current = snapshot.modules.find(item => item.id === module.id)
+    if (!current) throw new Error('Updated module is missing from the host snapshot.')
+    const kind = current.updateStatus === 'UpdateAvailable' ? 'warning'
+      : current.updateStatus === 'UpToDate' ? 'success'
+        : ['HostUpdateRequired','ModuleApiIncompatible','HostVersionIncompatible'].includes(current.updateStatus) ? 'warning' : 'info'
+    toast.show(t(current.updateStatus === 'UpdateAvailable' ? 'modules.update.toast.available'
+      : current.updateStatus === 'UpToDate' ? 'modules.update.toast.upToDate'
+        : 'modules.update.toast.checked'), kind)
+  } catch {
+    toast.show(t('modules.update.toast.checkFailed'), 'error')
+    await resyncAfterOperationFailure()
+  } finally {
+    store.endOperation(module.id)
+  }
+}
+
+async function downloadModuleUpdate(module: ModuleSnapshotItem) {
+  if (!hostOperationsAvailable.value || !module.canDownloadUpdate || !store.beginOperation(module.id, 'downloadUpdate')) return
+  try {
+    const snapshot = await client.downloadUpdate(module.id)
+    store.complete(snapshot)
+    const current = snapshot.modules.find(item => item.id === module.id)
+    if (!current) throw new Error('Updated module is missing from the host snapshot.')
+    toast.show(t(isVerifiedUpdate(current) ? 'modules.update.toast.verified' : 'modules.update.toast.downloadFinished'),
+      isVerifiedUpdate(current) ? 'success' : updateTone(current) === 'danger' ? 'error' : 'warning')
+  } catch {
+    toast.show(t('modules.update.toast.downloadFailed'), 'error')
+    await resyncAfterOperationFailure()
+  } finally {
+    store.endOperation(module.id)
+  }
+}
+
 const startupMessage = (state: ModuleSnapshotItem['startupAuthorizationState']) => t(startupAuthorizationMessageKey(state))
 function availableLifecycleOperations(module: ModuleSnapshotItem): LifecycleModuleOperation[] {
   const operations: LifecycleModuleOperation[] = []
@@ -262,6 +317,8 @@ onBeforeUnmount(() => {
                 <QBadge :tone="tone(module)">{{ runtimeLabel(module) }}</QBadge>
                 <QBadge v-if="module.startupAuthorizationState === 'Enabled'" tone="info">{{ t('modules.card.startsOnLaunch') }}</QBadge>
                 <QBadge v-else-if="module.startupAuthorizationState === 'ChangedNeedsConfirmation'" tone="warning">{{ t('modules.card.startupApprovalRequired') }}</QBadge>
+                <QBadge v-if="isVerifiedUpdate(module)" tone="success">{{ t('modules.update.verifiedBadge') }}</QBadge>
+                <QBadge v-else-if="module.updateStatus === 'UpdateAvailable'" tone="info">{{ t('modules.update.availableBadge') }}</QBadge>
               </div>
             </header>
             <p>{{ module.displayDescription }}</p>
@@ -294,6 +351,26 @@ onBeforeUnmount(() => {
         <h3>{{ t('modules.details.information') }}</h3>
         <dl class="wpf-detail-grid"><div><dt>{{ t('modules.details.runtime') }}</dt><dd>{{ store.selectedModule.runtimeType }}</dd></div><div><dt>{{ t('modules.details.loadMode') }}</dt><dd>{{ store.selectedModule.loadMode }}</dd></div><div><dt>{{ t('modules.details.author') }}</dt><dd>{{ store.selectedModule.author }}</dd></div><div><dt>{{ t('modules.details.permissions') }}</dt><dd>{{ store.selectedModule.permissions.length ? store.selectedModule.permissions.join(', ') : t('modules.details.noneDeclared') }}</dd></div><div><dt>{{ t('modules.details.moduleId') }}</dt><dd>{{ store.selectedModule.id }}</dd></div><div><dt>{{ t('modules.details.minimumHostVersion') }}</dt><dd>{{ store.selectedModule.minimumHostVersion }}</dd></div><div><dt>{{ t('modules.details.userInstalled') }}</dt><dd>{{ t(store.selectedModule.isUserInstalled ? 'modules.details.yes' : 'modules.details.no') }}</dd></div><div><dt>{{ t('modules.details.valid') }}</dt><dd>{{ t(store.selectedModule.isValid ? 'modules.details.yes' : 'modules.details.no') }}</dd></div></dl>
         <template v-if="store.selectedModule.errors.length"><h3>{{ t('modules.details.issues') }}</h3><ul><li v-for="error in store.selectedModule.errors" :key="error">{{ error }}</li></ul></template>
+        <div class="wpf-detail-divider" />
+        <section class="module-update">
+          <h3>{{ t('modules.update.title') }}</h3>
+          <p>{{ t('modules.update.description') }}</p>
+          <div class="module-update-status">
+            <div><span>{{ t('modules.update.currentVersion') }}</span><strong>{{ store.selectedModule.version }}</strong></div>
+            <div><span>{{ t('modules.update.statusLabel') }}</span><QBadge :tone="updateTone(store.selectedModule)">{{ t(isVerifiedUpdate(store.selectedModule) ? 'modules.update.verifiedBadge' : updateStatusKey(store.selectedModule.updateStatus)) }}</QBadge></div>
+            <div v-if="store.selectedModule.targetVersion"><span>{{ t('modules.update.latestVersion') }}</span><strong>{{ store.selectedModule.targetVersion }}</strong></div>
+          </div>
+          <div v-if="store.selectedModule.releaseNotes" class="module-update-notes"><strong>{{ t('modules.update.releaseNotes') }}</strong><p>{{ store.selectedModule.releaseNotes }}</p></div>
+          <div v-if="hasDownloadStatus(store.selectedModule)" class="module-download-status" :class="`is-${updateTone(store.selectedModule)}`" role="status">
+            <QBadge :tone="updateTone(store.selectedModule)">{{ t(downloadStatusKey(store.selectedModule.downloadStatus)) }}</QBadge>
+            <span v-if="store.selectedModule.isDownloadActive && downloadPercentage(store.selectedModule) !== null">{{ store.selectedModule.downloadBytesReceived }} / {{ store.selectedModule.downloadExpectedBytes }} ({{ downloadPercentage(store.selectedModule)?.toFixed(0) }}%)</span>
+          </div>
+          <div v-if="isVerifiedUpdate(store.selectedModule)" class="module-update-verified"><strong>{{ t('modules.update.verifiedTitle') }}</strong><p>{{ t('modules.update.notInstalled') }}</p></div>
+          <div class="module-update-actions">
+            <QButton class="module-check-update" variant="secondary" :aria-busy="store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy" :disabled="!hostOperationsAvailable || !store.selectedModule.canCheckForUpdate || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy || store.selectedModule.isUpdateCheckBusy" @click="checkModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="refresh" />{{ t(store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy ? 'modules.update.checking' : 'modules.update.check') }}</QButton>
+            <QButton v-if="store.selectedModule.canDownloadUpdate || store.selectedModule.isDownloadActive" class="module-download-update" variant="primary" :aria-busy="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy || store.selectedModule.isDownloadActive" @click="downloadModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="import" />{{ t(store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive ? 'modules.update.downloading' : 'modules.update.download') }}</QButton>
+          </div>
+        </section>
         <div class="wpf-detail-divider" />
         <section class="module-management">
           <h3>{{ t('modules.management.title') }}</h3>
@@ -348,6 +425,22 @@ onBeforeUnmount(() => {
 .module-startup > p, .module-startup-status { color: var(--q-text-2); font-size: 12px; }
 .module-startup .settings-switch-row { margin-top: 8px; }
 .module-startup-status { margin-top: 4px; }
+.module-update>p { margin: -7px 0 12px; color: var(--q-text-2); font-size: 12px; line-height: 1.45; }
+.module-update-status { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+.module-update-status>div { min-width: 110px; }
+.module-update-status span,.module-update-status strong { display: block; }
+.module-update-status span { margin-bottom: 5px; color: var(--q-text-2); font-size: 11px; }
+.module-update-notes { margin-top: 12px; padding: 11px 12px; border: 1px solid var(--q-border); border-radius: 10px; background: var(--q-surface-soft); }
+.module-update-notes p { margin: 5px 0 0; color: var(--q-text-2); font-size: 12px; line-height: 1.45; white-space: pre-wrap; }
+.module-download-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; color: var(--q-text-2); font-size: 11px; }
+.module-update-verified { margin-top: 12px; padding: 11px 12px; border: 1px solid color-mix(in srgb,var(--q-success) 28%,var(--q-border)); border-radius: 10px; background: color-mix(in srgb,var(--q-success) 6%,var(--q-surface)); }
+.module-update-verified p { margin: 4px 0 0; color: var(--q-text-2); font-size: 12px; }
+.module-update-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.module-update-actions .q-button { gap: 7px; white-space: nowrap; }
+.module-update-actions .module-operation-spinner { flex: 0 0 14px; margin-inline-end: 0; }
+.module-check-update { min-width: 132px; }
+.module-download-update { min-width: 184px; }
+.module-download-update.is-primary { border-color: var(--q-brand); background: var(--q-brand); color: #fff; }
 .module-management>p { margin: -7px 0 12px; color: var(--q-text-2); font-size: 12px; }
 .module-management-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .module-management-actions .q-button { gap: 7px; white-space: nowrap; }

@@ -19,7 +19,7 @@ const moduleItem = (id: string, state = 'NotLoaded'): ModuleSnapshotItem => ({
   isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2.0-alpha',
   isUserInstalled: true, canRemove: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false,
   canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false,
-  startupAuthorizationState: 'NotEnabled', canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false,
+  startupAuthorizationState: 'NotEnabled', canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false, updateStatus: 'NotChecked', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: true, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'NotDownloaded', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0,
 })
 const settingsSnapshot = (code: LanguageCode, effectiveCode: EffectiveLanguageCode): SettingsSnapshot => ({
   generatedAt: new Date().toISOString(), language: { code, effectiveCode, displayName: code, options: [

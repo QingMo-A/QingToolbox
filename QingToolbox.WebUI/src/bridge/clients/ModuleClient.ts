@@ -16,6 +16,8 @@ export class ModuleClient {
   unload(moduleId: string) { return this.requestSnapshot('modules.unload', { moduleId }) }
   openDirectory(moduleId: string) { return this.requestManagement('modules.openDirectory', moduleId) }
   remove(moduleId: string) { return this.requestManagement('modules.remove', moduleId) }
+  checkUpdate(moduleId: string) { return this.requestSnapshot('modules.checkUpdate', { moduleId }) }
+  downloadUpdate(moduleId: string) { return this.requestSnapshot('modules.downloadUpdate', { moduleId }) }
   setStartupAuthorization(moduleId: string, enabled: boolean) { return this.requestSnapshot('modules.setStartupAuthorization', { moduleId, enabled }) }
   private async requestSnapshot(command: string, payload: Record<string, unknown> = {}): Promise<ModuleSnapshot> {
     const value = await this.requests.request<unknown>(command, payload)

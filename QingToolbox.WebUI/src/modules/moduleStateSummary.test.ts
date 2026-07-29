@@ -34,7 +34,7 @@ const item = (runtimeState: string, overrides: Partial<ModuleSnapshotItem> = {})
   isStartupEnabled: false,
   startupAuthorizationState: 'NotEnabled',
   canChangeStartupAuthorization: true,
-  isStartupAuthorizationBusy: false,
+  isStartupAuthorizationBusy: false, updateStatus: 'NotChecked', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: true, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'NotDownloaded', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0,
   ...overrides,
 })
 

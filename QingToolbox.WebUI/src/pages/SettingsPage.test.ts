@@ -8,7 +8,7 @@ import { useThemeStore } from '../app/themeStore'
 import { useToastStore } from '../app/toastStore'
 import { useModuleStore } from '../app/moduleStore'
 import type { LanguageCode, SettingsSnapshot } from '../contracts/settings'
-import type { ModuleSnapshot } from '../contracts/modules'
+import type { ModuleSnapshot, ModuleSnapshotItem } from '../contracts/modules'
 
 const wrappers: VueWrapper[] = []
 afterEach(() => wrappers.splice(0).forEach(wrapper => wrapper.unmount()))
@@ -19,7 +19,7 @@ const languageOptions = [
   { code: 'en-US' as const, displayName: 'English', nativeName: 'English' },
 ]
 const snapshot: SettingsSnapshot = { generatedAt: '2026-07-25T12:00:00Z', language: { code: 'en-US', effectiveCode: 'en-US', displayName: 'English', options: languageOptions }, showLogsInSidebar: true, mainWindowCloseBehavior: 'Ask', closeBehaviorMessage: 'Ask before closing.', launchAtLogin: false, canConfigureLaunchAtLogin: true, canRepairStartup: false, startupPresentationMode: 'FloatingBadge', startupBackend: 'Registry Run', startupStatus: 'Healthy', startupMessage: 'Registration is healthy.' }
-const moduleItem = { id: 'hello', displayName: 'Hello', displayDescription: 'English host metadata', version: '1.0.0', author: 'QingMo', runtimeType: 'InProcess', loadMode: 'Manual', runtimeState: 'NotLoaded', isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2.0', isUserInstalled: true, canRemove: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false, canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled' as const, canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false }
+const moduleItem: ModuleSnapshotItem = { id: 'hello', displayName: 'Hello', displayDescription: 'English host metadata', version: '1.0.0', author: 'QingMo', runtimeType: 'InProcess', loadMode: 'Manual', runtimeState: 'NotLoaded', isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2.0', isUserInstalled: true, canRemove: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false, canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled' as const, canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false, updateStatus: 'NotChecked', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: true, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'NotDownloaded', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0 }
 type PageOptions = {
   bridge?: 'Connecting'|'Connected'|'Unavailable'; status?: 'idle'|'loading'|'ready'|'error'; hasSnapshot?: boolean
   languageImpl?: (value: LanguageCode) => Promise<SettingsSnapshot>

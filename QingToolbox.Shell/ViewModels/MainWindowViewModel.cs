@@ -63,6 +63,7 @@ public sealed partial class MainWindowViewModel(
     private readonly SemaphoreSlim _presentationSaveGate = new(1, 1);
     private readonly SemaphoreSlim _closeBehaviorSaveGate = new(1, 1);
     private readonly SemaphoreSlim _languageChangeGate = new(1, 1);
+    private readonly SemaphoreSlim _webModuleUpdateGate = new(1, 1);
     private readonly CancellationTokenSource _updateCancellation = new();
     private CancellationTokenSource? _automaticUpdateDelay;
     private readonly Dictionary<string, (string Version, ModuleUpdateResult Result)> _updateResults = new(StringComparer.Ordinal);
@@ -435,6 +436,62 @@ public sealed partial class MainWindowViewModel(
 
     partial void OnIsCheckingModuleUpdatesChanged(bool value) => OnPropertyChanged(nameof(CanCheckModuleUpdates));
 
+    public bool CanCheckModuleUpdateFromWeb(string moduleId)
+    {
+        var module = Modules.FirstOrDefault(item => item.Id == moduleId);
+        return module is not null && !executionEnvironment.IsModuleTest && !IsCheckingModuleUpdates &&
+            !module.IsBusy && !module.IsStartupAuthorizationBusy && !module.IsDownloadActive;
+    }
+
+    public async Task<WebModuleUpdateOperationResult> CheckModuleUpdateFromWebAsync(
+        string moduleId, CancellationToken cancellationToken)
+    {
+        if (!await _webModuleUpdateGate.WaitAsync(0, cancellationToken)) return WebModuleUpdateOperationResult.Busy;
+        try
+        {
+            var module = Modules.FirstOrDefault(item => item.Id == moduleId);
+            if (module is null) return WebModuleUpdateOperationResult.NotFound;
+            if (!CanCheckModuleUpdateFromWeb(moduleId)) return WebModuleUpdateOperationResult.Busy;
+
+            var localVersion = module.Version;
+            var previous = module.UpdateResult;
+            module.UpdateResult = new(module.Id, ModuleUpdateStatus.Checking);
+            try
+            {
+                var batch = await moduleUpdateCoordinator.CheckAsync(
+                    new ModuleUpdateCheckRequest([new InstalledModuleVersion(module.Id, localVersion)], true,
+                        timeProvider.GetUtcNow()), cancellationToken);
+                var current = Modules.FirstOrDefault(item => item.Id == moduleId);
+                if (current is null) return WebModuleUpdateOperationResult.NotFound;
+                if (current.Version != localVersion) return WebModuleUpdateOperationResult.Unavailable;
+                if (batch.Disposition == ModuleUpdateBatchDisposition.DuplicateSuppressed)
+                {
+                    current.UpdateResult = previous;
+                    return WebModuleUpdateOperationResult.Busy;
+                }
+                if (!batch.Results.TryGetValue(moduleId, out var bound) || bound.LocalVersion != localVersion)
+                {
+                    current.UpdateResult = previous;
+                    return WebModuleUpdateOperationResult.Failed;
+                }
+                current.UpdateResult = bound.Result;
+                _updateResults[current.Id] = (current.Version, bound.Result);
+                return WebModuleUpdateOperationResult.Succeeded;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                module.UpdateResult = previous;
+                throw;
+            }
+            catch
+            {
+                module.UpdateResult = previous;
+                return WebModuleUpdateOperationResult.Failed;
+            }
+        }
+        finally { _webModuleUpdateGate.Release(); }
+    }
+
     [RelayCommand(CanExecute = nameof(CanCheckModuleUpdates))]
     private async Task CheckModuleUpdatesAsync()
     {
@@ -521,8 +578,30 @@ public sealed partial class MainWindowViewModel(
 
     [RelayCommand]
     private async Task DownloadModulePackageAsync(DiscoveredModuleViewModel module)
+        => await DownloadModulePackageCoreAsync(module, CancellationToken.None);
+
+    public async Task<WebModuleUpdateOperationResult> DownloadModuleUpdateFromWebAsync(
+        string moduleId, CancellationToken cancellationToken)
     {
-        if (!module.CanDownloadUpdate || module.UpdateResult.SelectedRelease is not { } release) return;
+        if (!await _webModuleUpdateGate.WaitAsync(0, cancellationToken)) return WebModuleUpdateOperationResult.Busy;
+        try
+        {
+            var module = Modules.FirstOrDefault(item => item.Id == moduleId);
+            if (module is null) return WebModuleUpdateOperationResult.NotFound;
+            if (module.IsBusy || module.IsStartupAuthorizationBusy || module.IsDownloadActive)
+                return WebModuleUpdateOperationResult.Busy;
+            if (!module.CanDownloadUpdate) return WebModuleUpdateOperationResult.Unavailable;
+            return await DownloadModulePackageCoreAsync(module, cancellationToken)
+                ? WebModuleUpdateOperationResult.Succeeded
+                : WebModuleUpdateOperationResult.Failed;
+        }
+        finally { _webModuleUpdateGate.Release(); }
+    }
+
+    private async Task<bool> DownloadModulePackageCoreAsync(
+        DiscoveredModuleViewModel module, CancellationToken cancellationToken)
+    {
+        if (!module.CanDownloadUpdate || module.UpdateResult.SelectedRelease is not { } release) return false;
         var request = new ModulePackageDownloadRequest(module.Id, module.Version, release.Version, release.Package);
         var identity = ModulePackageDownloadIdentity.From(request);
         module.DownloadStatus = ModulePackageDownloadStatus.ConfirmingMetadata;
@@ -537,19 +616,21 @@ public sealed partial class MainWindowViewModel(
             current.DownloadExpectedBytes = value.ExpectedBytes;
         });
         ModulePackageDownloadResult result;
-        try { result = await modulePackageDownloadCoordinator.DownloadAsync(request, progress); }
+        try { result = await modulePackageDownloadCoordinator.DownloadAsync(request, progress, cancellationToken); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) { Debug.WriteLine($"Module package download failed: {exception.GetType().Name}"); result = new(ModulePackageDownloadStatus.Failed); }
         var currentModule = Modules.FirstOrDefault(item => item.Id == identity.ModuleId);
-        if (currentModule is null || currentModule.Version != identity.LocalVersion) return;
+        if (currentModule is null || currentModule.Version != identity.LocalVersion) return false;
         if (result.LatestUpdateResult is { } latest &&
             result.Status is ModulePackageDownloadStatus.MetadataChanged or ModulePackageDownloadStatus.MetadataStale)
         {
             currentModule.UpdateResult = latest;
             _updateResults[currentModule.Id] = (currentModule.Version, latest);
         }
-        else if (!ModulePackageUiBinding.Matches(identity, currentModule.Id, currentModule.Version, currentModule.UpdateResult)) return;
+        else if (!ModulePackageUiBinding.Matches(identity, currentModule.Id, currentModule.Version, currentModule.UpdateResult)) return false;
         currentModule.DownloadStatus = result.Status;
         _downloadResults[currentModule.Id] = (identity, result.Status);
+        return true;
     }
 
     [RelayCommand]

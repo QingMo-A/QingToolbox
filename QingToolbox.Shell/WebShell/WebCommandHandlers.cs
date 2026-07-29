@@ -127,6 +127,61 @@ public sealed class WebModuleRemoveCommandHandler(
         Operations.RemoveAsync(moduleId, cancellationToken);
 }
 
+public abstract class WebModuleUpdateCommandHandler(
+    IWebModuleUpdateOperations operations,
+    WebModuleSnapshotProvider snapshots,
+    WebActivationSession activation) : IWebCommandHandler
+{
+    protected IWebModuleUpdateOperations Operations { get; } = operations;
+    public abstract string Command { get; }
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } =
+        new HashSet<string>(StringComparer.Ordinal) { "moduleId" };
+    protected abstract Task<WebModuleUpdateOperationResult> ExecuteAsync(string moduleId, CancellationToken cancellationToken);
+
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        if (!payload.TryGetProperty("moduleId", out var property) || property.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(property.GetString()))
+            throw new WebBridgeValidationException("InvalidPayload", "A non-empty module ID is required.");
+
+        var result = await ExecuteAsync(property.GetString()!, context.SessionCancellation);
+        return result switch
+        {
+            WebModuleUpdateOperationResult.Succeeded => snapshots.Create(),
+            WebModuleUpdateOperationResult.NotFound => throw SafeError("ModuleNotFound"),
+            WebModuleUpdateOperationResult.Busy => throw SafeError("ModuleBusy"),
+            WebModuleUpdateOperationResult.Unavailable => throw SafeError("ModuleUpdateUnavailable"),
+            _ => throw SafeError("ModuleUpdateFailed")
+        };
+    }
+
+    private static WebBridgeValidationException SafeError(string code) =>
+        new(code, "The host could not complete the module update operation.");
+}
+
+public sealed class WebModuleCheckUpdateCommandHandler(
+    IWebModuleUpdateOperations operations,
+    WebModuleSnapshotProvider snapshots,
+    WebActivationSession activation)
+    : WebModuleUpdateCommandHandler(operations, snapshots, activation)
+{
+    public override string Command => "modules.checkUpdate";
+    protected override Task<WebModuleUpdateOperationResult> ExecuteAsync(string moduleId, CancellationToken cancellationToken) =>
+        Operations.CheckAsync(moduleId, cancellationToken);
+}
+
+public sealed class WebModuleDownloadUpdateCommandHandler(
+    IWebModuleUpdateOperations operations,
+    WebModuleSnapshotProvider snapshots,
+    WebActivationSession activation)
+    : WebModuleUpdateCommandHandler(operations, snapshots, activation)
+{
+    public override string Command => "modules.downloadUpdate";
+    protected override Task<WebModuleUpdateOperationResult> ExecuteAsync(string moduleId, CancellationToken cancellationToken) =>
+        Operations.DownloadAndVerifyAsync(moduleId, cancellationToken);
+}
+
 public abstract class WebModuleLifecycleCommandHandler(
     WebModuleSnapshotProvider snapshots,
     WebActivationSession activation) : IWebCommandHandler

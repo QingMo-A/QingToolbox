@@ -25,7 +25,10 @@ public sealed record WebModuleSnapshotItem(string Id, string DisplayName, string
     string Author, string RuntimeType, string LoadMode, string RuntimeState, bool IsValid, int ErrorCount,
     IReadOnlyList<string> Errors, IReadOnlyList<string> Permissions, string MinimumHostVersion, bool IsUserInstalled, bool CanRemove,
     bool CanLoad, bool CanActivate, bool CanOpen, bool CanDeactivate, bool CanUnload, bool IsBusy, bool IsExecutionBlocked,
-    bool IsStartupEnabled, string StartupAuthorizationState, bool CanChangeStartupAuthorization, bool IsStartupAuthorizationBusy);
+    bool IsStartupEnabled, string StartupAuthorizationState, bool CanChangeStartupAuthorization, bool IsStartupAuthorizationBusy,
+    string UpdateStatus, string? TargetVersion, string? ReleaseNotes, bool IsFromStaleCache,
+    bool CanCheckForUpdate, bool IsUpdateCheckBusy, bool CanDownloadUpdate, string DownloadStatus,
+    bool IsDownloadActive, long DownloadBytesReceived, long DownloadExpectedBytes);
 public sealed record WebLogSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList<WebLogSnapshotEntry> Entries);
 public sealed record WebLogSnapshotEntry(DateTimeOffset Timestamp, string Level, string Category, string Message);
 public sealed record WebSettingsSnapshot(DateTimeOffset GeneratedAt, WebSettingsLanguage Language,

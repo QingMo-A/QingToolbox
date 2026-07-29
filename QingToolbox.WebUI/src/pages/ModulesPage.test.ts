@@ -10,7 +10,7 @@ import { useSettingsStore } from '../app/settingsStore'
 import type { EffectiveLanguageCode, LanguageCode, SettingsSnapshot } from '../contracts/settings'
 
 const item = (overrides: Partial<ModuleSnapshotItem> = {}): ModuleSnapshotItem => ({
-  id: 'qing.text', displayName: 'Text Tools', displayDescription: 'Formatting tools', version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState: 'NotLoaded', isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canRemove: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false, canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled', canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false, ...overrides
+  id: 'qing.text', displayName: 'Text Tools', displayDescription: 'Formatting tools', version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState: 'NotLoaded', isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canRemove: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false, canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled', canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false, updateStatus: 'NotChecked', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: true, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'NotDownloaded', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0, ...overrides
 })
 const mounted: ReturnType<typeof mount>[] = []
 afterEach(() => { mounted.splice(0).forEach(x => x.unmount()); document.body.innerHTML = ''; vi.restoreAllMocks() })
@@ -32,7 +32,7 @@ function page(module = item(), clientOverrides: Record<string, unknown> = {}, st
   else if (state.status === 'error') store.fail(new Error('Bridge.Internal: secret failure'))
   else if (state.status === 'idle') store.status = 'idle'
   const snapshot = () => ({ generatedAt: new Date().toISOString(), modules: [module] })
-  const client = { getSnapshot: vi.fn(async () => snapshot()), importModule: vi.fn(async () => ({ disposition: 'Cancelled', importedModuleId: null, snapshot: snapshot() })), load: vi.fn(async () => snapshot()), activate: vi.fn(async () => snapshot()), open: vi.fn(async () => snapshot()), deactivate: vi.fn(async () => snapshot()), unload: vi.fn(async () => snapshot()), setStartupAuthorization: vi.fn(async () => snapshot()), openDirectory: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: snapshot() })), remove: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: { generatedAt: new Date().toISOString(), modules: [] } })), ...clientOverrides }
+  const client = { getSnapshot: vi.fn(async () => snapshot()), importModule: vi.fn(async () => ({ disposition: 'Cancelled', importedModuleId: null, snapshot: snapshot() })), load: vi.fn(async () => snapshot()), activate: vi.fn(async () => snapshot()), open: vi.fn(async () => snapshot()), deactivate: vi.fn(async () => snapshot()), unload: vi.fn(async () => snapshot()), setStartupAuthorization: vi.fn(async () => snapshot()), openDirectory: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: snapshot() })), remove: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: { generatedAt: new Date().toISOString(), modules: [] } })), checkUpdate: vi.fn(async () => snapshot()), downloadUpdate: vi.fn(async () => snapshot()), ...clientOverrides }
   const wrapper = mount(ModulesPage, { attachTo: document.body, global: { plugins: [pinia], provide: { moduleClient: client } } }); mounted.push(wrapper)
   return { wrapper, client, app, store }
 }
@@ -673,5 +673,69 @@ describe('ModulesPage lifecycle controls', () => {
     expect(store.selectedModuleId).toBe('qing.text')
     expect(useToastStore().message).toBe('Could not remove the module.')
     expect(useToastStore().message).not.toContain('C:/private')
+  })
+})
+
+describe('ModulesPage host-authoritative update presentation', () => {
+  it('checks once, shows pending feedback, and applies the complete host snapshot', async () => {
+    let resolve!: (value: unknown) => void
+    const available = item({ updateStatus: 'UpdateAvailable', targetVersion: '1.1.0', releaseNotes: 'Safer formatting.', canDownloadUpdate: true })
+    const checkUpdate = vi.fn(() => new Promise(value => { resolve = value }))
+    const { wrapper, store } = page(item(), { checkUpdate })
+    await wrapper.get('.wpf-module-card').trigger('click')
+    expect(wrapper.get('.module-update').text()).toContain('Current version')
+    expect(wrapper.get('.module-update').text()).toContain('1.0.0')
+    const check = wrapper.get('.module-check-update')
+    await check.trigger('click'); await check.trigger('click')
+    expect(checkUpdate).toHaveBeenCalledTimes(1)
+    expect(checkUpdate).toHaveBeenCalledWith('qing.text')
+    expect(check.attributes('aria-busy')).toBe('true')
+    expect(check.text()).toContain('Checking…')
+    expect(check.find('.module-operation-spinner').exists()).toBe(true)
+    resolve({ generatedAt: new Date().toISOString(), modules: [available] })
+    await flushPromises()
+    expect(store.selectedModuleId).toBe('qing.text')
+    expect(wrapper.get('.module-update').text()).toContain('1.1.0')
+    expect(wrapper.get('.module-update').text()).toContain('Safer formatting.')
+    expect(wrapper.get('.module-download-update').classes()).toContain('is-primary')
+    expect(wrapper.get('.module-card-badges').text()).toContain('Update available')
+  })
+
+  it('keeps the current version unchanged after verified staging and offers no install action', async () => {
+    const verified = item({ updateStatus: 'UpdateAvailable', targetVersion: '1.1.0', canDownloadUpdate: false, downloadStatus: 'Verified', downloadBytesReceived: 512, downloadExpectedBytes: 512 })
+    const downloadUpdate = vi.fn(async () => ({ generatedAt: new Date().toISOString(), modules: [verified] }))
+    const { wrapper } = page(item({ updateStatus: 'UpdateAvailable', targetVersion: '1.1.0', canDownloadUpdate: true }), { downloadUpdate })
+    await wrapper.get('.wpf-module-card').trigger('click')
+    await wrapper.get('.module-download-update').trigger('click')
+    await flushPromises()
+    const update = wrapper.get('.module-update')
+    expect(downloadUpdate).toHaveBeenCalledWith('qing.text')
+    expect(update.text()).toContain('The update package has been downloaded and verified.')
+    expect(update.text()).toContain('It has not been installed, and the current module version is unchanged.')
+    expect(update.text()).toContain('1.0.0')
+    expect(wrapper.get('.module-card-badges').text()).toContain('Update verified')
+    expect(update.text().toLowerCase()).not.toContain('install update')
+  })
+
+  it('uses host failure classifications and safe localized resynchronization', async () => {
+    const failed = item({ updateStatus: 'HostVersionIncompatible', targetVersion: '2.0.0', downloadStatus: 'HashMismatch' })
+    const getSnapshot = vi.fn(async () => ({ generatedAt: new Date().toISOString(), modules: [failed] }))
+    const { wrapper } = page(item(), { checkUpdate: vi.fn().mockRejectedValue(new Error('C:/private/update.qmod')), getSnapshot })
+    await wrapper.get('.wpf-module-card').trigger('click')
+    await wrapper.get('.module-check-update').trigger('click'); await flushPromises()
+    expect(getSnapshot).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.module-update').text()).toContain('Host version incompatible')
+    expect(wrapper.get('.module-download-status').classes()).toContain('is-danger')
+    expect(useToastStore().message).toBe('The update check failed.')
+    expect(useToastStore().message).not.toContain('C:/private')
+  })
+
+  it('renders Simplified Chinese update labels from the shared localization system', async () => {
+    const { wrapper } = page(item({ updateStatus: 'UpdateAvailable', targetVersion: '1.1.0', canDownloadUpdate: true }), {}, { language: 'zh-CN', effectiveLanguage: 'zh-CN' })
+    await wrapper.get('.wpf-module-card').trigger('click')
+    expect(wrapper.get('.module-update').text()).toContain('模块更新')
+    expect(wrapper.get('.module-check-update').text()).toContain('检查更新')
+    expect(wrapper.get('.module-download-update').text()).toContain('下载并验证')
+    expect(wrapper.get('.module-card-badges').text()).toContain('有可用更新')
   })
 })

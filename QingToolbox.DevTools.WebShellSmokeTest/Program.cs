@@ -128,6 +128,39 @@ var extraResult = await moduleDispatcher.DispatchAsync(extraPayload, new(11, Can
 Require(!extraResult.Response.Success && extraResult.Response.Error?.Code == "InvalidPayload", "Module projection must reject additional payload properties.");
 var moduleSnapshot = (WebModuleSnapshot)moduleResult.Response.Payload;
 Require(moduleSnapshot.Modules[0] is { CanRemove: true, CanLoad: false, CanActivate: false, CanOpen: true, CanDeactivate: true, CanUnload: true, IsBusy: false, IsExecutionBlocked: false, IsStartupEnabled: false, StartupAuthorizationState: "ChangedNeedsConfirmation", CanChangeStartupAuthorization: true, IsStartupAuthorizationBusy: false }, "Module projection must include host management, lifecycle and startup authorization capabilities.");
+Require(moduleSnapshot.Modules[0] is { UpdateStatus: "UpdateAvailable", TargetVersion: "1.1.0", ReleaseNotes: "Safe release notes", IsFromStaleCache: false, CanCheckForUpdate: true, IsUpdateCheckBusy: false, CanDownloadUpdate: true, DownloadStatus: "Verified", IsDownloadActive: false, DownloadBytesReceived: 512, DownloadExpectedBytes: 512 },
+    "Module projection must include the host-authoritative update and verified staging state.");
+
+Console.WriteLine("Verifying module update bridge boundaries...");
+var updateOperations = new UpdateOperations();
+var updateDispatcher = new WebBridgeDispatcher([
+    new WebModuleCheckUpdateCommandHandler(updateOperations, new WebModuleSnapshotProvider(source, TimeProvider.System), moduleActivation),
+    new WebModuleDownloadUpdateCommandHandler(updateOperations, new WebModuleSnapshotProvider(source, TimeProvider.System), moduleActivation)]);
+foreach (var command in new[] { "modules.checkUpdate", "modules.downloadUpdate" })
+{
+    foreach (var payload in new object[]
+    {
+        new { }, new { moduleId = 42 }, new { moduleId = "" }, new { moduleId = "qing.test", url = "https://invalid.example" },
+        new { moduleId = "qing.test", targetVersion = "9.9.9" }, new { moduleId = "qing.test", sha256 = "00" },
+        new { moduleId = "qing.test", size = 1 }, new { moduleId = "qing.test", stagingPath = root },
+        new { moduleId = "qing.test", packagePath = root }
+    })
+    {
+        var malformed = await updateDispatcher.DispatchAsync(LifecycleRequest(command, payload), new(11, CancellationToken.None));
+        Require(!malformed.Response.Success && malformed.Response.Error?.Code == "InvalidPayload", $"{command} must accept only a non-empty moduleId.");
+    }
+}
+var checkedUpdate = await updateDispatcher.DispatchAsync(LifecycleRequest("modules.checkUpdate", new { moduleId = "qing.test" }), new(11, CancellationToken.None));
+var downloadedUpdate = await updateDispatcher.DispatchAsync(LifecycleRequest("modules.downloadUpdate", new { moduleId = "qing.test" }), new(11, CancellationToken.None));
+Require(checkedUpdate.Response.Success && downloadedUpdate.Response.Success && downloadedUpdate.Response.Payload is WebModuleSnapshot { Modules.Count: 1 } &&
+        updateOperations.CheckCount == 1 && updateOperations.DownloadCount == 1 && updateOperations.LastModuleId == "qing.test",
+    "Update commands must use only the update adapter and return complete snapshots.");
+updateOperations.NextResult = WebModuleUpdateOperationResult.Unavailable;
+var unavailableUpdate = await updateDispatcher.DispatchAsync(LifecycleRequest("modules.downloadUpdate", new { moduleId = "qing.test" }), new(11, CancellationToken.None));
+Require(!unavailableUpdate.Response.Success && unavailableUpdate.Response.Error?.Code == "ModuleUpdateUnavailable" &&
+        !JsonSerializer.Serialize(unavailableUpdate.Response).Contains(root, StringComparison.OrdinalIgnoreCase),
+    "Unavailable downloads must return a safe error without host paths or download metadata.");
+Require(WebBridgeProtocol.Version == 4, "Module update commands must preserve protocol version 4.");
 
 Console.WriteLine("Verifying explicit host-confirmed module lifecycle commands...");
 var lifecycle = new LifecycleOperations();
@@ -602,8 +635,20 @@ file sealed class SnapshotSource : IWebModuleSnapshotSource
         ReadCount++;
         return [new("qing.test", "Test", "Safe description", "1.0.0", "Qing", "OutOfProcess", "Manual",
             "Running", true, 0, [], ["Clipboard"], "0.2.0-alpha", true, true, false, false, true, true, true, false, false,
-            false, "ChangedNeedsConfirmation", true, false)];
+            false, "ChangedNeedsConfirmation", true, false, "UpdateAvailable", "1.1.0", "Safe release notes", false,
+            true, false, true, "Verified", false, 512, 512)];
     }
+}
+file sealed class UpdateOperations : IWebModuleUpdateOperations
+{
+    public WebModuleUpdateOperationResult NextResult { get; set; } = WebModuleUpdateOperationResult.Succeeded;
+    public int CheckCount { get; private set; }
+    public int DownloadCount { get; private set; }
+    public string LastModuleId { get; private set; } = string.Empty;
+    public Task<WebModuleUpdateOperationResult> CheckAsync(string moduleId, CancellationToken cancellationToken)
+    { cancellationToken.ThrowIfCancellationRequested(); CheckCount++; LastModuleId = moduleId; return Task.FromResult(NextResult); }
+    public Task<WebModuleUpdateOperationResult> DownloadAndVerifyAsync(string moduleId, CancellationToken cancellationToken)
+    { cancellationToken.ThrowIfCancellationRequested(); DownloadCount++; LastModuleId = moduleId; return Task.FromResult(NextResult); }
 }
 file sealed class LifecycleOperations : IWebModuleLifecycleOperations
 {
