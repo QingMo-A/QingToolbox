@@ -299,11 +299,11 @@ onBeforeUnmount(() => {
           <h3>{{ t('modules.management.title') }}</h3>
           <p>{{ t('modules.management.description') }}</p>
           <div class="module-management-actions">
-            <QButton variant="secondary" :aria-busy="store.operations[store.selectedModule.id] === 'openDirectory'" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="openModuleDirectory(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'openDirectory'" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="folder" />{{ t(store.operations[store.selectedModule.id] === 'openDirectory' ? 'modules.management.opening' : 'modules.management.openFolder') }}</QButton>
-            <QButton v-if="store.selectedModule.isUserInstalled" class="module-remove-entry" variant="ghost" :disabled="!hostOperationsAvailable || !store.selectedModule.canRemove || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="removeConfirmationModuleId = store.selectedModule.id"><QIcon name="remove" />{{ t('modules.management.removeModule') }}</QButton>
+            <QButton class="module-open-directory" variant="secondary" :aria-busy="store.operations[store.selectedModule.id] === 'openDirectory'" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="openModuleDirectory(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'openDirectory'" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="folder" />{{ t(store.operations[store.selectedModule.id] === 'openDirectory' ? 'modules.management.opening' : 'modules.management.openFolder') }}</QButton>
+            <QButton v-if="store.selectedModule.isUserInstalled" class="module-remove-entry" variant="ghost" :aria-expanded="removeConfirmationModuleId === store.selectedModule.id" aria-controls="module-remove-confirmation" :disabled="!hostOperationsAvailable || !store.selectedModule.canRemove || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="removeConfirmationModuleId = store.selectedModule.id"><QIcon name="remove" />{{ t('modules.management.removeModule') }}</QButton>
           </div>
-          <div v-if="removeConfirmationModuleId === store.selectedModule.id" class="module-remove-confirmation">
-            <strong>{{ t('modules.management.confirmTitle', { name: store.selectedModule.displayName }) }}</strong>
+          <div v-if="removeConfirmationModuleId === store.selectedModule.id" id="module-remove-confirmation" class="module-remove-confirmation" role="group" aria-labelledby="module-remove-confirmation-title">
+            <strong id="module-remove-confirmation-title">{{ t('modules.management.confirmTitle', { name: store.selectedModule.displayName }) }}</strong>
             <p>{{ t('modules.management.confirmDescription') }}</p>
             <small>{{ t('modules.management.reimportHint') }}</small>
             <div>
@@ -351,17 +351,20 @@ onBeforeUnmount(() => {
 .module-management>p { margin: -7px 0 12px; color: var(--q-text-2); font-size: 12px; }
 .module-management-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .module-management-actions .q-button { gap: 7px; white-space: nowrap; }
-.module-remove-entry { color: var(--q-danger); }
-.module-remove-entry:hover:not(:disabled) { border-color: color-mix(in srgb,var(--q-danger) 45%,var(--q-border)); background: color-mix(in srgb,var(--q-danger) 7%,var(--q-surface)); color: var(--q-danger); }
-.module-remove-confirmation { margin-top: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb,var(--q-danger) 32%,var(--q-border)); border-radius: 11px; background: color-mix(in srgb,var(--q-danger) 6%,var(--q-surface)); }
+.module-management .module-operation-spinner { flex: 0 0 14px; margin-inline-end: 0; }
+.module-open-directory { min-width: 144px; }
+.module-remove-entry { color: var(--q-text-2); }
+.module-remove-entry:hover:not(:disabled),.module-remove-entry:focus-visible:not(:disabled) { border-color: color-mix(in srgb,var(--q-danger) 45%,var(--q-border)); background: color-mix(in srgb,var(--q-danger) 7%,var(--q-surface)); color: var(--q-danger); }
+.module-remove-entry:disabled { color: var(--q-text-3); }
+.module-remove-confirmation { margin-top: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb,var(--q-danger) 32%,var(--q-border)); border-radius: 11px; background: color-mix(in srgb,var(--q-danger) 6%,var(--q-surface)); animation: module-remove-confirmation-enter 160ms cubic-bezier(.2,.75,.25,1) both; }
 .module-remove-confirmation strong,.module-remove-confirmation small { display: block; }
 .module-remove-confirmation p { margin: 5px 0; color: var(--q-text-2); font-size: 12px; line-height: 1.45; }
 .module-remove-confirmation small { color: var(--q-text-3); }
 .module-remove-confirmation>div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-.module-remove-confirm { border-color: color-mix(in srgb,var(--q-danger) 55%,var(--q-border)); color: var(--q-danger); }
-.module-remove-confirm:hover:not(:disabled) { border-color: var(--q-danger); background: color-mix(in srgb,var(--q-danger) 10%,var(--q-surface)); color: var(--q-danger); }
-:global(.q-toast.is-warning) { background: var(--q-warning); }
+.module-remove-confirm { min-width: 130px; border-color: var(--q-danger); background: var(--q-danger); color: #fff; }
+.module-remove-confirm:hover:not(:disabled) { border-color: color-mix(in srgb,var(--q-danger) 82%,#000); background: color-mix(in srgb,var(--q-danger) 88%,#000); color: #fff; }
 @keyframes module-operation-spin { to { transform: rotate(360deg); } }
+@keyframes module-remove-confirmation-enter { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes module-lifecycle-ring-draw { to { stroke-dashoffset: 0; } }
 @keyframes module-lifecycle-check-draw { to { stroke-dashoffset: 0; } }
 @keyframes module-lifecycle-success-presence {
@@ -379,6 +382,7 @@ onBeforeUnmount(() => {
   .module-lifecycle-success { animation-name: module-lifecycle-success-reduced; }
   .module-lifecycle-success-ring,.module-lifecycle-success-check { stroke-dashoffset: 0; animation: none; }
   .module-card-lifecycle-actions.is-revealing .q-button { animation: none; }
+  .module-remove-confirmation { animation: none; }
 }
 @keyframes module-lifecycle-success-reduced { 0%, 82% { opacity: 1; } 100% { opacity: 0; } }
 @media (max-width: 650px) {
