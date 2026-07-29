@@ -10,6 +10,9 @@ public enum HostUpdateDownloadState { Idle, Downloading, Verifying, ReadyToInsta
 public sealed record HostUpdateDownloadProgress(HostUpdateDownloadState State, long BytesReceived, long ExpectedBytes,
     string? Error = null, string? InstallerPath = null, string? ReleaseVersion = null, long InstallerAssetId = 0);
 
+public sealed record VerifiedHostInstaller(string Version, long InstallerAssetId, long ChecksumAssetId,
+    string InstallerPath, long InstallerSize);
+
 public sealed class HostUpdateInstallerDownloader(HttpClient client, string cacheRoot)
 {
     public const long MaximumInstallerBytes = 512L * 1024 * 1024;
@@ -21,6 +24,16 @@ public sealed class HostUpdateInstallerDownloader(HttpClient client, string cach
     private Task<HostUpdateDownloadProgress>? _inFlight;
 
     public event EventHandler<HostUpdateDownloadProgress>? ProgressChanged;
+
+    public async Task<VerifiedHostInstaller?> GetVerifiedInstallerForHandoffAsync(HostReleaseInfo release, CancellationToken token)
+    {
+        var directory = ResolveControlledDirectory(release);
+        var installer = ResolveControlledFile(directory, release.Installer.Name);
+        var sidecar = ResolveControlledFile(directory, release.Checksum.Name);
+        if (!release.Installer.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
+            !await VerifyCachedAsync(release, installer, sidecar, token)) return null;
+        return new(release.Version, release.Installer.Id, release.Checksum.Id, installer, release.Installer.Size);
+    }
 
     public Task<HostUpdateDownloadProgress> DownloadAsync(HostReleaseInfo release, CancellationToken cancellationToken)
     {
@@ -36,7 +49,7 @@ public sealed class HostUpdateInstallerDownloader(HttpClient client, string cach
     {
         HostUpdateDownloadProgress Emit(HostUpdateDownloadProgress value) =>
             Report(value with { ReleaseVersion = release.Version, InstallerAssetId = release.Installer.Id });
-        var directory = ResolveControlledDirectory(release.Version);
+        var directory = ResolveControlledDirectory(release);
         var finalPath = ResolveControlledFile(directory, release.Installer.Name);
         var partPath = finalPath + ".part";
         var sidecarPath = ResolveControlledFile(directory, release.Checksum.Name);
@@ -77,7 +90,8 @@ public sealed class HostUpdateInstallerDownloader(HttpClient client, string cach
         if (!File.Exists(installer) || !File.Exists(sidecar)) return false;
         try
         {
-            if (new FileInfo(installer).Length != release.Installer.Size || new FileInfo(sidecar).Length > MaximumSidecarBytes) return false;
+            if (new FileInfo(installer).Length != release.Installer.Size || new FileInfo(sidecar).Length != release.Checksum.Size ||
+                new FileInfo(sidecar).Length > MaximumSidecarBytes) return false;
             var expected = ParseSidecar(await File.ReadAllBytesAsync(sidecar, token), release.Installer.Name);
             return (await HashAsync(installer, token)).Equals(expected, StringComparison.OrdinalIgnoreCase);
         }
@@ -163,9 +177,10 @@ public sealed class HostUpdateInstallerDownloader(HttpClient client, string cach
         return match.Groups["hash"].Value.ToUpperInvariant();
     }
 
-    private string ResolveControlledDirectory(string version)
+    private string ResolveControlledDirectory(HostReleaseInfo release)
     {
-        var root = Path.GetFullPath(cacheRoot); var directory = Path.GetFullPath(Path.Combine(root, version));
+        var root = Path.GetFullPath(cacheRoot);
+        var directory = Path.GetFullPath(Path.Combine(root, release.Version, $"{release.Installer.Id}-{release.Checksum.Id}"));
         if (!directory.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Update cache path escaped its root.");
         return directory;
     }

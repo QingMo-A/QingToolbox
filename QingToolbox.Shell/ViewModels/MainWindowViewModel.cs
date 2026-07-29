@@ -38,6 +38,7 @@ public sealed partial class MainWindowViewModel(
     ModulePackageDownloadCoordinator modulePackageDownloadCoordinator,
     HostUpdateDiscoveryService hostUpdateDiscovery,
     HostUpdateInstallerDownloader hostUpdateInstallerDownloader,
+    HostUpdateHandoffCoordinator hostUpdateHandoffCoordinator,
     TimeProvider timeProvider,
     StartupHealthJournal startupHealthJournal,
     IModuleExecutionReadinessGate executionGate,
@@ -163,6 +164,11 @@ public sealed partial class MainWindowViewModel(
     [ObservableProperty] private long _hostUpdateBytesReceived;
     [ObservableProperty] private long _hostUpdateExpectedBytes;
     [ObservableProperty] private string _hostUpdateDownloadError = string.Empty;
+    [ObservableProperty] private bool _hostInstallationSupported;
+    [ObservableProperty] private bool _isStartingHostUpdate;
+    [ObservableProperty] private bool _isHostInstallerStarted;
+    [ObservableProperty] private string _hostUpdateInstallMessage = string.Empty;
+    [ObservableProperty] private bool _isHostUpdateConfirmationOpen;
     private HostReleaseInfo? _selectedHostRelease;
     private CancellationTokenSource? _hostUpdateDownloadCancellation;
     private bool _hostUpdateDownloadSubscribed;
@@ -197,6 +203,8 @@ public sealed partial class MainWindowViewModel(
     public string HostUpdateDownloadProgress => $"{FormatBytes(HostUpdateBytesReceived)} / {FormatBytes(HostUpdateExpectedBytes)}";
     public string HostUpdateDownloadActionLabel => localization.GetString(IsHostUpdateDownloadFailed ? "hostUpdate.retry" : "hostUpdate.download");
     public string HostUpdateReadyVersion => localization.GetString("hostUpdate.readyVersion", HostUpdateLatestVersion);
+    public bool CanInstallHostUpdate => IsHostUpdateReady && HostInstallationSupported && !IsStartingHostUpdate && !IsHostInstallerStarted;
+    public bool ShowUnsupportedHostInstallation => IsHostUpdateReady && !HostInstallationSupported;
     public LocalizedText Strings { get; } = new(localization);
     public ObservableCollection<LanguageOptionViewModel> LanguageOptions { get; } =
     [
@@ -448,6 +456,7 @@ public sealed partial class MainWindowViewModel(
         OnPropertyChanged(nameof(HostUpdateStatus));
         OnPropertyChanged(nameof(HostUpdateDownloadActionLabel));
         OnPropertyChanged(nameof(HostUpdateReadyVersion));
+        OnPropertyChanged(nameof(HostUpdateInstallMessage));
         RefreshLanguageOptionLabels();
         if (!string.IsNullOrEmpty(ModuleUpdateLastChecked))
         {
@@ -482,8 +491,11 @@ public sealed partial class MainWindowViewModel(
         OnPropertyChanged(nameof(IsHostUpdateDownloading)); OnPropertyChanged(nameof(IsHostUpdateVerifying));
         OnPropertyChanged(nameof(IsHostUpdateReady)); OnPropertyChanged(nameof(IsHostUpdateDownloadFailed));
         OnPropertyChanged(nameof(HostUpdateDownloadActionLabel));
+        OnPropertyChanged(nameof(CanInstallHostUpdate)); OnPropertyChanged(nameof(ShowUnsupportedHostInstallation));
         DownloadHostUpdateCommand.NotifyCanExecuteChanged(); CancelHostUpdateDownloadCommand.NotifyCanExecuteChanged();
         CheckHostUpdateCommand.NotifyCanExecuteChanged();
+        InstallHostUpdateCommand.NotifyCanExecuteChanged();
+        if (value == HostUpdateDownloadState.ReadyToInstall) RefreshHostInstallationIdentity();
     }
     partial void OnHostUpdateBytesReceivedChanged(long value) => OnPropertyChanged(nameof(HostUpdateDownloadProgress));
     partial void OnHostUpdateExpectedBytesChanged(long value) => OnPropertyChanged(nameof(HostUpdateDownloadProgress));
@@ -562,6 +574,57 @@ public sealed partial class MainWindowViewModel(
 
     private static string FormatBytes(long bytes) => bytes >= 1024 * 1024
         ? $"{bytes / 1024d / 1024d:F1} MB" : bytes >= 1024 ? $"{bytes / 1024d:F1} KB" : $"{bytes} B";
+
+    partial void OnHostInstallationSupportedChanged(bool value) { OnPropertyChanged(nameof(CanInstallHostUpdate)); OnPropertyChanged(nameof(ShowUnsupportedHostInstallation)); InstallHostUpdateCommand.NotifyCanExecuteChanged(); }
+    partial void OnIsStartingHostUpdateChanged(bool value) { OnPropertyChanged(nameof(CanInstallHostUpdate)); InstallHostUpdateCommand.NotifyCanExecuteChanged(); }
+    partial void OnIsHostInstallerStartedChanged(bool value) { OnPropertyChanged(nameof(CanInstallHostUpdate)); InstallHostUpdateCommand.NotifyCanExecuteChanged(); }
+
+    private void RefreshHostInstallationIdentity()
+    {
+        var identity = hostUpdateHandoffCoordinator.ProbeInstallation();
+        HostInstallationSupported = identity.IsSupported;
+        HostUpdateInstallMessage = identity.IsSupported ? string.Empty : localization.GetString("hostUpdate.unsupportedDeployment");
+    }
+
+    [RelayCommand(CanExecute = nameof(CanInstallHostUpdate))]
+    private async Task InstallHostUpdateAsync()
+    {
+        if (_selectedHostRelease is null || IsHostUpdateConfirmationOpen) return;
+        IsHostUpdateConfirmationOpen = true;
+        var confirmed = false;
+        try
+        {
+            var dialog = new HostUpdateConfirmationDialog(localization, _selectedHostRelease.Version)
+                { Owner = Application.Current?.MainWindow };
+            confirmed = dialog.ShowDialog() == true;
+        }
+        finally { IsHostUpdateConfirmationOpen = false; }
+        if (!confirmed) return;
+        IsStartingHostUpdate = true; HostUpdateInstallMessage = localization.GetString("hostUpdate.recheckingInstaller");
+        var result = await hostUpdateHandoffCoordinator.StartAsync(_selectedHostRelease);
+        IsStartingHostUpdate = false;
+        if (result.State == HostUpdateHandoffState.InstallerInvalid)
+        {
+            ApplyHostDownloadProgress(new(HostUpdateDownloadState.Failed, 0, _selectedHostRelease.Installer.Size,
+                localization.GetString("hostUpdate.reverificationFailed")));
+        }
+        IsHostInstallerStarted = result.State == HostUpdateHandoffState.Started;
+        HostUpdateInstallMessage = localization.GetString(result.State switch
+        {
+            HostUpdateHandoffState.Started => "hostUpdate.installerStarted",
+            HostUpdateHandoffState.Unsupported => "hostUpdate.unsupportedDeployment",
+            HostUpdateHandoffState.InstallerInvalid => "hostUpdate.reverificationFailed",
+            _ => "hostUpdate.installerStartFailed"
+        });
+        if (result.State == HostUpdateHandoffState.Unsupported) HostInstallationSupported = false;
+    }
+
+    [RelayCommand]
+    private void OpenHostReleasePage()
+    {
+        try { Process.Start(new ProcessStartInfo("https://github.com/QingMo-A/QingToolbox/releases") { UseShellExecute = true }); }
+        catch { HostUpdateInstallMessage = localization.GetString("hostUpdate.releasePageFailed"); }
+    }
 
     private void RestoreSelectedLanguageCode() =>
         SetSelectedLanguageCode(localizationManager.ConfiguredLanguageCode);

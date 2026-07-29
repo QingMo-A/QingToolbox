@@ -38,7 +38,7 @@ QingToolbox 是面向 Windows 的轻量模块化工具箱。Shell 提供现代�
 - B1 事务所有权边界已加固：Marker 保留到 `Committed` 原子落盘之后，提交后清理失败绝不回滚；Verified Staging 到 candidate 使用稳定句柄复制，Journal 按物理根/环境/模块隔离，并通过五个真实子进程崩溃窗口验证，其中 copy 窗口已完成至少一个 payload 文件的落盘。
 - B1 的最终可信边界将事务绑定到宿主配置的唯一 Verified Root，并使用 Windows 卷序列号与 128-bit File ID 跟踪旧模块、candidate、backup 和 promoted 目录；内容完整性与目录所有权分别验证，外部替换的目录绝不会被自动移动或覆盖。
 - B1 的安全关键目录替换使用源目录句柄、目标父目录句柄和相对叶名执行 native rename，不再通过路径 `Directory.Move`；Journal temp 也由同一文件句柄通过 Namespace Handle 原子替换。双遍快照后的 `SecureTreeLease` 绑定文件身份、Hash 与 Manifest 同一次读取，最终 rename 后立即复核完整树。Runtime Restore 已开始后，即使返回 false、抛异常或 Progress Journal 写入失败，回滚仍查询并卸载实际 v2，再恢复 v1。当前 Journal 为 schema 4，真实旧 schema 3 按严格布局和现场迁移，否则保留为恢复现场。
-- B1 现为 **Engineering Complete — Frozen**，且仍仅限 Development/ModuleTest。B2.1 已接入真实 Shell 生命周期适配器、启动恢复执行门禁和固定来源的 Development/ModuleTest TextTools 金丝雀；Production 更新按钮、自动安装和宿主自更新仍未开放。Preview 2 未执行人工验收仍为 `Not Run`。详见 [`docs/MODULE_UPDATE_RUNTIME_ADAPTER.md`](docs/MODULE_UPDATE_RUNTIME_ADAPTER.md) 与 [`docs/TEXTTOOLS_UPDATE_CANARY.md`](docs/TEXTTOOLS_UPDATE_CANARY.md)。
+- B1 现为 **Engineering Complete — Frozen**，且仍仅限 Development/ModuleTest。B2.1 已接入真实 Shell 生命周期适配器、启动恢复执行门禁和固定来源的 Development/ModuleTest TextTools 金丝雀；Production 模块自动安装仍未开放。宿主自更新 Plan 013 已在原生 Production 工作区完成并冻结。Preview 2 未执行人工验收仍为 `Not Run`。详见 [`docs/MODULE_UPDATE_RUNTIME_ADAPTER.md`](docs/MODULE_UPDATE_RUNTIME_ADAPTER.md) 与 [`docs/TEXTTOOLS_UPDATE_CANARY.md`](docs/TEXTTOOLS_UPDATE_CANARY.md)。
 
 ## 运行 Preview
 
@@ -70,6 +70,11 @@ SmartScreen 可能显示未知发布者警告。
 后续正式 Windows Release 仅提供 `win-x64` 安装器及其同名 `.sha256`。安装器是
 QingToolbox 唯一受支持的正式分发方式；历史 Release 中已经存在的便携资产保持不变，
 但新版本不再生成、上传或宣传便携 ZIP。
+
+正式安装版可在原生“关于与更新”区域检查官方 Release，由用户明确下载并校验 SHA256，
+确认后把已复核的安装器交给现有 Inno Setup 完成原地升级。应用不会自行覆盖程序文件；
+手动运行更高版本安装器、同版本 Repair 和降级保护仍保持支持。非标准复制部署只提供官方
+Release 页面，不会猜测安装目录或自动启动安装器。
 
 开发环境运行：
 

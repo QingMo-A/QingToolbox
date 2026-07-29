@@ -3,7 +3,8 @@
 ## Unreleased
 
 - Added Production-native discovery of higher official QingToolbox GitHub Releases with SemVer channel selection, installer-only asset validation, conditional caching, and a non-blocking update banner.
-- Added explicit Production installer download and SHA256 verification with bounded streaming, cancellation, cache revalidation, and a native ready state; installer handoff is not yet implemented.
+- Added explicit Production installer download and SHA256 verification with bounded streaming, cancellation, cache revalidation, and a native ready state.
+- Added installed-deployment verification, final installer revalidation, user confirmation, and safe `/SILENT /NORESTART` handoff to the existing Inno Setup in-place upgrade path.
 - Retired portable ZIP distribution; future Windows releases publish only the installer and its same-name SHA256 sidecar while retaining audited installer payload generation.
 
 - Localized the Development Web Home, Session Logs, and Diagnostics workspaces in English and Simplified Chinese.

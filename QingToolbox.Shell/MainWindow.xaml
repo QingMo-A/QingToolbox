@@ -1696,6 +1696,19 @@
                                         <TextBlock Text="{Binding Strings[hostUpdate.verified]}" FontWeight="SemiBold" Foreground="#087B42"/>
                                         <TextBlock Margin="0,3,0,0" Text="{Binding HostUpdateReadyVersion}"/>
                                         <TextBlock Margin="0,3,0,0" Text="{Binding Strings[hostUpdate.handoffNext]}" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                                        <Button Margin="0,10,0,0" HorizontalAlignment="Left" Command="{Binding InstallHostUpdateCommand}"
+                                                AutomationProperties.Name="{Binding Strings[hostUpdate.installNow]}" Style="{StaticResource PrimaryActionButtonStyle}"
+                                                Visibility="{Binding CanInstallHostUpdate, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Text="{Binding Strings[hostUpdate.installNow]}"/>
+                                        </Button>
+                                        <StackPanel Margin="0,9,0,0" Visibility="{Binding ShowUnsupportedHostInstallation, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Text="{Binding Strings[hostUpdate.unsupportedDeployment]}" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                                            <Button Margin="0,9,0,0" HorizontalAlignment="Left" Command="{Binding OpenHostReleasePageCommand}"
+                                                    AutomationProperties.Name="{Binding Strings[hostUpdate.openReleasePage]}" Style="{StaticResource SecondaryActionButtonStyle}">
+                                                <TextBlock Text="{Binding Strings[hostUpdate.openReleasePage]}"/>
+                                            </Button>
+                                        </StackPanel>
+                                        <TextBlock Margin="0,9,0,0" Text="{Binding HostUpdateInstallMessage}" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <StackPanel Margin="0,9,0,0" Visibility="{Binding IsHostUpdateDownloadFailed, Converter={StaticResource BooleanToVisibilityConverter}}">
                                         <TextBlock Text="{Binding Strings[hostUpdate.downloadFailed]}" FontWeight="SemiBold" Foreground="#B54708"/>

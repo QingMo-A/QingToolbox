@@ -1,6 +1,6 @@
 # Plan 013：QingToolbox 宿主更新与一键原地升级
 
-**状态：Approved / In Progress — 013A, 013B and 013C Implementation Complete; next 013D**
+**状态：Implementation Complete / Frozen — 013A, 013B, 013C and 013D complete**
 **目标分支：`toolbox`**  
 **批准决策：QingToolbox 停止将便携版作为正式分发形态，后续正式发布仅提供安装版。**
 
@@ -390,7 +390,12 @@ Failed
 
 ## 013D：安装器交接与端到端原地升级
 
-**状态：Next — Not Started**
+**状态：Implementation Complete**
+
+Production 安装版会在用户确认后再次依据当前 Release 身份复核受控缓存中的安装器与 sidecar，
+并以精确的 `/SILENT /NORESTART` 参数直接启动现有 Inno Setup。启动成功后 QingToolbox 保持
+运行，等待安装器通过既有 `CloseApplications` 与恢复逻辑接管；启动失败则保留应用和已验证
+缓存并允许重试。非标准部署 fail closed，只提供固定官方 Release 页面。Plan 013 至此冻结。
 
 ### 目标
 

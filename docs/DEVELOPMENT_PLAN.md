@@ -24,10 +24,10 @@
 - Plan 012 UI-5A3A commit: `3ddedcb7849831f865e40cc82ed998b908d623a9`.
 - Plan 012 UI-5A3B1 read-only workspaces: Implementation Complete.
 - Plan 012 UI-5A3B2 Settings localization and module metadata refresh: Implementation Complete. Successful language changes refresh one complete host-localized Module Snapshot. Plan 012 is complete.
-- Plan 013: **Approved / In Progress**. 013A, 013B and 013C are Implementation Complete; the next substage is **013D — installer handoff and end-to-end in-place upgrade**.
+- Plan 013: **Implementation Complete / Frozen**. Installer-only delivery, discovery, verified download, user confirmation, and Inno Setup handoff are complete.
 - Development Web module updates now support an explicit, inline-confirmed installation of a host-authorized verified package through the frozen B1/B2.1 transaction boundary. This is manual and Development-only; it is not automatic installation.
 - Production Web UI: Deferred.
-- Production module update transactions, automatic module installation, and Production Web UI remain deferred. The native Production workspace can discover, explicitly download and verify the official host installer; installer launch remains unavailable.
+- Production module update transactions, automatic module installation, and Production Web UI remain deferred. The native Production workspace can discover, verify, confirm, and hand the official host installer to the existing Inno Setup upgrade path.
 - Preview 2 release work and UI modernization remain independent tracks.
 
 The Development Vue workspace currently contains Home, Modules, Running, Session Logs, Settings,
@@ -197,12 +197,12 @@ Preview 2 的产品目标不是完成全部自动更新，而是证明：
 
 ## 5. 当前选定计划：Plan 013 宿主自更新
 
-Plan 013 状态为 **Approved / In Progress**，完整边界见
+Plan 013 状态为 **Implementation Complete / Frozen**，完整边界见
 [`docs/plans/PLAN_013_HOST_SELF_UPDATE.md`](plans/PLAN_013_HOST_SELF_UPDATE.md)。
-**013A**、**013B** 与 **013C** 已达到 Implementation Complete：正式 Windows Release 仅分发安装器与
+**013A**、**013B**、**013C** 与 **013D** 已达到 Implementation Complete，Plan 013 现已 Frozen：正式 Windows Release 仅分发安装器与
 同名 `.sha256`；Production 原生工作区可异步检查官方 Release，并通过 24 小时缓存与条件请求
-显示非阻塞更新提示，并由用户明确下载、校验官方安装器。下一子阶段为
-**013D — installer handoff and end-to-end in-place upgrade**；启动安装仍未实现。
+显示非阻塞更新提示，由用户明确下载、校验和确认，再将安装器交给现有 Inno Setup 完成原地覆盖。
+用户手动运行更高版本安装器、同版本 Repair 与降级保护继续由同一安装器路径支持。
 
 ## 5.1 Preview 1 → Preview 2 原地升级门禁（保留的发布基础设施）
 
@@ -468,7 +468,7 @@ frozen runtime, transaction, and capability boundaries.
 
 `检测宿主更新 → 下载并验证安装器 → 用户确认 → 启动安装器 → 退出宿主 → 安装器原地覆盖并重新打开`
 
-宿主不直接替换自身文件。013A、013B 与 013C 已完成；已验证安装器的启动和退出交接仍属于 013D。
+宿主不直接替换自身文件。Plan 013 已完成并冻结；文件替换、运行中 Shell 接管与恢复继续由现有 Inno Setup 完成。
 
 ## 9. 提交和验证工作流
 
@@ -554,8 +554,8 @@ docs/plans/PLAN_013_HOST_SELF_UPDATE.md
 - 开发环境隔离、Smoke Tests、安装器和 Preview RC Gate。
 
 项目所有者已明确推迟剩余 Preview 2 人工发布验收。未执行项目继续保持 `Not Run`。
-当前选定计划是 Plan 013。013A、013B 与 013C 已完成；Production 原生界面可以检测、提示、
-显式下载并验证官方安装器，但不会启动安装器。下一子阶段是 013D：installer handoff and end-to-end in-place upgrade。
+Plan 013 已完成并冻结。Production 原生界面可以检测、提示、显式下载、验证并在用户确认后
+启动官方安装器；QingToolbox 不直接替换自身文件，安装器成功启动后也不会抢先退出。
 
 目标版本：
 
@@ -591,7 +591,7 @@ Preview 2 明确不包含：
 A. qmod ZIP 结构与安全 Staging 验证，仍不安装。
 B. 0.3.0-alpha 模块事务更新、原子替换和失败回滚。
 C. 0.4.0-alpha 稳定 Module API、NuGet SDK 和模板。
-D. Plan 013 的 013A/013B/013C 已完成；下一步 013D 负责已验证安装器交接与端到端原地升级。
+D. Plan 013 的 013A/013B/013C/013D 已完成并冻结；除 P0/P1 外，后续回到用户可见工具和 UI 功能。
 
 每次开始工作先执行：
 

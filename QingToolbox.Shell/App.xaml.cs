@@ -273,6 +273,15 @@ public partial class App : Application
                 return new HostUpdateInstallerDownloader(client,
                     provider.GetRequiredService<ApplicationPaths>().HostUpdateInstallerDirectory);
             });
+            services.AddSingleton<IHostInstallationRecordReader, WindowsHostInstallationRecordReader>();
+            services.AddSingleton<IHostInstallationIdentityService>(provider =>
+            {
+                var version = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "unknown";
+                return new HostInstallationIdentityService(environment.IsProduction, Environment.ProcessPath, version,
+                    provider.GetRequiredService<IHostInstallationRecordReader>());
+            });
+            services.AddSingleton<IHostInstallerLauncher, HostInstallerLauncher>();
+            services.AddSingleton<HostUpdateHandoffCoordinator>();
             services.AddSingleton<IModulePackageTransport>(_ =>
             {
                 var handler = new HttpClientHandler { AllowAutoRedirect = false, AutomaticDecompression = DecompressionMethods.None, UseCookies = false };
