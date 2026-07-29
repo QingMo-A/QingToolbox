@@ -194,6 +194,11 @@ Phase A remains **Engineering Complete**. The B1 transaction core described here
 **Engineering Complete — Frozen**: it is not extended further unless a concrete security defect
 is found. B1 remains restricted to Development/ModuleTest. B2.1 now connects the real Shell
 lifecycle adapter, startup recovery gate, and pinned Development/ModuleTest TextTools canary.
-Production transaction execution, automatic installation, and update UI remain disabled. Preview 2
+Development Web now exposes a manual, inline-confirmed installation entry for a host-authorized
+verified update. The request contains only the module ID; the host retains the immutable verified
+staging attestation, revalidates its exact release and local-version binding, and delegates execution
+to `GatedModuleUpdateTransactionCoordinator`. The returned full module snapshot remains authoritative.
+This does not change the B1/B2.1 algorithm or make installation automatic. Production transaction
+execution and update UI remain disabled, and ModuleTest has no Web UI. Preview 2
 manual acceptance items that were not run remain `Not Run`; this work is not evidence that those
 checks passed.

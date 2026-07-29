@@ -10,7 +10,7 @@ import { useSettingsStore } from '../app/settingsStore'
 import type { EffectiveLanguageCode, LanguageCode, SettingsSnapshot } from '../contracts/settings'
 
 const item = (overrides: Partial<ModuleSnapshotItem> = {}): ModuleSnapshotItem => ({
-  id: 'qing.text', displayName: 'Text Tools', displayDescription: 'Formatting tools', version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState: 'NotLoaded', isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canRemove: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false, canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled', canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false, updateStatus: 'NotChecked', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: true, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'NotDownloaded', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0, ...overrides
+  id: 'qing.text', displayName: 'Text Tools', displayDescription: 'Formatting tools', version: '1.0.0', author: 'Qing', runtimeType: 'OutOfProcess', loadMode: 'Manual', runtimeState: 'NotLoaded', isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2', isUserInstalled: true, canRemove: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false, canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled', canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false, updateStatus: 'NotChecked', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: true, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'NotDownloaded', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0, canInstallVerifiedUpdate: false, ...overrides
 })
 const mounted: ReturnType<typeof mount>[] = []
 afterEach(() => { mounted.splice(0).forEach(x => x.unmount()); document.body.innerHTML = ''; vi.restoreAllMocks() })
@@ -32,7 +32,7 @@ function page(module = item(), clientOverrides: Record<string, unknown> = {}, st
   else if (state.status === 'error') store.fail(new Error('Bridge.Internal: secret failure'))
   else if (state.status === 'idle') store.status = 'idle'
   const snapshot = () => ({ generatedAt: new Date().toISOString(), modules: [module] })
-  const client = { getSnapshot: vi.fn(async () => snapshot()), importModule: vi.fn(async () => ({ disposition: 'Cancelled', importedModuleId: null, snapshot: snapshot() })), load: vi.fn(async () => snapshot()), activate: vi.fn(async () => snapshot()), open: vi.fn(async () => snapshot()), deactivate: vi.fn(async () => snapshot()), unload: vi.fn(async () => snapshot()), setStartupAuthorization: vi.fn(async () => snapshot()), openDirectory: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: snapshot() })), remove: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: { generatedAt: new Date().toISOString(), modules: [] } })), checkUpdate: vi.fn(async () => snapshot()), downloadUpdate: vi.fn(async () => snapshot()), ...clientOverrides }
+  const client = { getSnapshot: vi.fn(async () => snapshot()), importModule: vi.fn(async () => ({ disposition: 'Cancelled', importedModuleId: null, snapshot: snapshot() })), load: vi.fn(async () => snapshot()), activate: vi.fn(async () => snapshot()), open: vi.fn(async () => snapshot()), deactivate: vi.fn(async () => snapshot()), unload: vi.fn(async () => snapshot()), setStartupAuthorization: vi.fn(async () => snapshot()), openDirectory: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: snapshot() })), remove: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: { generatedAt: new Date().toISOString(), modules: [] } })), checkUpdate: vi.fn(async () => snapshot()), downloadUpdate: vi.fn(async () => snapshot()), installVerifiedUpdate: vi.fn(async () => ({ disposition: 'Installed', sourceVersion: module.version, targetVersion: module.targetVersion ?? module.version, snapshot: snapshot() })), ...clientOverrides }
   const wrapper = mount(ModulesPage, { attachTo: document.body, global: { plugins: [pinia], provide: { moduleClient: client } } }); mounted.push(wrapper)
   return { wrapper, client, app, store }
 }
@@ -772,5 +772,59 @@ describe('ModulesPage host-authoritative update presentation', () => {
     expect(wrapper.get('.module-check-update').text()).toContain('检查更新')
     expect(wrapper.get('.module-download-update').text()).toContain('下载并验证')
     expect(wrapper.get('.module-card-badges').text()).toContain('有可用更新')
+  })
+
+  it('shows installation only for a host-authorized verified package and confirms inline', async () => {
+    const installVerifiedUpdate=vi.fn()
+    const verified=item({updateStatus:'UpdateAvailable',targetVersion:'1.1.0',downloadStatus:'Verified',canInstallVerifiedUpdate:true})
+    const {wrapper,store}=page(verified,{installVerifiedUpdate})
+    await wrapper.get('.wpf-module-card').trigger('click')
+    expect(wrapper.find('.module-download-update').exists()).toBe(false)
+    expect(wrapper.get('.module-install-update').classes()).toContain('is-primary')
+    await wrapper.get('.module-install-update').trigger('click')
+    expect(installVerifiedUpdate).not.toHaveBeenCalled()
+    const confirmation=wrapper.get('.module-install-confirmation')
+    expect(confirmation.text()).toContain('1.0.0')
+    expect(confirmation.text()).toContain('1.1.0')
+    expect(confirmation.classes()).not.toContain('is-danger')
+    await confirmation.get('.q-button.is-secondary').trigger('click')
+    expect(wrapper.find('.module-install-confirmation').exists()).toBe(false)
+  })
+
+  it('waits for the authoritative installed snapshot and keeps the module selected', async () => {
+    let resolve!:(value:unknown)=>void
+    const pending=new Promise(value=>{resolve=value})
+    const verified=item({updateStatus:'UpdateAvailable',targetVersion:'1.1.0',downloadStatus:'Verified',canInstallVerifiedUpdate:true,canOpen:true,canUnload:true})
+    const installed=item({version:'1.1.0',updateStatus:'NotChecked',targetVersion:null,downloadStatus:'NotDownloaded',canInstallVerifiedUpdate:false,canOpen:true,canUnload:true})
+    const installVerifiedUpdate=vi.fn(()=>pending)
+    const {wrapper,store,client}=page(verified,{installVerifiedUpdate})
+    await wrapper.get('.wpf-module-card').trigger('click')
+    await wrapper.get('.module-install-update').trigger('click')
+    await wrapper.get('.module-install-confirm').trigger('click')
+    expect(installVerifiedUpdate).toHaveBeenCalledTimes(1)
+    expect(installVerifiedUpdate).toHaveBeenCalledWith('qing.text')
+    expect(wrapper.get('.module-install-confirm').text()).toContain('Installing update…')
+    expect(wrapper.get('.wpf-module-details').text()).toContain('v1.0.0')
+    expect(wrapper.get('.module-open-directory').attributes('disabled')).toBeDefined()
+    resolve({disposition:'Installed',sourceVersion:'1.0.0',targetVersion:'1.1.0',snapshot:{generatedAt:new Date().toISOString(),modules:[installed]}})
+    await flushPromises()
+    expect(store.selectedModuleId).toBe('qing.text')
+    expect(store.selectedModule?.version).toBe('1.1.0')
+    expect(useToastStore().message).toBe('Text Tools was updated to v1.1.0.')
+    expect(client.load).not.toHaveBeenCalled();expect(client.activate).not.toHaveBeenCalled();expect(client.open).not.toHaveBeenCalled()
+  })
+
+  it('reports rollback and recovery from complete host snapshots without optimistic success', async () => {
+    const verified=item({updateStatus:'UpdateAvailable',targetVersion:'1.1.0',downloadStatus:'Verified',canInstallVerifiedUpdate:true})
+    const rolled=item({...verified,canInstallVerifiedUpdate:false})
+    const installVerifiedUpdate=vi.fn(async()=>({disposition:'RolledBack',sourceVersion:'1.0.0',targetVersion:'1.1.0',snapshot:{generatedAt:new Date().toISOString(),modules:[rolled]}}))
+    const {wrapper,store}=page(verified,{installVerifiedUpdate})
+    await wrapper.get('.wpf-module-card').trigger('click');await wrapper.get('.module-install-update').trigger('click');await wrapper.get('.module-install-confirm').trigger('click');await flushPromises()
+    expect(useToastStore().kind).toBe('warning');expect(useToastStore().message).toContain('restored to v1.0.0')
+    installVerifiedUpdate.mockResolvedValue({disposition:'RecoveryRequired',sourceVersion:'1.0.0',targetVersion:'1.1.0',snapshot:{generatedAt:new Date().toISOString(),modules:[item({...verified,isExecutionBlocked:true,canInstallVerifiedUpdate:false})]}})
+    store.complete({generatedAt:new Date().toISOString(),modules:[verified]})
+    await flushPromises()
+    await wrapper.get('.module-install-update').trigger('click');await wrapper.get('.module-install-confirm').trigger('click');await flushPromises()
+    expect(useToastStore().kind).toBe('error');expect(wrapper.text()).toContain('Module operations are blocked while recovery is pending.')
   })
 })

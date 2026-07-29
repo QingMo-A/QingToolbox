@@ -182,6 +182,44 @@ public sealed class WebModuleDownloadUpdateCommandHandler(
         Operations.DownloadAndVerifyAsync(moduleId, cancellationToken);
 }
 
+public sealed class WebModuleInstallVerifiedUpdateCommandHandler(
+    IWebModuleUpdateInstallOperations operations,
+    WebModuleSnapshotProvider snapshots,
+    WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "modules.installVerifiedUpdate";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } =
+        new HashSet<string>(StringComparer.Ordinal) { "moduleId" };
+
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context,
+        CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        if (!payload.TryGetProperty("moduleId", out var property) || property.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(property.GetString()))
+            throw new WebBridgeValidationException("InvalidPayload", "A non-empty module ID is required.");
+
+        var result = await operations.InstallAsync(property.GetString()!, context.SessionCancellation);
+        return result.Status switch
+        {
+            WebModuleUpdateInstallOperationStatus.Installed or
+            WebModuleUpdateInstallOperationStatus.RolledBack or
+            WebModuleUpdateInstallOperationStatus.RecoveryRequired when
+                result.SourceVersion is not null && result.TargetVersion is not null =>
+                new WebModuleUpdateInstallResponse(result.Status.ToString(), result.SourceVersion,
+                    result.TargetVersion, snapshots.Create()),
+            WebModuleUpdateInstallOperationStatus.NotFound => throw SafeError("ModuleNotFound"),
+            WebModuleUpdateInstallOperationStatus.Busy => throw SafeError("ModuleBusy"),
+            WebModuleUpdateInstallOperationStatus.Unavailable => throw SafeError("ModuleUpdateUnavailable"),
+            WebModuleUpdateInstallOperationStatus.RecoveryRequired => throw SafeError("ModuleRecoveryRequired"),
+            _ => throw SafeError("ModuleUpdateInstallFailed")
+        };
+    }
+
+    private static WebBridgeValidationException SafeError(string code) =>
+        new(code, "The host could not install the verified module update.");
+}
+
 public abstract class WebModuleLifecycleCommandHandler(
     WebModuleSnapshotProvider snapshots,
     WebActivationSession activation) : IWebCommandHandler

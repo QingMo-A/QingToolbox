@@ -41,7 +41,9 @@ public sealed partial class MainWindowViewModel(
     IModuleExecutionReadinessGate executionGate,
     SessionLogService sessionLog,
     ModuleUpdateRuntimeCoordinator updateRuntimeCoordinator,
-    ModuleProcessBroker moduleProcessBroker) : ObservableObject
+    ModuleProcessBroker moduleProcessBroker,
+    QmodPackageStagingService qmodPackageStagingService,
+    GatedModuleUpdateTransactionCoordinator? gatedModuleUpdateTransactions = null) : ObservableObject
 {
     public void ApplyNotificationAvailability(NotificationAvailabilityChangedEventArgs change)
     {
@@ -67,7 +69,8 @@ public sealed partial class MainWindowViewModel(
     private readonly CancellationTokenSource _updateCancellation = new();
     private CancellationTokenSource? _automaticUpdateDelay;
     private readonly Dictionary<string, (string Version, ModuleUpdateResult Result)> _updateResults = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, (ModulePackageDownloadIdentity Identity, ModulePackageDownloadStatus Status)> _downloadResults = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (ModulePackageDownloadIdentity Identity, ModulePackageDownloadStatus Status,
+        QmodVerifiedStagingAttestation? Attestation)> _downloadResults = new(StringComparer.Ordinal);
     private bool _moduleUpdateUsedStaleCache;
     private StartupRegistrationState? _lastStartupRegistrationState;
     private DateTimeOffset? _moduleUpdateLastCheckedAt;
@@ -476,6 +479,7 @@ public sealed partial class MainWindowViewModel(
                 }
                 current.UpdateResult = bound.Result;
                 _updateResults[current.Id] = (current.Version, bound.Result);
+                ClearDownloadIfNotBound(current);
                 return WebModuleUpdateOperationResult.Succeeded;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -553,6 +557,7 @@ public sealed partial class MainWindowViewModel(
             {
                 module.UpdateResult = bound.Result;
                 _updateResults[module.Id] = (bound.LocalVersion, bound.Result);
+                ClearDownloadIfNotBound(module);
             }
         ModuleUpdateCount = application.UpdateCount;
         var stale = application.UsedStaleCache;
@@ -628,9 +633,103 @@ public sealed partial class MainWindowViewModel(
             _updateResults[currentModule.Id] = (currentModule.Version, latest);
         }
         else if (!ModulePackageUiBinding.Matches(identity, currentModule.Id, currentModule.Version, currentModule.UpdateResult)) return false;
-        currentModule.DownloadStatus = result.Status;
-        _downloadResults[currentModule.Id] = (identity, result.Status);
+        var effectiveStatus = result.Status;
+        QmodVerifiedStagingAttestation? attestation = null;
+        if (result.Status is ModulePackageDownloadStatus.Verified or ModulePackageDownloadStatus.AlreadyVerified)
+        {
+            if (result.VerifiedPackage is null)
+            {
+                effectiveStatus = ModulePackageDownloadStatus.Failed;
+            }
+            else
+            {
+                var stagingInput = new QmodStagingInput(result.VerifiedPackage, identity,
+                    ModuleUpdateIdentity.ModuleApiVersion, "qingtoolbox-official");
+                var staging = await qmodPackageStagingService.StageAsync(stagingInput, cancellationToken);
+                if (staging.Succeeded)
+                    attestation = await qmodPackageStagingService.AttestVerifiedStagingAsync(stagingInput, cancellationToken);
+                if (attestation is null) effectiveStatus = ModulePackageDownloadStatus.Failed;
+            }
+        }
+        currentModule.DownloadStatus = effectiveStatus;
+        _downloadResults[currentModule.Id] = (identity, effectiveStatus, attestation);
         return true;
+    }
+
+    private void ClearDownloadIfNotBound(DiscoveredModuleViewModel module)
+    {
+        if (_downloadResults.TryGetValue(module.Id, out var download) &&
+            !ModulePackageUiBinding.Matches(download.Identity, module.Id, module.Version, module.UpdateResult))
+        {
+            _downloadResults.Remove(module.Id);
+            module.DownloadStatus = ModulePackageDownloadStatus.NotDownloaded;
+            module.DownloadBytesReceived = 0;
+            module.DownloadExpectedBytes = 0;
+        }
+    }
+
+    public bool CanInstallVerifiedModuleUpdateFromWeb(string moduleId)
+    {
+        if (!executionEnvironment.IsDevelopment || gatedModuleUpdateTransactions is null) return false;
+        var module = Modules.FirstOrDefault(item => item.Id == moduleId);
+        return module is not null && module.IsUserInstalled && module.IsValid && !module.IsBusy &&
+            !module.IsStartupAuthorizationBusy && !module.IsDownloadActive &&
+            module.DownloadStatus is ModulePackageDownloadStatus.Verified or ModulePackageDownloadStatus.AlreadyVerified &&
+            _downloadResults.TryGetValue(moduleId, out var download) &&
+            download.Status is ModulePackageDownloadStatus.Verified or ModulePackageDownloadStatus.AlreadyVerified &&
+            download.Attestation is not null &&
+            ModulePackageUiBinding.Matches(download.Identity, module.Id, module.Version, module.UpdateResult) &&
+            download.Attestation.ModuleId == module.Id &&
+            download.Attestation.TargetVersion == download.Identity.TargetVersion &&
+            download.Attestation.PackageSha256.Equals(download.Identity.Sha256, StringComparison.OrdinalIgnoreCase) &&
+            download.Attestation.EnvironmentIdentity == qmodPackageStagingService.EnvironmentIdentity &&
+            download.Attestation.PhysicalVerifiedRootIdentity == qmodPackageStagingService.PhysicalVerifiedRootIdentity &&
+            executionGate.GetReadiness(module.Id).CanExecute;
+    }
+
+    public async Task<WebModuleUpdateInstallOperationResult> InstallVerifiedModuleUpdateFromWebAsync(
+        string moduleId, CancellationToken cancellationToken)
+    {
+        if (!executionEnvironment.IsDevelopment || gatedModuleUpdateTransactions is null)
+            return new(WebModuleUpdateInstallOperationStatus.Unavailable);
+        if (!await _webModuleUpdateGate.WaitAsync(0, cancellationToken))
+            return new(WebModuleUpdateInstallOperationStatus.Busy);
+        try
+        {
+            var module = Modules.FirstOrDefault(item => item.Id == moduleId);
+            if (module is null) return new(WebModuleUpdateInstallOperationStatus.NotFound);
+            if (module.IsBusy || module.IsStartupAuthorizationBusy || module.IsDownloadActive)
+                return new(WebModuleUpdateInstallOperationStatus.Busy);
+            if (!CanInstallVerifiedModuleUpdateFromWeb(moduleId) ||
+                !_downloadResults.TryGetValue(moduleId, out var download) || download.Attestation is null)
+                return new(WebModuleUpdateInstallOperationStatus.Unavailable);
+
+            var sourceVersion = module.Version;
+            var targetVersion = download.Identity.TargetVersion;
+            var transaction = await gatedModuleUpdateTransactions.ExecuteAsync(
+                new ModuleUpdateTransactionInput(download.Attestation), cancellationToken);
+            await RefreshModulesCoreAsync(cancellationToken);
+            var status = transaction.Succeeded && transaction.State == ModuleUpdateTransactionState.Committed
+                ? WebModuleUpdateInstallOperationStatus.Installed
+                : transaction.RolledBack || transaction.State == ModuleUpdateTransactionState.RolledBack
+                    ? WebModuleUpdateInstallOperationStatus.RolledBack
+                    : transaction.State == ModuleUpdateTransactionState.RecoveryRequired ||
+                      transaction.FailureCode == ModuleUpdateTransactionFailureCode.RecoveryRequired
+                        ? WebModuleUpdateInstallOperationStatus.RecoveryRequired
+                        : WebModuleUpdateInstallOperationStatus.Failed;
+            sessionLog.Information("ModuleUpdate",
+                $"Development Web verified update install completed; module={moduleId}; source={sourceVersion}; target={targetVersion}; status={status}.");
+            return new(status, sourceVersion, targetVersion);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            sessionLog.Warning("ModuleUpdate",
+                $"Development Web verified update install failed; module={moduleId}; failure={exception.GetType().Name}.");
+            await RefreshModulesCoreAsync(CancellationToken.None);
+            return new(WebModuleUpdateInstallOperationStatus.Failed);
+        }
+        finally { _webModuleUpdateGate.Release(); }
     }
 
     [RelayCommand]

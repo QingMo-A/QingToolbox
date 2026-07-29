@@ -21,6 +21,8 @@ public sealed record WebPingResponse(bool Pong, DateTimeOffset HostTime, string?
 public sealed record WebModuleSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList<WebModuleSnapshotItem> Modules);
 public sealed record WebModuleImportResponse(string Disposition, string? ImportedModuleId, WebModuleSnapshot Snapshot);
 public sealed record WebModuleManagementResponse(string Disposition, WebModuleSnapshot Snapshot);
+public sealed record WebModuleUpdateInstallResponse(string Disposition, string SourceVersion,
+    string TargetVersion, WebModuleSnapshot Snapshot);
 public sealed record WebModuleSnapshotItem(string Id, string DisplayName, string DisplayDescription, string Version,
     string Author, string RuntimeType, string LoadMode, string RuntimeState, bool IsValid, int ErrorCount,
     IReadOnlyList<string> Errors, IReadOnlyList<string> Permissions, string MinimumHostVersion, bool IsUserInstalled, bool CanRemove,
@@ -28,7 +30,8 @@ public sealed record WebModuleSnapshotItem(string Id, string DisplayName, string
     bool IsStartupEnabled, string StartupAuthorizationState, bool CanChangeStartupAuthorization, bool IsStartupAuthorizationBusy,
     string UpdateStatus, string? TargetVersion, string? ReleaseNotes, bool IsFromStaleCache,
     bool CanCheckForUpdate, bool IsUpdateCheckBusy, bool CanDownloadUpdate, string DownloadStatus,
-    bool IsDownloadActive, long DownloadBytesReceived, long DownloadExpectedBytes);
+    bool IsDownloadActive, long DownloadBytesReceived, long DownloadExpectedBytes,
+    bool CanInstallVerifiedUpdate);
 public sealed record WebLogSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList<WebLogSnapshotEntry> Entries);
 public sealed record WebLogSnapshotEntry(DateTimeOffset Timestamp, string Level, string Category, string Message);
 public sealed record WebSettingsSnapshot(DateTimeOffset GeneratedAt, WebSettingsLanguage Language,

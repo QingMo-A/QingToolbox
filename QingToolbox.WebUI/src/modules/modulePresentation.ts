@@ -2,7 +2,7 @@ import type { ModuleFilter, ModuleOperation } from '../app/moduleStore'
 import type { StartupAuthorizationState } from '../contracts/modules'
 import type { TranslationKey } from '../localization/messages/en-US'
 
-export type LifecycleModuleOperation = Exclude<ModuleOperation, 'startupAuthorization'|'openDirectory'|'remove'|'checkUpdate'|'downloadUpdate'>
+export type LifecycleModuleOperation = Exclude<ModuleOperation, 'startupAuthorization'|'openDirectory'|'remove'|'checkUpdate'|'downloadUpdate'|'installUpdate'>
 
 const operationKeys: Record<LifecycleModuleOperation, readonly [TranslationKey, TranslationKey]> = {
   load: ['modules.operation.load', 'modules.operation.loading'],

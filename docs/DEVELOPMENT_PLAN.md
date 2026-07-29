@@ -24,8 +24,9 @@
 - Plan 012 UI-5A3A commit: `3ddedcb7849831f865e40cc82ed998b908d623a9`.
 - Plan 012 UI-5A3B1 read-only workspaces: Implementation Complete.
 - Plan 012 UI-5A3B2 Settings localization and module metadata refresh: Implementation Complete. Successful language changes refresh one complete host-localized Module Snapshot. Plan 012 is complete.
+- Development Web module updates now support an explicit, inline-confirmed installation of a host-authorized verified package through the frozen B1/B2.1 transaction boundary. This is manual and Development-only; it is not automatic installation.
 - Production Web UI: Deferred.
-- Downloads, updates, and floating surfaces remain deferred.
+- Production module update transactions, automatic installation, host self-update, and Production Web UI remain deferred.
 - Preview 2 release work and UI modernization remain independent tracks.
 
 The Development Vue workspace currently contains Home, Modules, Running, Session Logs, Settings,
@@ -39,6 +40,11 @@ startup-registration repair action. These completed additions do not authorize f
 parity work or additional Settings Bridge commands. Any future user-visible Settings feature must be
 selected and reviewed independently. B2.1 boundaries, session security, environment isolation, and
 native fallback stay frozen.
+
+The Development-only verified-update installation entry projects only a host-calculated capability.
+The Web request contains only the module ID; verified staging identity and attestation remain private to
+the host, and the existing transaction coordinator owns quiescing, replacement, rollback, recovery, and
+runtime-intent restoration. ModuleTest does not gain a Web UI. B1/B2.1 remain **Engineering Complete — Frozen**.
 
 ## 1. 项目定位
 

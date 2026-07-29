@@ -34,4 +34,14 @@ describe('ModuleClient lifecycle commands',()=>{
     request.mockResolvedValue({generatedAt:new Date().toISOString(),modules:[{id:'incomplete'}]})
     await expect(client.downloadUpdate('qing.invalid')).rejects.toThrow('validation failed')
   })
+  it('installs a verified update with only the module ID and strictly validates the result',async()=>{
+    const result={disposition:'Installed',sourceVersion:'1.0.0',targetVersion:'1.1.0',snapshot}
+    const request=vi.fn().mockResolvedValue(result);const client=new ModuleClient({request} as any)
+    await expect(client.installVerifiedUpdate('qing.install')).resolves.toEqual(result)
+    expect(request).toHaveBeenCalledWith('modules.installVerifiedUpdate',{moduleId:'qing.install'})
+    for(const invalid of [{...result,packagePath:'C:/private'}, {...result,disposition:'Succeeded'}, {...result,targetVersion:null}]){
+      request.mockResolvedValue(invalid)
+      await expect(client.installVerifiedUpdate('qing.install')).rejects.toThrow('validation failed')
+    }
+  })
 })

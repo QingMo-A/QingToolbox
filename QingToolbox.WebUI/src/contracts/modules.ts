@@ -9,7 +9,7 @@ export interface ModuleSnapshotItem {
   isStartupEnabled: boolean; startupAuthorizationState: StartupAuthorizationState; canChangeStartupAuthorization: boolean; isStartupAuthorizationBusy: boolean
   updateStatus: ModuleUpdateStatus; targetVersion: string|null; releaseNotes: string|null; isFromStaleCache: boolean
   canCheckForUpdate: boolean; isUpdateCheckBusy: boolean; canDownloadUpdate: boolean; downloadStatus: ModuleDownloadStatus
-  isDownloadActive: boolean; downloadBytesReceived: number; downloadExpectedBytes: number
+  isDownloadActive: boolean; downloadBytesReceived: number; downloadExpectedBytes: number; canInstallVerifiedUpdate: boolean
 }
 export interface ModuleSnapshot { generatedAt: string; modules: ModuleSnapshotItem[] }
 export interface ModuleImportResult {
@@ -19,6 +19,12 @@ export interface ModuleImportResult {
 }
 export interface ModuleManagementResult {
   disposition: 'Succeeded'|'SucceededWithWarning'
+  snapshot: ModuleSnapshot
+}
+export interface ModuleUpdateInstallResult {
+  disposition: 'Installed'|'RolledBack'|'RecoveryRequired'
+  sourceVersion: string
+  targetVersion: string
   snapshot: ModuleSnapshot
 }
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string')
@@ -37,7 +43,8 @@ const isItem = (value: any): value is ModuleSnapshotItem => !!value &&
   (value.releaseNotes === null || typeof value.releaseNotes === 'string') && typeof value.isFromStaleCache === 'boolean' &&
   typeof value.canCheckForUpdate === 'boolean' && typeof value.isUpdateCheckBusy === 'boolean' &&
   typeof value.canDownloadUpdate === 'boolean' && downloadStatuses.includes(value.downloadStatus) &&
-  typeof value.isDownloadActive === 'boolean' && nonNegativeFinite(value.downloadBytesReceived) && nonNegativeFinite(value.downloadExpectedBytes)
+  typeof value.isDownloadActive === 'boolean' && nonNegativeFinite(value.downloadBytesReceived) &&
+  nonNegativeFinite(value.downloadExpectedBytes) && typeof value.canInstallVerifiedUpdate === 'boolean'
 export const isModuleSnapshot = (value: any): value is ModuleSnapshot => !!value &&
   typeof value.generatedAt === 'string' && !Number.isNaN(Date.parse(value.generatedAt)) &&
   Array.isArray(value.modules) && value.modules.every(isItem)
@@ -53,3 +60,9 @@ export const isModuleManagementResult = (value: any): value is ModuleManagementR
   typeof value === 'object' && Object.keys(value).length === 2 &&
   Object.prototype.hasOwnProperty.call(value, 'disposition') && Object.prototype.hasOwnProperty.call(value, 'snapshot') &&
   (value.disposition === 'Succeeded' || value.disposition === 'SucceededWithWarning') && isModuleSnapshot(value.snapshot)
+export const isModuleUpdateInstallResult = (value: any): value is ModuleUpdateInstallResult => !!value &&
+  typeof value === 'object' && Object.keys(value).length === 4 &&
+  ['disposition','sourceVersion','targetVersion','snapshot'].every(key => Object.prototype.hasOwnProperty.call(value, key)) &&
+  ['Installed','RolledBack','RecoveryRequired'].includes(value.disposition) &&
+  typeof value.sourceVersion === 'string' && value.sourceVersion.length > 0 &&
+  typeof value.targetVersion === 'string' && value.targetVersion.length > 0 && isModuleSnapshot(value.snapshot)

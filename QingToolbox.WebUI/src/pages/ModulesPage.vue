@@ -33,6 +33,7 @@ const toast = useToastStore()
 const { t } = useLocalization()
 const isImporting = ref(false)
 const removeConfirmationModuleId = ref<string|null>(null)
+const installConfirmationModuleId = ref<string|null>(null)
 type AnimatedLifecycleSuccess = 'load' | 'unload'
 const lifecycleSuccessOperations = reactive(new Map<string, AnimatedLifecycleSuccess>())
 const revealingLifecycleActions = reactive(new Set<string>())
@@ -270,6 +271,29 @@ async function downloadModuleUpdate(module: ModuleSnapshotItem) {
   }
 }
 
+async function installVerifiedModuleUpdate(module: ModuleSnapshotItem) {
+  if (!hostOperationsAvailable.value || !module.canInstallVerifiedUpdate ||
+      !store.beginOperation(module.id, 'installUpdate')) return
+  try {
+    const result = await client.installVerifiedUpdate(module.id)
+    store.complete(result.snapshot)
+    store.selectedModuleId = module.id
+    installConfirmationModuleId.value = null
+    const current = result.snapshot.modules.find(item => item.id === module.id)
+    if (result.disposition === 'Installed')
+      toast.show(t('modules.update.install.toastInstalled', { name: module.displayName, version: current?.version ?? result.targetVersion }), 'success')
+    else if (result.disposition === 'RolledBack')
+      toast.show(t('modules.update.install.toastRolledBack', { name: module.displayName, version: current?.version ?? result.sourceVersion }), 'warning')
+    else
+      toast.show(t('modules.update.install.toastRecoveryRequired', { name: module.displayName }), 'error')
+  } catch {
+    toast.show(t('modules.update.install.toastFailed', { name: module.displayName }), 'error')
+    await resyncAfterOperationFailure()
+  } finally {
+    store.endOperation(module.id)
+  }
+}
+
 const startupMessage = (state: ModuleSnapshotItem['startupAuthorizationState']) => t(startupAuthorizationMessageKey(state))
 function availableLifecycleOperations(module: ModuleSnapshotItem): LifecycleModuleOperation[] {
   const operations: LifecycleModuleOperation[] = []
@@ -296,7 +320,14 @@ const openDetailsFromCard = (event: MouseEvent, moduleId: string) => {
   openDetails(moduleId)
 }
 watch(() => app.bridge, bridge => { if (bridge === 'Connected' && store.status === 'idle') void refresh() }, { immediate: true })
-watch(() => store.selectedModuleId, () => { removeConfirmationModuleId.value = null })
+watch(() => store.selectedModuleId, () => {
+  removeConfirmationModuleId.value = null
+  installConfirmationModuleId.value = null
+})
+watch(() => store.selectedModule && [store.selectedModule.version, store.selectedModule.targetVersion,
+  store.selectedModule.downloadStatus, store.selectedModule.canInstallVerifiedUpdate], () => {
+  installConfirmationModuleId.value = null
+})
 const summary = computed(() => summarizeModuleStates(store.modules))
 const hasConfirmedSnapshot = computed(() => store.lastUpdatedAt !== null)
 const hostOperationsAvailable = computed(() => app.bridge === 'Connected' && store.status === 'ready')
@@ -310,10 +341,15 @@ const snapshotStatusMessage = computed(() => {
 })
 const filterValues: ModuleFilter[] = ['all', 'running', 'notLoaded', 'issues', 'invalid']
 const tone = (module: { isValid: boolean; runtimeState: string }) => !module.isValid ? 'danger' : module.runtimeState === 'Running' ? 'success' : module.runtimeState === 'NotLoaded' ? 'neutral' : 'info'
-const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') store.selectedModuleId = null }
+const closeOnEscape = (event: KeyboardEvent) => {
+  if (event.key !== 'Escape') return
+  if (installConfirmationModuleId.value) installConfirmationModuleId.value = null
+  else store.selectedModuleId = null
+}
 onMounted(() => window.addEventListener('keydown', closeOnEscape))
 onBeforeUnmount(() => {
   removeConfirmationModuleId.value = null
+  installConfirmationModuleId.value = null
   window.removeEventListener('keydown', closeOnEscape)
   for (const timers of lifecycleFeedbackTimers.values())
     for (const timer of timers) window.clearTimeout(timer)
@@ -408,6 +444,7 @@ onBeforeUnmount(() => {
             <div class="module-update-overall"><span>{{ t('modules.update.statusLabel') }}</span><QBadge :tone="updateTone(store.selectedModule)">{{ t(overallUpdateStatusKey(store.selectedModule)) }}</QBadge></div>
           </div>
           <div v-if="isVerifiedUpdate(store.selectedModule)" class="module-update-detail module-update-verified" role="status"><QIcon name="statusSuccess" /><div><strong>{{ t('modules.update.verifiedTitle') }}</strong><p>{{ t('modules.update.notInstalled') }}</p></div></div>
+          <p v-if="isVerifiedUpdate(store.selectedModule) && !store.selectedModule.canInstallVerifiedUpdate" class="module-install-unavailable">{{ t('modules.update.install.unavailable') }}</p>
           <div v-else-if="hasDownloadStatus(store.selectedModule)" class="module-update-detail module-download-status" :class="`is-${updateTone(store.selectedModule)}`" role="status">
             <QIcon :name="updateTone(store.selectedModule) === 'danger' ? 'statusDanger' : updateTone(store.selectedModule) === 'warning' ? 'statusWarning' : 'statusInfo'" />
             <div><strong>{{ t(downloadStatusKey(store.selectedModule.downloadStatus)) }}</strong><span v-if="store.selectedModule.isDownloadActive && downloadProgressText(store.selectedModule)">{{ downloadProgressText(store.selectedModule) }}</span><span v-else-if="store.operations[store.selectedModule.id] === 'downloadUpdate'">{{ t('modules.update.downloading') }}</span></div>
@@ -417,6 +454,13 @@ onBeforeUnmount(() => {
           <div class="module-update-actions">
             <QButton class="module-check-update" variant="secondary" :aria-busy="store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy" :disabled="!hostOperationsAvailable || !store.selectedModule.canCheckForUpdate || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy || store.selectedModule.isUpdateCheckBusy" @click="checkModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="refresh" />{{ t(store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy ? 'modules.update.checking' : 'modules.update.check') }}</QButton>
             <QButton v-if="(store.selectedModule.canDownloadUpdate || store.selectedModule.isDownloadActive) && !isVerifiedUpdate(store.selectedModule)" class="module-download-update" variant="primary" :aria-busy="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy || store.selectedModule.isDownloadActive" @click="downloadModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="download" />{{ t(store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive ? 'modules.update.downloading' : 'modules.update.download') }}</QButton>
+            <QButton v-if="isVerifiedUpdate(store.selectedModule) && store.selectedModule.canInstallVerifiedUpdate" class="module-install-update" variant="primary" :aria-expanded="installConfirmationModuleId === store.selectedModule.id" aria-controls="module-install-confirmation" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="installConfirmationModuleId = store.selectedModule.id"><QIcon name="install" />{{ t('modules.update.install.action') }}</QButton>
+          </div>
+          <div v-if="installConfirmationModuleId === store.selectedModule.id" id="module-install-confirmation" class="module-install-confirmation" role="group" aria-labelledby="module-install-confirmation-title">
+            <strong id="module-install-confirmation-title">{{ t('modules.update.install.confirmTitle', { name: store.selectedModule.displayName }) }}</strong>
+            <dl><div><dt>{{ t('modules.update.currentVersion') }}</dt><dd>{{ store.selectedModule.version }}</dd></div><div><dt>{{ t('modules.update.install.targetVersion') }}</dt><dd>{{ store.selectedModule.targetVersion }}</dd></div></dl>
+            <ul><li>{{ t('modules.update.install.mayStop') }}</li><li>{{ t('modules.update.install.restoreRuntime') }}</li><li>{{ t('modules.update.install.rollback') }}</li><li>{{ t('modules.update.install.preserveData') }}</li></ul>
+            <div><QButton variant="secondary" :disabled="store.operations[store.selectedModule.id] === 'installUpdate'" @click="installConfirmationModuleId = null">{{ t('modules.update.install.cancel') }}</QButton><QButton class="module-install-confirm" variant="primary" :aria-busy="store.operations[store.selectedModule.id] === 'installUpdate'" :disabled="store.operations[store.selectedModule.id] === 'installUpdate'" @click="installVerifiedModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'installUpdate'" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="install" />{{ t(store.operations[store.selectedModule.id] === 'installUpdate' ? 'modules.update.install.installing' : 'modules.update.install.confirm') }}</QButton></div>
           </div>
         </section>
         <div class="wpf-detail-divider" />
@@ -496,6 +540,18 @@ onBeforeUnmount(() => {
 .module-check-update { min-width: 132px; }
 .module-download-update { min-width: 184px; }
 .module-download-update.is-primary { border-color: var(--q-brand); background: var(--q-brand); color: #fff; }
+.module-install-update { min-width: 142px; }
+.module-install-unavailable { margin: 7px 0 0; color: var(--q-text-3); font-size: 11px; }
+.module-install-confirmation { margin-top: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb,var(--q-brand) 30%,var(--q-border)); border-radius: 11px; background: color-mix(in srgb,var(--q-brand) 5%,var(--q-surface)); animation: module-remove-confirmation-enter 160ms cubic-bezier(.2,.75,.25,1) both; }
+.module-install-confirmation>strong { display: block; }
+.module-install-confirmation dl { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 10px 0; }
+.module-install-confirmation dl>div { min-width: 100px; }
+.module-install-confirmation dt { color: var(--q-text-2); font-size: 11px; }
+.module-install-confirmation dd { margin: 3px 0 0; font-weight: 700; }
+.module-install-confirmation ul { margin: 8px 0 0; padding-inline-start: 18px; color: var(--q-text-2); font-size: 12px; line-height: 1.55; }
+.module-install-confirmation>div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.module-install-confirmation .module-operation-spinner { flex: 0 0 14px; margin-inline-end: 0; }
+.module-install-confirm { min-width: 142px; }
 .module-management>p { margin: -7px 0 12px; color: var(--q-text-2); font-size: 12px; }
 .module-management-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .module-management-actions .q-button { gap: 7px; white-space: nowrap; }

@@ -1,5 +1,5 @@
 import type { RequestClient } from '../protocol/RequestClient'
-import { isModuleImportResult, isModuleManagementResult, isModuleSnapshot, type ModuleImportResult, type ModuleManagementResult, type ModuleSnapshot } from '../../contracts/modules'
+import { isModuleImportResult, isModuleManagementResult, isModuleSnapshot, isModuleUpdateInstallResult, type ModuleImportResult, type ModuleManagementResult, type ModuleSnapshot, type ModuleUpdateInstallResult } from '../../contracts/modules'
 
 export class ModuleClient {
   constructor(private readonly requests: RequestClient) {}
@@ -18,6 +18,11 @@ export class ModuleClient {
   remove(moduleId: string) { return this.requestManagement('modules.remove', moduleId) }
   checkUpdate(moduleId: string) { return this.requestSnapshot('modules.checkUpdate', { moduleId }) }
   downloadUpdate(moduleId: string) { return this.requestSnapshot('modules.downloadUpdate', { moduleId }) }
+  async installVerifiedUpdate(moduleId: string): Promise<ModuleUpdateInstallResult> {
+    const value = await this.requests.request<unknown>('modules.installVerifiedUpdate', { moduleId })
+    if (!isModuleUpdateInstallResult(value)) throw new Error('Module update install result validation failed.')
+    return value
+  }
   setStartupAuthorization(moduleId: string, enabled: boolean) { return this.requestSnapshot('modules.setStartupAuthorization', { moduleId, enabled }) }
   private async requestSnapshot(command: string, payload: Record<string, unknown> = {}): Promise<ModuleSnapshot> {
     const value = await this.requests.request<unknown>(command, payload)

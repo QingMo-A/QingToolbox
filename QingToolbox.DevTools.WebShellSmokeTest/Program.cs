@@ -128,7 +128,7 @@ var extraResult = await moduleDispatcher.DispatchAsync(extraPayload, new(11, Can
 Require(!extraResult.Response.Success && extraResult.Response.Error?.Code == "InvalidPayload", "Module projection must reject additional payload properties.");
 var moduleSnapshot = (WebModuleSnapshot)moduleResult.Response.Payload;
 Require(moduleSnapshot.Modules[0] is { CanRemove: true, CanLoad: false, CanActivate: false, CanOpen: true, CanDeactivate: true, CanUnload: true, IsBusy: false, IsExecutionBlocked: false, IsStartupEnabled: false, StartupAuthorizationState: "ChangedNeedsConfirmation", CanChangeStartupAuthorization: true, IsStartupAuthorizationBusy: false }, "Module projection must include host management, lifecycle and startup authorization capabilities.");
-Require(moduleSnapshot.Modules[0] is { UpdateStatus: "UpdateAvailable", TargetVersion: "1.1.0", ReleaseNotes: "Safe release notes", IsFromStaleCache: false, CanCheckForUpdate: true, IsUpdateCheckBusy: false, CanDownloadUpdate: true, DownloadStatus: "Verified", IsDownloadActive: false, DownloadBytesReceived: 512, DownloadExpectedBytes: 512 },
+Require(moduleSnapshot.Modules[0] is { UpdateStatus: "UpdateAvailable", TargetVersion: "1.1.0", ReleaseNotes: "Safe release notes", IsFromStaleCache: false, CanCheckForUpdate: true, IsUpdateCheckBusy: false, CanDownloadUpdate: true, DownloadStatus: "Verified", IsDownloadActive: false, DownloadBytesReceived: 512, DownloadExpectedBytes: 512, CanInstallVerifiedUpdate: true },
     "Module projection must include the host-authoritative update and verified staging state.");
 
 Console.WriteLine("Verifying module update bridge boundaries...");
@@ -161,6 +161,37 @@ Require(!unavailableUpdate.Response.Success && unavailableUpdate.Response.Error?
         !JsonSerializer.Serialize(unavailableUpdate.Response).Contains(root, StringComparison.OrdinalIgnoreCase),
     "Unavailable downloads must return a safe error without host paths or download metadata.");
 Require(WebBridgeProtocol.Version == 4, "Module update commands must preserve protocol version 4.");
+
+Console.WriteLine("Verifying host-gated verified update installation...");
+var installOperations = new InstallUpdateOperations();
+var installDispatcher = new WebBridgeDispatcher([
+    new WebModuleInstallVerifiedUpdateCommandHandler(installOperations,
+        new WebModuleSnapshotProvider(source, TimeProvider.System), moduleActivation)]);
+foreach (var payload in new object[]
+{
+    new { }, new { moduleId = 42 }, new { moduleId = "" },
+    new { moduleId = "qing.test", packagePath = root }, new { moduleId = "qing.test", stagingPath = root },
+    new { moduleId = "qing.test", targetVersion = "9.9.9" }, new { moduleId = "qing.test", sha256 = "00" },
+    new { moduleId = "qing.test", url = "https://invalid.example" }
+})
+{
+    var malformed = await installDispatcher.DispatchAsync(
+        LifecycleRequest("modules.installVerifiedUpdate", payload), new(11, CancellationToken.None));
+    Require(!malformed.Response.Success && malformed.Response.Error?.Code == "InvalidPayload",
+        "Verified update installation must accept only a non-empty moduleId.");
+}
+var installedUpdate = await installDispatcher.DispatchAsync(
+    LifecycleRequest("modules.installVerifiedUpdate", new { moduleId = "qing.test" }), new(11, CancellationToken.None));
+Require(installedUpdate.Response.Success && installedUpdate.Response.Payload is WebModuleUpdateInstallResponse
+    { Disposition: "Installed", SourceVersion: "1.0.0", TargetVersion: "1.1.0", Snapshot.Modules.Count: 1 } &&
+    installOperations.CallCount == 1 && installOperations.LastModuleId == "qing.test",
+    "Verified update installation must use only its host adapter and return a complete snapshot.");
+installOperations.NextResult = new(WebModuleUpdateInstallOperationStatus.Unavailable);
+var unavailableInstall = await installDispatcher.DispatchAsync(
+    LifecycleRequest("modules.installVerifiedUpdate", new { moduleId = "qing.test" }), new(11, CancellationToken.None));
+Require(!unavailableInstall.Response.Success && unavailableInstall.Response.Error?.Code == "ModuleUpdateUnavailable" &&
+        !JsonSerializer.Serialize(unavailableInstall.Response).Contains(root, StringComparison.OrdinalIgnoreCase),
+    "Ineligible verified packages must return a safe unavailable error.");
 
 Console.WriteLine("Verifying explicit host-confirmed module lifecycle commands...");
 var lifecycle = new LifecycleOperations();
@@ -636,7 +667,7 @@ file sealed class SnapshotSource : IWebModuleSnapshotSource
         return [new("qing.test", "Test", "Safe description", "1.0.0", "Qing", "OutOfProcess", "Manual",
             "Running", true, 0, [], ["Clipboard"], "0.2.0-alpha", true, true, false, false, true, true, true, false, false,
             false, "ChangedNeedsConfirmation", true, false, "UpdateAvailable", "1.1.0", "Safe release notes", false,
-            true, false, true, "Verified", false, 512, 512)];
+            true, false, true, "Verified", false, 512, 512, true)];
     }
 }
 file sealed class UpdateOperations : IWebModuleUpdateOperations
@@ -649,6 +680,19 @@ file sealed class UpdateOperations : IWebModuleUpdateOperations
     { cancellationToken.ThrowIfCancellationRequested(); CheckCount++; LastModuleId = moduleId; return Task.FromResult(NextResult); }
     public Task<WebModuleUpdateOperationResult> DownloadAndVerifyAsync(string moduleId, CancellationToken cancellationToken)
     { cancellationToken.ThrowIfCancellationRequested(); DownloadCount++; LastModuleId = moduleId; return Task.FromResult(NextResult); }
+}
+file sealed class InstallUpdateOperations : IWebModuleUpdateInstallOperations
+{
+    public WebModuleUpdateInstallOperationResult NextResult { get; set; } =
+        new(WebModuleUpdateInstallOperationStatus.Installed, "1.0.0", "1.1.0");
+    public int CallCount { get; private set; }
+    public string LastModuleId { get; private set; } = string.Empty;
+    public Task<WebModuleUpdateInstallOperationResult> InstallAsync(string moduleId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CallCount++; LastModuleId = moduleId;
+        return Task.FromResult(NextResult);
+    }
 }
 file sealed class LifecycleOperations : IWebModuleLifecycleOperations
 {

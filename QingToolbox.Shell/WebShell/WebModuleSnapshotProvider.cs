@@ -48,7 +48,8 @@ public sealed class WebModuleSnapshotSource(MainWindowViewModel viewModel) : IWe
             module.DownloadStatus.ToString(),
             module.IsDownloadActive,
             Math.Max(0, module.DownloadBytesReceived),
-            Math.Max(0, module.DownloadExpectedBytes))).ToArray();
+            Math.Max(0, module.DownloadExpectedBytes),
+            viewModel.CanInstallVerifiedModuleUpdateFromWeb(module.Id))).ToArray();
 
     private static IReadOnlyList<string> SafeErrors(DiscoveredModuleViewModel module)
     {

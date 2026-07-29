@@ -13,6 +13,7 @@ type QIconName =
   | 'refresh'
   | 'import'
   | 'download'
+  | 'install'
   | 'statusSuccess'
   | 'statusInfo'
   | 'statusWarning'
@@ -73,6 +74,11 @@ const fluentGlyph = computed(() => fluentGlyphs[props.name])
       <path d="M10 2.8v9" />
       <path d="m6.4 8.5 3.6 3.6 3.6-3.6" />
       <path d="M3.2 13.8v2.4h13.6v-2.4" />
+    </template>
+    <template v-else-if="name === 'install'">
+      <path d="M10 2.8v8.6" />
+      <path d="m6.6 8.1 3.4 3.4 3.4-3.4" />
+      <rect x="3" y="13.2" width="14" height="3.8" rx="1.2" />
     </template>
     <template v-else-if="name === 'statusSuccess'">
       <circle cx="10" cy="10" r="7" />
