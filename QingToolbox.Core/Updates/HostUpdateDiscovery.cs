@@ -13,6 +13,15 @@ public sealed record HostReleaseInfo(string Version, DateTimeOffset PublishedAt,
 {
     public string InstallerFileName => Installer.Name;
     public string ChecksumFileName => Checksum.Name;
+
+    public bool HasSameDownloadIdentity(HostReleaseInfo? other) => other is not null &&
+        string.Equals(Version, other.Version, StringComparison.Ordinal) &&
+        SameAsset(Installer, other.Installer) && SameAsset(Checksum, other.Checksum);
+
+    private static bool SameAsset(HostReleaseAssetIdentity left, HostReleaseAssetIdentity right) =>
+        left.Id == right.Id && left.Size == right.Size &&
+        string.Equals(left.Name, right.Name, StringComparison.Ordinal) &&
+        string.Equals(left.DownloadUri.OriginalString, right.DownloadUri.OriginalString, StringComparison.Ordinal);
 }
 
 public sealed record HostUpdateCheckResult(HostUpdateCheckState State, string CurrentVersion,

@@ -8,7 +8,13 @@ namespace QingToolbox.Core.Updates;
 public enum HostUpdateDownloadState { Idle, Downloading, Verifying, ReadyToInstall, Failed }
 
 public sealed record HostUpdateDownloadProgress(HostUpdateDownloadState State, long BytesReceived, long ExpectedBytes,
-    string? Error = null, string? InstallerPath = null, string? ReleaseVersion = null, long InstallerAssetId = 0);
+    string? Error = null, string? InstallerPath = null, string? ReleaseVersion = null, long InstallerAssetId = 0,
+    long ChecksumAssetId = 0)
+{
+    public bool Matches(HostReleaseInfo release) =>
+        string.Equals(ReleaseVersion, release.Version, StringComparison.Ordinal) &&
+        InstallerAssetId == release.Installer.Id && ChecksumAssetId == release.Checksum.Id;
+}
 
 public sealed record VerifiedHostInstaller(string Version, long InstallerAssetId, long ChecksumAssetId,
     string InstallerPath, long InstallerSize);
@@ -48,7 +54,8 @@ public sealed class HostUpdateInstallerDownloader(HttpClient client, string cach
     private async Task<HostUpdateDownloadProgress> DownloadCoreAsync(HostReleaseInfo release, CancellationToken cancellationToken)
     {
         HostUpdateDownloadProgress Emit(HostUpdateDownloadProgress value) =>
-            Report(value with { ReleaseVersion = release.Version, InstallerAssetId = release.Installer.Id });
+            Report(value with { ReleaseVersion = release.Version, InstallerAssetId = release.Installer.Id,
+                ChecksumAssetId = release.Checksum.Id });
         var directory = ResolveControlledDirectory(release);
         var finalPath = ResolveControlledFile(directory, release.Installer.Name);
         var partPath = finalPath + ".part";

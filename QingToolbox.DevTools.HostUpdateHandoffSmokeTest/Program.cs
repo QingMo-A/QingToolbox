@@ -24,6 +24,14 @@ static class Smoke
         Assert(!new HostInstallationIdentityService(true, exe, "0.2.0-alpha", new Records(valid.Uninstall, new(root, "invalid", true))).Probe().IsSupported, "invalid version");
         Assert(!new HostInstallationIdentityService(true, exe, "0.2.0-alpha", new Records(valid.Uninstall, new(root, "0.3.0-alpha", true))).Probe().IsSupported, "version mismatch");
         Assert(!new HostInstallationIdentityService(true, Path.Combine(root, "copy.exe"), "0.2.0-alpha", valid).Probe().IsSupported, "copied executable rejected");
+        Assert(!new HostInstallationIdentityService(true, root + "\\invalid\0shell.exe", "0.2.0-alpha", valid).Probe().IsSupported, "malformed executable path rejected");
+        Assert(!new HostInstallationIdentityService(true, "QingToolbox.Shell.exe", "0.2.0-alpha", valid).Probe().IsSupported, "relative executable path rejected");
+        Assert(!new HostInstallationIdentityService(true, "\\\\server\\share\\QingToolbox.Shell.exe", "0.2.0-alpha", valid).Probe().IsSupported, "remote executable path rejected");
+        Assert(!new HostInstallationIdentityService(true, exe, "0.2.0-alpha", new Records(new(root + "\\invalid\0location", null, true), valid.Product)).Probe().IsSupported, "malformed uninstall location rejected");
+        Assert(!new HostInstallationIdentityService(true, exe, "0.2.0-alpha", new Records(valid.Uninstall, new(root + "\\invalid\0location", "0.2.0-alpha", true))).Probe().IsSupported, "malformed product location rejected");
+        Assert(!new HostInstallationIdentityService(true, exe, "0.2.0-alpha", new ThrowingRecords()).Probe().IsSupported, "registry read failure rejected");
+        File.Delete(exe);
+        Assert(!new HostInstallationIdentityService(true, exe, "0.2.0-alpha", valid).Probe().IsSupported, "missing shell rejected");
     }
 
     private static async Task TestHandoffAsync(string root)
@@ -76,6 +84,7 @@ static class Smoke
     private static async Task InTemp(Func<string, Task> action) { var root = Path.Combine(Path.GetTempPath(), "QingToolbox-handoff-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root); try { await action(root); } finally { Directory.Delete(root, true); } }
     private static void Assert(bool value, string name) { if (!value) throw new InvalidOperationException("Failed: " + name); }
     private sealed record Records(HostInstallationRecord Uninstall, HostInstallationRecord Product) : IHostInstallationRecordReader { public HostInstallationRecord ReadUninstallRecord() => Uninstall; public HostInstallationRecord ReadProductRecord() => Product; }
+    private sealed class ThrowingRecords : IHostInstallationRecordReader { public HostInstallationRecord ReadUninstallRecord() => throw new UnauthorizedAccessException("denied"); public HostInstallationRecord ReadProductRecord() => throw new InvalidOperationException("unreachable"); }
     private sealed class Identity(bool supported) : IHostInstallationIdentityService { public HostInstallationIdentity Probe() => new(supported, supported ? "C:\\App" : null, supported ? "0.2.0-alpha" : null); }
     private sealed class Launcher(bool result) : IHostInstallerLauncher { public int Calls; public HostInstallerLaunchRequest? Request; public bool Start(HostInstallerLaunchRequest request) { Calls++; Request = request; return result; } }
     private sealed class ThrowingLauncher : IHostInstallerLauncher { public bool Start(HostInstallerLaunchRequest request) => throw new InvalidOperationException("launch failed"); }

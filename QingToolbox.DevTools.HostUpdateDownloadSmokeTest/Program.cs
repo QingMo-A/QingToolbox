@@ -9,8 +9,29 @@ static class Smoke
 {
     public static async Task RunAsync()
     {
-        TestSidecars(); await TestDownloadAsync(); await TestFailuresAsync(); await TestCacheAndConcurrencyAsync();
-        Console.WriteLine("Host update download smoke test passed: strict sidecars, bounded streaming, cancellation, hashing, cache reuse and coalescing.");
+        TestSidecars(); TestReleaseIdentity(); await TestDownloadAsync(); await TestFailuresAsync(); await TestCacheAndConcurrencyAsync();
+        Console.WriteLine("Host update download smoke test passed: complete asset identity, identity-bound progress, strict sidecars, bounded streaming, cancellation, hashing, cache reuse and coalescing.");
+    }
+
+    private static void TestReleaseIdentity()
+    {
+        var baseline = Release(Utf8("identity"));
+        Assert(baseline.HasSameDownloadIdentity(baseline with { PublishedAt = baseline.PublishedAt.AddDays(1), Summary = "changed notes" }), "non-download metadata ignored");
+        Assert(!baseline.HasSameDownloadIdentity(baseline with { Version = "0.3.1-alpha" }), "version change");
+        Assert(!baseline.HasSameDownloadIdentity(baseline with { Installer = baseline.Installer with { Id = 9 } }), "installer id change");
+        Assert(!baseline.HasSameDownloadIdentity(baseline with { Installer = baseline.Installer with { Name = "other.exe" } }), "installer name change");
+        Assert(!baseline.HasSameDownloadIdentity(baseline with { Installer = baseline.Installer with { Size = baseline.Installer.Size + 1 } }), "installer size change");
+        Assert(!baseline.HasSameDownloadIdentity(baseline with { Installer = baseline.Installer with { DownloadUri = new("https://github.com/changed-installer") } }), "installer uri change");
+        Assert(!baseline.HasSameDownloadIdentity(baseline with { Checksum = baseline.Checksum with { Id = 10 } }), "checksum id change");
+        Assert(!baseline.HasSameDownloadIdentity(baseline with { Checksum = baseline.Checksum with { Name = "other.sha256" } }), "checksum name change");
+        Assert(!baseline.HasSameDownloadIdentity(baseline with { Checksum = baseline.Checksum with { Size = baseline.Checksum.Size + 1 } }), "checksum size change");
+        Assert(!baseline.HasSameDownloadIdentity(baseline with { Checksum = baseline.Checksum with { DownloadUri = new("https://github.com/changed-checksum") } }), "checksum uri change");
+
+        var current = new HostUpdateDownloadProgress(HostUpdateDownloadState.ReadyToInstall, 1, 1,
+            ReleaseVersion: baseline.Version, InstallerAssetId: baseline.Installer.Id, ChecksumAssetId: baseline.Checksum.Id);
+        Assert(current.Matches(baseline), "current progress identity accepted");
+        Assert(!(current with { ChecksumAssetId = baseline.Checksum.Id + 1 }).Matches(baseline), "stale checksum downloading rejected");
+        Assert(!(current with { State = HostUpdateDownloadState.ReadyToInstall, ChecksumAssetId = baseline.Checksum.Id + 1 }).Matches(baseline), "stale checksum ready rejected");
     }
 
     private static void TestSidecars()
@@ -30,9 +51,10 @@ static class Smoke
             var payload = Enumerable.Range(0, 180_000).Select(x => (byte)(x % 251)).ToArray();
             var release = Release(payload); var handler = new QueueHandler(Response(Sidecar(payload, release)), Response(payload));
             var downloader = new HostUpdateInstallerDownloader(new HttpClient(handler), root); var progress = new List<long>();
-            downloader.ProgressChanged += (_, x) => { if (x.State == HostUpdateDownloadState.Downloading) progress.Add(x.BytesReceived); };
+            downloader.ProgressChanged += (_, x) => { Assert(x.Matches(release), "progress carries complete identity"); if (x.State == HostUpdateDownloadState.Downloading) progress.Add(x.BytesReceived); };
             var result = await downloader.DownloadAsync(release, CancellationToken.None);
             Assert(result.State == HostUpdateDownloadState.ReadyToInstall && File.Exists(result.InstallerPath), "successful atomic commit");
+            Assert(result.Matches(release), "ready result carries complete identity");
             Assert(!File.Exists(result.InstallerPath + ".part") && progress.Count > 1 && progress[^1] == payload.Length, "real streaming progress");
         });
         await InTemp(async root =>
@@ -57,7 +79,8 @@ static class Smoke
                 new[] { Response(Sidecar(payload, release)), new HttpResponseMessage(HttpStatusCode.InternalServerError) } })
             {
                 var result = await new HostUpdateInstallerDownloader(new HttpClient(new QueueHandler(responses)), root).DownloadAsync(release, CancellationToken.None);
-                Assert(result.State == HostUpdateDownloadState.Failed && !Directory.EnumerateFiles(root, "*.part", SearchOption.AllDirectories).Any(), "failure cleanup");
+                Assert(result.State == HostUpdateDownloadState.Failed && result.Matches(release) &&
+                    !Directory.EnumerateFiles(root, "*.part", SearchOption.AllDirectories).Any(), "failure cleanup and identity");
             }
         });
         await InTemp(async root =>
@@ -78,7 +101,9 @@ static class Smoke
             var payload = new byte[100]; var release = Release(payload); using var cts = new CancellationTokenSource();
             var handler = new CancelHandler(); var downloader = new HostUpdateInstallerDownloader(new HttpClient(handler), root);
             var task = downloader.DownloadAsync(release, cts.Token); await handler.Started.Task; cts.Cancel();
-            Assert((await task).State == HostUpdateDownloadState.Idle && !Directory.EnumerateFiles(root, "*.part", SearchOption.AllDirectories).Any(), "cancel cleanup");
+            var cancelled = await task;
+            Assert(cancelled.State == HostUpdateDownloadState.Idle && cancelled.Matches(release) &&
+                !Directory.EnumerateFiles(root, "*.part", SearchOption.AllDirectories).Any(), "cancel cleanup and identity");
         });
     }
 

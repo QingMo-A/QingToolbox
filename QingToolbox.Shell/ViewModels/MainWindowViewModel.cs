@@ -525,11 +525,14 @@ public sealed partial class MainWindowViewModel(
         HostUpdatePublishedAt = result.Release?.PublishedAt.LocalDateTime.ToString("g") ?? "—";
         HostUpdateLastChecked = result.LastSuccessfulCheck?.LocalDateTime.ToString("g") ?? "—";
         HostUpdateSummary = result.Release?.Summary ?? string.Empty;
-        if (_selectedHostRelease?.Version != result.Release?.Version || _selectedHostRelease?.Installer.Id != result.Release?.Installer.Id)
+        if (!SameHostReleaseIdentity(_selectedHostRelease, result.Release))
         {
             _hostUpdateDownloadCancellation?.Cancel();
             _selectedHostRelease = result.Release;
-            ApplyHostDownloadProgress(new(HostUpdateDownloadState.Idle, 0, result.Release?.Installer.Size ?? 0));
+            HostUpdateInstallMessage = string.Empty;
+            HostInstallationSupported = false;
+            ApplyHostDownloadProgress(CreateHostDownloadProgress(HostUpdateDownloadState.Idle, 0,
+                result.Release?.Installer.Size ?? 0));
         }
         HostUpdateState = result.State;
         if (result.State == HostUpdateCheckState.UpdateAvailable) IsHostUpdateBannerDismissed = false;
@@ -556,7 +559,8 @@ public sealed partial class MainWindowViewModel(
         }
         _hostUpdateDownloadCancellation?.Dispose();
         _hostUpdateDownloadCancellation = new CancellationTokenSource();
-        ApplyHostDownloadProgress(new(HostUpdateDownloadState.Downloading, 0, _selectedHostRelease.Installer.Size));
+        ApplyHostDownloadProgress(CreateHostDownloadProgress(HostUpdateDownloadState.Downloading, 0,
+            _selectedHostRelease.Installer.Size));
         var result = await hostUpdateInstallerDownloader.DownloadAsync(_selectedHostRelease, _hostUpdateDownloadCancellation.Token);
         ApplyHostDownloadProgress(result);
     }
@@ -566,11 +570,18 @@ public sealed partial class MainWindowViewModel(
 
     private void ApplyHostDownloadProgress(HostUpdateDownloadProgress progress)
     {
-        if (progress.InstallerAssetId != 0 && (_selectedHostRelease?.Installer.Id != progress.InstallerAssetId ||
-            !string.Equals(_selectedHostRelease.Version, progress.ReleaseVersion, StringComparison.Ordinal))) return;
+        if (progress.InstallerAssetId != 0 && (_selectedHostRelease is null || !progress.Matches(_selectedHostRelease))) return;
         HostUpdateBytesReceived = progress.BytesReceived; HostUpdateExpectedBytes = progress.ExpectedBytes;
         HostUpdateDownloadError = progress.Error ?? string.Empty; HostUpdateDownloadState = progress.State;
     }
+
+    private HostUpdateDownloadProgress CreateHostDownloadProgress(HostUpdateDownloadState state, long received,
+        long expected, string? error = null) => new(state, received, expected, error,
+            ReleaseVersion: _selectedHostRelease?.Version, InstallerAssetId: _selectedHostRelease?.Installer.Id ?? 0,
+            ChecksumAssetId: _selectedHostRelease?.Checksum.Id ?? 0);
+
+    internal static bool SameHostReleaseIdentity(HostReleaseInfo? left, HostReleaseInfo? right) =>
+        left is null ? right is null : left.HasSameDownloadIdentity(right);
 
     private static string FormatBytes(long bytes) => bytes >= 1024 * 1024
         ? $"{bytes / 1024d / 1024d:F1} MB" : bytes >= 1024 ? $"{bytes / 1024d:F1} KB" : $"{bytes} B";
@@ -605,8 +616,8 @@ public sealed partial class MainWindowViewModel(
         IsStartingHostUpdate = false;
         if (result.State == HostUpdateHandoffState.InstallerInvalid)
         {
-            ApplyHostDownloadProgress(new(HostUpdateDownloadState.Failed, 0, _selectedHostRelease.Installer.Size,
-                localization.GetString("hostUpdate.reverificationFailed")));
+            ApplyHostDownloadProgress(CreateHostDownloadProgress(HostUpdateDownloadState.Failed, 0,
+                _selectedHostRelease.Installer.Size, localization.GetString("hostUpdate.reverificationFailed")));
         }
         IsHostInstallerStarted = result.State == HostUpdateHandoffState.Started;
         HostUpdateInstallMessage = localization.GetString(result.State switch

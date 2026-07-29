@@ -6,6 +6,7 @@
 - Added explicit Production installer download and SHA256 verification with bounded streaming, cancellation, cache revalidation, and a native ready state.
 - Added installed-deployment verification, final installer revalidation, user confirmation, and safe `/SILENT /NORESTART` handoff to the existing Inno Setup in-place upgrade path.
 - Retired portable ZIP distribution; future Windows releases publish only the installer and its same-name SHA256 sidecar while retaining audited installer payload generation.
+- Fixed host self-update identity checks to fail closed on malformed installation records and replaced installer or checksum assets.
 
 - Localized the Development Web Home, Session Logs, and Diagnostics workspaces in English and Simplified Chinese.
 - Localized the Development Web Modules and Running workspaces in English and Simplified Chinese.

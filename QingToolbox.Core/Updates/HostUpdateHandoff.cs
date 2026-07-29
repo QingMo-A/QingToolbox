@@ -16,12 +16,15 @@ public sealed class HostInstallationIdentityService(bool isProduction, string? e
     public HostInstallationIdentity Probe()
     {
         if (!isProduction) return Unsupported("One-click updates are available only in an installed Production build.");
-        if (string.IsNullOrWhiteSpace(executablePath) || !Path.IsPathFullyQualified(executablePath)) return Unsupported("The current executable path is not a supported local installation.");
-        var executable = Path.GetFullPath(executablePath);
+        if (!TryNormalizePath(executablePath, false, out var executable)) return Unsupported("The current executable path is not a supported local installation.");
         var directory = Path.GetDirectoryName(executable);
         if (directory is null || IsRemote(directory) || !string.Equals(Path.GetFileName(executable), "QingToolbox.Shell.exe", StringComparison.OrdinalIgnoreCase) ||
             !File.Exists(Path.Combine(directory, "QingToolbox.Shell.exe"))) return Unsupported("The current executable is not in a supported installation directory.");
-        var uninstall = records.ReadUninstallRecord(); var product = records.ReadProductRecord();
+        HostInstallationRecord uninstall;
+        HostInstallationRecord product;
+        try { uninstall = records.ReadUninstallRecord(); product = records.ReadProductRecord(); }
+        catch (Exception exception) when (IsExpectedIdentityException(exception))
+        { return Unsupported("The installed QingToolbox registration could not be read safely."); }
         if (!uninstall.Exists || !product.Exists) return Unsupported("The installed QingToolbox registration is incomplete.");
         if (!TryDirectory(uninstall.InstallLocation, out var uninstallDirectory) || !TryDirectory(product.InstallLocation, out var productDirectory) ||
             !Same(uninstallDirectory!, productDirectory!) || !Same(directory, productDirectory!)) return Unsupported("The installed QingToolbox locations are missing or conflict.");
@@ -32,10 +35,25 @@ public sealed class HostInstallationIdentityService(bool isProduction, string? e
 
     private static bool TryDirectory(string? value, out string? directory)
     {
-        directory = null; if (string.IsNullOrWhiteSpace(value) || !Path.IsPathFullyQualified(value)) return false;
-        var full = Path.GetFullPath(value).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (IsRemote(full)) return false; directory = full; return true;
+        if (!TryNormalizePath(value, true, out directory)) return false;
+        directory = directory!.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return directory.Length > 0;
     }
+    private static bool TryNormalizePath(string? value, bool directory, out string? normalized)
+    {
+        normalized = null;
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        try
+        {
+            if (!Path.IsPathFullyQualified(value)) return false;
+            var full = Path.GetFullPath(value);
+            if (IsRemote(full) || (!directory && Path.GetFileName(full).Length == 0)) return false;
+            normalized = full; return true;
+        }
+        catch (Exception exception) when (IsExpectedIdentityException(exception)) { return false; }
+    }
+    private static bool IsExpectedIdentityException(Exception exception) => exception is
+        ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException or System.Security.SecurityException;
     private static bool IsRemote(string path) => path.StartsWith("\\\\", StringComparison.Ordinal);
     private static bool Same(string left, string right) => string.Equals(left.TrimEnd('\\', '/'), right.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
     private static HostInstallationIdentity Unsupported(string error) => new(false, null, null, error);
