@@ -37,6 +37,7 @@ public sealed partial class MainWindowViewModel(
     ModuleUpdateCheckCoordinator moduleUpdateCoordinator,
     ModulePackageDownloadCoordinator modulePackageDownloadCoordinator,
     HostUpdateDiscoveryService hostUpdateDiscovery,
+    HostUpdateInstallerDownloader hostUpdateInstallerDownloader,
     TimeProvider timeProvider,
     StartupHealthJournal startupHealthJournal,
     IModuleExecutionReadinessGate executionGate,
@@ -158,6 +159,13 @@ public sealed partial class MainWindowViewModel(
     [ObservableProperty] private string _hostUpdateLastChecked = "—";
     [ObservableProperty] private string _hostUpdateSummary = string.Empty;
     [ObservableProperty] private bool _isHostUpdateBannerDismissed;
+    [ObservableProperty] private HostUpdateDownloadState _hostUpdateDownloadState = HostUpdateDownloadState.Idle;
+    [ObservableProperty] private long _hostUpdateBytesReceived;
+    [ObservableProperty] private long _hostUpdateExpectedBytes;
+    [ObservableProperty] private string _hostUpdateDownloadError = string.Empty;
+    private HostReleaseInfo? _selectedHostRelease;
+    private CancellationTokenSource? _hostUpdateDownloadCancellation;
+    private bool _hostUpdateDownloadSubscribed;
 
     public IReadOnlyList<StartupPresentationMode> StartupPresentationModes { get; } = Enum.GetValues<StartupPresentationMode>();
     public string StartupAuthorizationSummary => localization.GetString("startup.authorizationSummary", StartupAuthorizationCount);
@@ -179,6 +187,16 @@ public sealed partial class MainWindowViewModel(
         HostUpdateCheckState.Failed => "hostUpdate.failed",
         _ => "hostUpdate.notChecked"
     }, HostUpdateLatestVersion);
+    public bool ShowHostUpdateDownload => IsHostUpdateAvailable;
+    public bool CanDownloadHostUpdate => IsHostUpdateAvailable && HostUpdateDownloadState is HostUpdateDownloadState.Idle or HostUpdateDownloadState.Failed;
+    public bool CanCancelHostUpdateDownload => HostUpdateDownloadState == HostUpdateDownloadState.Downloading;
+    public bool IsHostUpdateDownloading => HostUpdateDownloadState == HostUpdateDownloadState.Downloading;
+    public bool IsHostUpdateDownloadFailed => HostUpdateDownloadState == HostUpdateDownloadState.Failed;
+    public bool IsHostUpdateVerifying => HostUpdateDownloadState == HostUpdateDownloadState.Verifying;
+    public bool IsHostUpdateReady => HostUpdateDownloadState == HostUpdateDownloadState.ReadyToInstall;
+    public string HostUpdateDownloadProgress => $"{FormatBytes(HostUpdateBytesReceived)} / {FormatBytes(HostUpdateExpectedBytes)}";
+    public string HostUpdateDownloadActionLabel => localization.GetString(IsHostUpdateDownloadFailed ? "hostUpdate.retry" : "hostUpdate.download");
+    public string HostUpdateReadyVersion => localization.GetString("hostUpdate.readyVersion", HostUpdateLatestVersion);
     public LocalizedText Strings { get; } = new(localization);
     public ObservableCollection<LanguageOptionViewModel> LanguageOptions { get; } =
     [
@@ -428,6 +446,8 @@ public sealed partial class MainWindowViewModel(
         OnPropertyChanged(nameof(StartupAuthorizationSummary));
         OnPropertyChanged(nameof(MissingStartupAuthorizationSummary));
         OnPropertyChanged(nameof(HostUpdateStatus));
+        OnPropertyChanged(nameof(HostUpdateDownloadActionLabel));
+        OnPropertyChanged(nameof(HostUpdateReadyVersion));
         RefreshLanguageOptionLabels();
         if (!string.IsNullOrEmpty(ModuleUpdateLastChecked))
         {
@@ -448,12 +468,25 @@ public sealed partial class MainWindowViewModel(
     {
         OnPropertyChanged(nameof(IsHostUpdateAvailable));
         OnPropertyChanged(nameof(ShowHostUpdateBanner));
+        OnPropertyChanged(nameof(ShowHostUpdateDownload));
+        OnPropertyChanged(nameof(CanDownloadHostUpdate));
         OnPropertyChanged(nameof(HostUpdateStatus));
         CheckHostUpdateCommand.NotifyCanExecuteChanged();
     }
 
-    partial void OnHostUpdateLatestVersionChanged(string value) => OnPropertyChanged(nameof(HostUpdateStatus));
+    partial void OnHostUpdateLatestVersionChanged(string value) { OnPropertyChanged(nameof(HostUpdateStatus)); OnPropertyChanged(nameof(HostUpdateReadyVersion)); }
     partial void OnIsHostUpdateBannerDismissedChanged(bool value) => OnPropertyChanged(nameof(ShowHostUpdateBanner));
+    partial void OnHostUpdateDownloadStateChanged(HostUpdateDownloadState value)
+    {
+        OnPropertyChanged(nameof(CanDownloadHostUpdate)); OnPropertyChanged(nameof(CanCancelHostUpdateDownload));
+        OnPropertyChanged(nameof(IsHostUpdateDownloading)); OnPropertyChanged(nameof(IsHostUpdateVerifying));
+        OnPropertyChanged(nameof(IsHostUpdateReady)); OnPropertyChanged(nameof(IsHostUpdateDownloadFailed));
+        OnPropertyChanged(nameof(HostUpdateDownloadActionLabel));
+        DownloadHostUpdateCommand.NotifyCanExecuteChanged(); CancelHostUpdateDownloadCommand.NotifyCanExecuteChanged();
+        CheckHostUpdateCommand.NotifyCanExecuteChanged();
+    }
+    partial void OnHostUpdateBytesReceivedChanged(long value) => OnPropertyChanged(nameof(HostUpdateDownloadProgress));
+    partial void OnHostUpdateExpectedBytesChanged(long value) => OnPropertyChanged(nameof(HostUpdateDownloadProgress));
 
     public async Task CheckHostUpdateAutomaticallyAsync(CancellationToken cancellationToken)
     {
@@ -469,7 +502,8 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand(CanExecute = nameof(CanCheckHostUpdate))]
     private Task CheckHostUpdateAsync() => CheckHostUpdateCoreAsync(true, CancellationToken.None);
 
-    private bool CanCheckHostUpdate() => HostUpdateState != HostUpdateCheckState.Checking;
+    private bool CanCheckHostUpdate() => HostUpdateState != HostUpdateCheckState.Checking &&
+        HostUpdateDownloadState is not HostUpdateDownloadState.Downloading and not HostUpdateDownloadState.Verifying;
 
     private async Task CheckHostUpdateCoreAsync(bool manual, CancellationToken cancellationToken)
     {
@@ -479,6 +513,12 @@ public sealed partial class MainWindowViewModel(
         HostUpdatePublishedAt = result.Release?.PublishedAt.LocalDateTime.ToString("g") ?? "—";
         HostUpdateLastChecked = result.LastSuccessfulCheck?.LocalDateTime.ToString("g") ?? "—";
         HostUpdateSummary = result.Release?.Summary ?? string.Empty;
+        if (_selectedHostRelease?.Version != result.Release?.Version || _selectedHostRelease?.Installer.Id != result.Release?.Installer.Id)
+        {
+            _hostUpdateDownloadCancellation?.Cancel();
+            _selectedHostRelease = result.Release;
+            ApplyHostDownloadProgress(new(HostUpdateDownloadState.Idle, 0, result.Release?.Installer.Size ?? 0));
+        }
         HostUpdateState = result.State;
         if (result.State == HostUpdateCheckState.UpdateAvailable) IsHostUpdateBannerDismissed = false;
     }
@@ -492,6 +532,36 @@ public sealed partial class MainWindowViewModel(
         IsHostUpdateBannerDismissed = true;
         SelectedNavigationKey = "Settings";
     }
+
+    [RelayCommand(CanExecute = nameof(CanDownloadHostUpdate))]
+    private async Task DownloadHostUpdateAsync()
+    {
+        if (_selectedHostRelease is null) return;
+        if (!_hostUpdateDownloadSubscribed)
+        {
+            hostUpdateInstallerDownloader.ProgressChanged += (_, progress) => ApplyHostDownloadProgress(progress);
+            _hostUpdateDownloadSubscribed = true;
+        }
+        _hostUpdateDownloadCancellation?.Dispose();
+        _hostUpdateDownloadCancellation = new CancellationTokenSource();
+        ApplyHostDownloadProgress(new(HostUpdateDownloadState.Downloading, 0, _selectedHostRelease.Installer.Size));
+        var result = await hostUpdateInstallerDownloader.DownloadAsync(_selectedHostRelease, _hostUpdateDownloadCancellation.Token);
+        ApplyHostDownloadProgress(result);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanCancelHostUpdateDownload))]
+    private void CancelHostUpdateDownload() => _hostUpdateDownloadCancellation?.Cancel();
+
+    private void ApplyHostDownloadProgress(HostUpdateDownloadProgress progress)
+    {
+        if (progress.InstallerAssetId != 0 && (_selectedHostRelease?.Installer.Id != progress.InstallerAssetId ||
+            !string.Equals(_selectedHostRelease.Version, progress.ReleaseVersion, StringComparison.Ordinal))) return;
+        HostUpdateBytesReceived = progress.BytesReceived; HostUpdateExpectedBytes = progress.ExpectedBytes;
+        HostUpdateDownloadError = progress.Error ?? string.Empty; HostUpdateDownloadState = progress.State;
+    }
+
+    private static string FormatBytes(long bytes) => bytes >= 1024 * 1024
+        ? $"{bytes / 1024d / 1024d:F1} MB" : bytes >= 1024 ? $"{bytes / 1024d:F1} KB" : $"{bytes} B";
 
     private void RestoreSelectedLanguageCode() =>
         SetSelectedLanguageCode(localizationManager.ConfiguredLanguageCode);

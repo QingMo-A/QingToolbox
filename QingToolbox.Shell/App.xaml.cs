@@ -261,6 +261,18 @@ public partial class App : Application
                     provider.GetRequiredService<ApplicationPaths>().HostUpdateCachePath,
                     parsed, provider.GetRequiredService<TimeProvider>(), environment.IsProduction);
             });
+            services.AddSingleton(provider =>
+            {
+                var client = new HttpClient(new HttpClientHandler
+                {
+                    AllowAutoRedirect = false,
+                    AutomaticDecompression = DecompressionMethods.None,
+                    UseCookies = false
+                }) { Timeout = TimeSpan.FromMinutes(10) };
+                client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("QingToolbox", "HostUpdate"));
+                return new HostUpdateInstallerDownloader(client,
+                    provider.GetRequiredService<ApplicationPaths>().HostUpdateInstallerDirectory);
+            });
             services.AddSingleton<IModulePackageTransport>(_ =>
             {
                 var handler = new HttpClientHandler { AllowAutoRedirect = false, AutomaticDecompression = DecompressionMethods.None, UseCookies = false };

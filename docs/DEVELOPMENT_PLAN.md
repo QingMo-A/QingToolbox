@@ -24,10 +24,10 @@
 - Plan 012 UI-5A3A commit: `3ddedcb7849831f865e40cc82ed998b908d623a9`.
 - Plan 012 UI-5A3B1 read-only workspaces: Implementation Complete.
 - Plan 012 UI-5A3B2 Settings localization and module metadata refresh: Implementation Complete. Successful language changes refresh one complete host-localized Module Snapshot. Plan 012 is complete.
-- Plan 013: **Approved / In Progress**. 013A and 013B are Implementation Complete; the next substage is **013C — installer download and SHA256 verification**.
+- Plan 013: **Approved / In Progress**. 013A, 013B and 013C are Implementation Complete; the next substage is **013D — installer handoff and end-to-end in-place upgrade**.
 - Development Web module updates now support an explicit, inline-confirmed installation of a host-authorized verified package through the frozen B1/B2.1 transaction boundary. This is manual and Development-only; it is not automatic installation.
 - Production Web UI: Deferred.
-- Production module update transactions, automatic module installation, and Production Web UI remain deferred. Host update discovery is available only in the native Production workspace; installer download and launch remain unavailable.
+- Production module update transactions, automatic module installation, and Production Web UI remain deferred. The native Production workspace can discover, explicitly download and verify the official host installer; installer launch remains unavailable.
 - Preview 2 release work and UI modernization remain independent tracks.
 
 The Development Vue workspace currently contains Home, Modules, Running, Session Logs, Settings,
@@ -199,10 +199,10 @@ Preview 2 的产品目标不是完成全部自动更新，而是证明：
 
 Plan 013 状态为 **Approved / In Progress**，完整边界见
 [`docs/plans/PLAN_013_HOST_SELF_UPDATE.md`](plans/PLAN_013_HOST_SELF_UPDATE.md)。
-**013A** 与 **013B** 已达到 Implementation Complete：正式 Windows Release 仅分发安装器与
+**013A**、**013B** 与 **013C** 已达到 Implementation Complete：正式 Windows Release 仅分发安装器与
 同名 `.sha256`；Production 原生工作区可异步检查官方 Release，并通过 24 小时缓存与条件请求
-显示非阻塞更新提示。下一子阶段为 **013C — installer download and SHA256 verification**；
-下载安装器和启动安装仍未实现。
+显示非阻塞更新提示，并由用户明确下载、校验官方安装器。下一子阶段为
+**013D — installer handoff and end-to-end in-place upgrade**；启动安装仍未实现。
 
 ## 5.1 Preview 1 → Preview 2 原地升级门禁（保留的发布基础设施）
 
@@ -468,7 +468,7 @@ frozen runtime, transaction, and capability boundaries.
 
 `检测宿主更新 → 下载并验证安装器 → 用户确认 → 启动安装器 → 退出宿主 → 安装器原地覆盖并重新打开`
 
-宿主不直接替换自身文件。013A 与 013B 已完成；下一子阶段 013C 只负责下载安装器与 SHA256 验证，安装交接仍属于 013D。
+宿主不直接替换自身文件。013A、013B 与 013C 已完成；已验证安装器的启动和退出交接仍属于 013D。
 
 ## 9. 提交和验证工作流
 
@@ -554,8 +554,8 @@ docs/plans/PLAN_013_HOST_SELF_UPDATE.md
 - 开发环境隔离、Smoke Tests、安装器和 Preview RC Gate。
 
 项目所有者已明确推迟剩余 Preview 2 人工发布验收。未执行项目继续保持 `Not Run`。
-当前选定计划是 Plan 013。013A 与 013B 已完成；Production 原生界面可以检测并提示官方
-Release，但不会下载或启动安装器。下一子阶段是 013C：installer download and SHA256 verification。
+当前选定计划是 Plan 013。013A、013B 与 013C 已完成；Production 原生界面可以检测、提示、
+显式下载并验证官方安装器，但不会启动安装器。下一子阶段是 013D：installer handoff and end-to-end in-place upgrade。
 
 目标版本：
 
@@ -591,7 +591,7 @@ Preview 2 明确不包含：
 A. qmod ZIP 结构与安全 Staging 验证，仍不安装。
 B. 0.3.0-alpha 模块事务更新、原子替换和失败回滚。
 C. 0.4.0-alpha 稳定 Module API、NuGet SDK 和模板。
-D. Plan 013 的 013A/013B 已完成；下一步 013C 下载并验证安装器，013D 负责安装器交接。
+D. Plan 013 的 013A/013B/013C 已完成；下一步 013D 负责已验证安装器交接与端到端原地升级。
 
 每次开始工作先执行：
 

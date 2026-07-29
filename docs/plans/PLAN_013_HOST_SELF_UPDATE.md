@@ -1,6 +1,6 @@
 # Plan 013：QingToolbox 宿主更新与一键原地升级
 
-**状态：Approved / In Progress — 013A and 013B Implementation Complete; next 013C**
+**状态：Approved / In Progress — 013A, 013B and 013C Implementation Complete; next 013D**
 **目标分支：`toolbox`**  
 **批准决策：QingToolbox 停止将便携版作为正式分发形态，后续正式发布仅提供安装版。**
 
@@ -330,7 +330,12 @@ ETag/Last-Modified 条件请求、并发合并和环境隔离边界内选择最�
 
 ## 013C：安装器下载与 SHA256 验证
 
-**状态：Next — Not Started**
+**状态：Implementation Complete**
+
+Production 原生界面现在可由用户明确触发同一官方 Release 的 sidecar 与安装器下载。下载使用
+受控环境隔离缓存、严格 sidecar 格式、512 MiB 安装器上限、有界流式传输、真实字节进度、
+SHA256 校验和成功后的原子文件提交。取消或失败会清理半成品；匹配缓存每次复用前都会重新
+检查路径、大小、sidecar 与文件 Hash。本阶段仅进入 `ReadyToInstall`，不会启动安装器。
 
 ### 目标
 
@@ -384,6 +389,8 @@ Failed
 - 下载失败不自动连续重试。
 
 ## 013D：安装器交接与端到端原地升级
+
+**状态：Next — Not Started**
 
 ### 目标
 

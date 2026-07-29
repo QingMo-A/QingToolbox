@@ -31,6 +31,10 @@ static class Smoke
         Assert(Best("1.0.0-alpha", R("1.1.0-alpha", assets: ["QingToolbox-1.1.0-alpha-win-x64-setup.exe"])) is null, "sidecar missing");
         Assert(Best("1.0.0-alpha", R("1.1.0-alpha", assets: ["QingToolbox-1.1.0-alpha-win-x64-setup.exe", "QingToolbox-1.1.0-alpha-win-x64-setup.exe", "QingToolbox-1.1.0-alpha-win-x64-setup.exe.sha256"])) is null, "duplicate installer");
         Assert(Best("1.0.0-alpha", R("1.1.0-alpha", assets: ["QingToolbox-2.0.0-win-x64-setup.exe", "QingToolbox-2.0.0-win-x64-setup.exe.sha256"])) is null, "filename mismatch");
+        Assert(Best("1.0.0-alpha", BadAsset("1.1.0-alpha", x => x with { BrowserDownloadUrl = null })) is null, "missing asset URL");
+        Assert(Best("1.0.0-alpha", BadAsset("1.1.0-alpha", x => x with { BrowserDownloadUrl = "http://github.com/file" })) is null, "non-HTTPS asset URL");
+        Assert(Best("1.0.0-alpha", BadAsset("1.1.0-alpha", x => x with { Size = 0 })) is null, "zero asset size");
+        Assert(Best("1.0.0-alpha", BadAsset("1.1.0-alpha", x => x with { Size = HostUpdateInstallerDownloader.MaximumInstallerBytes + 1 })) is null, "oversize installer");
     }
 
     private static async Task TestHttpAndCacheAsync()
@@ -92,9 +96,14 @@ static class Smoke
     private static HostUpdateDiscoveryService.ReleaseRecord R(string version, bool draft = false, string[]? assets = null)
     {
         assets ??= [$"QingToolbox-{version}-win-x64-setup.exe", $"QingToolbox-{version}-win-x64-setup.exe.sha256"];
-        return new(version, draft, DateTimeOffset.UtcNow, "# Notes\nSafe **summary**", assets.Select(x => new HostUpdateDiscoveryService.ReleaseAssetRecord(x)).ToArray());
+        return new(version, draft, DateTimeOffset.UtcNow, "# Notes\nSafe **summary**", assets.Select((x, i) =>
+            new HostUpdateDiscoveryService.ReleaseAssetRecord(i + 1, x, $"https://github.com/QingMo-A/QingToolbox/releases/download/v{version}/{x}", x.EndsWith(".sha256", StringComparison.Ordinal) ? 100 : 1024)).ToArray());
     }
-    private static string Json(string version) => $"[{{\"tag_name\":\"{version}\",\"draft\":false,\"published_at\":\"2025-12-01T00:00:00Z\",\"body\":\"Notes\",\"assets\":[{{\"name\":\"QingToolbox-{version}-win-x64-setup.exe\"}},{{\"name\":\"QingToolbox-{version}-win-x64-setup.exe.sha256\"}}]}}]";
+    private static HostUpdateDiscoveryService.ReleaseRecord BadAsset(string version, Func<HostUpdateDiscoveryService.ReleaseAssetRecord, HostUpdateDiscoveryService.ReleaseAssetRecord> change)
+    {
+        var release = R(version); var assets = release.Assets.ToArray(); assets[0] = change(assets[0]); return release with { Assets = assets };
+    }
+    private static string Json(string version) => $"[{{\"tag_name\":\"{version}\",\"draft\":false,\"published_at\":\"2025-12-01T00:00:00Z\",\"body\":\"Notes\",\"assets\":[{{\"id\":1,\"name\":\"QingToolbox-{version}-win-x64-setup.exe\",\"browser_download_url\":\"https://github.com/QingMo-A/QingToolbox/releases/download/v{version}/QingToolbox-{version}-win-x64-setup.exe\",\"size\":1024}},{{\"id\":2,\"name\":\"QingToolbox-{version}-win-x64-setup.exe.sha256\",\"browser_download_url\":\"https://github.com/QingMo-A/QingToolbox/releases/download/v{version}/QingToolbox-{version}-win-x64-setup.exe.sha256\",\"size\":100}}]}}]";
     private static HttpResponseMessage Response(HttpStatusCode status, string json = "[]", string? etag = null, DateTimeOffset? modified = null)
     { var r = new HttpResponseMessage(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") }; if (etag is not null) r.Headers.ETag = new(etag); if (modified.HasValue) r.Content.Headers.LastModified = modified; return r; }
     private static async Task InTemp(Func<string, Task> action) { var root = Path.Combine(Path.GetTempPath(), "QingToolbox-host-update-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root); try { await action(root); } finally { Directory.Delete(root, true); } }

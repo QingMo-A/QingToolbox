@@ -1675,6 +1675,33 @@
                                 <Button Margin="0,12,0,0" HorizontalAlignment="Left" Command="{Binding CheckHostUpdateCommand}" AutomationProperties.Name="{Binding Strings[hostUpdate.check]}" Style="{StaticResource SecondaryActionButtonStyle}">
                                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" Style="{StaticResource CompactFluentIconStyle}"/><TextBlock Text="{Binding Strings[hostUpdate.check]}"/></StackPanel>
                                 </Button>
+                                <StackPanel Margin="0,12,0,0" Visibility="{Binding ShowHostUpdateDownload, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <WrapPanel>
+                                        <Button Command="{Binding DownloadHostUpdateCommand}" AutomationProperties.Name="{Binding HostUpdateDownloadActionLabel}" Style="{StaticResource PrimaryActionButtonStyle}"
+                                                Visibility="{Binding CanDownloadHostUpdate, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Text="{Binding HostUpdateDownloadActionLabel}"/>
+                                        </Button>
+                                        <Button Margin="8,0,0,0" Command="{Binding CancelHostUpdateDownloadCommand}" AutomationProperties.Name="{Binding Strings[hostUpdate.cancelDownload]}" Style="{StaticResource SecondaryActionButtonStyle}"
+                                                Visibility="{Binding CanCancelHostUpdateDownload, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Text="{Binding Strings[hostUpdate.cancelDownload]}"/>
+                                        </Button>
+                                    </WrapPanel>
+                                    <StackPanel Margin="0,9,0,0" Visibility="{Binding IsHostUpdateDownloading, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <TextBlock Text="{Binding Strings[hostUpdate.downloading]}" FontWeight="SemiBold"/>
+                                        <TextBlock Margin="0,3,0,0" Text="{Binding HostUpdateDownloadProgress}" Foreground="{StaticResource SecondaryTextBrush}"/>
+                                    </StackPanel>
+                                    <TextBlock Margin="0,9,0,0" Text="{Binding Strings[hostUpdate.verifying]}" FontWeight="SemiBold"
+                                               Visibility="{Binding IsHostUpdateVerifying, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                    <StackPanel Margin="0,9,0,0" Visibility="{Binding IsHostUpdateReady, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <TextBlock Text="{Binding Strings[hostUpdate.verified]}" FontWeight="SemiBold" Foreground="#087B42"/>
+                                        <TextBlock Margin="0,3,0,0" Text="{Binding HostUpdateReadyVersion}"/>
+                                        <TextBlock Margin="0,3,0,0" Text="{Binding Strings[hostUpdate.handoffNext]}" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="0,9,0,0" Visibility="{Binding IsHostUpdateDownloadFailed, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <TextBlock Text="{Binding Strings[hostUpdate.downloadFailed]}" FontWeight="SemiBold" Foreground="#B54708"/>
+                                        <TextBlock Margin="0,3,0,0" Text="{Binding HostUpdateDownloadError}" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </StackPanel>
                             </StackPanel>
                         </Border>
                     </StackPanel>

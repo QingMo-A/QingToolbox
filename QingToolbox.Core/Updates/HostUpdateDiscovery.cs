@@ -6,8 +6,14 @@ namespace QingToolbox.Core.Updates;
 
 public enum HostUpdateCheckState { Idle, Checking, UpToDate, UpdateAvailable, Failed }
 
+public sealed record HostReleaseAssetIdentity(long Id, string Name, Uri DownloadUri, long Size);
+
 public sealed record HostReleaseInfo(string Version, DateTimeOffset PublishedAt, string Summary,
-    string InstallerFileName, string ChecksumFileName);
+    HostReleaseAssetIdentity Installer, HostReleaseAssetIdentity Checksum)
+{
+    public string InstallerFileName => Installer.Name;
+    public string ChecksumFileName => Checksum.Name;
+}
 
 public sealed record HostUpdateCheckResult(HostUpdateCheckState State, string CurrentVersion,
     HostReleaseInfo? Release, DateTimeOffset? LastSuccessfulCheck, bool FromCache = false);
@@ -110,10 +116,22 @@ public sealed class HostUpdateDiscoveryService
         var versionText = version.ToString();
         var installer = $"QingToolbox-{versionText}-win-x64-setup.exe";
         var checksum = $"{installer}.sha256";
-        if (release.Assets.Count(x => string.Equals(x.Name, installer, StringComparison.Ordinal)) != 1 ||
-            release.Assets.Count(x => string.Equals(x.Name, checksum, StringComparison.Ordinal)) != 1)
+        var installers = release.Assets.Where(x => string.Equals(x.Name, installer, StringComparison.Ordinal)).ToArray();
+        var checksums = release.Assets.Where(x => string.Equals(x.Name, checksum, StringComparison.Ordinal)).ToArray();
+        if (installers.Length != 1 || checksums.Length != 1 || installers[0].Size > HostUpdateInstallerDownloader.MaximumInstallerBytes ||
+            checksums[0].Size > HostUpdateInstallerDownloader.MaximumSidecarBytes ||
+            !TryAsset(installers[0], out var installerAsset) || !TryAsset(checksums[0], out var checksumAsset))
             return null;
-        return new(versionText, release.PublishedAt, Summarize(release.Body), installer, checksum);
+        return new(versionText, release.PublishedAt, Summarize(release.Body), installerAsset!, checksumAsset!);
+    }
+
+    private static bool TryAsset(ReleaseAssetRecord asset, out HostReleaseAssetIdentity? identity)
+    {
+        identity = null;
+        if (asset.Id <= 0 || asset.Size <= 0 || !Uri.TryCreate(asset.BrowserDownloadUrl, UriKind.Absolute, out var uri) ||
+            uri.Scheme != Uri.UriSchemeHttps || !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase)) return false;
+        identity = new(asset.Id, asset.Name, uri, asset.Size);
+        return true;
     }
 
     private static string Summarize(string? body)
@@ -147,8 +165,11 @@ public sealed class HostUpdateDiscoveryService
         {
             if (!item.TryGetProperty("tag_name", out var tag) || tag.ValueKind != JsonValueKind.String) continue;
             var assets = item.TryGetProperty("assets", out var assetsElement) && assetsElement.ValueKind == JsonValueKind.Array
-                ? assetsElement.EnumerateArray().Select(x => x.TryGetProperty("name", out var name) ? name.GetString() : null)
-                    .Where(x => x is not null).Select(x => new ReleaseAssetRecord(x!)).ToArray() : [];
+                ? assetsElement.EnumerateArray().Select(x => new ReleaseAssetRecord(
+                    x.TryGetProperty("id", out var id) && id.TryGetInt64(out var parsedId) ? parsedId : 0,
+                    x.TryGetProperty("name", out var name) ? name.GetString() ?? string.Empty : string.Empty,
+                    x.TryGetProperty("browser_download_url", out var url) ? url.GetString() : null,
+                    x.TryGetProperty("size", out var size) && size.TryGetInt64(out var parsedSize) ? parsedSize : 0)).ToArray() : [];
             var published = item.TryGetProperty("published_at", out var date) && date.ValueKind == JsonValueKind.String &&
                 DateTimeOffset.TryParse(date.GetString(), out var parsed) ? parsed : DateTimeOffset.MinValue;
             result.Add(new(tag.GetString()!, item.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True,
@@ -177,7 +198,7 @@ public sealed class HostUpdateDiscoveryService
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
     }
 
-    public sealed record ReleaseAssetRecord(string Name);
+    public sealed record ReleaseAssetRecord(long Id, string Name, string? BrowserDownloadUrl, long Size);
     public sealed record ReleaseRecord(string TagName, bool Draft, DateTimeOffset PublishedAt, string? Body,
         IReadOnlyList<ReleaseAssetRecord> Assets);
     private sealed record CacheRecord(DateTimeOffset LastSuccessfulCheck, string? ETag,
