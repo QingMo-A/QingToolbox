@@ -184,8 +184,53 @@ const updateTone = (module: ModuleSnapshotItem) => {
 const isVerifiedUpdate = (module: ModuleSnapshotItem) => module.downloadStatus === 'Verified' || module.downloadStatus === 'AlreadyVerified'
 const hasDownloadStatus = (module: ModuleSnapshotItem) => module.downloadStatus !== 'NotDownloaded'
 const downloadPercentage = (module: ModuleSnapshotItem) => module.downloadExpectedBytes > 0
-  ? Math.min(100, module.downloadBytesReceived * 100 / module.downloadExpectedBytes)
+  ? Math.max(0, Math.min(100, module.downloadBytesReceived * 100 / module.downloadExpectedBytes))
   : null
+const formatBytes = (bytes: number) => {
+  const value = Math.max(0, bytes)
+  if (value < 1024) return `${value.toFixed(0)} B`
+  const units = ['KB', 'MB', 'GB']
+  let scaled = value / 1024
+  let unit = units[0]
+  for (let index = 1; index < units.length && scaled >= 1024; index++) {
+    scaled /= 1024
+    unit = units[index]
+  }
+  return `${scaled < 10 ? scaled.toFixed(1) : scaled.toFixed(0)} ${unit}`
+}
+const downloadProgressText = (module: ModuleSnapshotItem) => {
+  const percentage = downloadPercentage(module)
+  if (percentage !== null) return `${formatBytes(module.downloadBytesReceived)} / ${formatBytes(module.downloadExpectedBytes)} · ${percentage.toFixed(0)}%`
+  return module.downloadBytesReceived > 0 ? formatBytes(module.downloadBytesReceived) : null
+}
+const overallUpdateStatusKey = (module: ModuleSnapshotItem): TranslationKey => {
+  if (isVerifiedUpdate(module)) return 'modules.update.verifiedBadge'
+  if (hasDownloadStatus(module)) return downloadStatusKey(module.downloadStatus)
+  return updateStatusKey(module.updateStatus)
+}
+const updateConditionDetailKey = (module: ModuleSnapshotItem): TranslationKey | null => {
+  if (['HostUpdateRequired','ModuleApiIncompatible','HostVersionIncompatible'].includes(module.updateStatus)) return 'modules.update.compatibilityDetail'
+  if (['SourceUnavailable','SourceInvalid','InvalidLocalVersion'].includes(module.updateStatus)) return 'modules.update.sourceDetail'
+  if (module.updateStatus === 'DisabledByEnvironment') return 'modules.update.environmentDetail'
+  return null
+}
+
+const updateConditionDetail = (module: ModuleSnapshotItem) => {
+  const key = updateConditionDetailKey(module)
+  return key ? t(key) : ''
+}
+const downloadToast = (status: ModuleSnapshotItem['downloadStatus']): { key: TranslationKey; kind: 'info'|'success'|'warning'|'error' } => {
+  if (status === 'Verified' || status === 'AlreadyVerified') return { key: 'modules.update.toast.verified', kind: 'success' }
+  if (status === 'SizeMismatch' || status === 'HashMismatch') return { key: 'modules.update.toast.validationFailed', kind: 'error' }
+  if (status === 'SourceUnavailable' || status === 'SourceInvalid' || status === 'UntrustedRedirect') return { key: 'modules.update.toast.sourceRejected', kind: 'error' }
+  if (status === 'StorageUnavailable') return { key: 'modules.update.toast.storageFailed', kind: 'error' }
+  if (status === 'TransferTimedOut') return { key: 'modules.update.toast.timedOut', kind: 'error' }
+  if (status === 'MetadataChanged' || status === 'MetadataStale') return { key: 'modules.update.toast.metadataChanged', kind: 'warning' }
+  if (status === 'Cancelled') return { key: 'modules.update.toast.cancelled', kind: 'warning' }
+  if (status === 'DisabledByEnvironment') return { key: 'modules.update.toast.disabled', kind: 'warning' }
+  if (status === 'Failed') return { key: 'modules.update.toast.downloadFailed', kind: 'error' }
+  return { key: 'modules.update.toast.downloadFinished', kind: 'warning' }
+}
 
 async function checkModuleUpdate(module: ModuleSnapshotItem) {
   if (!hostOperationsAvailable.value || !module.canCheckForUpdate || !store.beginOperation(module.id, 'checkUpdate')) return
@@ -215,8 +260,8 @@ async function downloadModuleUpdate(module: ModuleSnapshotItem) {
     store.complete(snapshot)
     const current = snapshot.modules.find(item => item.id === module.id)
     if (!current) throw new Error('Updated module is missing from the host snapshot.')
-    toast.show(t(isVerifiedUpdate(current) ? 'modules.update.toast.verified' : 'modules.update.toast.downloadFinished'),
-      isVerifiedUpdate(current) ? 'success' : updateTone(current) === 'danger' ? 'error' : 'warning')
+    const result = downloadToast(current.downloadStatus)
+    toast.show(t(result.key), result.kind)
   } catch {
     toast.show(t('modules.update.toast.downloadFailed'), 'error')
     await resyncAfterOperationFailure()
@@ -355,20 +400,23 @@ onBeforeUnmount(() => {
         <section class="module-update">
           <h3>{{ t('modules.update.title') }}</h3>
           <p>{{ t('modules.update.description') }}</p>
-          <div class="module-update-status">
-            <div><span>{{ t('modules.update.currentVersion') }}</span><strong>{{ store.selectedModule.version }}</strong></div>
-            <div><span>{{ t('modules.update.statusLabel') }}</span><QBadge :tone="updateTone(store.selectedModule)">{{ t(isVerifiedUpdate(store.selectedModule) ? 'modules.update.verifiedBadge' : updateStatusKey(store.selectedModule.updateStatus)) }}</QBadge></div>
-            <div v-if="store.selectedModule.targetVersion"><span>{{ t('modules.update.latestVersion') }}</span><strong>{{ store.selectedModule.targetVersion }}</strong></div>
+          <div class="module-update-overview">
+            <div class="module-update-versions">
+              <div><span>{{ t('modules.update.currentVersion') }}</span><strong>{{ store.selectedModule.version }}</strong></div>
+              <template v-if="store.selectedModule.targetVersion"><span class="module-update-version-arrow" aria-hidden="true">→</span><div><span>{{ t('modules.update.latestVersion') }}</span><strong>{{ store.selectedModule.targetVersion }}</strong></div></template>
+            </div>
+            <div class="module-update-overall"><span>{{ t('modules.update.statusLabel') }}</span><QBadge :tone="updateTone(store.selectedModule)">{{ t(overallUpdateStatusKey(store.selectedModule)) }}</QBadge></div>
           </div>
-          <div v-if="store.selectedModule.releaseNotes" class="module-update-notes"><strong>{{ t('modules.update.releaseNotes') }}</strong><p>{{ store.selectedModule.releaseNotes }}</p></div>
-          <div v-if="hasDownloadStatus(store.selectedModule)" class="module-download-status" :class="`is-${updateTone(store.selectedModule)}`" role="status">
-            <QBadge :tone="updateTone(store.selectedModule)">{{ t(downloadStatusKey(store.selectedModule.downloadStatus)) }}</QBadge>
-            <span v-if="store.selectedModule.isDownloadActive && downloadPercentage(store.selectedModule) !== null">{{ store.selectedModule.downloadBytesReceived }} / {{ store.selectedModule.downloadExpectedBytes }} ({{ downloadPercentage(store.selectedModule)?.toFixed(0) }}%)</span>
+          <div v-if="isVerifiedUpdate(store.selectedModule)" class="module-update-detail module-update-verified" role="status"><QIcon name="statusSuccess" /><div><strong>{{ t('modules.update.verifiedTitle') }}</strong><p>{{ t('modules.update.notInstalled') }}</p></div></div>
+          <div v-else-if="hasDownloadStatus(store.selectedModule)" class="module-update-detail module-download-status" :class="`is-${updateTone(store.selectedModule)}`" role="status">
+            <QIcon :name="updateTone(store.selectedModule) === 'danger' ? 'statusDanger' : updateTone(store.selectedModule) === 'warning' ? 'statusWarning' : 'statusInfo'" />
+            <div><strong>{{ t(downloadStatusKey(store.selectedModule.downloadStatus)) }}</strong><span v-if="store.selectedModule.isDownloadActive && downloadProgressText(store.selectedModule)">{{ downloadProgressText(store.selectedModule) }}</span><span v-else-if="store.operations[store.selectedModule.id] === 'downloadUpdate'">{{ t('modules.update.downloading') }}</span></div>
           </div>
-          <div v-if="isVerifiedUpdate(store.selectedModule)" class="module-update-verified"><strong>{{ t('modules.update.verifiedTitle') }}</strong><p>{{ t('modules.update.notInstalled') }}</p></div>
+          <div v-else-if="store.selectedModule.releaseNotes" class="module-update-detail module-update-notes" tabindex="0"><div><strong>{{ t('modules.update.releaseNotes') }}</strong><p>{{ store.selectedModule.releaseNotes }}</p></div></div>
+          <div v-else-if="updateConditionDetailKey(store.selectedModule)" class="module-update-detail module-update-condition" :class="`is-${updateTone(store.selectedModule)}`" role="status"><QIcon :name="updateTone(store.selectedModule) === 'danger' ? 'statusDanger' : 'statusWarning'" /><div><strong>{{ t(updateStatusKey(store.selectedModule.updateStatus)) }}</strong><p>{{ updateConditionDetail(store.selectedModule) }}</p></div></div>
           <div class="module-update-actions">
             <QButton class="module-check-update" variant="secondary" :aria-busy="store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy" :disabled="!hostOperationsAvailable || !store.selectedModule.canCheckForUpdate || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy || store.selectedModule.isUpdateCheckBusy" @click="checkModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="refresh" />{{ t(store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy ? 'modules.update.checking' : 'modules.update.check') }}</QButton>
-            <QButton v-if="store.selectedModule.canDownloadUpdate || store.selectedModule.isDownloadActive" class="module-download-update" variant="primary" :aria-busy="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy || store.selectedModule.isDownloadActive" @click="downloadModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="import" />{{ t(store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive ? 'modules.update.downloading' : 'modules.update.download') }}</QButton>
+            <QButton v-if="(store.selectedModule.canDownloadUpdate || store.selectedModule.isDownloadActive) && !isVerifiedUpdate(store.selectedModule)" class="module-download-update" variant="primary" :aria-busy="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy || store.selectedModule.isDownloadActive" @click="downloadModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="download" />{{ t(store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive ? 'modules.update.downloading' : 'modules.update.download') }}</QButton>
           </div>
         </section>
         <div class="wpf-detail-divider" />
@@ -426,15 +474,22 @@ onBeforeUnmount(() => {
 .module-startup .settings-switch-row { margin-top: 8px; }
 .module-startup-status { margin-top: 4px; }
 .module-update>p { margin: -7px 0 12px; color: var(--q-text-2); font-size: 12px; line-height: 1.45; }
-.module-update-status { display: flex; flex-wrap: wrap; gap: 10px 18px; }
-.module-update-status>div { min-width: 110px; }
-.module-update-status span,.module-update-status strong { display: block; }
-.module-update-status span { margin-bottom: 5px; color: var(--q-text-2); font-size: 11px; }
-.module-update-notes { margin-top: 12px; padding: 11px 12px; border: 1px solid var(--q-border); border-radius: 10px; background: var(--q-surface-soft); }
-.module-update-notes p { margin: 5px 0 0; color: var(--q-text-2); font-size: 12px; line-height: 1.45; white-space: pre-wrap; }
-.module-download-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; color: var(--q-text-2); font-size: 11px; }
-.module-update-verified { margin-top: 12px; padding: 11px 12px; border: 1px solid color-mix(in srgb,var(--q-success) 28%,var(--q-border)); border-radius: 10px; background: color-mix(in srgb,var(--q-success) 6%,var(--q-surface)); }
-.module-update-verified p { margin: 4px 0 0; color: var(--q-text-2); font-size: 12px; }
+.module-update-overview { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.module-update-versions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.module-update-versions>div { min-width: 78px; }
+.module-update-versions span,.module-update-versions strong,.module-update-overall>span { display: block; }
+.module-update-versions span,.module-update-overall>span { margin-bottom: 5px; color: var(--q-text-2); font-size: 11px; }
+.module-update-version-arrow { color: var(--q-text-3); font-size: 14px; }
+.module-update-overall { flex: 0 0 auto; text-align: end; }
+.module-update-detail { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; padding: 10px 12px; border: 1px solid var(--q-border); border-radius: 10px; background: var(--q-surface-soft); }
+.module-update-detail>.q-icon { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 1px; }
+.module-update-detail>div { min-width: 0; }
+.module-update-detail p,.module-update-detail span { display: block; margin: 4px 0 0; color: var(--q-text-2); font-size: 12px; line-height: 1.45; }
+.module-update-notes { max-height: 132px; overflow-y: auto; scrollbar-gutter: stable; }
+.module-update-notes p { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.module-download-status.is-danger,.module-update-condition.is-danger { border-color: color-mix(in srgb,var(--q-danger) 28%,var(--q-border)); background: color-mix(in srgb,var(--q-danger) 5%,var(--q-surface)); color: var(--q-danger); }
+.module-download-status.is-warning,.module-update-condition.is-warning { border-color: color-mix(in srgb,var(--q-warning) 28%,var(--q-border)); background: color-mix(in srgb,var(--q-warning) 5%,var(--q-surface)); color: var(--q-warning); }
+.module-update-verified { border-color: color-mix(in srgb,var(--q-success) 28%,var(--q-border)); background: color-mix(in srgb,var(--q-success) 6%,var(--q-surface)); color: var(--q-success); }
 .module-update-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .module-update-actions .q-button { gap: 7px; white-space: nowrap; }
 .module-update-actions .module-operation-spinner { flex: 0 0 14px; margin-inline-end: 0; }

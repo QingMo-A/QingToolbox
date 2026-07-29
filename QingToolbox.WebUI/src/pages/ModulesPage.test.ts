@@ -697,7 +697,10 @@ describe('ModulesPage host-authoritative update presentation', () => {
     expect(store.selectedModuleId).toBe('qing.text')
     expect(wrapper.get('.module-update').text()).toContain('1.1.0')
     expect(wrapper.get('.module-update').text()).toContain('Safer formatting.')
+    expect(wrapper.get('.module-update-notes').attributes('tabindex')).toBe('0')
+    expect(wrapper.findAll('.module-update-overall .q-badge')).toHaveLength(1)
     expect(wrapper.get('.module-download-update').classes()).toContain('is-primary')
+    expect(wrapper.get('.module-download-update .q-icon path').attributes('d')).toBe('M10 2.8v9')
     expect(wrapper.get('.module-card-badges').text()).toContain('Update available')
   })
 
@@ -714,7 +717,39 @@ describe('ModulesPage host-authoritative update presentation', () => {
     expect(update.text()).toContain('It has not been installed, and the current module version is unchanged.')
     expect(update.text()).toContain('1.0.0')
     expect(wrapper.get('.module-card-badges').text()).toContain('Update verified')
+    expect(wrapper.findAll('.module-update-overall .q-badge')).toHaveLength(1)
+    expect(wrapper.find('.module-download-status').exists()).toBe(false)
+    expect(wrapper.find('.module-download-update').exists()).toBe(false)
     expect(update.text().toLowerCase()).not.toContain('install update')
+  })
+
+  it('formats host-reported download progress without inventing an unknown percentage', async () => {
+    const { wrapper, store } = page(item({
+      updateStatus: 'UpdateAvailable', targetVersion: '1.1.0', canDownloadUpdate: true,
+      downloadStatus: 'Downloading', isDownloadActive: true,
+      downloadBytesReceived: 2_516_582, downloadExpectedBytes: 8_388_608,
+    }))
+    await wrapper.get('.wpf-module-card').trigger('click')
+    expect(wrapper.get('.module-download-status').text()).toContain('2.4 MB / 8.0 MB · 30%')
+
+    store.complete({ generatedAt: new Date().toISOString(), modules: [item({
+      updateStatus: 'UpdateAvailable', targetVersion: '1.1.0', canDownloadUpdate: true,
+      downloadStatus: 'Downloading', isDownloadActive: true,
+      downloadBytesReceived: 1536, downloadExpectedBytes: 0,
+    })] })
+    await flushPromises()
+    expect(wrapper.get('.module-download-status').text()).toContain('1.5 KB')
+    expect(wrapper.get('.module-download-status').text()).not.toContain('%')
+  })
+
+  it('uses a status-specific safe toast for a failed package validation', async () => {
+    const failed = item({ updateStatus: 'UpdateAvailable', targetVersion: '1.1.0', downloadStatus: 'HashMismatch' })
+    const downloadUpdate = vi.fn(async () => ({ generatedAt: new Date().toISOString(), modules: [failed] }))
+    const { wrapper } = page(item({ updateStatus: 'UpdateAvailable', targetVersion: '1.1.0', canDownloadUpdate: true }), { downloadUpdate })
+    await wrapper.get('.wpf-module-card').trigger('click')
+    await wrapper.get('.module-download-update').trigger('click'); await flushPromises()
+    expect(useToastStore().kind).toBe('error')
+    expect(useToastStore().message).toBe('The update package failed size or hash verification.')
   })
 
   it('uses host failure classifications and safe localized resynchronization', async () => {
@@ -724,7 +759,7 @@ describe('ModulesPage host-authoritative update presentation', () => {
     await wrapper.get('.wpf-module-card').trigger('click')
     await wrapper.get('.module-check-update').trigger('click'); await flushPromises()
     expect(getSnapshot).toHaveBeenCalledTimes(1)
-    expect(wrapper.get('.module-update').text()).toContain('Host version incompatible')
+    expect(wrapper.get('.module-update').text()).toContain('Package hash mismatch')
     expect(wrapper.get('.module-download-status').classes()).toContain('is-danger')
     expect(useToastStore().message).toBe('The update check failed.')
     expect(useToastStore().message).not.toContain('C:/private')
