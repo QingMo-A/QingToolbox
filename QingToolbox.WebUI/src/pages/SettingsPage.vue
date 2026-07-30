@@ -40,7 +40,7 @@ const startupPresentations: StartupPresentationMode[] = ['MainWindow', 'Minimize
 
 const hasSnapshot = computed(() => settings.snapshot !== null)
 const refreshed = computed(() => settings.generatedAt ? new Date(settings.generatedAt).toLocaleTimeString(currentLocale.value) : null)
-const productVersion = computed(() => app.snapshot?.hostVersion || '0.2.0-alpha')
+const productVersion = computed(() => app.snapshot?.hostVersion || '0.2.1-alpha')
 const environment = computed(() => app.snapshot?.environmentDisplayName || app.mode || 'Development')
 const hostControlsDisabled = computed(() => app.bridge !== 'Connected')
 const languageControlsDisabled = computed(() => hostControlsDisabled.value || settings.status === 'loading' || settings.isHostMutationBusy || isSynchronizingLanguage.value)

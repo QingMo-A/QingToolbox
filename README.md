@@ -21,8 +21,8 @@ QingToolbox 以当前 Windows 用户为范围保持单实例运行。Pipe Server
 QingToolbox 是面向 Windows 的轻量模块化工具箱。Shell 提供现代化界面、
 模块发现和生命周期管理，实际工具功能由独立模块按需提供。
 
-当前版本：**0.2.0-alpha Preview 2**。主题为 **Reliable Startup & Module Lifecycle**，
-这是面向少量测试用户的预览版，
+当前候选版本：**0.2.1-alpha Release Candidate（尚未发布）**。该候选整合宿主安全更新、
+真正的最近使用模块和一键启动体验，
 不是正式稳定版，也不代表生产环境可用。
 
 ## 主要功能
@@ -44,7 +44,7 @@ QingToolbox 是面向 Windows 的轻量模块化工具箱。Shell 提供现代�
 
 ### 当前用户安装版
 
-运行 `QingToolbox-0.2.0-alpha-win-x64-setup.exe`。安装器基于 Inno Setup，
+候选验证使用 `QingToolbox-0.2.1-alpha-win-x64-setup.exe`。安装器基于 Inno Setup，
 只为当前用户安装，不需要管理员权限，也不会触发 UAC。默认目录为：
 
 ```text
@@ -94,7 +94,7 @@ dotnet run --project QingToolbox.Shell
 
 ## `.qmod` 安全提醒
 
-`.qmod` 本质是 ZIP 模块包。`0.2.0-alpha` 尚未实现包签名；模块加载后拥有
+`.qmod` 本质是 ZIP 模块包。`0.2.1-alpha` 尚未实现包签名；模块加载后拥有
 当前用户权限，因此只应导入可信来源模块。格式和校验规则参见
 [`docs/QMOD_FORMAT.md`](docs/QMOD_FORMAT.md)。
 
@@ -110,7 +110,8 @@ dotnet run --project QingToolbox.Shell
 - 模块契约与本地化：[`docs/MODULE_DEVELOPMENT.md`](docs/MODULE_DEVELOPMENT.md)
 - 本地化：[`docs/LOCALIZATION.md`](docs/LOCALIZATION.md)
 - 开发环境：[`docs/DEVELOPMENT_SETUP.md`](docs/DEVELOPMENT_SETUP.md)
-- Preview 2 Release Notes：[`docs/releases/0.2.0-alpha.md`](docs/releases/0.2.0-alpha.md)
+- 0.2.1-alpha 候选说明：[`docs/releases/0.2.1-alpha.md`](docs/releases/0.2.1-alpha.md)
+- Preview 2 历史说明：[`docs/releases/0.2.0-alpha.md`](docs/releases/0.2.0-alpha.md)
 - 更新记录：[`CHANGELOG.md`](CHANGELOG.md)
 
 生成当前用户安装器（需要本机安装 Inno Setup 6）：

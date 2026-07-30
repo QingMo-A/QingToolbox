@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Prepared the unpublished 0.2.1-alpha installer-only release candidate and synchronized host version metadata.
+- Documented the candidate's safe host update flow, genuine recent-module shortcuts, and starter module set.
+
 - Updated the native home to show up to five genuinely recent modules with quick Open and Details actions.
 - Recent modules on the native home can now load, activate, and open in one explicit launch action.
 - Added Production-native discovery of higher official QingToolbox GitHub Releases with SemVer channel selection, installer-only asset validation, conditional caching, and a non-blocking update banner.

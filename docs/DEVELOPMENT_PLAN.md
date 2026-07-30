@@ -6,6 +6,11 @@
 
 ## UI modernization status (authoritative addendum)
 
+- Current release target: **QingToolbox 0.2.1-alpha Release Candidate (unpublished)**.
+- Candidate host source baseline: `dec509b8a48ca635cc93df60f24bc72481a9fbca`; starter-module source baseline: `c4c1b8fe15a37c16b38192aab3b26735bc232be6`.
+- Candidate starter modules: TextTools, PowerGuard, and WindowTopmost. They remain ordinary manifest-discovered modules and are never loaded or activated by refresh or installation.
+- Tag and GitHub Release have not been created. Automated and manual acceptance results must be recorded separately and must not be inferred.
+
 - B1: Engineering Complete — Frozen.
 - B2.1: Engineering Complete — Frozen.
 - UI-1: Engineering Complete — Frozen; protocol-v4 session and immutable-serving correction verified.
@@ -562,6 +567,15 @@ Plan 013 已完成并冻结，除 P0/P1 外不得继续追加普通边缘加固�
 随后以 `/SILENT /NORESTART` 交给现有 Inno Setup。QingToolbox 不直接覆盖自身文件，也不会抢先
 退出。用户手动下载更高版本安装器仍可原地覆盖，同版本 Repair 和 SemVer 降级保护继续有效。
 Development 和 ModuleTest 不访问真实宿主更新源。
+
+当前 0.2.1-alpha 候选版本：
+
+- Version：0.2.1-alpha
+- AssemblyVersion：0.2.1.0
+- FileVersion：0.2.1.0
+- 显示名称：QingToolbox 0.2.1-alpha Preview 2
+
+以下 0.2.0-alpha 条目保留为 Preview 2 历史发布基线：
 
 目标版本：
 

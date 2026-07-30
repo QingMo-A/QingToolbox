@@ -186,7 +186,7 @@ public sealed partial class MainWindowViewModel(
     public string VersionDisplay =>
         typeof(MainWindowViewModel).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-            .InformationalVersion.Split('+')[0] ?? "0.2.0-alpha";
+            .InformationalVersion.Split('+')[0] ?? "0.2.1-alpha";
     public bool IsHostUpdateAvailable => HostUpdateState == HostUpdateCheckState.UpdateAvailable;
     public bool ShowHostUpdateBanner => executionEnvironment.IsProduction && IsHostUpdateAvailable && !IsHostUpdateBannerDismissed;
     public string HostUpdateStatus => localization.GetString(HostUpdateState switch
