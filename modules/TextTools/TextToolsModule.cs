@@ -5,6 +5,7 @@ namespace QingToolbox.Modules.TextTools;
 public sealed class TextToolsModule : IToolModule
 {
     private ModuleContext? _context;
+    private readonly List<WeakReference<TextToolsView>> _views = [];
     public string Id => "qing.texttools";
 
     public string Name => "Text Tools";
@@ -29,22 +30,24 @@ public sealed class TextToolsModule : IToolModule
         return Task.CompletedTask;
     }
 
-    public Task OnUnloadAsync(CancellationToken cancellationToken = default)
+    public async Task OnUnloadAsync(CancellationToken cancellationToken = default)
     {
+        foreach (var reference in _views) if (reference.TryGetTarget(out var view)) await view.DisposeAsync();
+        _views.Clear();
         _context = null;
-        return Task.CompletedTask;
     }
 
     public object? CreateView()
     {
-        return _context is null
-            ? throw new InvalidOperationException("Module context is not available.")
-            : new TextToolsView(_context.Localization, _context.ModuleId);
+        if (_context is null)
+            throw new InvalidOperationException("Module context is not available.");
+        var view = new TextToolsView(_context.Localization, _context.ModuleId);
+        _views.Add(new(view));
+        return view;
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        _context = null;
-        return ValueTask.CompletedTask;
+        await OnUnloadAsync();
     }
 }

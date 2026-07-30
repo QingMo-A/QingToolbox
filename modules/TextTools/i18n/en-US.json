@@ -15,12 +15,21 @@
   "actions.lowercase": "Lowercase",
   "actions.removeEmptyLines": "Remove Empty Lines",
   "actions.copyOutputToInput": "Copy Output To Input",
+  "actions.copyOutput": "Copy Result",
+  "actions.swap": "Swap",
   "actions.clear": "Clear",
   "status.ready": "Ready.",
   "status.done": "Done.",
   "status.copied": "Copied.",
   "status.inputEmpty": "Input is empty.",
-  "errors.invalidJson": "Invalid JSON: {0}",
+  "status.processing": "Processing…",
+  "status.moved": "Result moved to input.",
+  "status.swapped": "Input and result swapped.",
+  "automation.input": "Input text",
+  "automation.output": "Output text",
+  "errors.invalidJson": "The input is not valid JSON.",
   "errors.invalidBase64": "Invalid Base64 input.",
-  "errors.operationFailed": "Operation failed: {0}"
+  "errors.invalidUrl": "Invalid URL-encoded input.",
+  "errors.copyFailed": "The result could not be copied.",
+  "errors.operationFailed": "The operation could not be completed."
 }

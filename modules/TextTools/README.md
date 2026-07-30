@@ -11,7 +11,8 @@ formatting.
 - URL encode/decode
 - Uppercase/lowercase
 - Remove empty lines
-- Copy output back to input
+- Copy the result to the clipboard
+- Move the result back to input or swap both panes
 - Clear input, output, and status
 
 ## Localization
@@ -24,6 +25,9 @@ The module receives the current QingToolbox language through
 `ModuleContext.Localization`. Open Text Tools views implement
 `ILocalizedModuleView`, so labels and buttons refresh when the toolbox language
 changes. Existing input and output text are not cleared by localization refresh.
+
+Long-running transformations execute away from the UI thread and are cancelled
+when the module unloads.
 
 ## Build
 
@@ -45,3 +49,8 @@ Then run the Shell from the `toolbox` branch and click:
 ```text
 Refresh Modules -> Load -> Open
 ```
+
+## Package
+
+Run `scripts/package-texttools.ps1` from the repository root. Version `0.1.1`
+produces `qing.texttools-0.1.1.qmod` and its same-name `.sha256` sidecar.

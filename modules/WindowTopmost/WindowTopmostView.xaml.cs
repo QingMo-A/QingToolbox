@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using QingToolbox.Abstractions.Localization;
 
@@ -21,6 +22,7 @@ public partial class WindowTopmostView : UserControl, ILocalizedModuleView
         WindowGrid.ItemsSource = _windows;
         RefreshLocalization();
         RefreshWindows();
+        UpdateSelectionActions();
     }
 
     private string T(string key, string fallback) =>
@@ -40,6 +42,12 @@ public partial class WindowTopmostView : UserControl, ILocalizedModuleView
         ProcessColumn.Header = T("columns.process", "Process");
         HwndColumn.Header = T("columns.hwnd", "HWND");
         TopmostColumn.Header = T("columns.topmost", "Topmost");
+        EmptyStateText.Text = T("status.empty", "No eligible windows are currently available.");
+        AutomationProperties.SetName(WindowGrid, T("automation.windowList", "Visible windows"));
+        AutomationProperties.SetName(RefreshButton, RefreshButtonText.Text);
+        AutomationProperties.SetName(PickButton, PickButtonText.Text);
+        AutomationProperties.SetName(SetTopmostButton, SetTopmostButtonText.Text);
+        AutomationProperties.SetName(RemoveTopmostButton, RemoveTopmostButtonText.Text);
 
         foreach (var window in _windows)
         {
@@ -50,6 +58,7 @@ public partial class WindowTopmostView : UserControl, ILocalizedModuleView
     private void OnRefresh(object sender, RoutedEventArgs e) => RefreshWindows();
     private void OnSetTopmost(object sender, RoutedEventArgs e) => SetSelected(true);
     private void OnRemoveTopmost(object sender, RoutedEventArgs e) => SetSelected(false);
+    private void OnSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateSelectionActions();
 
     private async void OnPick(object sender, RoutedEventArgs e)
     {
@@ -105,10 +114,19 @@ public partial class WindowTopmostView : UserControl, ILocalizedModuleView
         }
 
         WindowGrid.SelectedItem = _windows.FirstOrDefault(item => item.Handle == selectedHandle);
+        EmptyStateText.Visibility = _windows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateSelectionActions();
         StatusText.Text = _localization.GetModuleString(
             _moduleId,
             "status.refreshed",
             "Window list refreshed.");
+    }
+
+    private void UpdateSelectionActions()
+    {
+        var selected = WindowGrid.SelectedItem is LocalizedWindowInfo;
+        SetTopmostButton.IsEnabled = selected;
+        RemoveTopmostButton.IsEnabled = selected;
     }
 
     private sealed class LocalizedWindowInfo : INotifyPropertyChanged

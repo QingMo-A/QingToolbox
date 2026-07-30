@@ -3,7 +3,7 @@ namespace QingToolbox.Modules.WindowTopmost;
 internal static class WindowTopmostService
 {
     public static bool SetTopmost(nint hwnd, bool topmost) =>
-        NativeMethods.SetWindowPos(
+        NativeMethods.IsWindow(hwnd) && NativeMethods.SetWindowPos(
             hwnd,
             topmost ? NativeMethods.HwndTopmost : NativeMethods.HwndNoTopmost,
             0, 0, 0, 0,

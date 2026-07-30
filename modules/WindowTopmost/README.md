@@ -18,3 +18,8 @@ The view implements `ILocalizedModuleView`, so headings, buttons, table
 headers, status messages, and Yes/No values refresh when the toolbox language
 changes. Refreshing localization does not re-enumerate windows or intentionally
 clear the current selection.
+
+Version `0.1.1` disables topmost actions until a window is selected, rejects
+stale handles, and provides a localized empty state. Package with
+`scripts/package-windowtopmost.ps1` to produce `qing.windowtopmost-0.1.1.qmod`
+and its same-name `.sha256` sidecar.

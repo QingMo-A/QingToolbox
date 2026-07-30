@@ -2,7 +2,7 @@
   "id": "qing.texttools",
   "name": "Text Tools",
   "description": "Lightweight text conversion and formatting tools.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "QingMo",
   "minimumHostVersion": "0.1.0",
   "entry": "QingToolbox.Modules.TextTools.dll",

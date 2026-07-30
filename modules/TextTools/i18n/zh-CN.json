@@ -15,12 +15,21 @@
   "actions.lowercase": "转小写",
   "actions.removeEmptyLines": "删除空行",
   "actions.copyOutputToInput": "复制输出到输入",
+  "actions.copyOutput": "复制结果",
+  "actions.swap": "交换",
   "actions.clear": "清空",
   "status.ready": "就绪。",
   "status.done": "完成。",
   "status.copied": "已复制。",
   "status.inputEmpty": "输入为空。",
-  "errors.invalidJson": "无效 JSON：{0}",
+  "status.processing": "正在处理…",
+  "status.moved": "结果已移到输入区。",
+  "status.swapped": "输入与结果已交换。",
+  "automation.input": "输入文本",
+  "automation.output": "输出文本",
+  "errors.invalidJson": "输入不是有效的 JSON。",
   "errors.invalidBase64": "无效的 Base64 输入。",
-  "errors.operationFailed": "操作失败：{0}"
+  "errors.invalidUrl": "无效的 URL 编码输入。",
+  "errors.copyFailed": "无法复制结果。",
+  "errors.operationFailed": "无法完成此操作。"
 }

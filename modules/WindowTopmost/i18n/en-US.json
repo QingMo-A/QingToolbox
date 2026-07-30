@@ -19,6 +19,8 @@
   "status.pickPending": "Move the cursor over a window and confirm.",
   "status.pickFailed": "No window was picked.",
   "status.noWindowSelected": "No window selected.",
+  "status.empty": "No eligible windows are currently available.",
+  "automation.windowList": "Visible windows",
   "values.yes": "Yes",
   "values.no": "No",
   "errors.operationFailed": "Operation failed: {0}"

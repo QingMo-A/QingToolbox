@@ -173,17 +173,23 @@
             <Border.Effect>
                 <DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.08" Color="#31598F"/>
             </Border.Effect>
+            <Grid>
             <DataGrid x:Name="WindowGrid" AutoGenerateColumns="False" IsReadOnly="True"
                       SelectionMode="Single" SelectionUnit="FullRow" HeadersVisibility="Column"
                       GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EDF2F8"
-                      BorderThickness="0" Background="Transparent" RowHeaderWidth="0">
+                      BorderThickness="0" Background="Transparent" RowHeaderWidth="0"
+                      SelectionChanged="OnSelectionChanged" AutomationProperties.Name="Visible windows">
                 <DataGrid.Columns>
                     <DataGridTextColumn x:Name="TitleColumn" Header="Title" Binding="{Binding Title}" Width="*"/>
-                    <DataGridTextColumn x:Name="ProcessColumn" Header="Process" Binding="{Binding ProcessName}" Width="170"/>
-                    <DataGridTextColumn x:Name="HwndColumn" Header="HWND" Binding="{Binding HandleText}" Width="135"/>
-                    <DataGridTextColumn x:Name="TopmostColumn" Header="Topmost" Binding="{Binding TopmostText}" Width="100"/>
+                    <DataGridTextColumn x:Name="ProcessColumn" Header="Process" Binding="{Binding ProcessName}" Width="120"/>
+                    <DataGridTextColumn x:Name="HwndColumn" Header="HWND" Binding="{Binding HandleText}" Width="100"/>
+                    <DataGridTextColumn x:Name="TopmostColumn" Header="Topmost" Binding="{Binding TopmostText}" Width="80"/>
                 </DataGrid.Columns>
             </DataGrid>
+            <TextBlock x:Name="EmptyStateText" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Foreground="{StaticResource SecondaryTextBrush}" FontSize="15" TextWrapping="Wrap"
+                       TextAlignment="Center" IsHitTestVisible="False"/>
+            </Grid>
         </Border>
 
         <Border Grid.Row="3" Margin="0,14,0,0" Padding="14,11" CornerRadius="11"

@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="$(QingToolboxHostRoot)\QingToolbox.Abstractions\QingToolbox.Abstractions.csproj" Private="false" />
   </ItemGroup>
+  <ItemGroup><AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo"><_Parameter1>QingToolbox.Modules.StarterModules.SmokeTest</_Parameter1></AssemblyAttribute></ItemGroup>
   <ItemGroup>
     <None Update="module.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="icon.svg" CopyToOutputDirectory="PreserveNewest" />

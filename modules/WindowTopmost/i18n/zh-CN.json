@@ -19,6 +19,8 @@
   "status.pickPending": "将鼠标移动到目标窗口上并确认。",
   "status.pickFailed": "未拾取到窗口。",
   "status.noWindowSelected": "未选择窗口。",
+  "status.empty": "当前没有可操作的窗口。",
+  "automation.windowList": "可见窗口列表",
   "values.yes": "是",
   "values.no": "否",
   "errors.operationFailed": "操作失败：{0}"

@@ -1,32 +1,19 @@
-# Modules
+# QingToolbox starter modules
 
-Available modules:
+The first public QingToolbox 0.2.1-alpha module set contains three independently packaged, manually loaded modules.
 
-- `TextTools` — text conversion and formatting.
-- `ScreenPin` — region capture with resizable floating image pins.
-- `WindowTopmost` — visible-window enumeration and always-on-top control.
-- `PowerGuard` — confirmed-outage monitoring with a cancellable normal-shutdown countdown.
+| Module | Purpose | Version | Minimum host | Load mode | System behavior | Package |
+| --- | --- | --- | --- | --- | --- | --- |
+| TextTools | Local JSON, Base64, URL, case, and line transformations. | 0.1.1 | 0.1.0 | Manual | None; clipboard access occurs only when the user selects Copy Result. | `qing.texttools-0.1.1.qmod` |
+| PowerGuard | Confirms a sustained connectivity outage and can request a normal Windows shutdown after an explicit opt-in countdown. | 0.1.0 | 0.1.0 | Manual | Network probes and optional, user-enabled normal shutdown. No service, scheduled task, tray process, remote commands, or forced shutdown. | `qing.powerguard-0.1.0.qmod` |
+| WindowTopmost | Lists eligible visible windows and toggles their always-on-top state. | 0.1.1 | 0.1.0 | Manual | Calls bounded Win32 window enumeration and positioning APIs only after user action. | `qing.windowtopmost-0.1.1.qmod` |
 
-Each folder under this directory is intended to contain one standalone QingToolbox module.
+Each package has a same-name SHA256 sidecar, for example `qing.texttools-0.1.1.qmod.sha256`.
 
-Example:
+Known limitations:
 
-```text
-modules/
-  TextTools/
-  FileTools/
-  ImageTools/
-```
+- TextTools processes text in memory and does not provide file batching or history.
+- PowerGuard does not read UPS state; endpoint reachability is authoritative and physical-link state is diagnostic only.
+- WindowTopmost lists eligible top-level windows owned by other processes; protected or elevated windows may reject changes.
 
-A module should include:
-
-- its own `.csproj`
-- `module.json`
-- module implementation
-- optional WPF view
-- README
-
-## Available modules
-
-- [`TextTools`](TextTools/README.md): JSON, Base64, URL, case conversion, and line cleanup.
-- [`PowerGuard`](PowerGuard/README.md): unattended offline detection and safe normal-shutdown protection.
+Build and packaging scripts consume `QingToolbox.Abstractions` from a separate, exact QingToolbox host worktree. Modules do not reference Shell or Core.

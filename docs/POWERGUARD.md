@@ -33,4 +33,4 @@ All duration decisions use monotonic timestamps from an injectable .NET `TimePro
 
 Probe health exposes only the latest check time, latest successful check time, and consecutive failure count. Successful probe events are recorded on first success, recovery from failure, or after a 30-minute quiet interval; state-transition events are never suppressed. See [POWERGUARD-ACCEPTANCE.md](POWERGUARD-ACCEPTANCE.md) for the manual deployment checklist. No test result in that checklist is claimed automatically.
 
-The package is written to `artifacts/modules/QingToolbox.PowerGuard-0.1.0.qmod` with a SHA256 sidecar. Build artifacts are not committed.
+The package is written to `artifacts/modules/qing.powerguard-0.1.0.qmod` with a same-name SHA256 sidecar. Build artifacts are not committed.
