@@ -14,6 +14,8 @@ using QingToolbox.Core.Runtime;
 using QingToolbox.Core.Settings;
 using QingToolbox.ModuleLoader;
 using QingToolbox.Shell.Services;
+using QingToolbox.Shell.ViewModels;
+using QingToolbox.Shell.WebShell;
 using QingToolbox.Shell.Windowing;
 using QingToolbox.Shell.Startup;
 
@@ -344,6 +346,10 @@ internal static class Program
             "QingToolbox.Shell", "ViewModels", "MainWindowViewModel.cs"));
         var windowXaml = File.ReadAllText(Path.Combine(repositoryRoot,
             "QingToolbox.Shell", "MainWindow.xaml"));
+        var english = File.ReadAllText(Path.Combine(repositoryRoot,
+            "QingToolbox.Shell", "Resources", "Localization", "en-US.json"));
+        var chinese = File.ReadAllText(Path.Combine(repositoryRoot,
+            "QingToolbox.Shell", "Resources", "Localization", "zh-CN.json"));
 
         Require(viewModelSource.Contains(
                 "ActivateModuleOperationAsync(moduleId, CancellationToken.None, false) == WebModuleLifecycleResult.Succeeded",
@@ -359,10 +365,172 @@ internal static class Program
             "Load, Deactivate, and Unload must not record recent module use.");
         Require(windowXaml.Contains("ItemsSource=\"{Binding RecentModules}\"", StringComparison.Ordinal),
             "The native home must bind to RecentModules instead of the complete module collection.");
-        Require(windowXaml.Contains("ShowRecentModuleDetailsCommand", StringComparison.Ordinal) &&
-                windowXaml.Contains("OpenModuleCommand", StringComparison.Ordinal),
-            "Recent module cards must reuse the native Open command and existing module details navigation.");
+        Require(windowXaml.Contains("LaunchRecentModuleCommand", StringComparison.Ordinal) &&
+                windowXaml.Contains("IsEnabled=\"{Binding CanLaunchFromHome}\"", StringComparison.Ordinal),
+            "Recent module cards must use the guarded one-click launch command.");
+        Require(windowXaml.Contains("ShowRecentModuleDetailsCommand", StringComparison.Ordinal),
+            "Recent module cards must preserve existing module details navigation.");
+        Require(windowXaml.Contains("OpenModuleCommand", StringComparison.Ordinal),
+            "The Modules page must preserve its explicit Open command.");
+        var recentMarkupStart = windowXaml.IndexOf("ItemsSource=\"{Binding RecentModules}\"", StringComparison.Ordinal);
+        var recentMarkupEnd = windowXaml.IndexOf("</ItemsControl>", recentMarkupStart, StringComparison.Ordinal);
+        var recentMarkup = windowXaml[recentMarkupStart..recentMarkupEnd];
+        Require(!recentMarkup.Contains("OpenModuleCommand", StringComparison.Ordinal),
+            "The recent module card must not bypass one-click orchestration through OpenModuleCommand.");
+        Require(viewModelSource.Contains("LoadModuleOperationAsync(moduleId, CancellationToken.None, false)", StringComparison.Ordinal) &&
+                viewModelSource.Contains("ActivateModuleOperationAsync(moduleId, CancellationToken.None, false)", StringComparison.Ordinal) &&
+                viewModelSource.Contains("OpenModuleOperationAsync(moduleId, CancellationToken.None)", StringComparison.Ordinal),
+            "Recent launch must compose the existing Load, Activate, and Open operations.");
+        var launchStart = viewModelSource.IndexOf("private async Task LaunchRecentModuleAsync", StringComparison.Ordinal);
+        var launchEnd = viewModelSource.IndexOf("public Task<WebModuleLifecycleResult> OpenModuleFromWebAsync", launchStart,
+            StringComparison.Ordinal);
+        var launchSource = viewModelSource[launchStart..launchEnd];
+        Require(launchSource.Split("RecordRecentModuleAsync", StringSplitOptions.None).Length == 2,
+            "A successful one-click launch must record recent use exactly once.");
+        Require(english.Contains("\"home.launch\": \"Launch\"", StringComparison.Ordinal) &&
+                chinese.Contains("\"home.launch\": \"启动\"", StringComparison.Ordinal) &&
+                english.Contains("home.launchRecentModuleDescription", StringComparison.Ordinal) &&
+                chinese.Contains("home.launchRecentModuleDescription", StringComparison.Ordinal),
+            "English and Simplified Chinese launch labels and descriptions must remain available.");
+        VerifyRecentModuleLaunchCapability();
+        VerifyRecentModuleLaunchOrchestrationAsync().GetAwaiter().GetResult();
         Console.WriteLine("Native recent-module contracts passed.");
+    }
+
+    private static void VerifyRecentModuleLaunchCapability()
+    {
+        foreach (var state in new[] { ModuleState.NotLoaded, ModuleState.Unloaded, ModuleState.Loaded,
+                     ModuleState.Deactivated, ModuleState.Running })
+            Require(CreateLaunchModule(state).CanLaunchFromHome, $"{state} must be launchable from the native home.");
+
+        foreach (var state in new[] { ModuleState.Failed, ModuleState.Unloading })
+            Require(!CreateLaunchModule(state).CanLaunchFromHome, $"{state} must not be launchable from the native home.");
+
+        var guarded = CreateLaunchModule(ModuleState.NotLoaded);
+        var capabilityNotifications = 0;
+        guarded.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(DiscoveredModuleViewModel.CanLaunchFromHome)) capabilityNotifications++;
+        };
+        guarded.IsBusy = true;
+        Require(!guarded.CanLaunchFromHome, "A busy module must not launch from the native home.");
+        guarded.IsBusy = false;
+        guarded.UpdateExecutionReadiness(new(guarded.Id, ModuleExecutionReadinessStatus.BlockedByModuleRecovery));
+        Require(!guarded.CanLaunchFromHome, "A recovery-blocked module must not launch from the native home.");
+        Require(capabilityNotifications >= 3,
+            "Busy and execution-readiness changes must notify the home launch capability.");
+        Require(!CreateLaunchModule(ModuleState.NotLoaded, valid: false).CanLaunchFromHome,
+            "An invalid module must not launch from the native home.");
+    }
+
+    private static async Task VerifyRecentModuleLaunchOrchestrationAsync()
+    {
+        async Task<(WebModuleLifecycleResult Result, string[] Calls)> RunAsync(
+            ModuleState initialState,
+            WebModuleLifecycleResult loadResult = WebModuleLifecycleResult.Succeeded,
+            WebModuleLifecycleResult activateResult = WebModuleLifecycleResult.Succeeded,
+            WebModuleLifecycleResult openResult = WebModuleLifecycleResult.Succeeded,
+            bool removeAfterLoad = false)
+        {
+            var module = CreateLaunchModule(initialState);
+            var calls = new List<string>();
+            var removed = false;
+            var result = await RecentModuleLaunchOrchestrator.ExecuteAsync(
+                () => removed ? null : module,
+                () =>
+                {
+                    calls.Add("Load");
+                    if (loadResult == WebModuleLifecycleResult.Succeeded) module.RuntimeState = "Loaded";
+                    if (removeAfterLoad) removed = true;
+                    return Task.FromResult(loadResult);
+                },
+                () =>
+                {
+                    calls.Add("Activate");
+                    if (activateResult == WebModuleLifecycleResult.Succeeded) module.RuntimeState = "Running";
+                    return Task.FromResult(activateResult);
+                },
+                () =>
+                {
+                    calls.Add("Open");
+                    return Task.FromResult(openResult);
+                });
+            return (result, calls.ToArray());
+        }
+
+        foreach (var state in new[] { ModuleState.NotLoaded, ModuleState.Unloaded })
+        {
+            var launch = await RunAsync(state);
+            Require(launch.Result == WebModuleLifecycleResult.Succeeded &&
+                    launch.Calls.SequenceEqual(new[] { "Load", "Activate", "Open" }, StringComparer.Ordinal),
+                $"{state} launch must run Load, Activate, then Open exactly once.");
+        }
+        foreach (var state in new[] { ModuleState.Loaded, ModuleState.Deactivated })
+        {
+            var launch = await RunAsync(state);
+            Require(launch.Calls.SequenceEqual(new[] { "Activate", "Open" }, StringComparer.Ordinal),
+                $"{state} launch must skip Load and run Activate then Open.");
+        }
+        var running = await RunAsync(ModuleState.Running);
+        Require(running.Calls.SequenceEqual(new[] { "Open" }, StringComparer.Ordinal),
+            "Running launch must only Open or focus the module window.");
+
+        var loadFailed = await RunAsync(ModuleState.NotLoaded, loadResult: WebModuleLifecycleResult.Failed);
+        Require(loadFailed.Calls.SequenceEqual(new[] { "Load" }, StringComparer.Ordinal),
+            "A failed Load must stop before Activate and Open.");
+        var activateFailed = await RunAsync(ModuleState.Loaded, activateResult: WebModuleLifecycleResult.Failed);
+        Require(activateFailed.Calls.SequenceEqual(new[] { "Activate" }, StringComparer.Ordinal),
+            "A failed Activate must stop before Open.");
+        var openFailed = await RunAsync(ModuleState.Running, openResult: WebModuleLifecycleResult.Failed);
+        Require(openFailed.Result == WebModuleLifecycleResult.Failed && openFailed.Calls.Length == 1,
+            "A failed Open must remain failed for the caller to avoid recording recent use.");
+        var removed = await RunAsync(ModuleState.NotLoaded, removeAfterLoad: true);
+        Require(removed.Result == WebModuleLifecycleResult.NotFound && removed.Calls.SequenceEqual(new[] { "Load" }),
+            "A module removed after Load must stop safely before Activate and Open.");
+
+        foreach (var blocked in new[]
+                 {
+                     CreateLaunchModule(ModuleState.NotLoaded, busy: true),
+                     CreateLaunchModule(ModuleState.NotLoaded, valid: false),
+                     CreateLaunchModule(ModuleState.Failed),
+                     CreateLaunchModule(ModuleState.Unloading),
+                     CreateLaunchModule(ModuleState.NotLoaded, recoveryBlocked: true)
+                 })
+        {
+            var calls = 0;
+            var result = await RecentModuleLaunchOrchestrator.ExecuteAsync(
+                () => blocked,
+                () => { calls++; return Task.FromResult(WebModuleLifecycleResult.Succeeded); },
+                () => { calls++; return Task.FromResult(WebModuleLifecycleResult.Succeeded); },
+                () => { calls++; return Task.FromResult(WebModuleLifecycleResult.Succeeded); });
+            Require(result != WebModuleLifecycleResult.Succeeded && calls == 0,
+                "Busy, invalid, failed, unloading, and recovery-blocked modules must not start a launch step.");
+        }
+    }
+
+    private static DiscoveredModuleViewModel CreateLaunchModule(ModuleState state, bool valid = true,
+        bool busy = false, bool recoveryBlocked = false)
+    {
+        var module = new DiscoveredModule
+        {
+            Manifest = new ModuleManifest
+            {
+                Id = $"qing.launch-{state}-{Guid.NewGuid():N}",
+                Name = state.ToString(),
+                Version = "1.0.0",
+                Entry = "Module.dll"
+            },
+            ModuleDirectory = Path.GetTempPath(),
+            ManifestPath = Path.Combine(Path.GetTempPath(), "module.json"),
+            State = state,
+            Errors = valid ? [] : [new ModuleDiscoveryError { Code = "Invalid", Message = "Invalid test module." }]
+        };
+        var viewModel = new DiscoveredModuleViewModel(module, new SmokeTestLocalizationService());
+        viewModel.UpdateExecutionReadiness(new(viewModel.Id, recoveryBlocked
+            ? ModuleExecutionReadinessStatus.BlockedByModuleRecovery
+            : ModuleExecutionReadinessStatus.Ready));
+        viewModel.IsBusy = busy;
+        return viewModel;
     }
 
     private static async Task VerifyExecutionEnvironmentContractsAsync()

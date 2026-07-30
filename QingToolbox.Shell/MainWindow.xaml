@@ -1346,13 +1346,14 @@
                                                     </Border>
                                                     <WrapPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="12,9,0,0">
                                                         <Button Margin="0,0,8,6"
-                                                                Command="{Binding DataContext.OpenModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                CommandParameter="{Binding Id}" IsEnabled="{Binding CanOpen}"
-                                                                AutomationProperties.Name="{Binding DataContext.Strings[home.openRecentModule], RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                Command="{Binding DataContext.LaunchRecentModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding Id}" IsEnabled="{Binding CanLaunchFromHome}"
+                                                                ToolTip="{Binding DataContext.Strings[home.launchRecentModuleDescription], RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                AutomationProperties.Name="{Binding DataContext.Strings[home.launchRecentModule], RelativeSource={RelativeSource AncestorType=Window}}"
                                                                 Style="{StaticResource PrimaryActionButtonStyle}">
                                                             <StackPanel Orientation="Horizontal">
                                                                 <TextBlock Text="&#xE8A7;" Style="{StaticResource CompactFluentIconStyle}"/>
-                                                                <TextBlock Text="{Binding DataContext.Strings[common.open], RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                                <TextBlock Text="{Binding DataContext.Strings[home.launch], RelativeSource={RelativeSource AncestorType=Window}}"/>
                                                             </StackPanel>
                                                         </Button>
                                                         <Button Margin="0,0,0,6"

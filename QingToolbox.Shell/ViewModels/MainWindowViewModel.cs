@@ -1254,6 +1254,19 @@ public sealed partial class MainWindowViewModel(
             await RecordRecentModuleAsync(moduleId, sequence);
     }
 
+    [RelayCommand]
+    private async Task LaunchRecentModuleAsync(string moduleId)
+    {
+        var sequence = Interlocked.Increment(ref _recentUseSequence);
+        var result = await RecentModuleLaunchOrchestrator.ExecuteAsync(
+            () => FindModule(moduleId),
+            () => LoadModuleOperationAsync(moduleId, CancellationToken.None, false),
+            () => ActivateModuleOperationAsync(moduleId, CancellationToken.None, false),
+            () => OpenModuleOperationAsync(moduleId, CancellationToken.None));
+        if (result == WebModuleLifecycleResult.Succeeded)
+            await RecordRecentModuleAsync(moduleId, sequence);
+    }
+
     public Task<WebModuleLifecycleResult> OpenModuleFromWebAsync(string moduleId, CancellationToken cancellationToken) =>
         OpenModuleOperationAsync(moduleId, cancellationToken);
 
@@ -1432,6 +1445,9 @@ public sealed partial class MainWindowViewModel(
             UpdateStatistics();
         }
     }
+
+    private DiscoveredModuleViewModel? FindModule(string moduleId) => Modules.FirstOrDefault(
+        module => string.Equals(module.Id, moduleId, StringComparison.Ordinal));
 
     private bool IsOutOfProcessWpf(string moduleId)
     {
@@ -2297,5 +2313,50 @@ public sealed partial class MainWindowViewModel(
         SelectedModule = Modules.FirstOrDefault(module => module.Id == moduleId);
         SelectedNavigationKey = "Modules";
         return new(WebModuleImportDisposition.Imported, moduleId);
+    }
+}
+
+internal static class RecentModuleLaunchOrchestrator
+{
+    public static async Task<WebModuleLifecycleResult> ExecuteAsync(
+        Func<DiscoveredModuleViewModel?> resolveModule,
+        Func<Task<WebModuleLifecycleResult>> load,
+        Func<Task<WebModuleLifecycleResult>> activate,
+        Func<Task<WebModuleLifecycleResult>> open)
+    {
+        var module = resolveModule();
+        var availability = GetAvailability(module);
+        if (availability != WebModuleLifecycleResult.Succeeded) return availability;
+
+        if (module!.RuntimeState is "NotLoaded" or "Unloaded")
+        {
+            var loadResult = await load();
+            if (loadResult != WebModuleLifecycleResult.Succeeded) return loadResult;
+            module = resolveModule();
+            if (module is null) return WebModuleLifecycleResult.NotFound;
+            if (!module.CanActivate) return GetAvailability(module);
+        }
+
+        if (module.RuntimeState is "Loaded" or "Deactivated")
+        {
+            var activateResult = await activate();
+            if (activateResult != WebModuleLifecycleResult.Succeeded) return activateResult;
+            module = resolveModule();
+            if (module is null) return WebModuleLifecycleResult.NotFound;
+            if (!module.CanOpen) return GetAvailability(module);
+        }
+
+        if (!module.CanOpen) return GetAvailability(module);
+        return await open();
+    }
+
+    private static WebModuleLifecycleResult GetAvailability(DiscoveredModuleViewModel? module)
+    {
+        if (module is null) return WebModuleLifecycleResult.NotFound;
+        if (module.IsBusy) return WebModuleLifecycleResult.Busy;
+        if (module.IsExecutionBlocked) return WebModuleLifecycleResult.ExecutionBlocked;
+        return module.CanLaunchFromHome || module.CanOpen || module.CanActivate
+            ? WebModuleLifecycleResult.Succeeded
+            : WebModuleLifecycleResult.Unavailable;
     }
 }

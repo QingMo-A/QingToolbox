@@ -211,6 +211,10 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
     public bool CanOpen =>
         IsValid && !IsExecutionBlocked && !IsBusy && RuntimeState is "Loaded" or "Running" or "Deactivated";
 
+    public bool CanLaunchFromHome =>
+        IsValid && !IsExecutionBlocked && !IsBusy &&
+        RuntimeState is "NotLoaded" or "Unloaded" or "Loaded" or "Deactivated" or "Running";
+
     public void UpdateRuntimeState(ModuleRuntimeRecord? record)
     {
         RuntimeState = record?.State.ToString() ?? State;
@@ -309,6 +313,7 @@ public sealed partial class DiscoveredModuleViewModel : ObservableObject
         OnPropertyChanged(nameof(CanDeactivate));
         OnPropertyChanged(nameof(CanUnload));
         OnPropertyChanged(nameof(CanOpen));
+        OnPropertyChanged(nameof(CanLaunchFromHome));
     }
 
     private static string? ResolveIconPath(DiscoveredModule module)

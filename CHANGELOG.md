@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Updated the native home to show up to five genuinely recent modules with quick Open and Details actions.
+- Recent modules on the native home can now load, activate, and open in one explicit launch action.
 - Added Production-native discovery of higher official QingToolbox GitHub Releases with SemVer channel selection, installer-only asset validation, conditional caching, and a non-blocking update banner.
 - Added explicit Production installer download and SHA256 verification with bounded streaming, cancellation, cache revalidation, and a native ready state.
 - Added installed-deployment verification, final installer revalidation, user confirmation, and safe `/SILENT /NORESTART` handoff to the existing Inno Setup in-place upgrade path.
