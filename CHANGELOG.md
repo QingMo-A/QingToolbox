@@ -4,6 +4,8 @@
 
 - Prepared the unpublished 0.2.1-alpha installer-only release candidate and synchronized host version metadata.
 - Documented the candidate's safe host update flow, genuine recent-module shortcuts, and starter module set.
+- Restored the published `v0.1.0-alpha` installer as the real upgrade baseline; `0.2.0-alpha` remains an unpublished internal Preview 2 target.
+- Clarified that TextTools, PowerGuard, and WindowTopmost are separately prepared `.qmod` candidates and are not bundled with the host installer or host Release.
 
 - Updated the native home to show up to five genuinely recent modules with quick Open and Details actions.
 - Recent modules on the native home can now load, activate, and open in one explicit launch action.

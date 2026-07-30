@@ -76,6 +76,11 @@ QingToolbox 唯一受支持的正式分发方式；历史 Release 中已经存�
 手动运行更高版本安装器、同版本 Repair 和降级保护仍保持支持。非标准复制部署只提供官方
 Release 页面，不会猜测安装目录或自动启动安装器。
 
+TextTools `0.1.1`、PowerGuard `0.1.0` 和 WindowTopmost `0.1.1` 已在 modules 提交
+`c4c1b8fe15a37c16b38192aab3b26735bc232be6` 单独完成适配与 `.qmod` 验证。宿主安装器和
+宿主 `0.2.1-alpha` Release 均不捆绑模块 DLL 或 `.qmod`；这些模块将由项目所有者通过独立模块
+交付路径提供。安装宿主、启动宿主或刷新模块不会自动加载或执行它们。
+
 开发环境运行：
 
 ```powershell
@@ -121,7 +126,7 @@ dotnet run --project QingToolbox.Shell
 ```
 
 安装器构建说明参见 [`installer/README.md`](installer/README.md)。安装器只包含
-QingToolbox 宿主，不包含 TextTools、ScreenPin、WindowTopmost 或其他具体模块。
+QingToolbox 宿主，不包含 TextTools、PowerGuard、WindowTopmost 或其他具体模块。
 
 `toolbox` 分支的 Windows CI 会构建并校验安装器、执行模块 Smoke Test，并在
 隔离用户目录中进行静默安装—卸载往返测试。CI 上传的 Preview

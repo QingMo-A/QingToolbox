@@ -11,11 +11,14 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'get-preview-release-metadata.ps1')
 $metadata = Get-PreviewReleaseMetadata
-$previousVersion = '0.2.0-alpha'
-$previousFileVersion = '0.2.0.0'
+$previousVersion = '0.1.0-alpha'
+$previousFileVersion = '0.1.0.0'
 $appId = '{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}_is1'
 $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$appId"
 $markerKey = 'HKCU:\Software\QingMo-A\QingToolbox'
+if ([string]::IsNullOrWhiteSpace($PreviousHostManifestPath)) {
+    $PreviousHostManifestPath = Join-Path $repoRoot 'installer\baselines\0.1.0-alpha-host-payload.json'
+}
 if ([string]::IsNullOrWhiteSpace($TestRoot)) { $TestRoot = Join-Path $env:TEMP ("QingToolbox-upgrade-" + [guid]::NewGuid().ToString('N')) }
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $isCi = $env:GITHUB_ACTIONS -eq 'true'
@@ -150,9 +153,6 @@ try {
     $preview1Entry=Get-ItemProperty $uninstallKey
     if(-not [IO.Path]::GetFullPath([string]$preview1Entry.InstallLocation).TrimEnd('\').Equals(
         $install.TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)){throw "$previousVersion did not register the custom installation directory."}
-    if ([string]::IsNullOrWhiteSpace($PreviousHostManifestPath)) {
-        $PreviousHostManifestPath = Join-Path $install 'host-payload.manifest.json'
-    }
     if (-not (Test-Path -LiteralPath $PreviousHostManifestPath -PathType Leaf)) {
         throw "$previousVersion host payload manifest is missing."
     }

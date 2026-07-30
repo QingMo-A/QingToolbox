@@ -14,7 +14,7 @@ static class Smoke
 
     private static void TestSelection()
     {
-        Assert(Best("0.2.0-alpha", R("0.2.1-alpha")) == "0.2.1-alpha", "0.2.0 candidate upgrade selected");
+        Assert(Best("0.1.0-alpha", R("0.2.1-alpha")) == "0.2.1-alpha", "published alpha to 0.2.1 candidate selected");
         Assert(Best("0.2.1-alpha", R("0.2.1-alpha"), R("0.2.0-alpha")) is null, "same and lower candidate ignored");
         Assert(Best("1.0.0-alpha", R("1.0.1-alpha")) == "1.0.1-alpha", "alpha to alpha");
         Assert(Best("1.0.0-alpha", R("1.0.0-beta")) == "1.0.0-beta", "alpha to beta");

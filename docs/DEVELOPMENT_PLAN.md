@@ -7,8 +7,10 @@
 ## UI modernization status (authoritative addendum)
 
 - Current release target: **QingToolbox 0.2.1-alpha Release Candidate (unpublished)**.
-- Candidate host source baseline: `dec509b8a48ca635cc93df60f24bc72481a9fbca`; starter-module source baseline: `c4c1b8fe15a37c16b38192aab3b26735bc232be6`.
-- Candidate starter modules: TextTools, PowerGuard, and WindowTopmost. They remain ordinary manifest-discovered modules and are never loaded or activated by refresh or installation.
+- Candidate feature-development baseline: `dec509b8a48ca635cc93df60f24bc72481a9fbca`; starter-module source baseline: `c4c1b8fe15a37c16b38192aab3b26735bc232be6`.
+- Exact candidate host source identity is recorded at build time and must match the final synchronized `origin/toolbox` HEAD in the Preview Manifest, Host Payload Manifest, RC report, and final handoff report.
+- TextTools `0.1.1`, PowerGuard `0.1.0`, and WindowTopmost `0.1.1` are separately prepared module candidates. The host installer and host Release do not contain their DLLs or `.qmod` files; the project owner will provide them through an independent module-delivery path.
+- `0.2.0-alpha` was the internal Preview 2 development target and was not published as an official Release. The `0.2.1-alpha` upgrade gate therefore uses the existing official `v0.1.0-alpha` installer.
 - Tag and GitHub Release have not been created. Automated and manual acceptance results must be recorded separately and must not be inferred.
 
 - B1: Engineering Complete — Frozen.
@@ -575,7 +577,7 @@ Development 和 ModuleTest 不访问真实宿主更新源。
 - FileVersion：0.2.1.0
 - 显示名称：QingToolbox 0.2.1-alpha Preview 2
 
-以下 0.2.0-alpha 条目保留为 Preview 2 历史发布基线：
+以下 0.2.0-alpha 条目仅保留为未发布的 Preview 2 内部开发目标历史，不代表官方 Tag、Release 或升级来源：
 
 目标版本：
 
