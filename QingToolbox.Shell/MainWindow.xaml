@@ -1286,41 +1286,88 @@
                             <StackPanel>
                                 <TextBlock Text="{Binding Strings[home.recentModules]}" FontSize="16"
                                            FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/>
-                                <ItemsControl Margin="0,10,0,0" ItemsSource="{Binding Modules}">
+                                <Border Margin="0,14,0,2" Padding="18" CornerRadius="14"
+                                        Background="#78F7FAFF" BorderBrush="{StaticResource SubtleBorderBrush}"
+                                        BorderThickness="1"
+                                        Visibility="{Binding HasNoRecentModules, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <StackPanel HorizontalAlignment="Center">
+                                        <TextBlock Text="{Binding Strings[home.noRecentModules]}" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource PrimaryTextBrush}" TextAlignment="Center"
+                                                   TextWrapping="Wrap"/>
+                                        <TextBlock Margin="0,5,0,0" Text="{Binding Strings[home.noRecentModulesDescription]}"
+                                                   Foreground="{StaticResource SecondaryTextBrush}" TextAlignment="Center"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+                                <ItemsControl Margin="0,10,0,0" ItemsSource="{Binding RecentModules}"
+                                              Visibility="{Binding HasRecentModules, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Grid Margin="0,8">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                    <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                </Grid.ColumnDefinitions>
-                                                <Border Width="34" Height="34" Padding="6" CornerRadius="9" Background="#EAF2FF">
-                                                    <Grid>
-                                                        <svgc:SvgViewbox Visibility="{Binding HasIcon, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                                         Source="{Binding IconPath, Converter={StaticResource ModuleIconSourceConverter}}"/>
-                                                        <TextBlock Text="&#xE71D;" FontFamily="Segoe Fluent Icons"
-                                                                   Foreground="#2563EB" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                                            <TextBlock.Style>
-                                                                <Style TargetType="TextBlock">
-                                                                    <Style.Triggers>
-                                                                        <DataTrigger Binding="{Binding HasIcon}" Value="True">
-                                                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                                                        </DataTrigger>
-                                                                    </Style.Triggers>
-                                                                </Style>
-                                                            </TextBlock.Style>
-                                                        </TextBlock>
-                                                    </Grid>
-                                                </Border>
-                                                <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/>
-                                                    <TextBlock Margin="0,3,0,0" Text="{Binding DisplayDescription}" FontSize="11" Foreground="{StaticResource SecondaryTextBrush}" TextTrimming="CharacterEllipsis"/>
-                                                </StackPanel>
-                                                <Border Grid.Column="2" VerticalAlignment="Center" Style="{StaticResource StateBadgeStyle}">
-                                                    <TextBlock Text="{Binding DisplayRuntimeState}" FontSize="11" Foreground="#1D4ED8"/>
-                                                </Border>
-                                            </Grid>
+                                            <Border Margin="0,5" Padding="12" CornerRadius="12"
+                                                    Background="#52FFFFFF" BorderBrush="{StaticResource SubtleBorderBrush}"
+                                                    BorderThickness="1">
+                                                <Grid>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                    </Grid.RowDefinitions>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="38" Height="38" Padding="7" CornerRadius="10" Background="#EAF2FF">
+                                                        <Grid>
+                                                            <svgc:SvgViewbox Visibility="{Binding HasIcon, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                                             Source="{Binding IconPath, Converter={StaticResource ModuleIconSourceConverter}}"/>
+                                                            <TextBlock Text="&#xE71D;" FontFamily="Segoe Fluent Icons"
+                                                                       Foreground="#2563EB" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding HasIcon}" Value="True">
+                                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                        </Grid>
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
+                                                                   Foreground="{StaticResource PrimaryTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Margin="0,3,0,0" Text="{Binding DisplayDescription}" FontSize="11"
+                                                                   Foreground="{StaticResource SecondaryTextBrush}"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                    <Border Grid.Column="2" VerticalAlignment="Center" Style="{StaticResource StateBadgeStyle}">
+                                                        <TextBlock Text="{Binding DisplayRuntimeState}" FontSize="11" Foreground="#1D4ED8"/>
+                                                    </Border>
+                                                    <WrapPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="12,9,0,0">
+                                                        <Button Margin="0,0,8,6"
+                                                                Command="{Binding DataContext.OpenModuleCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding Id}" IsEnabled="{Binding CanOpen}"
+                                                                AutomationProperties.Name="{Binding DataContext.Strings[home.openRecentModule], RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                Style="{StaticResource PrimaryActionButtonStyle}">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="&#xE8A7;" Style="{StaticResource CompactFluentIconStyle}"/>
+                                                                <TextBlock Text="{Binding DataContext.Strings[common.open], RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                            </StackPanel>
+                                                        </Button>
+                                                        <Button Margin="0,0,0,6"
+                                                                Command="{Binding DataContext.ShowRecentModuleDetailsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}"
+                                                                AutomationProperties.Name="{Binding DataContext.Strings[home.viewRecentModuleDetails], RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                Style="{StaticResource SecondaryActionButtonStyle}">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="&#xE946;" Style="{StaticResource CompactFluentIconStyle}"/>
+                                                                <TextBlock Text="{Binding DataContext.Strings[modules.details], RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                            </StackPanel>
+                                                        </Button>
+                                                    </WrapPanel>
+                                                </Grid>
+                                            </Border>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>

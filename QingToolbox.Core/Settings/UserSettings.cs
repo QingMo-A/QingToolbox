@@ -2,7 +2,7 @@ namespace QingToolbox.Core.Settings;
 
 public sealed class UserSettings
 {
-    public int SettingsSchemaVersion { get; set; } = 6;
+    public int SettingsSchemaVersion { get; set; } = 7;
     public string Language { get; set; } = "system";
     public double? FloatingBadgeLeft { get; set; }
     public double? FloatingBadgeTop { get; set; }
@@ -17,10 +17,11 @@ public sealed class UserSettings
     public MainWindowCloseBehavior MainWindowCloseBehavior { get; set; } = MainWindowCloseBehavior.Ask;
     public bool? ShowLogsInSidebar { get; set; }
     public List<StartupModuleAuthorization> StartupModules { get; set; } = [];
+    public List<string> RecentModuleIds { get; set; } = [];
 
     internal void Normalize()
     {
-        SettingsSchemaVersion = Math.Max(6, SettingsSchemaVersion);
+        SettingsSchemaVersion = Math.Max(7, SettingsSchemaVersion);
         Language = string.IsNullOrWhiteSpace(Language) ? "system" : Language;
         StartupRegistrationBackend = StartupRegistrationBackend is "TaskScheduler" or "RegistryRun"
             ? StartupRegistrationBackend : "None";
@@ -44,6 +45,7 @@ public sealed class UserSettings
             .GroupBy(item => item.ModuleId, StringComparer.Ordinal)
             .Select(group => group.Last())
             .ToList();
+        RecentModuleIds = RecentModuleHistory.Normalize(RecentModuleIds);
     }
 
     private static double? FiniteOrNull(double? value) =>
@@ -51,6 +53,31 @@ public sealed class UserSettings
 
     private static double? RatioOrNull(double? value) =>
         value is { } number && double.IsFinite(number) ? Math.Clamp(number, 0, 1) : null;
+}
+
+public static class RecentModuleHistory
+{
+    public const int MaximumCount = 5;
+
+    public static List<string> Normalize(IEnumerable<string?>? moduleIds) => moduleIds?
+        .Where(id => !string.IsNullOrWhiteSpace(id))
+        .Select(id => id!.Trim())
+        .Distinct(StringComparer.Ordinal)
+        .Take(MaximumCount)
+        .ToList() ?? [];
+
+    public static List<string> Merge(IReadOnlyList<string> persisted,
+        IReadOnlyDictionary<string, long> currentSessionUses) => Normalize(
+        currentSessionUses.OrderByDescending(pair => pair.Value).Select(pair => pair.Key)
+            .Concat(persisted.Where(id => !currentSessionUses.ContainsKey(id))));
+
+    public static IReadOnlyList<T> Project<T>(IEnumerable<string?> moduleIds, IEnumerable<T> modules,
+        Func<T, string> idSelector)
+    {
+        var byId = modules.GroupBy(idSelector, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        return Normalize(moduleIds).Where(byId.ContainsKey).Select(id => byId[id]).ToArray();
+    }
 }
 
 public enum StartupPresentationMode { MainWindow, Minimized, FloatingBadge }

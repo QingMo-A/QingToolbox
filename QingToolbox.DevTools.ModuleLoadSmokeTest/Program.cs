@@ -38,10 +38,18 @@ internal static class Program
 
     private static int Run(string[] args)
     {
-        var options = ParseOptions(args);
+        var recentModulesOnly = args.SequenceEqual(["--recent-modules-only"], StringComparer.Ordinal);
+        var options = recentModulesOnly ? new SmokeTestOptions(null, null) : ParseOptions(args);
         VerifyCloseBehaviorSettings();
         VerifyExecutionEnvironmentContractsAsync().GetAwaiter().GetResult();
         var repositoryRoot = FindRepositoryRoot(AppContext.BaseDirectory);
+        VerifyRecentModuleNativeContracts(repositoryRoot);
+        if (recentModulesOnly)
+        {
+            VerifyUserSettingsAsync().GetAwaiter().GetResult();
+            Console.WriteLine("Recent module settings and native projection smoke test passed.");
+            return 0;
+        }
         VerifyNotificationAreaLifecycleContracts(repositoryRoot);
         VerifyExitFailureIsolation();
         var configuration = GetBuildConfiguration(AppContext.BaseDirectory);
@@ -257,6 +265,39 @@ internal static class Program
             await File.WriteAllTextAsync(path, "{\"Language\":\"zh-CN\",\"UnknownFutureField\":true}");
             var legacyLanguage = await service.ReadAsync();
             Require(legacyLanguage.Language == "zh-CN", "Legacy language-only settings must load.");
+            Require(legacyLanguage.RecentModuleIds.Count == 0,
+                "Legacy settings without recent module history must default to an empty list.");
+
+            await File.WriteAllTextAsync(path,
+                "{\"RecentModuleIds\":[\" qing.first \",\"\",\"qing.second\",\"qing.first\",\"qing.third\",\"qing.fourth\",\"qing.fifth\",\"qing.sixth\"]}");
+            var normalizedHistory = await service.ReadAsync();
+            Require(normalizedHistory.SettingsSchemaVersion >= 7,
+                "Recent module settings must upgrade to schema version 7.");
+            Require(normalizedHistory.RecentModuleIds.SequenceEqual(
+                    new[] { "qing.first", "qing.second", "qing.third", "qing.fourth", "qing.fifth" },
+                    StringComparer.Ordinal),
+                "Recent module history must trim IDs, remove blanks and ordinal duplicates, preserve order, and retain five entries.");
+
+            var mergedHistory = RecentModuleHistory.Merge(
+                new[] { "qing.first", "qing.second", "qing.third", "qing.fourth" },
+                new Dictionary<string, long>(StringComparer.Ordinal)
+                {
+                    ["qing.first"] = 1,
+                    ["qing.third"] = 3,
+                    ["qing.new"] = 2
+                });
+            Require(mergedHistory.SequenceEqual(
+                    new[] { "qing.third", "qing.new", "qing.first", "qing.second", "qing.fourth" },
+                    StringComparer.Ordinal),
+                "Current-session use sequence must win over late operation completion order.");
+
+            var projectedHistory = RecentModuleHistory.Project(
+                new[] { "qing.missing", "qing.third", "qing.third", "qing.first", "qing.second" },
+                new[] { "qing.first", "qing.second", "qing.third" },
+                id => id);
+            Require(projectedHistory.SequenceEqual(
+                    new[] { "qing.third", "qing.first", "qing.second" }, StringComparer.Ordinal),
+                "Recent module projection must retain saved order while filtering missing and duplicate modules.");
 
             await File.WriteAllTextAsync(path,
                 "{\"Language\":\"en-US\",\"FloatingBadgeLeft\":120,\"FloatingBadgeTop\":240,\"HasFloatingBadgePosition\":true}");
@@ -294,6 +335,34 @@ internal static class Program
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
         Console.WriteLine("Durable shared user settings passed.");
+    }
+
+    private static void VerifyRecentModuleNativeContracts(string repositoryRoot)
+    {
+        Console.WriteLine("Verifying native recent-module contracts...");
+        var viewModelSource = File.ReadAllText(Path.Combine(repositoryRoot,
+            "QingToolbox.Shell", "ViewModels", "MainWindowViewModel.cs"));
+        var windowXaml = File.ReadAllText(Path.Combine(repositoryRoot,
+            "QingToolbox.Shell", "MainWindow.xaml"));
+
+        Require(viewModelSource.Contains(
+                "ActivateModuleOperationAsync(moduleId, CancellationToken.None, false) == WebModuleLifecycleResult.Succeeded",
+                StringComparison.Ordinal),
+            "Only a successful native Activate operation may record recent module use.");
+        Require(viewModelSource.Contains(
+                "OpenModuleOperationAsync(moduleId, CancellationToken.None) == WebModuleLifecycleResult.Succeeded",
+                StringComparison.Ordinal),
+            "Only a successful native Open operation may record recent module use.");
+        Require(!viewModelSource.Contains("LoadModuleAsync(string moduleId) => RecordRecentModule", StringComparison.Ordinal) &&
+                !viewModelSource.Contains("DeactivateModuleAsync(string moduleId) => RecordRecentModule", StringComparison.Ordinal) &&
+                !viewModelSource.Contains("UnloadModuleAsync(string moduleId) => RecordRecentModule", StringComparison.Ordinal),
+            "Load, Deactivate, and Unload must not record recent module use.");
+        Require(windowXaml.Contains("ItemsSource=\"{Binding RecentModules}\"", StringComparison.Ordinal),
+            "The native home must bind to RecentModules instead of the complete module collection.");
+        Require(windowXaml.Contains("ShowRecentModuleDetailsCommand", StringComparison.Ordinal) &&
+                windowXaml.Contains("OpenModuleCommand", StringComparison.Ordinal),
+            "Recent module cards must reuse the native Open command and existing module details navigation.");
+        Console.WriteLine("Native recent-module contracts passed.");
     }
 
     private static async Task VerifyExecutionEnvironmentContractsAsync()

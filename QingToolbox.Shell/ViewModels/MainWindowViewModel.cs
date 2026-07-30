@@ -69,6 +69,7 @@ public sealed partial class MainWindowViewModel(
     private readonly SemaphoreSlim _closeBehaviorSaveGate = new(1, 1);
     private readonly SemaphoreSlim _languageChangeGate = new(1, 1);
     private readonly SemaphoreSlim _webModuleUpdateGate = new(1, 1);
+    private readonly SemaphoreSlim _recentModulesGate = new(1, 1);
     private readonly CancellationTokenSource _updateCancellation = new();
     private CancellationTokenSource? _automaticUpdateDelay;
     private readonly Dictionary<string, (string Version, ModuleUpdateResult Result)> _updateResults = new(StringComparer.Ordinal);
@@ -82,6 +83,9 @@ public sealed partial class MainWindowViewModel(
     private bool _suppressLanguageSelectionChange;
     private MainWindowCloseBehavior _persistedCloseBehavior = MainWindowCloseBehavior.Ask;
     private int _closeBehaviorSaveVersion;
+    private long _recentUseSequence;
+    private readonly Dictionary<string, long> _recentSessionUses = new(StringComparer.Ordinal);
+    private List<string> _recentModuleIds = [];
     private bool _logSettingInitialized;
     private bool _processExitSubscribed;
     [ObservableProperty] private bool _isCheckingModuleUpdates;
@@ -243,10 +247,13 @@ public sealed partial class MainWindowViewModel(
 
     public ObservableCollection<DiscoveredModuleViewModel> Modules { get; } = [];
     public ObservableCollection<DiscoveredModuleViewModel> RunningModules { get; } = [];
+    public ObservableCollection<DiscoveredModuleViewModel> RecentModules { get; } = [];
     public ObservableCollection<SessionLogEntry> LogEntries => sessionLog.Entries;
     public string CurrentLogPath => sessionLog.CurrentLogPath;
     public bool HasModules => Modules.Count > 0;
     public bool HasNoModules => !HasModules;
+    public bool HasRecentModules => RecentModules.Count > 0;
+    public bool HasNoRecentModules => !HasRecentModules;
     public bool HasSelectedModule => SelectedModule is not null;
 
     [RelayCommand]
@@ -378,6 +385,14 @@ public sealed partial class MainWindowViewModel(
     {
         if (!_suppressLanguageSelectionChange)
             _ = ChangeLanguageFromNativeAsync(value);
+    }
+
+    [RelayCommand]
+    private void ShowRecentModuleDetails(DiscoveredModuleViewModel? module)
+    {
+        if (module is null) return;
+        SelectedModule = module;
+        SelectedNavigationKey = "Modules";
     }
 
     private async Task ChangeLanguageFromNativeAsync(string languageCode)
@@ -1102,6 +1117,7 @@ public sealed partial class MainWindowViewModel(
             {
                 Modules.Add(module);
             }
+            await MergeRecentModulesAsync(settings.RecentModuleIds, cancellationToken);
             _appliedDiscoveryGeneration = discovery.Generation;
 
             SelectedModule = Modules.FirstOrDefault(
@@ -1156,7 +1172,12 @@ public sealed partial class MainWindowViewModel(
     }
 
     [RelayCommand]
-    private Task ActivateModuleAsync(string moduleId) => ActivateModuleOperationAsync(moduleId, CancellationToken.None, false);
+    private async Task ActivateModuleAsync(string moduleId)
+    {
+        var sequence = Interlocked.Increment(ref _recentUseSequence);
+        if (await ActivateModuleOperationAsync(moduleId, CancellationToken.None, false) == WebModuleLifecycleResult.Succeeded)
+            await RecordRecentModuleAsync(moduleId, sequence);
+    }
 
     public Task<WebModuleLifecycleResult> ActivateModuleFromWebAsync(string moduleId, CancellationToken cancellationToken) =>
         ActivateModuleOperationAsync(moduleId, cancellationToken, true);
@@ -1226,7 +1247,12 @@ public sealed partial class MainWindowViewModel(
     }
 
     [RelayCommand]
-    private Task OpenModuleAsync(string moduleId) => OpenModuleOperationAsync(moduleId, CancellationToken.None);
+    private async Task OpenModuleAsync(string moduleId)
+    {
+        var sequence = Interlocked.Increment(ref _recentUseSequence);
+        if (await OpenModuleOperationAsync(moduleId, CancellationToken.None) == WebModuleLifecycleResult.Succeeded)
+            await RecordRecentModuleAsync(moduleId, sequence);
+    }
 
     public Task<WebModuleLifecycleResult> OpenModuleFromWebAsync(string moduleId, CancellationToken cancellationToken) =>
         OpenModuleOperationAsync(moduleId, cancellationToken);
@@ -1553,6 +1579,7 @@ public sealed partial class MainWindowViewModel(
             }
 
             SelectedModule = null;
+            await RemoveRecentModuleAsync(module.Id);
             await RefreshModulesAsync();
             StatusMessage = removal.Status == ModuleProgramRemovalStatus.Completed
                 ? localization.GetString("status.moduleRemoved", module.DisplayName)
@@ -1626,6 +1653,69 @@ public sealed partial class MainWindowViewModel(
     private async Task RepairStartupAsync()
     {
         _ = await RepairStartupRegistrationCoreAsync(CancellationToken.None);
+    }
+
+    private async Task MergeRecentModulesAsync(IReadOnlyList<string> persisted, CancellationToken cancellationToken)
+    {
+        await _recentModulesGate.WaitAsync(cancellationToken);
+        try
+        {
+            _recentModuleIds = RecentModuleHistory.Merge(persisted, _recentSessionUses);
+            RefreshRecentModulesProjection();
+        }
+        finally { _recentModulesGate.Release(); }
+    }
+
+    private async Task RecordRecentModuleAsync(string moduleId, long sequence)
+    {
+        await _recentModulesGate.WaitAsync();
+        try
+        {
+            if (!_recentSessionUses.TryGetValue(moduleId, out var existing) || sequence > existing)
+                _recentSessionUses[moduleId] = sequence;
+            _recentModuleIds = RecentModuleHistory.Merge(_recentModuleIds, _recentSessionUses);
+            RefreshRecentModulesProjection();
+            try
+            {
+                var snapshot = _recentModuleIds.ToArray();
+                await settingsService.UpdateAsync(settings => settings.RecentModuleIds = [.. snapshot]);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                sessionLog.Warning("Settings", $"Recent module history could not be saved: {exception.GetType().Name}.");
+            }
+        }
+        finally { _recentModulesGate.Release(); }
+    }
+
+    private async Task RemoveRecentModuleAsync(string moduleId)
+    {
+        await _recentModulesGate.WaitAsync();
+        try
+        {
+            _recentSessionUses.Remove(moduleId);
+            _recentModuleIds.RemoveAll(id => string.Equals(id, moduleId, StringComparison.Ordinal));
+            RefreshRecentModulesProjection();
+            try
+            {
+                await settingsService.UpdateAsync(settings =>
+                    settings.RecentModuleIds.RemoveAll(id => string.Equals(id, moduleId, StringComparison.Ordinal)));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                sessionLog.Warning("Settings", $"Removed module history could not be saved: {exception.GetType().Name}.");
+            }
+        }
+        finally { _recentModulesGate.Release(); }
+    }
+
+    private void RefreshRecentModulesProjection()
+    {
+        RecentModules.Clear();
+        foreach (var module in RecentModuleHistory.Project(_recentModuleIds, Modules, item => item.Id))
+            RecentModules.Add(module);
+        OnPropertyChanged(nameof(HasRecentModules));
+        OnPropertyChanged(nameof(HasNoRecentModules));
     }
 
     public Task<WebSettingsMutationResult> RepairStartupFromWebAsync(CancellationToken cancellationToken) =>
