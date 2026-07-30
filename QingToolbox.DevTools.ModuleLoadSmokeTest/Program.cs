@@ -430,7 +430,12 @@ internal static class Program
             WebModuleLifecycleResult loadResult = WebModuleLifecycleResult.Succeeded,
             WebModuleLifecycleResult activateResult = WebModuleLifecycleResult.Succeeded,
             WebModuleLifecycleResult openResult = WebModuleLifecycleResult.Succeeded,
-            bool removeAfterLoad = false)
+            ModuleState stateAfterLoad = ModuleState.Loaded,
+            ModuleState stateAfterActivate = ModuleState.Running,
+            bool removeAfterLoad = false,
+            bool removeAfterActivate = false,
+            bool recoveryBlockedAfterLoad = false,
+            bool busyAfterActivate = false)
         {
             var module = CreateLaunchModule(initialState);
             var calls = new List<string>();
@@ -440,14 +445,21 @@ internal static class Program
                 () =>
                 {
                     calls.Add("Load");
-                    if (loadResult == WebModuleLifecycleResult.Succeeded) module.RuntimeState = "Loaded";
+                    if (loadResult == WebModuleLifecycleResult.Succeeded)
+                        module.RuntimeState = stateAfterLoad.ToString();
+                    if (recoveryBlockedAfterLoad)
+                        module.UpdateExecutionReadiness(new(module.Id,
+                            ModuleExecutionReadinessStatus.BlockedByModuleRecovery));
                     if (removeAfterLoad) removed = true;
                     return Task.FromResult(loadResult);
                 },
                 () =>
                 {
                     calls.Add("Activate");
-                    if (activateResult == WebModuleLifecycleResult.Succeeded) module.RuntimeState = "Running";
+                    if (activateResult == WebModuleLifecycleResult.Succeeded)
+                        module.RuntimeState = stateAfterActivate.ToString();
+                    if (busyAfterActivate) module.IsBusy = true;
+                    if (removeAfterActivate) removed = true;
                     return Task.FromResult(activateResult);
                 },
                 () =>
@@ -472,8 +484,13 @@ internal static class Program
                 $"{state} launch must skip Load and run Activate then Open.");
         }
         var running = await RunAsync(ModuleState.Running);
-        Require(running.Calls.SequenceEqual(new[] { "Open" }, StringComparer.Ordinal),
+        Require(running.Result == WebModuleLifecycleResult.Succeeded &&
+                running.Calls.SequenceEqual(new[] { "Open" }, StringComparer.Ordinal),
             "Running launch must only Open or focus the module window.");
+        var directlyRunning = await RunAsync(ModuleState.NotLoaded, stateAfterLoad: ModuleState.Running);
+        Require(directlyRunning.Result == WebModuleLifecycleResult.Succeeded &&
+                directlyRunning.Calls.SequenceEqual(new[] { "Load", "Open" }, StringComparer.Ordinal),
+            "A module already Running after Load must skip Activate but still reach Open.");
 
         var loadFailed = await RunAsync(ModuleState.NotLoaded, loadResult: WebModuleLifecycleResult.Failed);
         Require(loadFailed.Calls.SequenceEqual(new[] { "Load" }, StringComparer.Ordinal),
@@ -487,6 +504,33 @@ internal static class Program
         var removed = await RunAsync(ModuleState.NotLoaded, removeAfterLoad: true);
         Require(removed.Result == WebModuleLifecycleResult.NotFound && removed.Calls.SequenceEqual(new[] { "Load" }),
             "A module removed after Load must stop safely before Activate and Open.");
+        var removedAfterActivate = await RunAsync(ModuleState.Loaded, removeAfterActivate: true);
+        Require(removedAfterActivate.Result == WebModuleLifecycleResult.NotFound &&
+                removedAfterActivate.Calls.SequenceEqual(new[] { "Activate" }),
+            "A module removed after Activate must stop safely before Open.");
+
+        foreach (var stalledState in new[] { ModuleState.NotLoaded, ModuleState.Unloaded })
+        {
+            var stalled = await RunAsync(ModuleState.NotLoaded, stateAfterLoad: stalledState);
+            Require(stalled.Result == WebModuleLifecycleResult.Unavailable &&
+                    stalled.Calls.SequenceEqual(new[] { "Load" }),
+                $"A successful Load that remains {stalledState} must not be treated as a complete launch.");
+        }
+        foreach (var regressedState in new[] { ModuleState.NotLoaded, ModuleState.Unloaded })
+        {
+            var regressed = await RunAsync(ModuleState.Loaded, stateAfterActivate: regressedState);
+            Require(regressed.Result == WebModuleLifecycleResult.Unavailable &&
+                    regressed.Calls.SequenceEqual(new[] { "Activate" }),
+                $"A successful Activate that regresses to {regressedState} must not reach Open.");
+        }
+        var recoveryAfterLoad = await RunAsync(ModuleState.NotLoaded, recoveryBlockedAfterLoad: true);
+        Require(recoveryAfterLoad.Result == WebModuleLifecycleResult.ExecutionBlocked &&
+                recoveryAfterLoad.Calls.SequenceEqual(new[] { "Load" }),
+            "Recovery blocking after Load must stop before Activate and Open.");
+        var busyAfterActivate = await RunAsync(ModuleState.Loaded, busyAfterActivate: true);
+        Require(busyAfterActivate.Result == WebModuleLifecycleResult.Busy &&
+                busyAfterActivate.Calls.SequenceEqual(new[] { "Activate" }),
+            "A Busy module after Activate must stop before Open.");
 
         foreach (var blocked in new[]
                  {

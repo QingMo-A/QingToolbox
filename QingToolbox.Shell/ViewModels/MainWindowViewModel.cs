@@ -2325,16 +2325,19 @@ internal static class RecentModuleLaunchOrchestrator
         Func<Task<WebModuleLifecycleResult>> open)
     {
         var module = resolveModule();
-        var availability = GetAvailability(module);
-        if (availability != WebModuleLifecycleResult.Succeeded) return availability;
+        if (GetBlockingLifecycleResult(module) is { } initialBlock) return initialBlock;
+        if (!module!.CanLaunchFromHome) return WebModuleLifecycleResult.Unavailable;
 
-        if (module!.RuntimeState is "NotLoaded" or "Unloaded")
+        if (module.RuntimeState is "NotLoaded" or "Unloaded")
         {
             var loadResult = await load();
             if (loadResult != WebModuleLifecycleResult.Succeeded) return loadResult;
             module = resolveModule();
-            if (module is null) return WebModuleLifecycleResult.NotFound;
-            if (!module.CanActivate) return GetAvailability(module);
+            if (GetBlockingLifecycleResult(module) is { } loadBlock) return loadBlock;
+
+            if (module!.RuntimeState == "Running") return await open();
+            if (module.RuntimeState is not ("Loaded" or "Deactivated"))
+                return WebModuleLifecycleResult.Unavailable;
         }
 
         if (module.RuntimeState is "Loaded" or "Deactivated")
@@ -2342,21 +2345,20 @@ internal static class RecentModuleLaunchOrchestrator
             var activateResult = await activate();
             if (activateResult != WebModuleLifecycleResult.Succeeded) return activateResult;
             module = resolveModule();
-            if (module is null) return WebModuleLifecycleResult.NotFound;
-            if (!module.CanOpen) return GetAvailability(module);
+            if (GetBlockingLifecycleResult(module) is { } activateBlock) return activateBlock;
+            if (!module!.CanOpen) return WebModuleLifecycleResult.Unavailable;
         }
 
-        if (!module.CanOpen) return GetAvailability(module);
+        if (!module.CanOpen) return WebModuleLifecycleResult.Unavailable;
         return await open();
     }
 
-    private static WebModuleLifecycleResult GetAvailability(DiscoveredModuleViewModel? module)
+    private static WebModuleLifecycleResult? GetBlockingLifecycleResult(DiscoveredModuleViewModel? module)
     {
         if (module is null) return WebModuleLifecycleResult.NotFound;
         if (module.IsBusy) return WebModuleLifecycleResult.Busy;
         if (module.IsExecutionBlocked) return WebModuleLifecycleResult.ExecutionBlocked;
-        return module.CanLaunchFromHome || module.CanOpen || module.CanActivate
-            ? WebModuleLifecycleResult.Succeeded
-            : WebModuleLifecycleResult.Unavailable;
+        if (!module.IsValid) return WebModuleLifecycleResult.Unavailable;
+        return null;
     }
 }
