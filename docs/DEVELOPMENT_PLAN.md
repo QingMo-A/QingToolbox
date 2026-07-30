@@ -57,7 +57,7 @@ QingToolbox 是一个面向 Windows 的模块化桌面工具箱。
 - 模块发现、加载、启动授权、更新和删除具有明确的安全边界。
 - Production、Development、ModuleTest 三种环境严格隔离。
 - 发布过程可复现、可审计，并通过安装器、宿主载荷审计和升级测试验证。
-- 优先建立可靠基础设施，再逐步加入自动安装和宿主自更新。
+- 可靠基础设施与 Plan 013 宿主自更新已经完成并冻结；后续优先推进用户可见工具和现代化 UI。
 
 当前开发分支：
 
@@ -195,7 +195,7 @@ Preview 2 的产品目标不是完成全部自动更新，而是证明：
 
 > QingToolbox 能可靠启动、原地升级、安全管理模块，并保留用户状态。
 
-## 5. 当前选定计划：Plan 013 宿主自更新
+## 5. 已完成计划：Plan 013 宿主自更新
 
 Plan 013 状态为 **Implementation Complete / Frozen**，完整边界见
 [`docs/plans/PLAN_013_HOST_SELF_UPDATE.md`](plans/PLAN_013_HOST_SELF_UPDATE.md)。
@@ -206,7 +206,7 @@ Plan 013 状态为 **Implementation Complete / Frozen**，完整边界见
 
 ## 5.1 Preview 1 → Preview 2 原地升级门禁（保留的发布基础设施）
 
-这是下一阶段的唯一主线。在完成前，不进入 qmod 自动安装。
+这是 Preview 2 发布工作的保留门禁，不代表当前功能开发主线；未执行的人工验收仍按真实状态保留为 `Not Run` 或 `Blocked`。
 
 ### 5.1.1 版本与发布说明
 
@@ -333,7 +333,7 @@ Preview 2 自动化升级门禁已经实现，并至少有一个历史提交通�
 真实升级测试会启动 Production 模式宿主，而普通 Windows 账户的 Known Folder 无法通过环境变量可靠重定向，因此
 本地安全门禁不得为测试强制关闭用户 Shell 或触及真实 Production 数据；该测试只在一次性 GitHub Actions 账户中执行。
 所有未实际执行的人工升级、登录启动、Repair、卸载和代表性 Windows 环境项目必须保持 **Not Run** 或 **Blocked**。
-项目所有者已明确决定暂时推迟剩余 Preview 2 人工发布验收，并授权进入后续开发。这不表示未执行的原地升级、登录重登、Repair、卸载或代表性环境项目通过；这些项目继续保持 `Not Run`。当前开发主线转为阶段 A：`.qmod` 离线结构验证与安全 Staging。
+项目所有者已明确决定暂时推迟剩余 Preview 2 人工发布验收，并授权进入后续开发。这不表示未执行的原地升级、登录重登、Repair、卸载或代表性环境项目通过；这些项目继续保持 `Not Run`。阶段 A 的 `.qmod` 离线结构验证与安全 Staging 后来已经完成；当前后续方向以用户可见工具、模块信息展示、设置体验和现代化 UI 为优先。
 
 ### 6.2 人工验收
 
@@ -351,15 +351,15 @@ Preview 2 自动化升级门禁已经实现，并至少有一个历史提交通�
 
 未实际执行的人工项目不得报告为 Pass。
 
-## 7. Preview 2 不包含的内容
+## 7. 原始 Preview 2 范围不包含的内容（历史）
 
-以下内容明确延后：
+以下项目在原始 Preview 2 规划时明确延后。该历史范围不等于当前仓库仍缺少这些能力；其中宿主应用内自更新后来已由独立的 Plan 013 完成并冻结，且不改变尚未执行的 Preview 2 人工验收状态：
 
 - `.qmod` 自动解压和安装。
 - 自动替换当前模块。
 - Pending Update。
 - 模块更新失败回滚。
-- QingToolbox 宿主应用内一键自更新。
+- QingToolbox 宿主应用内一键自更新（后来由 Plan 013 完成）。
 - 第三方模块更新源。
 - 数字签名信任链。
 - Windows Service。
@@ -410,8 +410,8 @@ installed→backup、candidate→installed、installed→failed-candidate 和 ba
 Journal 写入成功才被观察，false、异常或写入失败都会先查询、静默并验证卸载 v2，再恢复 v1。
 五个真实子进程窗口包含真正已写入 payload 的 candidate copy 中途崩溃。
 
-当前已进入 B2.1：真实生命周期适配器和 Development/ModuleTest-only TextTools 金丝雀已接入；
-宿主自更新、Production 安装、普通用户自动安装和 Production 模块替换仍未开始。
+进入 B2.1 时，真实生命周期适配器和 Development/ModuleTest-only TextTools 金丝雀已经接入；
+当时宿主自更新、Production 安装、普通用户自动安装和 Production 模块替换尚未开始。宿主自更新随后由 Plan 013 独立完成并冻结；Production 模块事务边界没有因此开放。
 
 目标流程：
 
@@ -443,9 +443,11 @@ modules use `InProcessCollectible + None`; real WPF view modules use one trusted
 ModuleHost per module; legacy in-process WPF remains compatible but cannot use a live transaction.
 The capability is verified from the manifest, never guessed by creating a view.
 
-This does not complete all of B2. Production transaction execution, a Production update button,
-automatic qmod installation, and host self-update remain unavailable. Preview 2 manual acceptance
-items that were not executed remain `Not Run`.
+This did not complete all of B2. At the time B2.1 was frozen, Production transaction execution, a
+Production module-update button, automatic qmod installation, and host self-update were not yet
+available. Host self-update was subsequently completed and frozen under Plan 013; the Production
+module transaction boundary remains closed. Preview 2 manual acceptance items that were not executed
+remain `Not Run`.
 
 The B2.1 local verification matrix passed. Implementation commit
 `1293402ac2c13964b55cbdf488d7582c752036ba` passed Preview validation run `29865749109`, including
@@ -462,11 +464,11 @@ frozen runtime, transaction, and capability boundaries.
 - 权限声明和能力模型。
 - 版本化测试宿主。
 
-### 8.4 当前选定：Plan 013 宿主应用内自更新
+### 8.4 已完成并冻结：Plan 013 宿主应用内自更新
 
 宿主自更新复用现有安装器覆盖能力：
 
-`检测宿主更新 → 下载并验证安装器 → 用户确认 → 启动安装器 → 退出宿主 → 安装器原地覆盖并重新打开`
+`检测宿主更新 → 下载并验证安装器 → 用户确认 → 启动安装器 → Inno Setup 接管关闭 → 原地覆盖并重新打开`
 
 宿主不直接替换自身文件。Plan 013 已完成并冻结；文件替换、运行中 Shell 接管与恢复继续由现有 Inno Setup 完成。
 
@@ -554,8 +556,12 @@ docs/plans/PLAN_013_HOST_SELF_UPDATE.md
 - 开发环境隔离、Smoke Tests、安装器和 Preview RC Gate。
 
 项目所有者已明确推迟剩余 Preview 2 人工发布验收。未执行项目继续保持 `Not Run`。
-Plan 013 已完成并冻结。Production 原生界面可以检测、提示、显式下载、验证并在用户确认后
-启动官方安装器；QingToolbox 不直接替换自身文件，安装器成功启动后也不会抢先退出。
+Plan 013 已完成并冻结，除 P0/P1 外不得继续追加普通边缘加固。正式 Windows Release 只分发
+安装器及其同名 SHA256。Production 原生界面可以检查官方 GitHub Release；用户明确点击后才会
+下载安装器。下载受大小上限约束，并严格验证 sidecar、文件长度和 SHA256；安装前会再次复核，
+随后以 `/SILENT /NORESTART` 交给现有 Inno Setup。QingToolbox 不直接覆盖自身文件，也不会抢先
+退出。用户手动下载更高版本安装器仍可原地覆盖，同版本 Repair 和 SemVer 降级保护继续有效。
+Development 和 ModuleTest 不访问真实宿主更新源。
 
 目标版本：
 
@@ -577,21 +583,25 @@ Repair、SemVer 降级保护、Host Payload Manifest、精确废弃文件清理�
 4. 保持未执行项目为 Not Run 或 Blocked，不以自动化结果替代人工结果。
 5. 剩余验收被明确推迟而非通过；阶段 A 可以继续，但不得进入正式模块替换、回滚或 0.3.0-alpha 发布。
 
-Preview 2 明确不包含：
+原始 Preview 2 规划明确不包含（历史范围）：
 
 - qmod 自动安装。
 - 模块自动替换或回滚。
-- 宿主应用内自更新。
+- 宿主应用内自更新；该能力后来由独立 Plan 013 完成并冻结。
 - 第三方更新源。
 - Windows Service、SYSTEM 或管理员自启。
 - 稳定版 Module API。
 
-后续路线：
+后续路线以用户可见产品体验为优先：
 
-A. qmod ZIP 结构与安全 Staging 验证，仍不安装。
-B. 0.3.0-alpha 模块事务更新、原子替换和失败回滚。
-C. 0.4.0-alpha 稳定 Module API、NuGet SDK 和模板。
-D. Plan 013 的 013A/013B/013C/013D 已完成并冻结；除 P0/P1 外，后续回到用户可见工具和 UI 功能。
+A. 推进真实用户可见工具。
+B. 改善模块信息展示与管理体验，但不开放冻结的 Production 模块事务边界。
+C. 完善设置体验。
+D. 继续现代化 UI，同时保持现有宿主、模块与 Web 安全边界。
+
+Plan 013 的 013A/013B/013C/013D 已完成并冻结；除 P0/P1 外，不再追加普通边缘加固。
+
+不得自动把后续主线切回 B1、B2.1、Web 激活协议、安装器供应链扩建、新的宿主更新状态机或 Update Helper。
 
 每次开始工作先执行：
 
