@@ -32,6 +32,17 @@ if ($workflow -notmatch [regex]::Escape('-Tag v0.2.1-alpha') -or
     $workflow -match [regex]::Escape('-Tag v0.2.0-alpha')) {
     throw 'Preview validation must use the published v0.2.1-alpha upgrade baseline.'
 }
+foreach ($remoteReleaseGuard in @(
+    "github.event_name == 'workflow_dispatch' && inputs.publish_release",
+    'GITHUB_REF_TYPE',
+    'GITHUB_REF_NAME',
+    '--verify-tag',
+    '--prerelease',
+    'sha256sum --check')) {
+    if ($workflow -notmatch [regex]::Escape($remoteReleaseGuard)) {
+        throw "Remote release publication guard is missing: $remoteReleaseGuard"
+    }
+}
 
 $resolver = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'resolve-previous-preview-installer.ps1') -Raw
 $candidateGate = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'build-preview-release-candidate.ps1') -Raw
