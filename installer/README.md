@@ -65,7 +65,7 @@ $env:LOCALAPPDATA = Join-Path $env:TEMP "QingToolboxProfile\LocalAppData"
 $env:APPDATA = Join-Path $env:TEMP "QingToolboxProfile\AppData"
 ./scripts/test-installer-roundtrip.ps1 `
   -InstallerPath `
-    ".\artifacts\installer\output\QingToolbox-0.2.1-alpha-win-x64-setup.exe"
+    ".\artifacts\installer\output\QingToolbox-0.2.2-alpha-win-x64-setup.exe"
 ```
 
 The script installs under its own temporary root, validates the host-only

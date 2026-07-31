@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.2-alpha - 2026-07-31
+
 - Enabled the verified Vue workspace for Production while retaining the native WPF workspace as the safe initialization and process-failure fallback.
 - Kept Development Diagnostics and verified module-update installation out of the Production Web workspace.
 - Preserved the host-owned self-update flow through a Production Vue banner and Settings panel without duplicating installer verification in the Web layer.
