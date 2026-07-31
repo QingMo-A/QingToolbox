@@ -59,11 +59,25 @@ foreach ($hostOnlyGuard in @(
 }
 
 $releaseNotes = Get-Content -LiteralPath (Join-Path $repoRoot 'docs\releases\0.2.1-alpha.md') -Raw -Encoding UTF8
+$chineseIndependentDelivery = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String('5LiN6ZqP5a6/5Li75a6J6KOF5Zmo5oiW5a6/5Li7IFJlbGVhc2Ug5o2G57uR'))
+$chineseUnpublished = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String('5bCa5pyq5Y+R5biD'))
 foreach ($deliveryStatement in @(
-    'not bundled with the host installer or host Release')) {
+    'not bundled with the host installer or host Release',
+    $chineseIndependentDelivery)) {
     if ($releaseNotes -notmatch [regex]::Escape($deliveryStatement)) {
         throw "Release Notes do not state the independent module delivery contract: $deliveryStatement"
     }
+}
+foreach ($candidateOnlyText in @('Release Candidate', $chineseUnpublished)) {
+    if ($releaseNotes -match [regex]::Escape($candidateOnlyText)) {
+        throw "Final Release Notes still contain candidate-only text: $candidateOnlyText"
+    }
+}
+if ($releaseNotes -notmatch [regex]::Escape('v0.1.0-alpha') -or
+    $releaseNotes -notmatch [regex]::Escape('unpublished internal Preview 2 target')) {
+    throw 'Final Release Notes do not distinguish the published upgrade source from the internal 0.2.0 target.'
 }
 
 $manifestWriter = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'write-preview-manifest.ps1') -Raw
