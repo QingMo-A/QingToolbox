@@ -35,10 +35,16 @@ if ($workflow -notmatch [regex]::Escape('-Tag v0.2.1-alpha') -or
 
 $resolver = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'resolve-previous-preview-installer.ps1') -Raw
 $candidateGate = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'build-preview-release-candidate.ps1') -Raw
+$upgradeTest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'test-preview-upgrade.ps1') -Raw
 if ($resolver -notmatch '\[string\]\$Tag\s*=\s*"v0\.2\.1-alpha"' -or
     $candidateGate -notmatch [regex]::Escape('-Tag "v0.2.1-alpha"') -or
     $candidateGate -match [regex]::Escape('-Tag "v0.2.0-alpha"')) {
     throw 'Release candidate scripts do not consistently use the published v0.2.1-alpha baseline.'
+}
+if ($upgradeTest -notmatch [regex]::Escape('[Diagnostics.FileVersionInfo]::GetVersionInfo($previous)') -or
+    $upgradeTest -notmatch [regex]::Escape("Join-Path `$install 'host-payload.manifest.json'") -or
+    $upgradeTest -match "previousFileVersion\s*=\s*'\d") {
+    throw 'The upgrade test must derive the published baseline identity and payload manifest from the verified previous installer.'
 }
 
 $installerScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'build-installer.ps1') -Raw

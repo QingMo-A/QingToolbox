@@ -11,14 +11,9 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'get-preview-release-metadata.ps1')
 $metadata = Get-PreviewReleaseMetadata
-$previousVersion = '0.1.0-alpha'
-$previousFileVersion = '0.1.0.0'
 $appId = '{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}_is1'
 $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$appId"
 $markerKey = 'HKCU:\Software\QingMo-A\QingToolbox'
-if ([string]::IsNullOrWhiteSpace($PreviousHostManifestPath)) {
-    $PreviousHostManifestPath = Join-Path $repoRoot 'installer\baselines\0.1.0-alpha-host-payload.json'
-}
 if ([string]::IsNullOrWhiteSpace($TestRoot)) { $TestRoot = Join-Path $env:TEMP ("QingToolbox-upgrade-" + [guid]::NewGuid().ToString('N')) }
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $isCi = $env:GITHUB_ACTIONS -eq 'true'
@@ -39,6 +34,13 @@ if (Test-Path $uninstallKey) { throw 'A real QingToolbox uninstall entry exists;
 if (Get-Process QingToolbox.Shell -ErrorAction SilentlyContinue) { throw 'A QingToolbox.Shell process is running; refusing isolated upgrade test.' }
 $previous = [IO.Path]::GetFullPath($PreviousInstallerPath); $current = [IO.Path]::GetFullPath($CurrentInstallerPath)
 foreach($installer in @($previous,$current)){if(-not(Test-Path $installer -PathType Leaf)-or(Get-Item $installer).Length-le 0){throw "Installer is missing: $installer"}}
+$previousInstallerInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($previous)
+$previousVersion = $previousInstallerInfo.ProductVersion.Trim()
+$previousFileVersion = $previousInstallerInfo.FileVersion.Trim()
+if ([string]::IsNullOrWhiteSpace($previousVersion) -or
+    [string]::IsNullOrWhiteSpace($previousFileVersion)) {
+    throw 'The previous installer does not expose a usable product and file version.'
+}
 $install = Join-Path $TestRoot 'Custom Install\QingToolbox'; $profile = Join-Path $TestRoot 'Profile'
 $logDirectory = Join-Path $TestRoot 'Installer Logs With Spaces'
 $oldLocal=$env:LOCALAPPDATA; $oldRoaming=$env:APPDATA
@@ -153,6 +155,9 @@ try {
     $preview1Entry=Get-ItemProperty $uninstallKey
     if(-not [IO.Path]::GetFullPath([string]$preview1Entry.InstallLocation).TrimEnd('\').Equals(
         $install.TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)){throw "$previousVersion did not register the custom installation directory."}
+    if ([string]::IsNullOrWhiteSpace($PreviousHostManifestPath)) {
+        $PreviousHostManifestPath = Join-Path $install 'host-payload.manifest.json'
+    }
     if (-not (Test-Path -LiteralPath $PreviousHostManifestPath -PathType Leaf)) {
         throw "$previousVersion host payload manifest is missing."
     }
