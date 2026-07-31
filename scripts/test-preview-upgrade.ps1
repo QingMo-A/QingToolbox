@@ -108,6 +108,15 @@ function Wait-Until {
     do { if(& $Condition){return}; Start-Sleep -Milliseconds 200 } while([DateTimeOffset]::UtcNow-lt$deadline)
     throw $FailureMessage
 }
+function Wait-ForShellWindowReady {
+    param([Diagnostics.Process]$Process,[string]$FailureMessage)
+    Wait-Until {
+        $Process.Refresh()
+        -not $Process.HasExited -and
+            $Process.MainWindowHandle -ne [IntPtr]::Zero -and
+            $Process.Responding
+    } 15 $FailureMessage
+}
 function Get-ShellProcessesAtInstallPath([string]$InstallPath=$install) {
     $expected=[IO.Path]::GetFullPath((Join-Path $InstallPath 'QingToolbox.Shell.exe'))
     return @(Get-CimInstance Win32_Process -Filter "Name='QingToolbox.Shell.exe'" -ErrorAction SilentlyContinue |
@@ -164,7 +173,7 @@ try {
     $previousManifestSnapshot = Join-Path $TestRoot 'previous-host-payload.manifest.json'
     Copy-Item -LiteralPath $PreviousHostManifestPath -Destination $previousManifestSnapshot
     $preview1Process = Start-Process -FilePath (Join-Path $install 'QingToolbox.Shell.exe') -PassThru
-    Wait-Until { -not $preview1Process.HasExited } 10 "$previousVersion Shell exited before the in-place upgrade could exercise process replacement."
+    Wait-ForShellWindowReady $preview1Process "$previousVersion Shell did not become responsive before the in-place upgrade."
     $oldPid=$preview1Process.Id
     $oldPath=[IO.Path]::GetFullPath($preview1Process.Path)
     $settings=Join-Path $env:APPDATA 'QingToolbox\settings.json'; $module=Join-Path $env:LOCALAPPDATA 'QingToolbox\Modules\sentinel\module.json'
@@ -243,7 +252,7 @@ try {
     if((Get-FileHash (Join-Path $install 'QingToolbox.Shell.exe') -Algorithm SHA256).Hash-ne$primaryHash){throw 'Rejected explicit directories changed the real installation.'}
     if((Get-FileHash $conflictingShell -Algorithm SHA256).Hash-ne$conflictingHash){throw 'Rejected explicit directories changed the secondary candidate.'}
     $explicitOldProcess=Start-Process -FilePath (Join-Path $install 'QingToolbox.Shell.exe') -PassThru
-    Wait-Until { -not $explicitOldProcess.HasExited } 10 'Shell exited before explicit /DIR process replacement could be tested.'
+    Wait-ForShellWindowReady $explicitOldProcess 'Shell did not become responsive before explicit /DIR process replacement.'
     $explicitOldPid=$explicitOldProcess.Id
     $explicitLog=Join-Path $logDirectory 'explicit-dir-overrides-conflict.log'
     if((Invoke-Setup $current $explicitLog $true $install)-ne 0){throw 'Explicit /DIR did not override conflicting discovered records.'}
@@ -279,7 +288,7 @@ try {
     $changedFinalInf=Join-Path $logDirectory 'final-directory-changed.inf'
     New-LoadInfWithDirectory $savedInf $changedFinalInf $wizardTarget
     $initialDirectoryProcess=Start-Process -FilePath (Join-Path $install 'QingToolbox.Shell.exe') -PassThru
-    Wait-Until { -not $initialDirectoryProcess.HasExited } 10 'Initial-directory Shell exited before final-directory change validation.'
+    Wait-ForShellWindowReady $initialDirectoryProcess 'Initial-directory Shell did not become responsive before final-directory change validation.'
     $changedFinalLog=Join-Path $logDirectory 'final-directory-changed.log'
     if((Invoke-Setup $current $changedFinalLog $false $install $changedFinalInf $null)-ne 0){throw 'Installer failed after the final wizard directory changed from A to B.'}
     $initialDirectoryProcess.Refresh()
@@ -302,7 +311,7 @@ try {
     New-Item -ItemType Directory -Path $wizardTarget -Force|Out-Null
     Copy-Item -Path (Join-Path $install '*') -Destination $wizardTarget -Recurse -Force
     $finalDirectoryProcess=Start-Process -FilePath (Join-Path $wizardTarget 'QingToolbox.Shell.exe') -PassThru
-    Wait-Until { -not $finalDirectoryProcess.HasExited } 10 'Final-directory Shell exited before running-target validation.'
+    Wait-ForShellWindowReady $finalDirectoryProcess 'Final-directory Shell did not become responsive before running-target validation.'
     $finalDirectoryOldPid=$finalDirectoryProcess.Id
     $runningFinalInf=Join-Path $logDirectory 'final-directory-running-shell.inf'
     New-LoadInfWithDirectory $savedInf $runningFinalInf $wizardTarget
@@ -338,7 +347,11 @@ try {
     Write-Host 'Preview upgrade, repair, DIR precedence, unsafe DIR rejection, downgrade guard, and user-state preservation passed.'
 }
 finally {
-    foreach($process in @(Get-ShellProcessesAtInstallPath)){
+    $testRootPrefix = $TestRoot.TrimEnd('\') + '\'
+    $testProcesses = @(Get-CimInstance Win32_Process -Filter "Name='QingToolbox.Shell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_.ExecutablePath) -and
+            [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith($testRootPrefix,[StringComparison]::OrdinalIgnoreCase) })
+    foreach($process in $testProcesses){
         Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
     }
     $env:LOCALAPPDATA=$oldLocal;$env:APPDATA=$oldRoaming

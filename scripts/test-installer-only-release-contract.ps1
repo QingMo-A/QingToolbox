@@ -57,6 +57,15 @@ if ($upgradeTest -notmatch [regex]::Escape('[Diagnostics.FileVersionInfo]::GetVe
     $upgradeTest -match "previousFileVersion\s*=\s*'\d") {
     throw 'The upgrade test must derive the published baseline identity and payload manifest from the verified previous installer.'
 }
+foreach ($upgradeSynchronizationGuard in @(
+    'Wait-ForShellWindowReady',
+    'MainWindowHandle',
+    'Responding',
+    'StartsWith($testRootPrefix')) {
+    if ($upgradeTest -notmatch [regex]::Escape($upgradeSynchronizationGuard)) {
+        throw "Upgrade test synchronization guard is missing: $upgradeSynchronizationGuard"
+    }
+}
 
 $installerScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'build-installer.ps1') -Raw
 if ($installerScript -notmatch [regex]::Escape('installer\baselines\0.2.1-alpha-host-payload.json') -or
