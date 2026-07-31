@@ -48,6 +48,10 @@ if ($upgradeTest -notmatch [regex]::Escape('[Diagnostics.FileVersionInfo]::GetVe
 }
 
 $installerScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'build-installer.ps1') -Raw
+if ($installerScript -notmatch [regex]::Escape('installer\baselines\0.2.1-alpha-host-payload.json') -or
+    $installerScript -match [regex]::Escape('installer\baselines\0.1.0-alpha-host-payload.json')) {
+    throw 'The installer must clean obsolete host files against the published v0.2.1-alpha payload baseline.'
+}
 foreach ($requiredContract in @(
     'dotnet', 'publish', 'write-host-payload-manifest.ps1',
     'verify-host-web-asset-binding.ps1', 'host-payload.manifest.json')) {

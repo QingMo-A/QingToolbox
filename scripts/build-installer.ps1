@@ -24,7 +24,7 @@ $shellProject = Join-Path $repoRoot "QingToolbox.Shell\QingToolbox.Shell.csproj"
 $maintenanceProject = Join-Path $repoRoot "QingToolbox.StartupMaintenance\QingToolbox.StartupMaintenance.csproj"
 $smokeProject = Join-Path $repoRoot "QingToolbox.DevTools.ModuleLoadSmokeTest\QingToolbox.DevTools.ModuleLoadSmokeTest.csproj"
 $installerScript = Join-Path $repoRoot "installer\QingToolbox.iss"
-$previousHostManifest = Join-Path $repoRoot "installer\baselines\0.1.0-alpha-host-payload.json"
+$previousHostManifest = Join-Path $repoRoot "installer\baselines\0.2.1-alpha-host-payload.json"
 $obsoleteInclude = Join-Path $installerRoot "generated-obsolete-files.iss"
 $brandIconPath = Join-Path $repoRoot `
     "QingToolbox.Shell\Assets\Branding\QingToolbox.ico"
