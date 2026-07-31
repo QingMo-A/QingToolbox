@@ -8,7 +8,7 @@ using QingToolbox.Shell.WebShell;
 var root = Directory.GetCurrentDirectory();
 var dev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "WebShellSmoke", root);
 Console.WriteLine("Verifying Web Shell environment and protocol v4 session semantics...");
-Require(!new WebShellState(ApplicationExecutionEnvironment.Production()).IsEnvironmentAllowed, "Production must disable Web Shell.");
+Require(new WebShellState(ApplicationExecutionEnvironment.Production()).IsEnvironmentAllowed, "Production must allow the verified Web Shell.");
 Require(new WebShellState(dev).IsEnvironmentAllowed, "Development must allow Web Shell.");
 Require(!new WebShellState(ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.ModuleTest, "WebShellSmoke", root)).IsEnvironmentAllowed, "ModuleTest must disable Web Shell.");
 
@@ -36,7 +36,7 @@ Require(fastReadyPresentation.TryShowReady(isExiting: false) && fastReadyPresent
 var nativePresentation = new WebWorkspacePresentationState(webShellAllowed: false);
 Require(nativePresentation.Phase == WebWorkspacePresentationPhase.Native &&
         !nativePresentation.TryPrepare(isExiting: false) && !nativePresentation.TryShowReady(isExiting: false),
-    "Production and ModuleTest presentation must remain native-only.");
+    "ModuleTest presentation must remain native-only.");
 
 var activation = new WebActivationSession();
 using var generationOne = new CancellationTokenSource();

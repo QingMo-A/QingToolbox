@@ -333,6 +333,59 @@ public sealed class WebSettingsSnapshotCommandHandler(WebSettingsSnapshotProvide
     { activation.RequireActivated(context.Generation, context.SessionCancellation); return Task.FromResult<object>(snapshots.Create()); }
 }
 
+public abstract class WebHostUpdateCommandHandler(
+    WebHostUpdateOperations operations,
+    WebActivationSession activation) : IWebCommandHandler
+{
+    protected WebHostUpdateOperations Operations { get; } = operations;
+    public abstract string Command { get; }
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string>();
+    protected abstract Task<WebHostUpdateSnapshot> ExecuteAsync(CancellationToken cancellationToken);
+
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context,
+        CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        return await ExecuteAsync(context.SessionCancellation);
+    }
+}
+
+public sealed class WebHostUpdateSnapshotCommandHandler(WebHostUpdateOperations operations, WebActivationSession activation)
+    : WebHostUpdateCommandHandler(operations, activation)
+{
+    public override string Command => "hostUpdate.getSnapshot";
+    protected override Task<WebHostUpdateSnapshot> ExecuteAsync(CancellationToken cancellationToken) =>
+        Task.FromResult(Operations.CreateSnapshot());
+}
+
+public sealed class WebHostUpdateCheckCommandHandler(WebHostUpdateOperations operations, WebActivationSession activation)
+    : WebHostUpdateCommandHandler(operations, activation)
+{
+    public override string Command => "hostUpdate.check";
+    protected override Task<WebHostUpdateSnapshot> ExecuteAsync(CancellationToken cancellationToken) => Operations.CheckAsync(cancellationToken);
+}
+
+public sealed class WebHostUpdateDownloadCommandHandler(WebHostUpdateOperations operations, WebActivationSession activation)
+    : WebHostUpdateCommandHandler(operations, activation)
+{
+    public override string Command => "hostUpdate.download";
+    protected override Task<WebHostUpdateSnapshot> ExecuteAsync(CancellationToken cancellationToken) => Operations.DownloadAsync(cancellationToken);
+}
+
+public sealed class WebHostUpdateCancelCommandHandler(WebHostUpdateOperations operations, WebActivationSession activation)
+    : WebHostUpdateCommandHandler(operations, activation)
+{
+    public override string Command => "hostUpdate.cancel";
+    protected override Task<WebHostUpdateSnapshot> ExecuteAsync(CancellationToken cancellationToken) => Task.FromResult(Operations.CancelDownload());
+}
+
+public sealed class WebHostUpdateInstallCommandHandler(WebHostUpdateOperations operations, WebActivationSession activation)
+    : WebHostUpdateCommandHandler(operations, activation)
+{
+    public override string Command => "hostUpdate.install";
+    protected override Task<WebHostUpdateSnapshot> ExecuteAsync(CancellationToken cancellationToken) => Operations.InstallAsync(cancellationToken);
+}
+
 public sealed class WebSetLanguageCommandHandler(IWebSettingsMutation mutation,
     WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
 {

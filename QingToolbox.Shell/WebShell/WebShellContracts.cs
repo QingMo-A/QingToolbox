@@ -41,6 +41,11 @@ public sealed record WebSettingsSnapshot(DateTimeOffset GeneratedAt, WebSettings
 public sealed record WebSettingsLanguage(string Code, string EffectiveCode, string DisplayName,
     IReadOnlyList<WebSettingsLanguageOption> Options);
 public sealed record WebSettingsLanguageOption(string Code, string DisplayName, string NativeName);
+public sealed record WebHostUpdateSnapshot(DateTimeOffset GeneratedAt, string State, string CurrentVersion,
+    string LatestVersion, string PublishedAt, string LastChecked, string Summary, bool ShowBanner,
+    string DownloadState, long BytesReceived, long ExpectedBytes, string DownloadError,
+    bool CanCheck, bool CanDownload, bool CanCancelDownload, bool CanInstall, bool InstallationSupported,
+    string InstallMessage);
 public sealed record WebAssetManifest(int SchemaVersion, string AssetBuildId, string PackageLockSha256,
     string SourceTreeSha256, IReadOnlyList<WebAssetFile> OutputFiles);
 public sealed record WebAssetFile(string Path, long Size, string Sha256);

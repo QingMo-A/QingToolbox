@@ -35,12 +35,12 @@
 - Plan 012 UI-5A3B2 Settings localization and module metadata refresh: Implementation Complete. Successful language changes refresh one complete host-localized Module Snapshot. Plan 012 is complete.
 - Plan 013: **Implementation Complete / Frozen**. Installer-only delivery, discovery, verified download, user confirmation, and Inno Setup handoff are complete.
 - Development Web module updates now support an explicit, inline-confirmed installation of a host-authorized verified package through the frozen B1/B2.1 transaction boundary. This is manual and Development-only; it is not automatic installation.
-- Production Web UI: Deferred.
-- Production module update transactions, automatic module installation, and Production Web UI remain deferred. The native Production workspace can discover, verify, confirm, and hand the official host installer to the existing Inno Setup upgrade path.
+- Production Web UI: Implemented for the next release candidate. Production now uses the same verified local Vue assets and ready handshake, with the native WPF workspace retained as the initialization and process-failure fallback.
+- Production module-update installation transactions and automatic module installation remain deferred. Development Diagnostics and verified module-update installation are not exposed by the Production Web workspace. The Vue update banner and Settings panel project the existing host-owned discovery, download, verification, confirmation, and installer handoff without moving those security operations into JavaScript.
 - Preview 2 release work and UI modernization remain independent tracks.
 
-The Development Vue workspace currently contains Home, Modules, Running, Session Logs, Settings,
-and Development Diagnostics. Plan 009's original boundary remains the read-only module center and
+The shared Vue workspace currently contains Home, Modules, Running, Session Logs, and Settings;
+Development additionally exposes Development Diagnostics. Plan 009's original boundary remains the read-only module center and
 visual foundation; Running, Logs, Settings, and the three narrow settings mutations added afterward
 are incremental implementation, not a retroactive expansion of Plan 009.
 

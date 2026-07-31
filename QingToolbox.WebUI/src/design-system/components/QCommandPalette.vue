@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useModuleStore } from '../../app/moduleStore'
+import { useAppStore } from '../../app/store'
 import type { ModuleSnapshotItem } from '../../contracts/modules'
 import QIcon from './QIcon.vue'
 import { useLocalization, translate } from '../../localization/localization'
@@ -11,6 +12,7 @@ const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const router = useRouter()
 const moduleStore = useModuleStore()
+const appStore = useAppStore()
 const { t } = useLocalization()
 const dialog = ref<HTMLDialogElement | null>(null)
 const input = ref<HTMLInputElement | null>(null)
@@ -33,7 +35,9 @@ const pageDefinitions: PageResultDefinition[] = [
   { kind: 'page', titleKey: 'navigation.settings', descriptionKey: 'page.settings.description', path: '/settings', icon: 'settings' },
   { kind: 'page', titleKey: 'navigation.diagnostics', descriptionKey: 'page.diagnostics.description', path: '/diagnostics', icon: 'diagnostics' },
 ]
-const pages = computed<PageResult[]>(() => pageDefinitions.map(page => ({
+const pages = computed<PageResult[]>(() => pageDefinitions
+  .filter(page => page.path !== '/diagnostics' || appStore.snapshot?.environmentKind === 'Development')
+  .map(page => ({
   kind: page.kind,
   title: t(page.titleKey),
   description: t(page.descriptionKey),

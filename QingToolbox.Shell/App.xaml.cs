@@ -293,7 +293,7 @@ public partial class App : Application
             services.AddSingleton(provider => new ModulePackageDownloadCoordinator(
                 provider.GetRequiredService<IModuleUpdateChecker>(), provider.GetRequiredService<IModulePackageTransport>(),
                 provider.GetRequiredService<ApplicationPaths>().CacheDirectory, provider.GetRequiredService<TimeProvider>(), environment.IsModuleTest));
-            if (environment.IsDevelopment)
+            if (!environment.IsModuleTest)
             {
                 services.AddSingleton<WebShellState>();
                 services.AddSingleton<WebNavigationPolicy>();
@@ -307,13 +307,15 @@ public partial class App : Application
                 services.AddSingleton<IWebModuleImportOperations, WebModuleImportOperations>();
                 services.AddSingleton<IWebModuleManagementOperations, WebModuleManagementOperations>();
                 services.AddSingleton<IWebModuleUpdateOperations, WebModuleUpdateOperations>();
-                services.AddSingleton<IWebModuleUpdateInstallOperations, WebModuleUpdateInstallOperations>();
+                if (environment.IsDevelopment)
+                    services.AddSingleton<IWebModuleUpdateInstallOperations, WebModuleUpdateInstallOperations>();
                 services.AddSingleton<IWebModuleStartupAuthorizationOperations, WebModuleStartupAuthorizationOperations>();
                 services.AddSingleton<IWebLogSnapshotSource, WebLogSnapshotSource>();
                 services.AddSingleton<WebLogSnapshotProvider>();
                 services.AddSingleton<IWebSettingsSnapshotSource, WebSettingsSnapshotSource>();
                 services.AddSingleton<IWebSettingsMutation, WebSettingsMutation>();
                 services.AddSingleton<WebSettingsSnapshotProvider>();
+                services.AddSingleton<WebHostUpdateOperations>();
                 services.AddSingleton<IWebCommandHandler, WebPingCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSnapshotCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleSnapshotCommandHandler>();
@@ -322,7 +324,8 @@ public partial class App : Application
                 services.AddSingleton<IWebCommandHandler, WebModuleRemoveCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleCheckUpdateCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleDownloadUpdateCommandHandler>();
-                services.AddSingleton<IWebCommandHandler, WebModuleInstallVerifiedUpdateCommandHandler>();
+                if (environment.IsDevelopment)
+                    services.AddSingleton<IWebCommandHandler, WebModuleInstallVerifiedUpdateCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleLoadCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleActivateCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleOpenCommandHandler>();
@@ -331,6 +334,11 @@ public partial class App : Application
                 services.AddSingleton<IWebCommandHandler, WebSetModuleStartupAuthorizationCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebLogSnapshotCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSettingsSnapshotCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebHostUpdateSnapshotCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebHostUpdateCheckCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebHostUpdateDownloadCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebHostUpdateCancelCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebHostUpdateInstallCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetLanguageCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetShowLogsInSidebarCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetMainWindowCloseBehaviorCommandHandler>();

@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import QSidebarLayout from './QSidebarLayout.vue'
 import { useSettingsStore } from '../../app/settingsStore'
+import { useAppStore } from '../../app/store'
 
 const snapshot = (showLogsInSidebar: boolean, effectiveCode: 'en-US'|'zh-CN' = 'en-US', code: 'system'|'en-US'|'zh-CN' = effectiveCode) => ({
   generatedAt: new Date().toISOString(), language: { code, effectiveCode, displayName: code, options: [
@@ -54,8 +55,10 @@ describe('QSidebarLayout localization and icons', () => {
     store.complete(snapshot(true,'en-US')); await wrapper.vm.$nextTick(); expect(wrapper.text()).toContain('Home'); expect(wrapper.get('nav').attributes('aria-label')).toBe('Workspace')
   })
 
-  it('keeps all six route paths unchanged', () => {
-    setActivePinia(createPinia()); const wrapper=mountSidebar()
+  it('shows diagnostics only for a Development host', async () => {
+    const pinia=createPinia(); setActivePinia(pinia); const app=useAppStore(); const wrapper=mount(QSidebarLayout,{global:{plugins:[pinia],stubs:{RouterLink:{props:['to'],template:'<a :data-to="to"><slot/></a>'}}}})
+    expect(wrapper.findAll('a').map(link=>link.attributes('data-to'))).toEqual(['/','/modules','/running','/logs','/settings'])
+    app.rebuild({environmentKind:'Development',environmentDisplayName:'Development',hostVersion:'1',protocolVersion:4,totalModuleCount:0,validModuleCount:0,runningModuleCount:0,generatedAt:new Date().toISOString()}); await wrapper.vm.$nextTick()
     expect(wrapper.findAll('a').map(link=>link.attributes('data-to'))).toEqual(['/','/modules','/running','/logs','/diagnostics','/settings'])
   })
 })

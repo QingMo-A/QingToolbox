@@ -529,6 +529,9 @@ public sealed partial class MainWindowViewModel(
     [RelayCommand(CanExecute = nameof(CanCheckHostUpdate))]
     private Task CheckHostUpdateAsync() => CheckHostUpdateCoreAsync(true, CancellationToken.None);
 
+    public Task CheckHostUpdateFromWebAsync(CancellationToken cancellationToken) =>
+        CheckHostUpdateCoreAsync(true, cancellationToken);
+
     private bool CanCheckHostUpdate() => HostUpdateState != HostUpdateCheckState.Checking &&
         HostUpdateDownloadState is not HostUpdateDownloadState.Downloading and not HostUpdateDownloadState.Verifying;
 
@@ -580,8 +583,13 @@ public sealed partial class MainWindowViewModel(
         ApplyHostDownloadProgress(result);
     }
 
+    public Task DownloadHostUpdateFromWebAsync(CancellationToken cancellationToken) =>
+        CanDownloadHostUpdate ? DownloadHostUpdateAsync() : Task.CompletedTask;
+
     [RelayCommand(CanExecute = nameof(CanCancelHostUpdateDownload))]
     private void CancelHostUpdateDownload() => _hostUpdateDownloadCancellation?.Cancel();
+
+    public void CancelHostUpdateDownloadFromWeb() => CancelHostUpdateDownload();
 
     private void ApplyHostDownloadProgress(HostUpdateDownloadProgress progress)
     {
@@ -644,6 +652,9 @@ public sealed partial class MainWindowViewModel(
         });
         if (result.State == HostUpdateHandoffState.Unsupported) HostInstallationSupported = false;
     }
+
+    public Task InstallHostUpdateFromWebAsync(CancellationToken cancellationToken) =>
+        CanInstallHostUpdate ? InstallHostUpdateAsync() : Task.CompletedTask;
 
     [RelayCommand]
     private void OpenHostReleasePage()

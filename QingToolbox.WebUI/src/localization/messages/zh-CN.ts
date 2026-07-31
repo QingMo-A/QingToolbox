@@ -1,6 +1,21 @@
 import type { TranslationKey } from './en-US'
 
 export const zhCNMessages = {
+  'hostUpdate.banner.title': 'QingToolbox {version} 可用',
+  'hostUpdate.banner.description': '已有经过验证的安装器更新可供查看。',
+  'hostUpdate.banner.progress': '正在下载……{progress}%',
+  'hostUpdate.banner.failed': '未能完成更新操作。',
+  'hostUpdate.banner.check': '重新检查',
+  'hostUpdate.banner.download': '下载更新',
+  'hostUpdate.banner.cancel': '取消',
+  'hostUpdate.banner.later': '稍后',
+  'hostUpdate.banner.install': '安装更新',
+  'hostUpdate.panel.title': 'QingToolbox 更新',
+  'hostUpdate.panel.description': '检查并安装经过验证的 QingToolbox 官方版本。',
+  'hostUpdate.panel.current': '当前版本',
+  'hostUpdate.panel.latest': '最新版本',
+  'hostUpdate.panel.status': '状态',
+  'hostUpdate.panel.lastChecked': '上次检查',
   'app.productName': 'QingToolbox',
   'navigation.workspace': '工作区',
   'navigation.home': '首页',

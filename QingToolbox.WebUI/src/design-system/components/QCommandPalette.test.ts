@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import QCommandPalette from './QCommandPalette.vue'
 import QIcon from './QIcon.vue'
 import { useModuleStore } from '../../app/moduleStore'
+import { useAppStore } from '../../app/store'
 import type { ModuleSnapshotItem } from '../../contracts/modules'
 import { useSettingsStore } from '../../app/settingsStore'
 import type { EffectiveLanguageCode, LanguageCode, SettingsSnapshot } from '../../contracts/settings'
@@ -50,6 +51,7 @@ afterEach(() => wrappers.splice(0).forEach(wrapper => wrapper.unmount()))
 
 async function palette(open = true) {
   const pinia = createPinia(); setActivePinia(pinia)
+  useAppStore().rebuild({ environmentKind: 'Development', environmentDisplayName: 'Development', hostVersion: '1', protocolVersion: 4, totalModuleCount: 0, validModuleCount: 0, runningModuleCount: 0, generatedAt: new Date().toISOString() })
   const store = useModuleStore()
   store.modules = [moduleItem('qing.alpha', 'Running'), moduleItem('qing.beta')]
   const router = createRouter({

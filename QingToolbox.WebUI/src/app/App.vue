@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { inject, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useThemeStore } from './themeStore'
 import { useAppStore } from './store'
 import { useSettingsStore } from './settingsStore'
@@ -8,6 +8,7 @@ import type { SettingsClient } from '../bridge/clients/SettingsClient'
 import QSidebarLayout from '../design-system/layouts/QSidebarLayout.vue'
 import QCommandPalette from '../design-system/components/QCommandPalette.vue'
 import QToast from '../design-system/components/QToast.vue'
+import QHostUpdateBanner from '../design-system/components/QHostUpdateBanner.vue'
 import { useLocalization } from '../localization/localization'
 import { routeTitleKeyByPath } from './router'
 
@@ -17,6 +18,7 @@ const settings = useSettingsStore()
 const client = inject<SettingsClient>('settingsClient')!
 const commandPaletteOpen = ref(false)
 const route = useRoute()
+const router = useRouter()
 const { currentLocale, t } = useLocalization()
 
 async function loadSettings() {
@@ -40,6 +42,9 @@ watch(() => app.bridge, bridge => {
   if (bridge === 'Connected' && settings.status === 'idle') void loadSettings()
 }, { immediate: true })
 watchEffect(() => {
+  if (route.path === '/diagnostics' && app.snapshot && app.snapshot.environmentKind !== 'Development') {
+    void router.replace('/')
+  }
   document.documentElement.lang = currentLocale.value
   const titleKey = routeTitleKeyByPath[route.path as keyof typeof routeTitleKeyByPath]
   document.title = `${titleKey ? t(titleKey) : t('app.productName')} · ${t('app.productName')}`
@@ -48,6 +53,7 @@ watchEffect(() => {
 
 <template>
   <QSidebarLayout @open-command-palette="commandPaletteOpen = true">
+    <QHostUpdateBanner />
     <router-view />
   </QSidebarLayout>
   <QCommandPalette :open="commandPaletteOpen" @close="commandPaletteOpen = false" />

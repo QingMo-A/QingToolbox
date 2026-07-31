@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import App from './App.vue'
 import { useSettingsStore } from './settingsStore'
+import { useAppStore } from './store'
 import type { EffectiveLanguageCode, LanguageCode, SettingsSnapshot } from '../contracts/settings'
 
 const wrappers: VueWrapper[] = []
@@ -26,6 +27,7 @@ function app() {
   const pinia = createPinia(); setActivePinia(pinia)
   const router = createRouter({ history: createMemoryHistory(), routes: [
     { path: '/', component: { template: '<div />' } }, { path: '/modules', component: { template: '<div />' } },
+    { path: '/diagnostics', component: { template: '<div />' } },
   ] })
   const preventDefault = vi.fn()
   const getSnapshot = vi.fn()
@@ -36,6 +38,7 @@ function app() {
       stubs: {
         RouterView: { template: '<div />' },
         QToast: { template: '<div />' },
+        QHostUpdateBanner: { template: '<div />' },
         QSidebarLayout: { emits: ['openCommandPalette'], template: '<button class="open" @click="$emit(\'openCommandPalette\')">Open</button><slot />' },
         QCommandPalette: { props: ['open'], emits: ['close'], template: '<div class="palette" :data-open="open"><button @click="$emit(\'close\')">Close</button></div>' },
       },
@@ -93,5 +96,13 @@ describe('App Quick Open integration', () => {
     settings.complete(snapshot('en-US', 'en-US')); await wrapper.vm.$nextTick()
     expect(document.title).toBe('Modules · QingToolbox')
     expect(getSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('redirects a Production host away from Development diagnostics', async () => {
+    const { wrapper, router } = app()
+    await router.push('/diagnostics')
+    useAppStore().rebuild({ environmentKind: 'Production', environmentDisplayName: 'QingToolbox', hostVersion: '1', protocolVersion: 4, totalModuleCount: 0, validModuleCount: 0, runningModuleCount: 0, generatedAt: new Date().toISOString() })
+    await wrapper.vm.$nextTick(); await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/')
   })
 })

@@ -13,6 +13,7 @@ import QButton from '../design-system/components/QButton.vue'
 import QIcon from '../design-system/components/QIcon.vue'
 import QBadge from '../design-system/components/QBadge.vue'
 import QSkeleton from '../design-system/components/QSkeleton.vue'
+import QHostUpdatePanel from '../design-system/components/QHostUpdatePanel.vue'
 import brandMark from '../assets/QingToolbox.Mark.svg'
 import { useLocalization } from '../localization/localization'
 import { bridgeStateKey } from '../presentation/workspacePresentation'
@@ -188,6 +189,7 @@ async function repairStartup() {
             <header class="settings-section-heading"><h2 id="settings-about-title">{{ t('settings.section.about') }}</h2><p>{{ t('settings.about.description') }}</p></header>
             <article class="settings-card settings-about" :aria-label="t('settings.about.ariaLabel')"><img :src="brandMark" alt="" aria-hidden="true" /><div><div class="settings-about-title"><strong>QingToolbox</strong><span>{{ t('settings.about.preview') }}</span></div><small>{{ productVersion }}</small><p>{{ t('settings.about.productDescription') }}</p></div></article>
             <article class="settings-card"><h3>{{ t('settings.about.workspace') }}</h3><dl class="settings-values"><div><dt>{{ t('settings.about.environment') }}</dt><dd>{{ environment }}</dd></div><div><dt>{{ t('settings.about.bridge') }}</dt><dd><QBadge :tone="app.bridge === 'Connected' ? 'success' : 'warning'">{{ bridgeLabel }}</QBadge></dd></div></dl></article>
+            <QHostUpdatePanel v-if="app.snapshot?.environmentKind === 'Production'" />
           </section>
         </main>
       </div>

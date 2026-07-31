@@ -161,7 +161,7 @@ public partial class MainWindow : Window
             DevelopmentWebWorkspace.Content = null;
             ApplyWorkspacePresentation(_webWorkspacePresentation.Snapshot);
             _viewModel.StatusMessage =
-                $"Development Web Shell unavailable ({failureCode}); native workspace restored.";
+                $"Web workspace unavailable ({failureCode}); native workspace restored.";
         });
     }
 

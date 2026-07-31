@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useSettingsStore } from '../../app/settingsStore'
+import { useAppStore } from '../../app/store'
 import brandMark from '../../assets/QingToolbox.Mark.svg'
 import QIcon from '../components/QIcon.vue'
 import { useLocalization } from '../../localization/localization'
@@ -9,10 +10,12 @@ const emit = defineEmits<{ openCommandPalette: [] }>()
 const hovered = ref(false)
 const pinned = ref(false)
 const settings = useSettingsStore()
+const app = useAppStore()
 const { t } = useLocalization()
 const showLogs = computed(
   () => settings.status !== 'ready' || settings.snapshot?.showLogsInSidebar === true,
 )
+const showDiagnostics = computed(() => app.snapshot?.environmentKind === 'Development')
 </script>
 
 <template>
@@ -60,7 +63,7 @@ const showLogs = computed(
       <div class="q-sidebar-spacer" />
 
       <nav class="q-sidebar-secondary">
-        <RouterLink to="/diagnostics" :title="t('navigation.diagnostics')" :aria-label="t('navigation.diagnostics')">
+        <RouterLink v-if="showDiagnostics" to="/diagnostics" :title="t('navigation.diagnostics')" :aria-label="t('navigation.diagnostics')">
           <b><QIcon name="diagnostics" /></b>
           <span>{{ t('navigation.diagnostics') }}</span>
         </RouterLink>

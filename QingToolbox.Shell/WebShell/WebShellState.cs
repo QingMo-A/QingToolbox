@@ -10,8 +10,8 @@ public enum WebShellAvailability
 
 public sealed class WebShellState(ApplicationExecutionEnvironment environment)
 {
-    public bool IsEnvironmentAllowed => environment.IsDevelopment;
-    public WebShellAvailability Availability { get; private set; } = environment.IsDevelopment
+    public bool IsEnvironmentAllowed => !environment.IsModuleTest;
+    public WebShellAvailability Availability { get; private set; } = !environment.IsModuleTest
         ? WebShellAvailability.Native : WebShellAvailability.Disabled;
     public string? FailureCode { get; private set; }
     public int ProcessRecoveryAttempts { get; private set; }

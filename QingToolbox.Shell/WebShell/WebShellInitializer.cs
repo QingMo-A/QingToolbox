@@ -50,7 +50,7 @@ public sealed class WebShellInitializer(
     private bool _sessionTokenIssued;
     private bool _repeatedPingSucceeded;
     private bool _workspaceActivated;
-    public bool IsAllowed => environment.IsDevelopment;
+    public bool IsAllowed => !environment.IsModuleTest;
 
     public async Task<WebView2?> InitializeAsync(Action<WebView2> preparing, Action<WebView2> ready, Action<string> fallback, CancellationToken cancellationToken)
     {
@@ -138,7 +138,7 @@ public sealed class WebShellInitializer(
             await activationAccepted.Task.WaitAsync(ReadyTimeout, cancellationToken);
             await repeatedPingAccepted.Task.WaitAsync(ReadyTimeout, cancellationToken);
             state.MarkReady();
-            log.Information("WebShell", $"Development Web Shell ready; protocol={WebBridgeProtocol.Version}; generation={generation}.");
+            log.Information("WebShell", $"Web Shell ready; environment={environment.Kind}; protocol={WebBridgeProtocol.Version}; generation={generation}.");
             _ready?.Invoke(webView);
             _workspaceActivated = true;
             if (launchOptions.WebShellProbeId is { } probeId)

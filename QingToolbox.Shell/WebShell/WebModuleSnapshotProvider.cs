@@ -1,5 +1,6 @@
 using QingToolbox.Shell.ViewModels;
 using QingToolbox.Core.Updates;
+using QingToolbox.Shell.Startup;
 
 namespace QingToolbox.Shell.WebShell;
 
@@ -8,7 +9,9 @@ public interface IWebModuleSnapshotSource
     IReadOnlyList<WebModuleSnapshotItem> ReadModules();
 }
 
-public sealed class WebModuleSnapshotSource(MainWindowViewModel viewModel) : IWebModuleSnapshotSource
+public sealed class WebModuleSnapshotSource(
+    MainWindowViewModel viewModel,
+    ApplicationExecutionEnvironment environment) : IWebModuleSnapshotSource
 {
     public IReadOnlyList<WebModuleSnapshotItem> ReadModules() => viewModel.Modules.Select(module =>
         new WebModuleSnapshotItem(
@@ -49,7 +52,7 @@ public sealed class WebModuleSnapshotSource(MainWindowViewModel viewModel) : IWe
             module.IsDownloadActive,
             Math.Max(0, module.DownloadBytesReceived),
             Math.Max(0, module.DownloadExpectedBytes),
-            viewModel.CanInstallVerifiedModuleUpdateFromWeb(module.Id))).ToArray();
+            environment.IsDevelopment && viewModel.CanInstallVerifiedModuleUpdateFromWeb(module.Id))).ToArray();
 
     private static IReadOnlyList<string> SafeErrors(DiscoveredModuleViewModel module)
     {
