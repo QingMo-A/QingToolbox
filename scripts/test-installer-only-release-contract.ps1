@@ -7,6 +7,11 @@ $repoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 . (Join-Path $PSScriptRoot 'get-preview-release-metadata.ps1')
 
 $metadata = Get-PreviewReleaseMetadata
+$sourceAssertion = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'assert-preview-source.ps1') -Raw
+if ($sourceAssertion -notmatch [regex]::Escape("`$branchOutput = @(Invoke-SourceGit") -or
+    $sourceAssertion -notmatch [regex]::Escape("(`$branchOutput -join '')")) {
+    throw 'Preview source validation must safely accept an allowed detached tag checkout.'
+}
 $expectedVersion = '0.2.2-alpha'
 if ($metadata.Version -ne $expectedVersion -or $metadata.FileVersion -ne '0.2.2.0') {
     throw "Unexpected 0.2.2 candidate metadata: $($metadata.Version) / $($metadata.FileVersion)"
@@ -41,6 +46,16 @@ foreach ($remoteReleaseGuard in @(
     'sha256sum --check')) {
     if ($workflow -notmatch [regex]::Escape($remoteReleaseGuard)) {
         throw "Remote release publication guard is missing: $remoteReleaseGuard"
+    }
+}
+foreach ($validatedCandidateGuard in @(
+    'publish-validated-candidate',
+    'inputs.candidate_run_id',
+    'run.head_sha',
+    'tagCommit',
+    'actions: read')) {
+    if ($workflow -notmatch [regex]::Escape($validatedCandidateGuard)) {
+        throw "Validated-candidate publication guard is missing: $validatedCandidateGuard"
     }
 }
 

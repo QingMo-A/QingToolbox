@@ -39,8 +39,9 @@ function Assert-PreviewSource {
         throw "Unable to resolve a full source commit from Git."
     }
 
-    $branch = ([string](Invoke-SourceGit -Arguments @(
-        "branch", "--show-current"))).Trim()
+    $branchOutput = @(Invoke-SourceGit -Arguments @(
+        "branch", "--show-current"))
+    $branch = ([string]($branchOutput -join '')).Trim()
     if ($RequireToolboxBranch) {
         if ([string]::IsNullOrWhiteSpace($branch)) {
             throw "Preview candidates must not be built from detached HEAD."

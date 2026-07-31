@@ -8,6 +8,11 @@ on:
         required: true
         default: false
         type: boolean
+      candidate_run_id:
+        description: Successful validation run to publish without rebuilding (optional)
+        required: false
+        default: ""
+        type: string
   pull_request:
     branches:
       - toolbox
@@ -26,6 +31,7 @@ concurrency:
 
 jobs:
   validate-preview:
+    if: github.event_name != 'workflow_dispatch' || inputs.candidate_run_id == ''
     runs-on: windows-latest
     timeout-minutes: 45
     outputs:
@@ -343,7 +349,7 @@ jobs:
             artifacts/${{ steps.release.outputs.manifest_file }}
 
   publish-release:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release && inputs.candidate_run_id == ''
     needs: validate-preview
     runs-on: ubuntu-latest
     permissions:
@@ -392,6 +398,72 @@ jobs:
           installer="release-assets/installer/output/${INSTALLER_FILE}"
           sidecar="${installer}.sha256"
           gh release create "v${VERSION}" \
+            "${installer}" \
+            "${sidecar}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --prerelease \
+            --title "QingToolbox ${VERSION}" \
+            --notes-file "docs/releases/${VERSION}.md"
+
+  publish-validated-candidate:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release && inputs.candidate_run_id != ''
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Checkout release orchestration source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Verify the successful candidate and release tag
+        id: candidate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+        run: |
+          $metadata = ./scripts/get-preview-release-metadata.ps1
+          $tag = "v$($metadata.Version)"
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:CANDIDATE_RUN_ID" | ConvertFrom-Json
+          if ($run.status -ne 'completed' -or $run.conclusion -ne 'success') {
+            throw "Candidate run $env:CANDIDATE_RUN_ID is not successful."
+          }
+          $tagCommit = (git rev-parse "$tag^{}").Trim()
+          if ($run.head_sha -ne $tagCommit) {
+            throw "Candidate $($run.head_sha) does not match $tag at $tagCommit."
+          }
+          "version=$($metadata.Version)" | Out-File $env:GITHUB_OUTPUT -Append
+          "tag=$tag" | Out-File $env:GITHUB_OUTPUT -Append
+          "installer_file=$($metadata.InstallerFileName)" | Out-File $env:GITHUB_OUTPUT -Append
+          "artifact_name=$($metadata.ValidationArtifactName)" | Out-File $env:GITHUB_OUTPUT -Append
+
+      - name: Download the successful candidate assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          ARTIFACT_NAME: ${{ steps.candidate.outputs.artifact_name }}
+        run: gh run download "${CANDIDATE_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --name "${ARTIFACT_NAME}" --dir release-assets
+
+      - name: Verify and publish the candidate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.candidate.outputs.version }}
+          TAG: ${{ steps.candidate.outputs.tag }}
+          INSTALLER_FILE: ${{ steps.candidate.outputs.installer_file }}
+        run: |
+          installer="release-assets/installer/output/${INSTALLER_FILE}"
+          sidecar="${installer}.sha256"
+          test -s "${installer}"
+          test -s "${sidecar}"
+          asset_count="$(find release-assets/installer/output -maxdepth 1 -type f | wc -l)"
+          test "${asset_count}" -eq 2
+          (cd "$(dirname "${installer}")" && sha256sum --check "$(basename "${sidecar}")")
+          gh release create "${TAG}" \
             "${installer}" \
             "${sidecar}" \
             --repo "${GITHUB_REPOSITORY}" \
