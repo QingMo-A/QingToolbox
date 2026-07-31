@@ -13,7 +13,9 @@
     <SolidColorBrush x:Key="PrimaryTextBrush" Color="#172033"/>
     <SolidColorBrush x:Key="SecondaryTextBrush" Color="#64748B"/>
     <SolidColorBrush x:Key="StatusBackgroundBrush" Color="#E8EEF8"/>
-    <SolidColorBrush x:Key="CardBorderBrush" Color="#DCE2EA"/>
+    <Color x:Key="CardBorderColor">#DCE2EA</Color>
+    <SolidColorBrush x:Key="CardBorderBrush" Color="{DynamicResource CardBorderColor}"/>
+    <SolidColorBrush x:Key="SubtleBorderBrush" Color="{DynamicResource CardBorderColor}"/>
     <LinearGradientBrush x:Key="ShellBackgroundGradientBrush" StartPoint="0,0" EndPoint="1,1">
         <GradientStop Color="#F8FAFC" Offset="0"/>
         <GradientStop Color="#EEF5FF" Offset="1"/>

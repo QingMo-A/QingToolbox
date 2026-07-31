@@ -118,7 +118,12 @@ jobs:
 
       - name: Run Development Web Shell canary
         shell: pwsh
-        run: ./scripts/test-development-web-shell.ps1 -Configuration Release -NoBuild
+        run: >-
+          ./scripts/test-development-web-shell.ps1
+          -Configuration Release
+          -NoBuild
+          -TimeoutSeconds 120
+          -DiagnosticsDirectory "${{ runner.temp }}\QingToolboxWebShellCanary"
 
       - name: Run module update smoke test
         shell: pwsh
@@ -296,6 +301,7 @@ jobs:
             ${{ runner.temp }}\QingToolboxInstallerRoundtrip\diagnostics.txt
             ${{ runner.temp }}\QingToolboxPreviewUpgrade\Installer Logs With Spaces\*.log
             ${{ runner.temp }}\QingToolboxStagingSmoke\summary.txt
+            ${{ runner.temp }}\QingToolboxWebShellCanary\**
 
       - name: Clean Preview validation test data
         if: always()
@@ -306,7 +312,8 @@ jobs:
             "${{ runner.temp }}\QingToolboxProfile",
             "${{ runner.temp }}\QingToolboxPreviewUpgrade",
             "${{ runner.temp }}\QingToolboxPreview1",
-            "${{ runner.temp }}\QingToolboxStagingSmoke"
+            "${{ runner.temp }}\QingToolboxStagingSmoke",
+            "${{ runner.temp }}\QingToolboxWebShellCanary"
           )
           foreach ($path in $paths) {
             if (Test-Path -LiteralPath $path) {
