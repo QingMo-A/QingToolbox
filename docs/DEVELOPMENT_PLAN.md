@@ -6,12 +6,14 @@
 
 ## UI modernization status (authoritative addendum)
 
-- Current release target: **QingToolbox 0.2.1-alpha Release Candidate (unpublished)**.
-- Candidate feature-development baseline: `dec509b8a48ca635cc93df60f24bc72481a9fbca`; starter-module source baseline: `c4c1b8fe15a37c16b38192aab3b26735bc232be6`.
-- Exact candidate host source identity is recorded at build time and must match the final synchronized `origin/toolbox` HEAD in the Preview Manifest, Host Payload Manifest, RC report, and final handoff report.
+- Current release status: **QingToolbox 0.2.1-alpha — Published**.
+- Tag: `v0.2.1-alpha`; release source SHA: `44374fb96f0ac8d78f71540d2d30d86c1fe6f31a`.
+- GitHub Actions Run `30615658843`: `success`; published at `2026-07-31T09:17:13Z`.
+- Official assets: `QingToolbox-0.2.1-alpha-win-x64-setup.exe` and its same-name SHA256 sidecar. The installer is `54,725,974` bytes with SHA256 `447ACEDE37CA5172B348A9662998B320C5710146235E03C6E7439D4850D77848`.
+- Starter-module source baseline: `c4c1b8fe15a37c16b38192aab3b26735bc232be6`.
 - TextTools `0.1.1`, PowerGuard `0.1.0`, and WindowTopmost `0.1.1` are separately prepared module candidates. The host installer and host Release do not contain their DLLs or `.qmod` files; the project owner will provide them through an independent module-delivery path.
 - `0.2.0-alpha` was the internal Preview 2 development target and was not published as an official Release. The `0.2.1-alpha` upgrade gate therefore uses the existing official `v0.1.0-alpha` installer.
-- Tag and GitHub Release have not been created. Automated and manual acceptance results must be recorded separately and must not be inferred.
+- The three starter modules remain independently delivered and were not bundled with the host Release. Plan 013 remains Frozen; follow-up work returns to user-visible features and module development. Automated and manual acceptance results remain separate and must not be inferred.
 
 - B1: Engineering Complete — Frozen.
 - B2.1: Engineering Complete — Frozen.
@@ -570,12 +572,15 @@ Plan 013 已完成并冻结，除 P0/P1 外不得继续追加普通边缘加固�
 退出。用户手动下载更高版本安装器仍可原地覆盖，同版本 Repair 和 SemVer 降级保护继续有效。
 Development 和 ModuleTest 不访问真实宿主更新源。
 
-当前 0.2.1-alpha 候选版本：
+当前已发布 0.2.1-alpha：
 
 - Version：0.2.1-alpha
 - AssemblyVersion：0.2.1.0
 - FileVersion：0.2.1.0
 - 显示名称：QingToolbox 0.2.1-alpha Preview 2
+- Tag：v0.2.1-alpha
+- Release source SHA：44374fb96f0ac8d78f71540d2d30d86c1fe6f31a
+- GitHub Actions Run：30615658843（success）
 
 以下 0.2.0-alpha 条目仅保留为未发布的 Preview 2 内部开发目标历史，不代表官方 Tag、Release 或升级来源：
 

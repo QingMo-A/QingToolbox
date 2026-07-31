@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.1-alpha - 2026-07-31
+
 - Prepared the unpublished 0.2.1-alpha installer-only release candidate and synchronized host version metadata.
 - Documented the candidate's safe host update flow, genuine recent-module shortcuts, and starter module set.
 - Restored the published `v0.1.0-alpha` installer as the real upgrade baseline; `0.2.0-alpha` remains an unpublished internal Preview 2 target.
