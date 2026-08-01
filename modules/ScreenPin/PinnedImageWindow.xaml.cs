@@ -179,26 +179,18 @@ public partial class PinnedImageWindow : Window, ILocalizedModuleView
 
     private void ResizeKeepingAspectRatio()
     {
-        var widthCandidate = Math.Max(MinWidth, _resizeStartWidth + _resizeDeltaX);
-        var heightCandidate = Math.Max(MinHeight, _resizeStartHeight + _resizeDeltaY);
-        var widthFromHeight = heightCandidate * _aspectRatio;
-
-        var newWidth = Math.Abs(_resizeDeltaX) >= Math.Abs(_resizeDeltaY)
-            ? widthCandidate
-            : widthFromHeight;
+        // Project the pointer movement onto the aspect-ratio line instead of
+        // switching between horizontal and vertical drivers on every event.
+        // The latter oscillates when both deltas are close and causes visible
+        // size jitter during diagonal drags.
+        var ratioSquared = _aspectRatio * _aspectRatio;
+        var projectedScaleDelta =
+            ((_resizeDeltaX * _aspectRatio) + _resizeDeltaY) /
+            (ratioSquared + 1);
+        var projectedWidth = _resizeStartWidth + (projectedScaleDelta * _aspectRatio);
+        var minimumWidth = Math.Max(MinWidth, MinHeight * _aspectRatio);
+        var newWidth = Math.Max(minimumWidth, projectedWidth);
         var newHeight = newWidth / _aspectRatio;
-
-        if (newHeight < MinHeight)
-        {
-            newHeight = MinHeight;
-            newWidth = newHeight * _aspectRatio;
-        }
-
-        if (newWidth < MinWidth)
-        {
-            newWidth = MinWidth;
-            newHeight = newWidth / _aspectRatio;
-        }
 
         Width = newWidth;
         Height = newHeight;
