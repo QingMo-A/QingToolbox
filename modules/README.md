@@ -1,12 +1,13 @@
-# QingToolbox starter modules
+# QingToolbox official modules
 
-The first public QingToolbox 0.2.1-alpha module set contains three independently packaged, manually loaded modules.
+The official QingToolbox module set contains independently packaged, manually loaded modules.
 
 | Module | Purpose | Version | Minimum host | Load mode | System behavior | Package |
 | --- | --- | --- | --- | --- | --- | --- |
 | TextTools | Local JSON, Base64, URL, case, and line transformations. | 0.1.1 | 0.1.0 | Manual | None; clipboard access occurs only when the user selects Copy Result. | `qing.texttools-0.1.1.qmod` |
-| PowerGuard | Confirms a sustained connectivity outage and can request a normal Windows shutdown after an explicit opt-in countdown. | 0.1.0 | 0.1.0 | Manual | Network probes and optional, user-enabled normal shutdown. No service, scheduled task, tray process, remote commands, or forced shutdown. | `qing.powerguard-0.1.0.qmod` |
+| PowerGuard | Confirms a sustained connectivity outage and can request a normal Windows shutdown after an explicit opt-in countdown. | 0.1.1 | 0.1.0 | Manual | Network probes and optional, user-enabled normal shutdown. No service, scheduled task, tray process, remote commands, or forced shutdown. | `qing.powerguard-0.1.1.qmod` |
 | WindowTopmost | Lists eligible visible windows and toggles their always-on-top state. | 0.1.1 | 0.1.0 | Manual | Calls bounded Win32 window enumeration and positioning APIs only after user action. | `qing.windowtopmost-0.1.1.qmod` |
+| ScreenPin | Captures a selected screen region and keeps it visible in a resizable floating window. | 0.1.1 | 0.1.0 | Manual | Captures only after explicit user action and creates user-controlled floating image windows. | `qing.screenpin-0.1.1.qmod` |
 
 Each package has a same-name SHA256 sidecar, for example `qing.texttools-0.1.1.qmod.sha256`.
 

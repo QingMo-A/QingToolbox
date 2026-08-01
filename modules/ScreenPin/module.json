@@ -2,7 +2,7 @@
   "id": "qing.screenpin",
   "name": "Screen Pin",
   "description": "Capture a screen region and pin it as a resizable floating image.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "QingMo",
   "entry": "QingToolbox.Modules.ScreenPin.dll",
   "icon": "icon.svg",
