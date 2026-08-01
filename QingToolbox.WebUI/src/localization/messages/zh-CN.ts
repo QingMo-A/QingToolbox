@@ -286,7 +286,7 @@ export const zhCNMessages = {
   'settings.section.aboutDescription': '版本和工作区信息',
   'settings.general.description': '个性化工作区，并查看宿主语言与导航偏好。',
   'settings.appearance.title': '外观',
-  'settings.appearance.description': '仅应用于 Development Web 工作区。',
+  'settings.appearance.description': '应用于工作区和原生标题栏。',
   'settings.appearance.system': '跟随系统',
   'settings.appearance.light': '浅色',
   'settings.appearance.dark': '深色',

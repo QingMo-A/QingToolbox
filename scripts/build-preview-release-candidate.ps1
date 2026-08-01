@@ -193,17 +193,17 @@ try {
     $env:LOCALAPPDATA = $originalLocalAppData
     $env:APPDATA = $originalAppData
 
-    Write-Host "`n==> Resolve verified v0.2.1-alpha installer"
+    Write-Host "`n==> Resolve verified v0.2.2-alpha installer"
     $previousDirectory = Join-Path $tempRoot "PreviousInstaller"
-    $previous = Invoke-CheckedStage -StageName "Resolve v0.2.1-alpha installer" -Action {
+    $previous = Invoke-CheckedStage -StageName "Resolve v0.2.2-alpha installer" -Action {
         & (Join-Path $PSScriptRoot "resolve-previous-preview-installer.ps1") `
-            -Tag "v0.2.1-alpha" -InstallerPath $PreviousInstallerPath -OutputDirectory $previousDirectory
+            -Tag "v0.2.2-alpha" -InstallerPath $PreviousInstallerPath -OutputDirectory $previousDirectory
     }
     if ($null -eq $previous -or -not (Test-Path -LiteralPath $previous.InstallerPath -PathType Leaf)) {
-        throw "0.2.2-alpha RC is blocked: verified v0.2.1-alpha installer is unavailable."
+        throw "0.2.3-alpha RC is blocked: verified v0.2.2-alpha installer is unavailable."
     }
 
-    Write-Host "`n==> Test v0.2.1-alpha to 0.2.2-alpha upgrade"
+    Write-Host "`n==> Test v0.2.2-alpha to 0.2.3-alpha upgrade"
     Invoke-CheckedStage -StageName "Preview in-place upgrade" -Action {
         & (Join-Path $PSScriptRoot "test-preview-upgrade.ps1") `
             -PreviousInstallerPath $previous.InstallerPath `
@@ -246,7 +246,7 @@ try {
     Write-Host "Installer SHA256:  $((Get-FileHash $installer.FullName -Algorithm SHA256).Hash)"
     Write-Host "Manifest:          $manifestPath"
     Write-Host "Roundtrip:         passed"
-    Write-Host "Previous version:  0.2.1-alpha"
+    Write-Host "Previous version:  0.2.2-alpha"
     Write-Host "Previous SHA256:   $($previous.Sha256)"
     Write-Host "Upgrade:           passed"
     Write-Host "Repair install:    passed"

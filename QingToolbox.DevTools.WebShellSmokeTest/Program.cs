@@ -100,6 +100,10 @@ var cancelledResult = await dispatcher.DispatchAsync(JsonSerializer.Serialize(ne
 Require(!cancelledResult.Response.Success && cancelledResult.Response.Error?.Code == "Cancelled", "A cancelled session must reject handler side effects.");
 Require(!WebBridgeHost.TryPost(() => throw new ObjectDisposedException("core")), "Disposed Core posts must be isolated.");
 Require(!WebBridgeHost.TryPost(() => throw new System.Runtime.InteropServices.COMException()), "Failed COM Core posts must be isolated.");
+Require(WebShellThemeNotification.TryParse("{\"kind\":\"qing.ui.theme\",\"mode\":\"dark\"}", out var darkTheme) && darkTheme == WebShellThemeMode.Dark,
+    "The native title bar must accept a bounded Web theme notification.");
+foreach (var invalidTheme in new[] { "{}", "{\"kind\":\"qing.ui.theme\",\"mode\":\"invalid\"}", "{\"kind\":\"qing.ui.theme\",\"mode\":\"dark\",\"extra\":true}" })
+    Require(!WebShellThemeNotification.TryParse(invalidTheme, out _), "Malformed or extended theme notifications must be rejected.");
 
 Console.WriteLine("Verifying activated read-only module projection...");
 var moduleActivation = new WebActivationSession();

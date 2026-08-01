@@ -8,7 +8,7 @@
              AutomationProperties.Name="{Binding AutomationName, RelativeSource={RelativeSource AncestorType=UserControl}}"
              PreviewMouseRightButtonUp="OnTitleBarRightClick">
     <Border Background="{Binding Background, RelativeSource={RelativeSource AncestorType=UserControl}}"
-            BorderBrush="{StaticResource WindowTitleBarDividerBrush}"
+            BorderBrush="{DynamicResource WindowTitleBarDividerBrush}"
             BorderThickness="0,0,0,1">
         <Grid>
             <Grid.ColumnDefinitions>

@@ -11,6 +11,7 @@ using QingToolbox.Abstractions.Localization;
 using QingToolbox.Shell.Views;
 using QingToolbox.Shell.Windowing;
 using QingToolbox.Shell.WebShell;
+using Microsoft.Win32;
 
 namespace QingToolbox.Shell;
 
@@ -30,6 +31,7 @@ public partial class MainWindow : Window
     private readonly ModuleTransactionRecoveryCoordinator _moduleRecovery;
     private readonly SessionLogService _sessionLog;
     private readonly IWebShellInitializer _webShellInitializer;
+    private readonly WebBridgeHost _webBridgeHost;
     private readonly WebWorkspacePresentationState _webWorkspacePresentation;
     private Task? _backgroundStartupTask;
     private long _workspaceTransitionVersion;
@@ -50,7 +52,8 @@ public partial class MainWindow : Window
         StartupPipelineCoordinator startupPipeline,
         ModuleTransactionRecoveryCoordinator moduleRecovery,
         SessionLogService sessionLog,
-        IWebShellInitializer webShellInitializer)
+        IWebShellInitializer webShellInitializer,
+        WebBridgeHost webBridgeHost)
     {
         InitializeComponent();
 
@@ -68,7 +71,11 @@ public partial class MainWindow : Window
         _moduleRecovery = moduleRecovery;
         _sessionLog = sessionLog;
         _webShellInitializer = webShellInitializer;
+        _webBridgeHost = webBridgeHost;
         _webWorkspacePresentation = new WebWorkspacePresentationState(webShellInitializer.IsAllowed);
+        _webBridgeHost.ThemeChanged += OnWebThemeChanged;
+        SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
+        WindowTitleBarThemeManager.Apply(WebShellThemeMode.System);
         _startupSession.Attach(this, floatingBadgeManager);
         _floatingBadgeManager.Attach(this);
         DataContext = viewModel;
@@ -76,6 +83,27 @@ public partial class MainWindow : Window
         Loaded += OnLoaded;
         SizeChanged += OnSizeChanged;
         Closing += OnClosing;
+        Closed += OnClosed;
+    }
+
+    private WebShellThemeMode _webThemeMode = WebShellThemeMode.System;
+
+    private void OnWebThemeChanged(WebShellThemeMode mode) => Dispatcher.BeginInvoke(() =>
+    {
+        _webThemeMode = mode;
+        WindowTitleBarThemeManager.Apply(mode);
+    });
+
+    private void OnSystemPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
+    {
+        if (_webThemeMode == WebShellThemeMode.System)
+            Dispatcher.BeginInvoke(() => WindowTitleBarThemeManager.Apply(WebShellThemeMode.System));
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        _webBridgeHost.ThemeChanged -= OnWebThemeChanged;
+        SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
     }
 
     private async void OnFloatingBadgeClick(object sender, RoutedEventArgs e)

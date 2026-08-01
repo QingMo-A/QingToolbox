@@ -17,6 +17,7 @@ public sealed class WebBridgeHost(WebBridgeDispatcher dispatcher, WebAppSnapshot
     public event Action<long>? ActivationAccepted;
     public event Action<long, bool>? PingAccepted;
     public event Action<string, long>? CommandSucceeded;
+    internal event Action<WebShellThemeMode>? ThemeChanged;
     public long Generation { get { lock (_sync) return _generation; } }
 
     public long Attach(CoreWebView2 core)
@@ -60,6 +61,11 @@ public sealed class WebBridgeHost(WebBridgeDispatcher dispatcher, WebAppSnapshot
         if (!Uri.TryCreate(args.Source, UriKind.Absolute, out var source) || !navigation.IsAllowed(source))
         { log.Warning("WebShell", "Bridge request rejected; failure=UntrustedSource."); return; }
         if (!IsCurrent(core, generation, token)) return;
+        if (WebShellThemeNotification.TryParse(args.WebMessageAsJson, out var theme))
+        {
+            if (activation.IsActivated(generation)) ThemeChanged?.Invoke(theme);
+            return;
+        }
         var context = new WebBridgeRequestContext(generation, token);
         var result = await dispatcher.DispatchAsync(args.WebMessageAsJson, context, token);
         if (!IsCurrent(core, generation, token)) return;
