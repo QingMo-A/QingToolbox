@@ -4,6 +4,9 @@ namespace QingToolbox.Shell.Windowing;
 
 internal static class NativeWindowMessages
 {
+    internal const int WindowQueryEndSession = 0x0011;
+    internal const int WindowEndSession = 0x0016;
+    internal const long EndSessionCloseApplication = 0x00000001;
     internal const int WindowNonClientHitTest = 0x0084;
     internal const int WindowNonClientMouseMove = 0x00A0;
     internal const int WindowNonClientLeftButtonDown = 0x00A1;
@@ -17,6 +20,14 @@ internal static class NativeWindowMessages
 
     [DllImport("user32.dll")]
     internal static extern uint GetDoubleClickTime();
+
+    internal static bool IsRestartManagerQuery(int message, IntPtr lParam) =>
+        message == WindowQueryEndSession &&
+        (lParam.ToInt64() & EndSessionCloseApplication) != 0;
+
+    internal static bool IsRestartManagerShutdown(int message, IntPtr wParam, IntPtr lParam) =>
+        message == WindowEndSession && wParam != IntPtr.Zero &&
+        (lParam.ToInt64() & EndSessionCloseApplication) != 0;
 
     [DllImport("user32.dll")]
     private static extern bool TrackMouseEvent(ref TrackMouseEventData eventTrack);

@@ -12,9 +12,9 @@ if ($sourceAssertion -notmatch [regex]::Escape("`$branchOutput = @(Invoke-Source
     $sourceAssertion -notmatch [regex]::Escape("(`$branchOutput -join '')")) {
     throw 'Preview source validation must safely accept an allowed detached tag checkout.'
 }
-$expectedVersion = '0.2.3-alpha'
-if ($metadata.Version -ne $expectedVersion -or $metadata.FileVersion -ne '0.2.3.0') {
-    throw "Unexpected 0.2.3 candidate metadata: $($metadata.Version) / $($metadata.FileVersion)"
+$expectedVersion = '0.2.4-alpha'
+if ($metadata.Version -ne $expectedVersion -or $metadata.FileVersion -ne '0.2.4.0') {
+    throw "Unexpected 0.2.4 candidate metadata: $($metadata.Version) / $($metadata.FileVersion)"
 }
 $expectedInstaller = "QingToolbox-$($metadata.Version)-win-x64-setup.exe"
 if ($metadata.InstallerFileName -ne $expectedInstaller) {
@@ -33,9 +33,9 @@ if ($workflow -notmatch [regex]::Escape('artifacts/installer/output/${{ steps.re
     $workflow -notmatch [regex]::Escape('artifacts/installer/output/${{ steps.release.outputs.installer_file }}.sha256')) {
     throw 'Preview validation does not upload the installer and its same-name SHA256 sidecar.'
 }
-if ($workflow -notmatch [regex]::Escape('-Tag v0.2.2-alpha') -or
-    $workflow -match [regex]::Escape('-Tag v0.2.1-alpha')) {
-    throw 'Preview validation must use the published v0.2.2-alpha upgrade baseline.'
+if ($workflow -notmatch [regex]::Escape('-Tag v0.2.3-alpha') -or
+    $workflow -match [regex]::Escape('-Tag v0.2.2-alpha')) {
+    throw 'Preview validation must use the published v0.2.3-alpha upgrade baseline.'
 }
 foreach ($remoteReleaseGuard in @(
     "github.event_name == 'workflow_dispatch' && inputs.publish_release",
@@ -62,10 +62,10 @@ foreach ($validatedCandidateGuard in @(
 $resolver = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'resolve-previous-preview-installer.ps1') -Raw
 $candidateGate = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'build-preview-release-candidate.ps1') -Raw
 $upgradeTest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'test-preview-upgrade.ps1') -Raw
-if ($resolver -notmatch '\[string\]\$Tag\s*=\s*"v0\.2\.2-alpha"' -or
-    $candidateGate -notmatch [regex]::Escape('-Tag "v0.2.2-alpha"') -or
-    $candidateGate -match [regex]::Escape('-Tag "v0.2.1-alpha"')) {
-    throw 'Release candidate scripts do not consistently use the published v0.2.2-alpha baseline.'
+if ($resolver -notmatch '\[string\]\$Tag\s*=\s*"v0\.2\.3-alpha"' -or
+    $candidateGate -notmatch [regex]::Escape('-Tag "v0.2.3-alpha"') -or
+    $candidateGate -match [regex]::Escape('-Tag "v0.2.2-alpha"')) {
+    throw 'Release candidate scripts do not consistently use the published v0.2.3-alpha baseline.'
 }
 if ($upgradeTest -notmatch [regex]::Escape('[Diagnostics.FileVersionInfo]::GetVersionInfo($previous)') -or
     $upgradeTest -notmatch [regex]::Escape("Join-Path `$install 'host-payload.manifest.json'") -or
@@ -83,18 +83,26 @@ foreach ($upgradeSynchronizationGuard in @(
 }
 
 $installerScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'build-installer.ps1') -Raw
-if ($installerScript -notmatch [regex]::Escape('installer\baselines\0.2.2-alpha-obsolete-host-payload.json') -or
-    $installerScript -match [regex]::Escape('installer\baselines\0.2.1-alpha-host-payload.json')) {
-    throw 'The installer must clean obsolete host files against the published v0.2.2-alpha payload baseline.'
+$innoScript = Get-Content -LiteralPath (Join-Path $repoRoot 'installer\QingToolbox.iss') -Raw
+foreach ($closeContract in @(
+    'CloseApplications=force',
+    'CloseApplicationsFilter=QingToolbox.Shell.exe,QingToolbox.ModuleHost.exe,QingToolbox.StartupMaintenance.exe')) {
+    if ($innoScript -notmatch [regex]::Escape($closeContract)) {
+        throw "Installer close-applications fallback is missing: $closeContract"
+    }
+}
+if ($installerScript -notmatch [regex]::Escape('installer\baselines\0.2.3-alpha-obsolete-host-payload.json') -or
+    $installerScript -match [regex]::Escape('installer\baselines\0.2.2-alpha-obsolete-host-payload.json')) {
+    throw 'The installer must clean obsolete host files against the published v0.2.3-alpha payload baseline.'
 }
 $previousCleanupBaseline = Get-Content -LiteralPath (
-    Join-Path $repoRoot 'installer\baselines\0.2.2-alpha-obsolete-host-payload.json') -Raw
+    Join-Path $repoRoot 'installer\baselines\0.2.3-alpha-obsolete-host-payload.json') -Raw
 foreach ($obsoletePath in @(
-    'docs/releases/0.2.2-alpha.md',
+    'docs/releases/0.2.3-alpha.md',
     'WebUI/assets/index-BSQ8CxnQ.css',
-    'WebUI/assets/index-DT0kivkt.js')) {
+    'WebUI/assets/index-DcgYzRqF.js')) {
     if ($previousCleanupBaseline -notmatch [regex]::Escape($obsoletePath)) {
-        throw "Published v0.2.2-alpha cleanup baseline is missing: $obsoletePath"
+        throw "Published v0.2.3-alpha cleanup baseline is missing: $obsoletePath"
     }
 }
 foreach ($requiredContract in @(
@@ -113,7 +121,7 @@ foreach ($hostOnlyGuard in @(
     }
 }
 
-$releaseNotes = Get-Content -LiteralPath (Join-Path $repoRoot 'docs\releases\0.2.3-alpha.md') -Raw -Encoding UTF8
+$releaseNotes = Get-Content -LiteralPath (Join-Path $repoRoot 'docs\releases\0.2.4-alpha.md') -Raw -Encoding UTF8
 $chineseIndependentDelivery = [Text.Encoding]::UTF8.GetString(
     [Convert]::FromBase64String('5LiN6ZqP5a6/5Li75a6J6KOF5Zmo5oiW5a6/5Li7IFJlbGVhc2Ug5o2G57uR'))
 $chineseUnpublished = [Text.Encoding]::UTF8.GetString(
@@ -130,7 +138,7 @@ foreach ($candidateOnlyText in @('Release Candidate', $chineseUnpublished)) {
         throw "Final Release Notes still contain candidate-only text: $candidateOnlyText"
     }
 }
-if ($releaseNotes -notmatch [regex]::Escape('v0.2.2-alpha')) {
+if ($releaseNotes -notmatch [regex]::Escape('v0.2.3-alpha')) {
     throw 'Final Release Notes do not identify the published upgrade baseline.'
 }
 

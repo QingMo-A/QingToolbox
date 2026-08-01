@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.4-alpha - 2026-08-01
+
+- Allowed Windows Restart Manager maintenance shutdowns to bypass the normal close-to-tray preference and run the existing orderly exit pipeline.
+- Added a controlled installer force-close fallback for older QingToolbox versions that cannot yet recognize maintenance shutdown messages.
+- Expanded installer in-use detection to the Shell, ModuleHost, and StartupMaintenance host executables.
+
 ## 0.2.3-alpha - 2026-08-01
 
 - Synchronized the native WPF title bar with the Vue workspace light, dark, and system appearance modes.

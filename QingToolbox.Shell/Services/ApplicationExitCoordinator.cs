@@ -10,6 +10,7 @@ public enum ApplicationExitReason
     UserRequested,
     NotificationAreaMenu,
     FloatingBadgeMenu,
+    RestartManager,
     SessionEnding,
     ApplicationFailure
 }

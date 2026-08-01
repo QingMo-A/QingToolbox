@@ -4,6 +4,7 @@ using QingToolbox.Core.Settings;
 using QingToolbox.Core.Localization;
 using QingToolbox.Shell.Startup;
 using QingToolbox.Shell.WebShell;
+using QingToolbox.Shell.Windowing;
 
 var root = Directory.GetCurrentDirectory();
 var dev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "WebShellSmoke", root);
@@ -37,6 +38,26 @@ var nativePresentation = new WebWorkspacePresentationState(webShellAllowed: fals
 Require(nativePresentation.Phase == WebWorkspacePresentationPhase.Native &&
         !nativePresentation.TryPrepare(isExiting: false) && !nativePresentation.TryShowReady(isExiting: false),
     "ModuleTest presentation must remain native-only.");
+
+Console.WriteLine("Verifying Restart Manager maintenance shutdown messages...");
+Require(NativeWindowMessages.IsRestartManagerQuery(
+        NativeWindowMessages.WindowQueryEndSession,
+        new IntPtr(NativeWindowMessages.EndSessionCloseApplication)),
+    "Restart Manager close queries must be approved without using the user's close-button behavior.");
+Require(!NativeWindowMessages.IsRestartManagerShutdown(
+        NativeWindowMessages.WindowEndSession,
+        IntPtr.Zero,
+        new IntPtr(NativeWindowMessages.EndSessionCloseApplication)),
+    "A cancelled Restart Manager session must not exit the application.");
+Require(NativeWindowMessages.IsRestartManagerShutdown(
+        NativeWindowMessages.WindowEndSession,
+        new IntPtr(1),
+        new IntPtr(NativeWindowMessages.EndSessionCloseApplication)),
+    "A confirmed Restart Manager maintenance shutdown must exit the application.");
+Require(!NativeWindowMessages.IsRestartManagerQuery(
+        NativeWindowMessages.WindowQueryEndSession,
+        IntPtr.Zero),
+    "Ordinary logoff or shutdown messages must retain the existing session-ending path.");
 
 var activation = new WebActivationSession();
 using var generationOne = new CancellationTokenSource();

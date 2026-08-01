@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media.Animation;
 using QingToolbox.Shell.ViewModels;
 using QingToolbox.Shell.Services;
@@ -36,6 +37,7 @@ public partial class MainWindow : Window
     private Task? _backgroundStartupTask;
     private long _workspaceTransitionVersion;
     private int _closeRequestPending;
+    private HwndSource? _nativeWindowSource;
     private WindowState _notificationAreaRestoreState = WindowState.Normal;
 
     public MainWindow(
@@ -81,6 +83,7 @@ public partial class MainWindow : Window
         DataContext = viewModel;
         ApplyWorkspacePresentation(_webWorkspacePresentation.Snapshot);
         Loaded += OnLoaded;
+        SourceInitialized += OnSourceInitialized;
         SizeChanged += OnSizeChanged;
         Closing += OnClosing;
         Closed += OnClosed;
@@ -102,8 +105,40 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        SourceInitialized -= OnSourceInitialized;
+        if (_nativeWindowSource is not null)
+        {
+            _nativeWindowSource.RemoveHook(OnNativeWindowMessage);
+            _nativeWindowSource = null;
+        }
         _webBridgeHost.ThemeChanged -= OnWebThemeChanged;
         SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
+    }
+
+    private void OnSourceInitialized(object? sender, EventArgs e)
+    {
+        _nativeWindowSource = PresentationSource.FromVisual(this) as HwndSource;
+        _nativeWindowSource?.AddHook(OnNativeWindowMessage);
+    }
+
+    private IntPtr OnNativeWindowMessage(
+        IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (NativeWindowMessages.IsRestartManagerQuery(message, lParam))
+        {
+            // Restart Manager asks first and sends WM_ENDSESSION only after every
+            // participating application agrees. Do not exit during the query.
+            handled = true;
+            return new IntPtr(1);
+        }
+
+        if (!NativeWindowMessages.IsRestartManagerShutdown(message, wParam, lParam))
+            return IntPtr.Zero;
+
+        handled = true;
+        _sessionLog.Information("Application", "Restart Manager requested application shutdown for installation maintenance.");
+        _ = _exitCoordinator.RequestExitAsync(ApplicationExitReason.RestartManager);
+        return IntPtr.Zero;
     }
 
     private async void OnFloatingBadgeClick(object sender, RoutedEventArgs e)
