@@ -83,9 +83,19 @@ foreach ($upgradeSynchronizationGuard in @(
 }
 
 $installerScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'build-installer.ps1') -Raw
-if ($installerScript -notmatch [regex]::Escape('installer\baselines\0.2.1-alpha-host-payload.json') -or
-    $installerScript -match [regex]::Escape('installer\baselines\0.1.0-alpha-host-payload.json')) {
-    throw 'The installer must clean obsolete host files against the published v0.2.1-alpha payload baseline.'
+if ($installerScript -notmatch [regex]::Escape('installer\baselines\0.2.2-alpha-obsolete-host-payload.json') -or
+    $installerScript -match [regex]::Escape('installer\baselines\0.2.1-alpha-host-payload.json')) {
+    throw 'The installer must clean obsolete host files against the published v0.2.2-alpha payload baseline.'
+}
+$previousCleanupBaseline = Get-Content -LiteralPath (
+    Join-Path $repoRoot 'installer\baselines\0.2.2-alpha-obsolete-host-payload.json') -Raw
+foreach ($obsoletePath in @(
+    'docs/releases/0.2.2-alpha.md',
+    'WebUI/assets/index-BSQ8CxnQ.css',
+    'WebUI/assets/index-DT0kivkt.js')) {
+    if ($previousCleanupBaseline -notmatch [regex]::Escape($obsoletePath)) {
+        throw "Published v0.2.2-alpha cleanup baseline is missing: $obsoletePath"
+    }
 }
 foreach ($requiredContract in @(
     'dotnet', 'publish', 'write-host-payload-manifest.ps1',

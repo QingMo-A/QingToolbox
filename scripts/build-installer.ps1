@@ -24,7 +24,7 @@ $shellProject = Join-Path $repoRoot "QingToolbox.Shell\QingToolbox.Shell.csproj"
 $maintenanceProject = Join-Path $repoRoot "QingToolbox.StartupMaintenance\QingToolbox.StartupMaintenance.csproj"
 $smokeProject = Join-Path $repoRoot "QingToolbox.DevTools.ModuleLoadSmokeTest\QingToolbox.DevTools.ModuleLoadSmokeTest.csproj"
 $installerScript = Join-Path $repoRoot "installer\QingToolbox.iss"
-$previousHostManifest = Join-Path $repoRoot "installer\baselines\0.2.1-alpha-host-payload.json"
+$previousHostManifest = Join-Path $repoRoot "installer\baselines\0.2.2-alpha-obsolete-host-payload.json"
 $obsoleteInclude = Join-Path $installerRoot "generated-obsolete-files.iss"
 $brandIconPath = Join-Path $repoRoot `
     "QingToolbox.Shell\Assets\Branding\QingToolbox.ico"
@@ -244,7 +244,7 @@ try {
     }
     & (Join-Path $PSScriptRoot 'verify-host-web-asset-binding.ps1') -PayloadRoot $payloadDirectory
     if (-not (Test-Path -LiteralPath $previousHostManifest -PathType Leaf)) {
-        throw "Preview 1 host payload baseline is missing: $previousHostManifest"
+        throw "Previous release host cleanup baseline is missing: $previousHostManifest"
     }
     & (Join-Path $PSScriptRoot "write-obsolete-host-files-include.ps1") `
         -PreviousManifestPath $previousHostManifest `

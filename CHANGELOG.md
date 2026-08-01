@@ -7,6 +7,7 @@
 - Synchronized the native WPF title bar with the Vue workspace light, dark, and system appearance modes.
 - Kept theme notifications constrained to the verified local WebView session without changing Bridge protocol v4.
 - Added focused Web and host smoke coverage for title-bar theme notification validation.
+- Updated installer cleanup for the published 0.2.2-alpha payload during in-place upgrades.
 
 ## 0.2.2-alpha - 2026-07-31
 
