@@ -34,8 +34,12 @@ public partial class ScreenPinView : UserControl, ILocalizedModuleView
         SubtitleText.Text = T(
             "view.subtitle",
             "Capture a region and keep it floating on screen.");
-        CaptureButton.Content = T("actions.captureRegion", "Capture Region");
-        CloseAllButton.Content = T("actions.closeAllPins", "Close All Pins");
+        CaptureButtonText.Text = T("actions.captureRegion", "Capture Region");
+        CloseAllButtonText.Text = T("actions.closeAllPins", "Close All Pins");
+        ActionHeadingText.Text = T("view.actionsTitle", "Capture controls");
+        ActionDescriptionText.Text = T(
+            "view.actionsDescription",
+            "Create a new floating image or close the current pins.");
         _manager.RefreshLocalization();
         UpdateCount();
     }
@@ -47,9 +51,10 @@ public partial class ScreenPinView : UserControl, ILocalizedModuleView
         _manager.CloseAll();
     }
     private void OnCountChanged(object? sender, EventArgs e) => UpdateCount();
-    private void UpdateCount() => CountText.Text = _localization.GetModuleString(
-        _moduleId,
-        "status.pinnedCount",
-        "Pinned images: {0}",
-        _manager.Count);
+    private void UpdateCount()
+    {
+        CountText.Text = T("status.pinnedSummary", "Pinned images currently on screen");
+        CountBadgeText.Text = _manager.Count.ToString();
+        CloseAllButton.IsEnabled = _manager.Count > 0;
+    }
 }

@@ -14,10 +14,10 @@
         <CubicEase x:Key="OverlayEase" EasingMode="EaseInOut"/>
 
         <Style x:Key="OverlayIconButtonStyle" TargetType="Button">
-            <Setter Property="Width" Value="30"/>
-            <Setter Property="Height" Value="30"/>
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
             <Setter Property="Padding" Value="0"/>
-            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="Margin" Value="0"/>
             <Setter Property="Foreground" Value="#F8FAFC"/>
             <Setter Property="Background" Value="#7A0F172A"/>
             <Setter Property="BorderBrush" Value="#55FFFFFF"/>
@@ -30,14 +30,14 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="10">
+                                CornerRadius="8">
                             <ContentPresenter HorizontalAlignment="Center"
                                               VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Chrome" Property="Background" Value="#B51D4ED8"/>
-                                <Setter TargetName="Chrome" Property="BorderBrush" Value="#80BFDBFE"/>
+                                <Setter TargetName="Chrome" Property="Background" Value="#D92563EB"/>
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="#99BFDBFE"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="Chrome" Property="Background" Value="#D91E40AF"/>
@@ -46,6 +46,16 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+        <Style x:Key="OverlayCloseButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource OverlayIconButtonStyle}">
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#D9DC2626"/>
+                    <Setter Property="BorderBrush" Value="#99FECACA"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
     </Window.Resources>
 
@@ -81,54 +91,63 @@
               Margin="8"
               Opacity="0"
               IsHitTestVisible="False">
-            <StackPanel HorizontalAlignment="Left"
-                        VerticalAlignment="Top"
-                        Orientation="Horizontal">
-                <Button x:Name="TopmostButton"
-                        Style="{StaticResource OverlayIconButtonStyle}"
-                        ToolTip="Unpin"
-                        Click="OnToggleTopmost">
-                    <Viewbox Width="15" Height="15">
-                        <Path x:Name="TopmostIcon"
-                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              Data="M5,2 L13,2 L13,4 L11.8,4 L11.8,9.2 L14,11.4 L14,13 L9.8,13 L9.8,18 L8.2,18 L8.2,13 L4,13 L4,11.4 L6.2,9.2 L6.2,4 L5,4 Z"/>
-                    </Viewbox>
-                </Button>
-                <Button x:Name="ResizeModeButton"
-                        Style="{StaticResource OverlayIconButtonStyle}"
-                        ToolTip="Aspect ratio resize"
-                        Click="OnToggleResizeMode">
-                    <Viewbox Width="15" Height="15">
-                        <Path x:Name="ResizeModeIcon"
-                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              Data="M3,3 L9,3 L9,5 L6.4,5 L11,9.6 L9.6,11 L5,6.4 L5,9 L3,9 Z M13,15 L7,15 L7,13 L9.6,13 L5,8.4 L6.4,7 L11,11.6 L11,9 L13,9 Z"/>
-                    </Viewbox>
-                </Button>
-                <Button x:Name="CopyButton"
-                        Style="{StaticResource OverlayIconButtonStyle}"
-                        ToolTip="Copy"
-                        Click="OnCopy">
-                    <Viewbox Width="15" Height="15">
-                        <Path Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              Data="M4,2 L12,2 L12,4 L6,4 L6,12 L4,12 Z M7,5 L15,5 L15,15 L7,15 Z M9,7 L9,13 L13,13 L13,7 Z"/>
-                    </Viewbox>
-                </Button>
-            </StackPanel>
+            <Border HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Padding="3"
+                    Background="#8F0F172A"
+                    BorderBrush="#55FFFFFF"
+                    BorderThickness="1"
+                    CornerRadius="12">
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="TopmostButton"
+                            Margin="0,0,3,0"
+                            Style="{StaticResource OverlayIconButtonStyle}"
+                            ToolTip="Unpin"
+                            Click="OnToggleTopmost">
+                        <TextBlock x:Name="TopmostIcon"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   FontFamily="Segoe Fluent Icons"
+                                   FontSize="15"
+                                   Text="&#xE840;"/>
+                    </Button>
+                    <Button x:Name="ResizeModeButton"
+                            Margin="0,0,3,0"
+                            Style="{StaticResource OverlayIconButtonStyle}"
+                            ToolTip="Aspect ratio resize"
+                            Click="OnToggleResizeMode">
+                        <TextBlock x:Name="ResizeModeIcon"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   FontFamily="Segoe Fluent Icons"
+                                   FontSize="15"
+                                   Text="&#xE8B9;"/>
+                    </Button>
+                    <Button x:Name="CopyButton"
+                            Style="{StaticResource OverlayIconButtonStyle}"
+                            ToolTip="Copy"
+                            Click="OnCopy">
+                        <TextBlock HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   FontFamily="Segoe Fluent Icons"
+                                   FontSize="15"
+                                   Text="&#xE8C8;"/>
+                    </Button>
+                </StackPanel>
+            </Border>
 
             <Button x:Name="CloseButton"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Top"
                     Margin="0"
-                    Style="{StaticResource OverlayIconButtonStyle}"
+                    Style="{StaticResource OverlayCloseButtonStyle}"
                     ToolTip="Close"
                     Click="OnClose">
-                <Viewbox Width="13" Height="13">
-                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                          StrokeThickness="2.2"
-                          StrokeStartLineCap="Round"
-                          StrokeEndLineCap="Round"
-                          Data="M3,3 L13,13 M13,3 L3,13"/>
-                </Viewbox>
+                <TextBlock HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           FontFamily="Segoe Fluent Icons"
+                           FontSize="14"
+                           Text="&#xE8BB;"/>
             </Button>
         </Grid>
 
