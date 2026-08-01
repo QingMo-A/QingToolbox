@@ -2,5 +2,24 @@
   "schemaVersion": 1,
   "moduleId": "qing.powerguard",
   "publisher": "QingMo-A",
-  "releases": []
+  "releases": [
+    {
+      "version": "0.1.1",
+      "channel": "stable",
+      "moduleApiVersion": "experimental-0.1",
+      "minimumHostVersion": "0.1.0",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-08-01T18:03:25Z",
+      "package": {
+        "fileName": "qing.powerguard-0.1.1.qmod",
+        "url": "https://github.com/QingMo-A/QingToolbox/releases/download/modules-powerguard-v0.1.1/qing.powerguard-0.1.1.qmod",
+        "size": 64422,
+        "sha256": "B284386FBB56EAF80F295D1950A6D4AF84C05844E05BF22E1797105B1CF30A03"
+      },
+      "releaseNotes": {
+        "zh-CN": "改进多源连接检测、状态恢复和安全关机倒计时可靠性。",
+        "en-US": "Improves multi-source connectivity detection, recovery handling, and safe shutdown countdown reliability."
+      }
+    }
+  ]
 }

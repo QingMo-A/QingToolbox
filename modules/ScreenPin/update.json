@@ -2,5 +2,24 @@
   "schemaVersion": 1,
   "moduleId": "qing.screenpin",
   "publisher": "QingMo-A",
-  "releases": []
+  "releases": [
+    {
+      "version": "0.1.1",
+      "channel": "stable",
+      "moduleApiVersion": "experimental-0.1",
+      "minimumHostVersion": "0.1.0",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-08-01T18:03:25Z",
+      "package": {
+        "fileName": "qing.screenpin-0.1.1.qmod",
+        "url": "https://github.com/QingMo-A/QingToolbox/releases/download/modules-screenpin-v0.1.1/qing.screenpin-0.1.1.qmod",
+        "size": 17886,
+        "sha256": "568612F5E1CC669744F6D10E136B00DA6CBEF6CD3692A302016DD4BFEF0A37AF"
+      },
+      "releaseNotes": {
+        "zh-CN": "更新模块界面，并修复等比例缩放时的抖动。",
+        "en-US": "Refreshes the module UI and fixes jitter during aspect-ratio-preserving resize."
+      }
+    }
+  ]
 }

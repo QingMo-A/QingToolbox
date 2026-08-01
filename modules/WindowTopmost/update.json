@@ -2,5 +2,24 @@
   "schemaVersion": 1,
   "moduleId": "qing.windowtopmost",
   "publisher": "QingMo-A",
-  "releases": []
+  "releases": [
+    {
+      "version": "0.1.1",
+      "channel": "stable",
+      "moduleApiVersion": "experimental-0.1",
+      "minimumHostVersion": "0.1.0",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-08-01T18:03:25Z",
+      "package": {
+        "fileName": "qing.windowtopmost-0.1.1.qmod",
+        "url": "https://github.com/QingMo-A/QingToolbox/releases/download/modules-windowtopmost-v0.1.1/qing.windowtopmost-0.1.1.qmod",
+        "size": 14210,
+        "sha256": "3E9D8D796C3F6470A5AED2B4C0E072D2DB7938A584545ACFE7E8F0B6FED18822"
+      },
+      "releaseNotes": {
+        "zh-CN": "改进窗口选择、置顶操作安全性与界面反馈。",
+        "en-US": "Improves window selection, topmost action safety, and UI feedback."
+      }
+    }
+  ]
 }
