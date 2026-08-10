@@ -1,0 +1,456 @@
+/* Appearance presets deliberately use one semantic vocabulary. Components
+   consume these aliases instead of knowing which visual preset is active. */
+:root {
+  --q-sidebar: #edf3fb;
+  --q-nav: #f8fbff;
+  --q-card: #ffffff;
+  --q-panel: #f8fbff;
+  --q-primary: #2563eb;
+  --q-primary-hover: #1d4ed8;
+  --q-primary-pressed: #1e40af;
+  --q-secondary: #ffffff;
+  --q-secondary-hover: #e8f0ff;
+  --q-danger-hover: #a93242;
+  --q-danger-pressed: #8e2635;
+  --q-input: #ffffff;
+  --q-select: #ffffff;
+  --q-toggle: #c4d2e3;
+  --q-border-strong: #b8c9df;
+  --q-text-muted: #50637e;
+  --q-text-disabled: #9aa9bb;
+  --q-hover: #e8f0ff;
+  --q-pressed: #d9e6ff;
+  --q-disabled: #eef2f7;
+  --q-focus: #2563eb;
+  --q-radius-xs: 6px;
+  --q-radius-md: 12px;
+  --q-radius-xl: 22px;
+  --q-shadow-sm: 0 4px 14px rgba(43, 76, 120, .06);
+  --q-shadow-md: 0 8px 22px rgba(43, 76, 120, .09);
+  --q-shadow-lg: 0 16px 42px rgba(43, 76, 120, .14);
+}
+
+:root[data-appearance-preset='qing-default'] {
+  --q-bg: #f3f7fd;
+  --q-sidebar: #edf3fb;
+  --q-nav: #f8fbff;
+  --q-surface: #ffffff;
+  --q-surface-soft: #f8fbff;
+  --q-card: #ffffff;
+  --q-panel: #f8fbff;
+  --q-border: #dce6f3;
+  --q-border-strong: #b8c9df;
+  --q-brand: #2563eb;
+  --q-primary: #2563eb;
+  --q-primary-hover: #1d4ed8;
+  --q-primary-pressed: #1e40af;
+  --q-brand-soft: #e8f0ff;
+  --q-secondary: #ffffff;
+  --q-secondary-hover: #e8f0ff;
+  --q-danger: #c23b4b;
+  --q-danger-hover: #a93242;
+  --q-danger-pressed: #8e2635;
+  --q-input: #ffffff;
+  --q-select: #ffffff;
+  --q-toggle: #c4d2e3;
+  --q-text: #10213d;
+  --q-text-2: #50637e;
+  --q-text-3: #8190a5;
+  --q-text-muted: #50637e;
+  --q-text-disabled: #9aa9bb;
+  --q-hover: #e8f0ff;
+  --q-pressed: #d9e6ff;
+  --q-disabled: #eef2f7;
+  --q-focus: #2563eb;
+  --q-radius-xs: 6px;
+  --q-radius-sm: 10px;
+  --q-radius: 16px;
+  --q-radius-md: 16px;
+  --q-radius-lg: 22px;
+  --q-radius-xl: 22px;
+  --q-shadow-sm: 0 4px 14px rgba(43, 76, 120, .06);
+  --q-shadow-md: 0 8px 22px rgba(43, 76, 120, .09);
+  --q-shadow-lg: 0 16px 42px rgba(43, 76, 120, .14);
+  --q-shadow: var(--q-shadow-md);
+}
+
+:root[data-appearance-preset='neon-circuit'] {
+  --q-bg: #070b16;
+  --q-sidebar: #0b1120;
+  --q-nav: #10182b;
+  --q-surface: #111a2d;
+  --q-surface-soft: #0d1527;
+  --q-card: #111a2d;
+  --q-panel: #0d1527;
+  --q-border: #24365a;
+  --q-border-strong: #365181;
+  --q-brand: #5de4ff;
+  --q-accent: #f05bd7;
+  --q-primary: #20c9e7;
+  --q-primary-hover: #5de4ff;
+  --q-primary-pressed: #0794b9;
+  --q-brand-soft: #12324a;
+  --q-secondary: #15213a;
+  --q-secondary-hover: #1c3153;
+  --q-success: #55e6a4;
+  --q-warning: #ffc857;
+  --q-danger: #ff5478;
+  --q-danger-hover: #ff7593;
+  --q-danger-pressed: #d6325a;
+  --q-input: #0d1527;
+  --q-select: #0d1527;
+  --q-toggle: #365181;
+  --q-text: #e7faff;
+  --q-text-2: #9bbbd0;
+  --q-text-3: #6f8da6;
+  --q-text-muted: #9bbbd0;
+  --q-text-disabled: #597187;
+  --q-hover: #12324a;
+  --q-pressed: #194a64;
+  --q-disabled: #152033;
+  --q-focus: #5de4ff;
+  --q-radius-xs: 3px;
+  --q-radius-sm: 5px;
+  --q-radius: 7px;
+  --q-radius-md: 7px;
+  --q-radius-lg: 10px;
+  --q-radius-xl: 12px;
+  --q-shadow-sm: 0 4px 16px rgba(32, 201, 231, .08);
+  --q-shadow-md: 0 10px 28px rgba(32, 201, 231, .12);
+  --q-shadow-lg: 0 18px 48px rgba(0, 0, 0, .38);
+  --q-shadow: var(--q-shadow-md);
+  color-scheme: dark;
+}
+
+:root[data-appearance-preset='greenline'] {
+  --q-bg: #061009;
+  --q-sidebar: #08150c;
+  --q-nav: #0b1a10;
+  --q-surface: #0c1c11;
+  --q-surface-soft: #0a1710;
+  --q-card: #0c1c11;
+  --q-panel: #0a1710;
+  --q-border: #183a22;
+  --q-border-strong: #2e6b3d;
+  --q-brand: #55f083;
+  --q-primary: #37d769;
+  --q-primary-hover: #64f68d;
+  --q-primary-pressed: #1faa4d;
+  --q-brand-soft: #113821;
+  --q-secondary: #102519;
+  --q-secondary-hover: #173622;
+  --q-success: #55f083;
+  --q-warning: #d8c75f;
+  --q-danger: #ef6172;
+  --q-danger-hover: #ff7b89;
+  --q-danger-pressed: #c94456;
+  --q-input: #08150c;
+  --q-select: #08150c;
+  --q-toggle: #2e6b3d;
+  --q-text: #e0fbe7;
+  --q-text-2: #9bc5a6;
+  --q-text-3: #6f9279;
+  --q-text-muted: #9bc5a6;
+  --q-text-disabled: #577261;
+  --q-hover: #113821;
+  --q-pressed: #19512b;
+  --q-disabled: #122218;
+  --q-focus: #55f083;
+  --q-radius-xs: 2px;
+  --q-radius-sm: 4px;
+  --q-radius: 6px;
+  --q-radius-md: 6px;
+  --q-radius-lg: 8px;
+  --q-radius-xl: 10px;
+  --q-shadow-sm: none;
+  --q-shadow-md: none;
+  --q-shadow-lg: 0 0 0 1px rgba(85, 240, 131, .08);
+  --q-shadow: none;
+  color-scheme: dark;
+}
+
+:root[data-appearance-preset='aurora-flow'] {
+  --q-bg: #080f25;
+  --q-sidebar: rgba(12, 23, 50, .94);
+  --q-nav: rgba(17, 32, 66, .9);
+  --q-surface: rgba(20, 34, 70, .86);
+  --q-surface-soft: rgba(25, 42, 82, .72);
+  --q-card: rgba(20, 34, 70, .82);
+  --q-panel: rgba(25, 42, 82, .7);
+  --q-border: rgba(125, 151, 222, .28);
+  --q-border-strong: rgba(129, 174, 255, .5);
+  --q-brand: #7de7e1;
+  --q-primary: #718dff;
+  --q-primary-hover: #8da4ff;
+  --q-primary-pressed: #5870dd;
+  --q-brand-soft: rgba(88, 111, 214, .28);
+  --q-secondary: rgba(31, 49, 92, .82);
+  --q-secondary-hover: rgba(49, 70, 123, .9);
+  --q-success: #68ddb6;
+  --q-warning: #e9bd69;
+  --q-danger: #ef7299;
+  --q-danger-hover: #ff8bab;
+  --q-danger-pressed: #cb5279;
+  --q-input: rgba(10, 21, 49, .8);
+  --q-select: rgba(10, 21, 49, .8);
+  --q-toggle: #4b5f95;
+  --q-text: #f1f5ff;
+  --q-text-2: #b8c5e7;
+  --q-text-3: #8797c1;
+  --q-text-muted: #b8c5e7;
+  --q-text-disabled: #69779d;
+  --q-hover: rgba(92, 118, 219, .24);
+  --q-pressed: rgba(115, 83, 202, .32);
+  --q-disabled: rgba(32, 43, 72, .88);
+  --q-focus: #7de7e1;
+  --q-radius-xs: 8px;
+  --q-radius-sm: 12px;
+  --q-radius: 20px;
+  --q-radius-md: 20px;
+  --q-radius-lg: 26px;
+  --q-radius-xl: 30px;
+  --q-shadow-sm: 0 8px 24px rgba(4, 9, 28, .2);
+  --q-shadow-md: 0 16px 38px rgba(4, 9, 28, .26);
+  --q-shadow-lg: 0 24px 58px rgba(4, 9, 28, .34);
+  --q-shadow: var(--q-shadow-md);
+  --q-ambient-background: radial-gradient(circle at 12% 12%, rgba(53, 214, 192, .15), transparent 34%), radial-gradient(circle at 78% 18%, rgba(82, 132, 255, .18), transparent 38%), radial-gradient(circle at 64% 88%, rgba(151, 86, 226, .15), transparent 40%), #080f25;
+  color-scheme: dark;
+}
+
+:root[data-appearance-preset='qing-nova'] {
+  --q-bg: #071522;
+  --q-sidebar: rgba(8, 25, 40, .96);
+  --q-nav: rgba(13, 35, 55, .94);
+  --q-surface: rgba(13, 34, 52, .9);
+  --q-surface-soft: rgba(16, 42, 62, .84);
+  --q-card: rgba(13, 34, 52, .9);
+  --q-panel: rgba(16, 42, 62, .84);
+  --q-border: rgba(59, 183, 220, .3);
+  --q-border-strong: rgba(81, 218, 238, .56);
+  --q-brand: #57d9e9;
+  --q-primary: #37b7e8;
+  --q-primary-hover: #60d2f2;
+  --q-primary-pressed: #218ab9;
+  --q-brand-soft: rgba(41, 144, 190, .24);
+  --q-secondary: rgba(17, 48, 68, .9);
+  --q-secondary-hover: rgba(24, 67, 92, .94);
+  --q-success: #62e8a4;
+  --q-warning: #e7c66b;
+  --q-danger: #f06882;
+  --q-danger-hover: #ff8399;
+  --q-danger-pressed: #c94b65;
+  --q-input: rgba(7, 24, 38, .9);
+  --q-select: rgba(7, 24, 38, .9);
+  --q-toggle: #356b7e;
+  --q-text: #e9fbff;
+  --q-text-2: #add1d9;
+  --q-text-3: #759da8;
+  --q-text-muted: #add1d9;
+  --q-text-disabled: #5f7e87;
+  --q-hover: rgba(47, 164, 202, .2);
+  --q-pressed: rgba(44, 117, 170, .3);
+  --q-disabled: rgba(22, 45, 57, .9);
+  --q-focus: #62e8d0;
+  --q-radius-xs: 5px;
+  --q-radius-sm: 8px;
+  --q-radius: 13px;
+  --q-radius-md: 13px;
+  --q-radius-lg: 18px;
+  --q-radius-xl: 22px;
+  --q-shadow-sm: 0 6px 18px rgba(2, 10, 18, .18), 0 0 0 1px rgba(77, 210, 231, .04);
+  --q-shadow-md: 0 14px 34px rgba(2, 10, 18, .25), 0 0 22px rgba(55, 183, 232, .06);
+  --q-shadow-lg: 0 22px 52px rgba(2, 10, 18, .34), 0 0 34px rgba(86, 86, 221, .08);
+  --q-shadow: var(--q-shadow-md);
+  --q-ambient-background: radial-gradient(circle at 18% 10%, rgba(48, 217, 198, .11), transparent 34%), radial-gradient(circle at 80% 24%, rgba(74, 118, 226, .13), transparent 38%), radial-gradient(circle at 58% 88%, rgba(128, 79, 194, .09), transparent 42%), #071522;
+  color-scheme: dark;
+}
+
+/* Preserve the existing light/dark mode contract while allowing each preset
+   to keep its own hue. Dark mode only shifts neutral surfaces and copy. */
+:root[data-theme='dark'][data-appearance-preset='qing-default'] {
+  --q-bg: #0e1726;
+  --q-sidebar: #111d31;
+  --q-nav: #18263d;
+  --q-surface: #162236;
+  --q-surface-soft: #1b2a41;
+  --q-card: #162236;
+  --q-panel: #1b2a41;
+  --q-border: #2b405e;
+  --q-border-strong: #466486;
+  --q-secondary: #1b2a41;
+  --q-input: #122035;
+  --q-select: #122035;
+  --q-toggle: #466486;
+  --q-text: #eef5ff;
+  --q-text-2: #b6c5da;
+  --q-text-3: #8496b0;
+  --q-text-muted: #b6c5da;
+  --q-text-disabled: #70829d;
+  --q-hover: var(--q-brand-soft);
+  --q-disabled: #25344b;
+  --q-shadow-sm: 0 4px 16px rgba(0, 0, 0, .2);
+  --q-shadow-md: 0 10px 28px rgba(0, 0, 0, .25);
+  --q-shadow-lg: 0 18px 48px rgba(0, 0, 0, .38);
+  --q-shadow: var(--q-shadow-md);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme='system'][data-appearance-preset='qing-default'] {
+    --q-bg: #0e1726;
+    --q-sidebar: #111d31;
+    --q-nav: #18263d;
+    --q-surface: #162236;
+    --q-surface-soft: #1b2a41;
+    --q-card: #162236;
+    --q-panel: #1b2a41;
+    --q-border: #2b405e;
+    --q-border-strong: #466486;
+    --q-brand: #79a8ff;
+    --q-primary: #79a8ff;
+    --q-primary-hover: #94b9ff;
+    --q-primary-pressed: #5c8ee7;
+    --q-brand-soft: #203a65;
+    --q-secondary: #1b2a41;
+    --q-secondary-hover: #253b5c;
+    --q-input: #122035;
+    --q-select: #122035;
+    --q-toggle: #466486;
+    --q-text: #eef5ff;
+    --q-text-2: #b6c5da;
+    --q-text-3: #8496b0;
+    --q-text-muted: #b6c5da;
+    --q-text-disabled: #70829d;
+    --q-hover: #203a65;
+    --q-pressed: #294b80;
+    --q-disabled: #25344b;
+    --q-focus: #79a8ff;
+    --q-shadow-sm: 0 4px 16px rgba(0, 0, 0, .2);
+    --q-shadow-md: 0 10px 28px rgba(0, 0, 0, .25);
+    --q-shadow-lg: 0 18px 48px rgba(0, 0, 0, .38);
+    --q-shadow: var(--q-shadow-md);
+    color-scheme: dark;
+  }
+}
+
+/* Shared semantic surfaces and controls. This is intentionally appended
+   after main.css by main.ts so the active preset wins over legacy literals. */
+body { background: var(--q-bg); color: var(--q-text); }
+.q-sidebar { background: var(--q-sidebar); border-color: color-mix(in srgb, var(--q-border) 70%, transparent); }
+.q-sidebar nav { background: color-mix(in srgb, var(--q-nav) 62%, transparent); border-radius: var(--q-radius); }
+.q-workspace { background: var(--q-ambient-background, var(--q-bg)); }
+.q-card, .q-panel, .settings-card, .running-module-card, .wpf-module-details,
+.logs-table, .diagnostics-panel, .diagnostics-tools, .dashboard-section {
+  background: var(--q-card);
+  border-color: var(--q-border);
+  border-radius: var(--q-radius-md);
+  box-shadow: var(--q-shadow-sm);
+}
+.q-sidebar nav a:hover, .q-sidebar nav button:hover,
+.q-sidebar nav a.router-link-active, .q-sidebar nav button.active,
+.filters button:hover, .filters button.active, .theme-switch button.active,
+.close-behavior-group > button[aria-checked='true'] {
+  background: var(--q-hover);
+  color: var(--q-primary);
+}
+:root[data-appearance-preset='neon-circuit'] .q-sidebar nav :is(a.router-link-active, button.active) {
+  box-shadow: inset 2px 0 var(--q-accent), 0 0 16px rgba(93, 228, 255, .08);
+}
+.wpf-home-hero { border-radius: var(--q-radius-xl); box-shadow: var(--q-shadow-lg); }
+.q-button, .q-icon-button {
+  border-color: var(--q-border);
+  border-radius: var(--q-radius-sm);
+  background: var(--q-secondary);
+  color: var(--q-text);
+  box-shadow: var(--q-shadow-sm);
+}
+.q-button:hover:not(:disabled), .q-icon-button:hover:not(:disabled) {
+  border-color: var(--q-primary);
+  background: var(--q-secondary-hover);
+  color: var(--q-primary);
+}
+.q-button:active:not(:disabled), .q-icon-button:active:not(:disabled) {
+  background: var(--q-pressed);
+  color: var(--q-primary-pressed);
+  transform: translateY(0);
+}
+.q-button.is-primary, .q-button.is-danger {
+  border-color: transparent;
+  color: #fff;
+}
+.q-button.is-primary { background: var(--q-primary); }
+.q-button.is-primary:hover:not(:disabled) { background: var(--q-primary-hover); color: #fff; }
+.q-button.is-primary:active:not(:disabled) { background: var(--q-primary-pressed); color: #fff; }
+.q-button.is-danger { background: var(--q-danger); }
+.q-button.is-danger:hover:not(:disabled) { background: var(--q-danger-hover); color: #fff; }
+.q-button.is-danger:active:not(:disabled) { background: var(--q-danger-pressed); color: #fff; }
+.q-button.is-ghost { background: transparent; border-color: transparent; box-shadow: none; }
+.q-button:disabled, .q-icon-button:disabled,
+button:disabled, input:disabled, select:disabled, textarea:disabled {
+  color: var(--q-text-disabled);
+  background: var(--q-disabled);
+  border-color: var(--q-border);
+}
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--q-focus) 42%, transparent);
+  outline-offset: 2px;
+}
+input, select, textarea, .wpf-module-tools input, .logs-search input, .logs-level-filter select {
+  border-color: var(--q-border);
+  border-radius: var(--q-radius-xs);
+  background: var(--q-input);
+  color: var(--q-text);
+}
+select, .logs-level-filter select { background: var(--q-select); }
+.q-switch { border-color: var(--q-border); background: var(--q-secondary); color: var(--q-text-muted); }
+.q-switch > span { background: var(--q-toggle); }
+.q-switch[aria-checked='true'] > span { background: var(--q-primary); }
+.q-switch:hover:not(:disabled) { border-color: var(--q-primary); color: var(--q-primary); }
+:root[data-appearance-preset='greenline'] :is(.q-badge, .wpf-stat strong, .module-update-versions strong,
+  .startup-health-values dd, .dashboard-host-state dd),
+:root[data-appearance-preset='qing-nova'] :is(.q-badge, .wpf-stat strong, .module-update-versions strong,
+  .startup-health-values dd, .dashboard-host-state dd) {
+  font-family: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+:root[data-appearance-preset='aurora-flow'] .q-workspace {
+  background-size: 135% 135%;
+  animation: q-aurora-flow 18s ease-in-out infinite alternate;
+}
+@keyframes q-aurora-flow {
+  from { background-position: 0% 20%; }
+  to { background-position: 100% 78%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-appearance-preset='aurora-flow'] .q-workspace { animation: none; }
+}
+.settings-section-nav, .settings-host-placeholder, .settings-snapshot-notice {
+  background: var(--q-panel);
+  border-color: var(--q-border);
+  box-shadow: var(--q-shadow-sm);
+}
+.settings-section-nav button:hover { background: var(--q-hover); color: var(--q-text); }
+.settings-section-nav button[aria-current='page'] { background: var(--q-brand-soft); color: var(--q-primary); }
+.appearance-preset-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.appearance-preset-grid > button {
+  display: grid; gap: 8px; min-width: 0; padding: 10px; border: 1px solid var(--q-border);
+  border-radius: var(--q-radius-sm); background: var(--q-panel); color: var(--q-text);
+  text-align: left; cursor: pointer;
+}
+.appearance-preset-grid > button:hover:not(:disabled) { border-color: var(--q-primary); background: var(--q-hover); }
+.appearance-preset-grid > button[aria-checked='true'] { border-color: var(--q-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--q-primary) 20%, transparent); }
+.appearance-preset-grid > button:disabled { opacity: .72; cursor: wait; }
+.appearance-preset-grid strong, .appearance-preset-grid small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.appearance-preset-grid small { margin-top: 3px; color: var(--q-text-muted); font-size: 10px; }
+.appearance-preset-swatch { display: flex; gap: 4px; height: 28px; padding: 4px; border-radius: 7px; background: var(--preset-bg); }
+.appearance-preset-swatch span { display: block; border-radius: 4px; }
+.appearance-preset-swatch span:first-child { flex: 1; background: var(--preset-primary); }
+.appearance-preset-swatch span:last-child { width: 32%; background: var(--preset-surface); border: 1px solid color-mix(in srgb, var(--preset-primary) 30%, transparent); }
+.appearance-preset-swatch[data-preset='qing-default'] { --preset-bg: #f3f7fd; --preset-primary: #2563eb; --preset-surface: #fff; }
+.appearance-preset-swatch[data-preset='neon-circuit'] { --preset-bg: #070b16; --preset-primary: #5de4ff; --preset-surface: #111a2d; }
+.appearance-preset-swatch[data-preset='greenline'] { --preset-bg: #061009; --preset-primary: #55f083; --preset-surface: #0c1c11; }
+.appearance-preset-swatch[data-preset='aurora-flow'] { --preset-bg: #080f25; --preset-primary: #718dff; --preset-surface: #142246; }
+.appearance-preset-swatch[data-preset='qing-nova'] { --preset-bg: #071522; --preset-primary: #37b7e8; --preset-surface: #0d2234; }
+@media (max-width: 900px) { .appearance-preset-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 500px) { .appearance-preset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

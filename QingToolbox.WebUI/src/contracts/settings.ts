@@ -20,6 +20,8 @@ export interface SettingsLanguage {
 
 export interface SettingsSnapshot {
   generatedAt: string
+  /** Host-selected workspace appearance. Older hosts may omit this field. */
+  appearancePresetId?: string
   language: SettingsLanguage
   showLogsInSidebar: boolean
   mainWindowCloseBehavior: MainWindowCloseBehavior
@@ -53,7 +55,9 @@ const date = (value: unknown): value is string =>
   typeof value === 'string' && !Number.isNaN(Date.parse(value))
 
 export const isSettingsSnapshot = (value: unknown): value is SettingsSnapshot =>
-  isRecord(value) && date(value.generatedAt) && isLanguage(value.language) &&
+  isRecord(value) && date(value.generatedAt) &&
+  (!('appearancePresetId' in value) || typeof value.appearancePresetId === 'string') &&
+  isLanguage(value.language) &&
   typeof value.showLogsInSidebar === 'boolean' &&
   (value.mainWindowCloseBehavior === 'Ask' || value.mainWindowCloseBehavior === 'MinimizeToNotificationArea' || value.mainWindowCloseBehavior === 'ExitApplication') &&
   typeof value.closeBehaviorMessage === 'string' && typeof value.launchAtLogin === 'boolean' &&

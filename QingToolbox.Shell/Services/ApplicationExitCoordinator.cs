@@ -74,7 +74,7 @@ public sealed class ApplicationExitCoordinator(
         {
             SyncStage("startup session", startupSession.PrepareForExit),
             SyncStage("notification area", notificationArea.PrepareForExit),
-            SyncStage("floating badge", floatingBadgeManager.PrepareForApplicationExit),
+            new("floating badge", floatingBadgeManager.PrepareForApplicationExitAsync),
             new("instance activation", () => _stopActivation?.Invoke() ?? Task.CompletedTask),
             SyncStage("module windows", () =>
             {

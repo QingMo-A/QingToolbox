@@ -131,14 +131,14 @@ internal static class Program
         Console.WriteLine("CreateView scenario unloaded successfully.");
         VerifyUserSettingsAsync().GetAwaiter().GetResult();
         VerifyStartupInfrastructureAsync(helloModule).GetAwaiter().GetResult();
-        VerifyWindowChromeContracts();
+        VerifyWindowChromeContracts(repositoryRoot);
         VerifyModuleWindowReuse();
         RunQmodImportScenario(repositoryRoot);
         Console.WriteLine("Smoke test passed.");
         return 0;
     }
 
-    private static void VerifyWindowChromeContracts()
+    private static void VerifyWindowChromeContracts(string repositoryRoot)
     {
         Console.WriteLine("Verifying custom window chrome contracts...");
         static IntPtr Pack(short x, short y) =>
@@ -147,6 +147,17 @@ internal static class Program
         {
             if (!condition) throw new InvalidOperationException(message);
         }
+
+        var badgeSource = File.ReadAllText(Path.Combine(
+            repositoryRoot, "QingToolbox.Shell", "Views", "FloatingBadgeWindow.xaml.cs"));
+        var managerSource = File.ReadAllText(Path.Combine(
+            repositoryRoot, "QingToolbox.Shell", "Services", "FloatingBadgeManager.cs"));
+        Require(badgeSource.Contains("DragCompletedAsync", StringComparison.Ordinal) &&
+                badgeSource.Contains("await RaiseDragCompletedAsync()", StringComparison.Ordinal),
+            "Floating badge drag completion must expose an awaitable notification.");
+        Require(managerSource.Contains("badge.DragCompletedAsync +=", StringComparison.Ordinal) &&
+                managerSource.Contains("AwaitPendingBadgePositionSaveAsync", StringComparison.Ordinal),
+            "Floating badge manager must await the final drag position save before transitions.");
 
         Require(WindowHitTestService.DecodeScreenPoint(Pack(120, 250)) == new Point(120, 250),
             "Positive screen coordinates were decoded incorrectly.");
@@ -197,6 +208,11 @@ internal static class Program
         var savedRatios = FloatingBadgePlacement.RatiosFromPosition(secondMonitor, savedPoint, new Size(102, 102));
         Require(Math.Abs(savedRatios.Horizontal - .25) < .0001 && Math.Abs(savedRatios.Vertical - .75) < .0001,
             "Monitor-local badge ratios must round-trip on a negative-coordinate mixed-DPI monitor.");
+        var savedDips = FloatingBadgePlacement.PixelPositionToDips(secondMonitor, savedPoint);
+        Require(double.IsFinite(savedDips.X) && double.IsFinite(savedDips.Y) &&
+                Math.Abs(savedDips.X * secondMonitor.ScaleX - savedPoint.X) < .0001 &&
+                Math.Abs(savedDips.Y * secondMonitor.ScaleY - savedPoint.Y) < .0001,
+            "Persisted badge coordinates must derive finite DIPs from the committed HWND pixels.");
         var resizedMonitor = secondMonitor with { PixelWorkArea = new Rect(-1920, -120, 960, 720) };
         var resizedPoint = FloatingBadgePlacement.PositionFromRatios(resizedMonitor, new Size(102, 102), savedRatios.Horizontal, savedRatios.Vertical);
         Require(resizedMonitor.PixelWorkArea.Contains(resizedPoint),
@@ -269,12 +285,30 @@ internal static class Program
             Require(legacyLanguage.Language == "zh-CN", "Legacy language-only settings must load.");
             Require(legacyLanguage.RecentModuleIds.Count == 0,
                 "Legacy settings without recent module history must default to an empty list.");
+            Require(legacyLanguage.AppearancePresetId == AppearancePresetIds.QingDefault,
+                "Legacy settings without an appearance preset must use Qing Default.");
+
+            await File.WriteAllTextAsync(path, "{\"AppearancePresetId\":\"aurora-flow\"}");
+            var supportedAppearance = await service.ReadAsync();
+            Require(supportedAppearance.AppearancePresetId == AppearancePresetIds.AuroraFlow &&
+                    supportedAppearance.SettingsSchemaVersion >= 8,
+                "A supported appearance preset must survive normalization and upgrade schema version 8.");
+            var startupAppearance = await new StartupPreferenceReader().ReadAsync(path, startup: false);
+            Require(startupAppearance.AppearancePresetId == AppearancePresetIds.AuroraFlow,
+                "The critical startup preference reader must preserve the selected appearance preset.");
+            await File.WriteAllTextAsync(path, "{\"AppearancePresetId\":\"unknown-preset\"}");
+            var unknownAppearance = await service.ReadAsync();
+            Require(unknownAppearance.AppearancePresetId == AppearancePresetIds.QingDefault,
+                "An unknown appearance preset must safely fall back to Qing Default.");
+            var unknownStartupAppearance = await new StartupPreferenceReader().ReadAsync(path, startup: false);
+            Require(unknownStartupAppearance.AppearancePresetId == AppearancePresetIds.QingDefault,
+                "The critical startup preference reader must safely fall back for an unknown preset.");
 
             await File.WriteAllTextAsync(path,
                 "{\"RecentModuleIds\":[\" qing.first \",\"\",\"qing.second\",\"qing.first\",\"qing.third\",\"qing.fourth\",\"qing.fifth\",\"qing.sixth\"]}");
             var normalizedHistory = await service.ReadAsync();
-            Require(normalizedHistory.SettingsSchemaVersion >= 7,
-                "Recent module settings must upgrade to schema version 7.");
+            Require(normalizedHistory.SettingsSchemaVersion >= 8,
+                "User settings must upgrade to schema version 8.");
             Require(normalizedHistory.RecentModuleIds.SequenceEqual(
                     new[] { "qing.first", "qing.second", "qing.third", "qing.fourth", "qing.fifth" },
                     StringComparer.Ordinal),

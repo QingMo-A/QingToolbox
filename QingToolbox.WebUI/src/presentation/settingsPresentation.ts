@@ -4,6 +4,7 @@ import type {
 } from '../contracts/settings'
 import type { ThemeMode } from '../app/themeStore'
 import type { TranslationKey } from '../localization/messages/en-US'
+import type { AppearancePresetId } from '../design-system/tokens/appearancePresets'
 
 export type SettingsSection = 'general' | 'window' | 'startup' | 'about'
 
@@ -27,6 +28,23 @@ export function themeModeLabelKey(mode: ThemeMode): TranslationKey {
     light: 'settings.appearance.light',
     dark: 'settings.appearance.dark',
   } satisfies Record<ThemeMode, TranslationKey>)[mode]
+}
+
+export const appearancePresetOptions: readonly AppearancePresetId[] = [
+  'qing-default', 'neon-circuit', 'greenline', 'aurora-flow', 'qing-nova',
+]
+
+export function appearancePresetPresentation(value: AppearancePresetId): {
+  labelKey: TranslationKey
+  descriptionKey: TranslationKey
+} {
+  return ({
+    'qing-default': { labelKey: 'settings.appearancePreset.qingDefault', descriptionKey: 'settings.appearancePreset.qingDefaultDescription' },
+    'neon-circuit': { labelKey: 'settings.appearancePreset.neonCircuit', descriptionKey: 'settings.appearancePreset.neonCircuitDescription' },
+    greenline: { labelKey: 'settings.appearancePreset.greenline', descriptionKey: 'settings.appearancePreset.greenlineDescription' },
+    'aurora-flow': { labelKey: 'settings.appearancePreset.auroraFlow', descriptionKey: 'settings.appearancePreset.auroraFlowDescription' },
+    'qing-nova': { labelKey: 'settings.appearancePreset.qingNova', descriptionKey: 'settings.appearancePreset.qingNovaDescription' },
+  } satisfies Record<AppearancePresetId, { labelKey: TranslationKey; descriptionKey: TranslationKey }>)[value]
 }
 
 export function closeBehaviorPresentation(value: MainWindowCloseBehavior): {

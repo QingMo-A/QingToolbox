@@ -60,6 +60,9 @@ public static class FloatingBadgePlacement
         return (Math.Clamp(FiniteOrZero(horizontal), 0, 1), Math.Clamp(FiniteOrZero(vertical), 0, 1));
     }
 
+    internal static Point PixelPositionToDips(MonitorWorkArea monitor, Point pixelPosition) =>
+        new(pixelPosition.X / monitor.ScaleX, pixelPosition.Y / monitor.ScaleY);
+
     public static Rect ConstrainWindowBounds(Rect requested, Rect workArea, Size minimumSize)
     {
         if (!IsFinite(requested.Left, requested.Top, requested.Width, requested.Height,

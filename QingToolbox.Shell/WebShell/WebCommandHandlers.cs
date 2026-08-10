@@ -416,6 +416,35 @@ public sealed class WebSetLanguageCommandHandler(IWebSettingsMutation mutation,
     }
 }
 
+public sealed class WebSetAppearancePresetCommandHandler(IWebSettingsMutation mutation,
+    WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "settings.setAppearancePreset";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string> { "appearancePresetId" };
+
+    public async Task<object> HandleAsync(
+        JsonElement payload,
+        WebBridgeRequestContext context,
+        CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        if (!payload.TryGetProperty("appearancePresetId", out var property) ||
+            property.ValueKind != JsonValueKind.String ||
+            !AppearancePresetIds.IsSupported(property.GetString()))
+            throw new WebBridgeValidationException("InvalidPayload", "A supported appearance preset id is required.");
+
+        var presetId = property.GetString()!;
+        if (mutation.AppearancePresetId == presetId) return snapshots.Create();
+        var result = await mutation.SetAppearancePresetAsync(presetId, context.SessionCancellation);
+        if (result == WebSettingsMutationResult.Succeeded && mutation.AppearancePresetId == presetId)
+            return snapshots.Create();
+
+        throw new WebBridgeValidationException(
+            "SettingsMutationFailed",
+            "The appearance preset could not be updated.");
+    }
+}
+
 public sealed class WebSetShowLogsInSidebarCommandHandler(IWebSettingsMutation mutation,
     WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
 {

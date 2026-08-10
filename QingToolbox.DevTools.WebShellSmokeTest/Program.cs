@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Windows;
 using QingToolbox.Core.Settings;
 using QingToolbox.Core.Localization;
 using QingToolbox.Shell.Startup;
@@ -14,6 +15,9 @@ Require(new WebShellState(dev).IsEnvironmentAllowed, "Development must allow Web
 Require(!new WebShellState(ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.ModuleTest, "WebShellSmoke", root)).IsEnvironmentAllowed, "ModuleTest must disable Web Shell.");
 
 Console.WriteLine("Verifying native Web workspace presentation transitions...");
+Require(WindowChromeBehavior.GetDwmCornerPreference(WindowState.Normal) == WindowChromeBehavior.DwmWindowCornerPreferenceRound &&
+        WindowChromeBehavior.GetDwmCornerPreference(WindowState.Maximized) == WindowChromeBehavior.DwmWindowCornerPreferenceDoNotRound,
+    "Native windows must round in normal state and opt out of DWM rounding while maximized.");
 var developmentPresentation = new WebWorkspacePresentationState(webShellAllowed: true);
 Require(developmentPresentation.Phase == WebWorkspacePresentationPhase.Preparing &&
         developmentPresentation.Snapshot is { ShowNativeWorkspace: false, ShowStartupSurface: true, AttachWebWorkspace: true, EnableWebWorkspace: false },
@@ -155,6 +159,44 @@ var moduleSnapshot = (WebModuleSnapshot)moduleResult.Response.Payload;
 Require(moduleSnapshot.Modules[0] is { CanRemove: true, CanLoad: false, CanActivate: false, CanOpen: true, CanDeactivate: true, CanUnload: true, IsBusy: false, IsExecutionBlocked: false, IsStartupEnabled: false, StartupAuthorizationState: "ChangedNeedsConfirmation", CanChangeStartupAuthorization: true, IsStartupAuthorizationBusy: false }, "Module projection must include host management, lifecycle and startup authorization capabilities.");
 Require(moduleSnapshot.Modules[0] is { UpdateStatus: "UpdateAvailable", TargetVersion: "1.1.0", ReleaseNotes: "Safe release notes", IsFromStaleCache: false, CanCheckForUpdate: true, IsUpdateCheckBusy: false, CanDownloadUpdate: true, DownloadStatus: "Verified", IsDownloadActive: false, DownloadBytesReceived: 512, DownloadExpectedBytes: 512, CanInstallVerifiedUpdate: true },
     "Module projection must include the host-authoritative update and verified staging state.");
+
+Console.WriteLine("Verifying bounded module icon projection...");
+var iconRoot = Path.Combine(Path.GetTempPath(), "QingToolbox-WebModuleIcon-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(iconRoot);
+try
+{
+    var iconPath = Path.Combine(iconRoot, "icon.svg");
+    var iconBytes = System.Text.Encoding.UTF8.GetBytes("<svg xmlns=\"http://www.w3.org/2000/svg\" />");
+    File.WriteAllBytes(iconPath, iconBytes);
+    var iconData = WebModuleIconProjection.ReadDataUri(iconRoot, iconPath);
+    Require(iconData is not null && iconData.StartsWith(WebModuleIconProjection.DataUriPrefix, StringComparison.Ordinal),
+        "A valid manifest SVG must be projected as a data URI.");
+    Require(Convert.FromBase64String(iconData![WebModuleIconProjection.DataUriPrefix.Length..]).SequenceEqual(iconBytes),
+        "Projected icon bytes must remain unchanged.");
+    Require(!iconData.Contains(iconRoot, StringComparison.OrdinalIgnoreCase),
+        "Projected icon data must not expose the module directory.");
+    Require(WebModuleIconProjection.ReadDataUri(iconRoot, Path.Combine(iconRoot, "missing.svg")) is null,
+        "A missing icon must fall back to null.");
+
+    var outsidePath = Path.Combine(Path.GetTempPath(), "QingToolbox-WebModuleIcon-outside-" + Guid.NewGuid().ToString("N") + ".svg");
+    File.WriteAllBytes(outsidePath, iconBytes);
+    try
+    {
+        Require(WebModuleIconProjection.ReadDataUri(iconRoot, outsidePath) is null,
+            "An icon outside the module root must be rejected.");
+    }
+    finally { File.Delete(outsidePath); }
+
+    var oversizedPath = Path.Combine(iconRoot, "oversized.svg");
+    File.WriteAllBytes(oversizedPath, new byte[WebModuleIconProjection.MaximumIconBytes + 1]);
+    Require(WebModuleIconProjection.ReadDataUri(iconRoot, oversizedPath) is null,
+        "An oversized icon must fall back to null.");
+    var unreadablePath = Path.Combine(iconRoot, "unreadable.svg");
+    Directory.CreateDirectory(unreadablePath);
+    Require(WebModuleIconProjection.ReadDataUri(iconRoot, unreadablePath) is null,
+        "An unreadable icon path must fall back to null.");
+}
+finally { Directory.Delete(iconRoot, true); }
 
 Console.WriteLine("Verifying module update bridge boundaries...");
 var updateOperations = new UpdateOperations();
@@ -412,6 +454,8 @@ Require(settingsSnapshot.Language.Options.Count == 3 &&
         settingsSnapshot.Language.Options.Select(option => option.Code).SequenceEqual(["system", "zh-CN", "en-US"]),
     "Settings DTO must include every unique supported language option.");
 Require(!settingsSnapshot.ShowLogsInSidebar && settingsSnapshot.MainWindowCloseBehavior == "Ask", "Settings DTO must include navigation and close behavior.");
+Require(settingsSnapshot.AppearancePresetId == AppearancePresetIds.QingDefault,
+    "Settings DTO must include the host-confirmed appearance preset.");
 Require(settingsSnapshot.LaunchAtLogin && settingsSnapshot.CanConfigureLaunchAtLogin && settingsSnapshot.StartupPresentationMode == "FloatingBadge" && settingsSnapshot.StartupBackend == "Task Scheduler" && settingsSnapshot.StartupStatus == "Healthy", "Settings DTO must include safe startup state.");
 Require(settingsSource.WriteCount == 0, "Reading settings must not invoke a write operation.");
 var settingsJson = JsonSerializer.Serialize(settingsSnapshot);
@@ -456,6 +500,63 @@ Require(!failedLanguage.Response.Success && failedLanguage.Response.Error?.Code 
     "A failed language mutation must preserve the previous confirmed language.");
 Require(!failedLanguageJson.Contains(root, StringComparison.OrdinalIgnoreCase) && !failedLanguageJson.Contains("IOException", StringComparison.OrdinalIgnoreCase) &&
         WebBridgeProtocol.Version == 4, "Language failures must remain safe and preserve protocol v4.");
+
+Console.WriteLine("Verifying host-confirmed appearance preset mutation...");
+var appearanceSource = new SettingsMutationSource(false);
+var appearanceDispatcher = new WebBridgeDispatcher([new WebSetAppearancePresetCommandHandler(
+    appearanceSource, new WebSettingsSnapshotProvider(appearanceSource, TimeProvider.System), settingsActivation)]);
+string AppearanceRequest(object payload) => JsonSerializer.Serialize(new
+{
+    protocolVersion = 4,
+    requestId = Guid.NewGuid(),
+    command = "settings.setAppearancePreset",
+    payload
+});
+foreach (var payload in new object[]
+         {
+             new { }, new { appearancePresetId = 1 }, new { appearancePresetId = "" },
+             new { appearancePresetId = "Qing-Default" }, new { appearancePresetId = "unknown" },
+             new { appearancePresetId = AppearancePresetIds.QingDefault, extra = true }
+         })
+{
+    var rejectedAppearance = await appearanceDispatcher.DispatchAsync(AppearanceRequest(payload), new(31, CancellationToken.None));
+    Require(!rejectedAppearance.Response.Success && rejectedAppearance.Response.Error?.Code == "InvalidPayload",
+        "Appearance preset mutation must reject malformed, unknown or ambiguous payloads.");
+}
+var inactiveAppearance = await new WebBridgeDispatcher([new WebSetAppearancePresetCommandHandler(
+        appearanceSource, new WebSettingsSnapshotProvider(appearanceSource, TimeProvider.System), inactiveSettings)])
+    .DispatchAsync(AppearanceRequest(new { appearancePresetId = AppearancePresetIds.QingNova }),
+        new(32, CancellationToken.None));
+Require(!inactiveAppearance.Response.Success && inactiveAppearance.Response.Error?.Code == "BridgeNotActivated",
+    "Appearance preset mutation must require activation.");
+foreach (var presetId in new[]
+         {
+             AppearancePresetIds.NeonCircuit, AppearancePresetIds.Greenline,
+             AppearancePresetIds.AuroraFlow, AppearancePresetIds.QingNova,
+             AppearancePresetIds.QingDefault
+         })
+{
+    var changed = await appearanceDispatcher.DispatchAsync(
+        AppearanceRequest(new { appearancePresetId = presetId }), new(31, CancellationToken.None));
+    Require(changed.Response.Success && appearanceSource.AppearancePresetId == presetId &&
+            ((WebSettingsSnapshot)changed.Response.Payload).AppearancePresetId == presetId,
+        "Each supported appearance preset must return a complete host-confirmed snapshot.");
+}
+Require(appearanceSource.AppearanceWriteCount == 5,
+    "Each changed appearance preset must be persisted exactly once.");
+_ = await appearanceDispatcher.DispatchAsync(
+    AppearanceRequest(new { appearancePresetId = AppearancePresetIds.QingDefault }), new(31, CancellationToken.None));
+Require(appearanceSource.AppearanceWriteCount == 5,
+    "An unchanged appearance preset must not be persisted again.");
+appearanceSource.FailWrites = true;
+var failedAppearance = await appearanceDispatcher.DispatchAsync(
+    AppearanceRequest(new { appearancePresetId = AppearancePresetIds.AuroraFlow }),
+    new(31, CancellationToken.None));
+Require(!failedAppearance.Response.Success && failedAppearance.Response.Error?.Code == "SettingsMutationFailed" &&
+        appearanceSource.AppearancePresetId == AppearancePresetIds.QingDefault,
+    "A failed appearance preset mutation must preserve the previous confirmed preset.");
+Require(WebBridgeProtocol.Version == 4,
+    "Appearance preset settings must preserve protocol v4.");
 
 Console.WriteLine("Verifying transactional LocalizationManager language persistence...");
 var languageTransactionRoot = Path.Combine(Path.GetTempPath(), "QingToolbox-LanguageSmoke-" + Guid.NewGuid().ToString("N"));
@@ -789,13 +890,15 @@ file sealed class SettingsSnapshotSource : IWebSettingsSnapshotSource
     public WebSettingsSnapshotValues Read()
     {
         ReadCount++;
-        return new(SettingsLanguages.Create("en-US", "en-US"), false, "Ask", "Ask before closing.", true, true, false,
+        return new(SettingsLanguages.Create("en-US", "en-US"), AppearancePresetIds.QingDefault,
+            false, "Ask", "Ask before closing.", true, true, false,
             "FloatingBadge", "Task Scheduler", "Healthy", "Startup registration is healthy.");
     }
 }
 file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapshotSource, IWebSettingsMutation
 {
     public string LanguageCode { get; private set; } = "en-US";
+    public string AppearancePresetId { get; private set; } = AppearancePresetIds.QingDefault;
     public bool ShowLogsInSidebar { get; private set; } = initialValue;
     public MainWindowCloseBehavior MainWindowCloseBehavior { get; private set; } = MainWindowCloseBehavior.Ask;
     public StartupPresentationMode StartupPresentationMode { get; private set; } = StartupPresentationMode.FloatingBadge;
@@ -810,7 +913,8 @@ file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapsh
     public int LaunchWriteCount { get; private set; }
     public int RepairWriteCount { get; private set; }
     public int LanguageWriteCount { get; private set; }
-    public WebSettingsSnapshotValues Read() => new(SettingsLanguages.Create(LanguageCode, LanguageCode == "system" ? "en-US" : LanguageCode), ShowLogsInSidebar,
+    public int AppearanceWriteCount { get; private set; }
+    public WebSettingsSnapshotValues Read() => new(SettingsLanguages.Create(LanguageCode, LanguageCode == "system" ? "en-US" : LanguageCode), AppearancePresetId, ShowLogsInSidebar,
         MainWindowCloseBehavior.ToString(), "Ask before closing.", LaunchAtLogin, CanConfigureLaunchAtLogin, CanRepairStartup, StartupPresentationMode.ToString(), "Task Scheduler", CanRepairStartup ? "Degraded" : "Healthy", CanRepairStartup ? "Startup registration requires repair." : "Startup registration is healthy.");
     public Task<WebSettingsMutationResult> SetLanguageAsync(string languageCode, CancellationToken cancellationToken)
     {
@@ -827,6 +931,14 @@ file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapsh
         WriteCount++;
         ShowLogsInSidebar = value;
         return Task.CompletedTask;
+    }
+    public Task<WebSettingsMutationResult> SetAppearancePresetAsync(string presetId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (FailWrites) return Task.FromResult(WebSettingsMutationResult.Failed);
+        AppearanceWriteCount++;
+        AppearancePresetId = presetId;
+        return Task.FromResult(WebSettingsMutationResult.Succeeded);
     }
     public Task SetMainWindowCloseBehaviorAsync(MainWindowCloseBehavior value, CancellationToken cancellationToken)
     {

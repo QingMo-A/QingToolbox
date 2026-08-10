@@ -340,6 +340,7 @@ public partial class App : Application
                 services.AddSingleton<IWebCommandHandler, WebHostUpdateCancelCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebHostUpdateInstallCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetLanguageCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebSetAppearancePresetCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetShowLogsInSidebarCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetMainWindowCloseBehaviorCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetStartupPresentationModeCommandHandler>();

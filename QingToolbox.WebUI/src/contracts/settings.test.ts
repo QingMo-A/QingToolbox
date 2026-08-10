@@ -32,4 +32,10 @@ describe('settings snapshot contract', () => {
   it.each(['Badge', 'Hidden', ''])('rejects presentation %s', startupPresentationMode => expect(isSettingsSnapshot({ ...valid, startupPresentationMode })).toBe(false))
   it('rejects invalid startup booleans', () => expect(isSettingsSnapshot({ ...valid, launchAtLogin: 'no' })).toBe(false))
   it('rejects invalid display state', () => expect(isSettingsSnapshot({ ...valid, startupStatus: 42 })).toBe(false))
+  it('accepts an optional host preset id and leaves unknown ids for UI normalization', () => {
+    expect(isSettingsSnapshot({ ...valid, appearancePresetId: 'future-preset' })).toBe(true)
+  })
+  it('rejects a malformed host preset id', () => {
+    expect(isSettingsSnapshot({ ...valid, appearancePresetId: { value: 'neon-circuit' } })).toBe(false)
+  })
 })

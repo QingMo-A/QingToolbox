@@ -29,12 +29,20 @@
     <SolidColorBrush x:Key="SuccessSoftBrush" Color="#ECFDF3"/>
     <SolidColorBrush x:Key="MutedTextBrush" Color="#64748B"/>
     <SolidColorBrush x:Key="StrongTextBrush" Color="#172033"/>
-    <SolidColorBrush x:Key="WindowTitleBarDividerBrush" Color="#D9E2EF"/>
-    <SolidColorBrush x:Key="WindowTitleBarBackgroundBrush" Color="#F7FBFF"/>
-    <SolidColorBrush x:Key="WindowTitleBarForegroundBrush" Color="#172033"/>
-    <SolidColorBrush x:Key="WindowTitleBarMutedForegroundBrush" Color="#64748B"/>
-    <SolidColorBrush x:Key="WindowTitleBarHoverBrush" Color="#EAF2FF"/>
+    <SolidColorBrush x:Key="WindowTitleBarDividerBrush" Color="#DCE6F3"/>
+    <SolidColorBrush x:Key="WindowTitleBarBackgroundBrush" Color="#F8FBFF"/>
+    <SolidColorBrush x:Key="WindowTitleBarForegroundBrush" Color="#10213D"/>
+    <SolidColorBrush x:Key="WindowTitleBarMutedForegroundBrush" Color="#50637E"/>
+    <SolidColorBrush x:Key="WindowTitleBarHoverBrush" Color="#E8F0FF"/>
     <SolidColorBrush x:Key="WindowTitleBarPressedBrush" Color="#D8E7FF"/>
+    <SolidColorBrush x:Key="WindowTitleBarAccentBrush" Color="#2563EB"/>
+    <SolidColorBrush x:Key="FloatingBadgeSurfaceBrush" Color="#F2FFFFFF"/>
+    <SolidColorBrush x:Key="FloatingBadgeBorderBrush" Color="#DCE6F3"/>
+    <SolidColorBrush x:Key="FloatingBadgeHoverBrush" Color="#E8F0FF"/>
+    <SolidColorBrush x:Key="FloatingBadgePressedBrush" Color="#D8E7FF"/>
+    <SolidColorBrush x:Key="FloatingBadgeFocusBrush" Color="#2563EB"/>
+    <SolidColorBrush x:Key="FloatingBadgeMenuSurfaceBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="FloatingBadgeMenuForegroundBrush" Color="#10213D"/>
     <CornerRadius x:Key="GlassPanelCornerRadius">24</CornerRadius>
     <CornerRadius x:Key="CardCornerRadius">18</CornerRadius>
     <CornerRadius x:Key="ButtonCornerRadius">12</CornerRadius>
@@ -42,6 +50,8 @@
     <Duration x:Key="FastAnimationDuration">0:0:0.12</Duration>
     <Duration x:Key="NormalAnimationDuration">0:0:0.18</Duration>
     <Duration x:Key="SlowAnimationDuration">0:0:0.26</Duration>
+    <!-- Caption and title-bar action buttons share this transition cadence. -->
+    <Duration x:Key="WindowCaptionButtonTransitionDuration">0:0:0.14</Duration>
     <DropShadowEffect x:Key="SoftPanelShadow" BlurRadius="22" ShadowDepth="5"
                       Opacity="0.12" Color="#334155"/>
     <DropShadowEffect x:Key="FloatingPanelShadow" BlurRadius="32" ShadowDepth="8"
@@ -81,15 +91,61 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Background" Background="{TemplateBinding Background}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Background" Property="Background" Value="{DynamicResource WindowTitleBarHoverBrush}"/></Trigger>
-                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Background" Property="Background" Value="{DynamicResource WindowTitleBarPressedBrush}"/></Trigger>
-                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Background" Property="BorderBrush" Value="{StaticResource AccentBrush}"/><Setter TargetName="Background" Property="BorderThickness" Value="1"/></Trigger>
-                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
-                    </ControlTemplate.Triggers>
+                    <Grid x:Name="Root">
+                        <VisualStateManager.VisualStateGroups>
+                            <VisualStateGroup x:Name="CommonStates">
+                                <VisualStateGroup.Transitions>
+                                    <VisualTransition GeneratedDuration="{StaticResource WindowCaptionButtonTransitionDuration}"/>
+                                </VisualStateGroup.Transitions>
+                                <VisualState x:Name="Normal"/>
+                                <VisualState x:Name="MouseOver">
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="HoverSurface"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0"/>
+                                    </Storyboard>
+                                </VisualState>
+                                <VisualState x:Name="Pressed">
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="PressedSurface"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0"/>
+                                    </Storyboard>
+                                </VisualState>
+                                <VisualState x:Name="Disabled">
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Root"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0.4" Duration="0"/>
+                                    </Storyboard>
+                                </VisualState>
+                            </VisualStateGroup>
+                            <VisualStateGroup x:Name="FocusStates">
+                                <VisualState x:Name="Focused">
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="FocusRing"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0"/>
+                                    </Storyboard>
+                                </VisualState>
+                                <VisualState x:Name="Unfocused"/>
+                            </VisualStateGroup>
+                        </VisualStateManager.VisualStateGroups>
+                        <Border x:Name="BaseSurface" Background="{TemplateBinding Background}"/>
+                        <Border x:Name="HoverSurface"
+                                Background="{DynamicResource WindowTitleBarHoverBrush}"
+                                Opacity="0"/>
+                        <Border x:Name="PressedSurface"
+                                Background="{DynamicResource WindowTitleBarPressedBrush}"
+                                Opacity="0"/>
+                        <Border x:Name="FocusRing"
+                                BorderBrush="{DynamicResource WindowTitleBarAccentBrush}"
+                                BorderThickness="1"
+                                Opacity="0"/>
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
+                    </Grid>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -99,13 +155,68 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Background" Background="{TemplateBinding Background}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
+                    <Grid x:Name="Root">
+                        <VisualStateManager.VisualStateGroups>
+                            <VisualStateGroup x:Name="CommonStates">
+                                <VisualStateGroup.Transitions>
+                                    <VisualTransition GeneratedDuration="{StaticResource WindowCaptionButtonTransitionDuration}"/>
+                                </VisualStateGroup.Transitions>
+                                <VisualState x:Name="Normal"/>
+                                <VisualState x:Name="MouseOver">
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="HoverSurface"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0"/>
+                                    </Storyboard>
+                                </VisualState>
+                                <VisualState x:Name="Pressed">
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="PressedSurface"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0"/>
+                                    </Storyboard>
+                                </VisualState>
+                                <VisualState x:Name="Disabled">
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Root"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0.4" Duration="0"/>
+                                    </Storyboard>
+                                </VisualState>
+                            </VisualStateGroup>
+                            <VisualStateGroup x:Name="FocusStates">
+                                <VisualState x:Name="Focused">
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="FocusRing"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0"/>
+                                    </Storyboard>
+                                </VisualState>
+                                <VisualState x:Name="Unfocused"/>
+                            </VisualStateGroup>
+                        </VisualStateManager.VisualStateGroups>
+                        <Border x:Name="BaseSurface" Background="{TemplateBinding Background}"/>
+                        <Border x:Name="HoverSurface" Background="#E81123" Opacity="0"/>
+                        <Border x:Name="PressedSurface" Background="#C50F1F" Opacity="0"/>
+                        <Border x:Name="FocusRing"
+                                BorderBrush="{DynamicResource WindowTitleBarAccentBrush}"
+                                BorderThickness="1"
+                                Opacity="0"/>
+                        <ContentPresenter x:Name="Content"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          TextElement.Foreground="{TemplateBinding Foreground}"
+                                          IsHitTestVisible="False"/>
+                    </Grid>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Background" Property="Background" Value="#E81123"/><Setter Property="Foreground" Value="White"/></Trigger>
-                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Background" Property="Background" Value="#C50F1F"/><Setter Property="Foreground" Value="White"/></Trigger>
-                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Background" Property="BorderBrush" Value="{StaticResource AccentBrush}"/><Setter TargetName="Background" Property="BorderThickness" Value="1"/></Trigger>
+                        <!-- Keep one presenter for the caller-owned glyph. A WPF
+                             Visual cannot be parented by both normal/alert presenters. -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="White"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter Property="Foreground" Value="White"/>
+                        </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -114,6 +225,15 @@
 
     <Style x:Key="WindowSystemMenuButtonStyle" TargetType="Button" BasedOn="{StaticResource WindowCaptionButtonStyle}">
         <Setter Property="Width" Value="{x:Static windowing:WindowChromeMetrics.SystemMenuButtonWidth}"/>
+    </Style>
+
+    <!-- Additional title-bar actions use the caption template and transitions so
+         hover, press, focus and disabled feedback remain visually consistent. -->
+    <Style x:Key="WindowFloatingBadgeButtonStyle" TargetType="Button" BasedOn="{StaticResource WindowCaptionButtonStyle}">
+        <Setter Property="Width" Value="{x:Static windowing:WindowChromeMetrics.CaptionButtonWidth}"/>
+        <Setter Property="Height" Value="47"/>
+        <Setter Property="Margin" Value="0"/>
+        <Setter Property="Padding" Value="0"/>
     </Style>
 
     <Style x:Key="WindowTitleActionButtonStyle" TargetType="Button">
@@ -142,18 +262,22 @@
     </Style>
 
     <Style x:Key="FloatingBadgeButtonStyle" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource FloatingBadgeSurfaceBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource FloatingBadgeBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
         <Setter Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1" ScaleY="1"/></Setter.Value></Setter>
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="{StaticResource AccentHoverBrush}"/>
+                <Setter Property="Background" Value="{DynamicResource FloatingBadgeHoverBrush}"/>
                 <Setter Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1.04" ScaleY="1.04"/></Setter.Value></Setter>
             </Trigger>
             <Trigger Property="IsMouseCaptureWithin" Value="True">
+                <Setter Property="Background" Value="{DynamicResource FloatingBadgePressedBrush}"/>
                 <Setter Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.97" ScaleY="0.97"/></Setter.Value></Setter>
             </Trigger>
             <Trigger Property="IsKeyboardFocused" Value="True">
-                <Setter Property="BorderBrush" Value="White"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource FloatingBadgeFocusBrush}"/>
                 <Setter Property="BorderThickness" Value="2"/>
             </Trigger>
         </Style.Triggers>
@@ -161,8 +285,9 @@
 
     <Style x:Key="FloatingBadgeContextMenuStyle" TargetType="ContextMenu">
         <Setter Property="Padding" Value="4"/>
-        <Setter Property="Background" Value="White"/>
-        <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource FloatingBadgeMenuSurfaceBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource FloatingBadgeMenuForegroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource FloatingBadgeBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
     </Style>
 

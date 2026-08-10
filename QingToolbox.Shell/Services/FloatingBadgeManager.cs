@@ -19,6 +19,8 @@ public sealed class FloatingBadgeManager(
     private MainWindow? _mainWindow;
     private FloatingBadgeWindow? _badgeWindow;
     private WindowSnapshot? _snapshot;
+    private BadgePlacementSnapshot? _lastBadgePlacement;
+    private Task _pendingBadgePositionSave = Task.CompletedTask;
     private bool _exitRequested;
     private Func<Task>? _applicationExitRequest;
     private bool _disposed;
@@ -103,8 +105,22 @@ public sealed class FloatingBadgeManager(
             if (_disposed || _exitRequested || _mainWindow is null || !_stateMachine.TryBeginRestore()) return;
             RaiseStateChanged();
             var mainWindow = _mainWindow;
+            var badge = _badgeWindow;
+            BadgePlacementSnapshot? badgePlacement = null;
             try
             {
+                if (badge is not null)
+                {
+                    try { badgePlacement = ConstrainAndCaptureBadgePlacement(badge); }
+                    catch (Exception exception)
+                    {
+                        Debug.WriteLine($"Could not capture badge position while restoring: {exception.GetType().Name}");
+                    }
+                    if (badgePlacement is not null) _lastBadgePlacement = badgePlacement;
+                }
+                // Remove the floating surface immediately. Restoring module windows and
+                // persisting the badge position may take longer than showing the Shell.
+                if (badge?.IsVisible == true) badge.Hide();
                 var snapshot = _snapshot ?? WindowSnapshot.Capture(mainWindow);
                 mainWindow.ShowInTaskbar = snapshot.ShowInTaskbar;
                 mainWindow.Show();
@@ -114,11 +130,20 @@ public sealed class FloatingBadgeManager(
                 mainWindow.Activate();
                 mainWindow.Focus();
 
-                if (_badgeWindow is { } badge)
+                if (badge is not null)
                 {
-                    await SaveBadgePositionAsync(badge, cancellationToken);
+                    try
+                    {
+                        await AwaitPendingBadgePositionSaveAsync().ConfigureAwait(true);
+                        if (badgePlacement is not null)
+                            await SaveBadgePositionAsync(badgePlacement, cancellationToken).ConfigureAwait(true);
+                    }
+                    catch (Exception exception)
+                    {
+                        Debug.WriteLine($"Could not save badge position while restoring: {exception.GetType().Name}");
+                    }
                     CloseBadge(badge);
-                    _badgeWindow = null;
+                    if (ReferenceEquals(_badgeWindow, badge)) _badgeWindow = null;
                 }
                 if (!_exitRequested) _stateMachine.TryCompleteRestore();
             }
@@ -126,7 +151,7 @@ public sealed class FloatingBadgeManager(
             {
                 if (!_exitRequested)
                 {
-                    if (_badgeWindow is { IsVisible: false } badge) badge.Show();
+                    if (ReferenceEquals(_badgeWindow, badge) && badge is { IsVisible: false }) badge.Show();
                     _stateMachine.TryFailRestore();
                     EnsureRecoverableWindow();
                 }
@@ -148,8 +173,14 @@ public sealed class FloatingBadgeManager(
             await _applicationExitRequest();
             return;
         }
-        PrepareForApplicationExit();
+        await PrepareForApplicationExitAsync();
         await CompleteExitAfterTransitionAsync();
+    }
+
+    public async Task PrepareForApplicationExitAsync()
+    {
+        PrepareForApplicationExit();
+        await PersistActiveBadgePositionBestEffortAsync().ConfigureAwait(true);
     }
 
     public void PrepareForApplicationExit()
@@ -169,8 +200,13 @@ public sealed class FloatingBadgeManager(
         try
         {
             if (_mainWindow is null) return;
-            CloseBadge(_badgeWindow);
-            _badgeWindow = null;
+            var badge = _badgeWindow;
+            if (badge is not null)
+            {
+                await PersistActiveBadgePositionBestEffortAsync().ConfigureAwait(true);
+                CloseBadge(badge);
+                if (ReferenceEquals(_badgeWindow, badge)) _badgeWindow = null;
+            }
             if (!_mainWindow.Dispatcher.HasShutdownStarted) _mainWindow.Close();
         }
         finally { _transitionGate.Release(); }
@@ -182,18 +218,27 @@ public sealed class FloatingBadgeManager(
         var badge = new FloatingBadgeWindow(localization, environment.DisplayName);
         badge.RestoreRequested += async (_, _) => await RestoreSafelyAsync();
         badge.ExitRequested += async (_, _) => await ExitSafelyAsync();
-        badge.DragCompleted += async (_, _) =>
-        {
-            try
-            {
-                ConstrainBadgeToCurrentMonitor(badge);
-                await SaveBadgePositionAsync(badge);
-            }
-            catch (Exception exception) { Debug.WriteLine($"Could not save badge position: {exception.GetType().Name}"); }
-        };
+        badge.DragCompletedAsync += () => SaveBadgePositionAfterDragAsync(badge);
         badge.Closed += (_, _) => OnBadgeClosed(badge);
         _badgeWindow = badge;
         return badge;
+    }
+
+    private Task SaveBadgePositionAfterDragAsync(FloatingBadgeWindow badge)
+    {
+        try
+        {
+            // DragMove has returned at this point, so capture the committed
+            // HWND placement rather than WPF's potentially stale Left/Top.
+            var placement = ConstrainAndCaptureBadgePlacement(badge);
+            _lastBadgePlacement = placement;
+            return QueueBadgePositionSave(placement);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"Could not save badge position after drag: {exception.GetType().Name}");
+            return Task.CompletedTask;
+        }
     }
 
     private async Task RestoreSafelyAsync()
@@ -219,13 +264,19 @@ public sealed class FloatingBadgeManager(
         if (!_exitRequested && _mainWindow is { IsVisible: false }) _ = RestoreSafelyAsync();
     }
 
-    private static void PositionVisibleBadge(FloatingBadgeWindow badge, Window mainWindow, UserSettings settings)
+    private void PositionVisibleBadge(FloatingBadgeWindow badge, Window mainWindow, UserSettings settings)
     {
         var fallbackPixel = mainWindow.PointToScreen(new Point(mainWindow.ActualWidth / 2, mainWindow.ActualHeight / 2));
-        var monitor = FloatingBadgePlacement.ResolveMonitor(settings.FloatingBadgeMonitorDeviceName, fallbackPixel);
+        var monitorDeviceName = _lastBadgePlacement?.MonitorDeviceName ?? settings.FloatingBadgeMonitorDeviceName;
+        var monitor = FloatingBadgePlacement.ResolveMonitor(monitorDeviceName, fallbackPixel);
         var badgePixels = FloatingBadgePlacement.GetBadgePixelSize(badge, monitor);
         Point requested;
-        if (settings.FloatingBadgeHorizontalRatio is not null && settings.FloatingBadgeVerticalRatio is not null)
+        if (_lastBadgePlacement is { } sessionPlacement)
+        {
+            requested = FloatingBadgePlacement.PositionFromRatios(
+                monitor, badgePixels, sessionPlacement.HorizontalRatio, sessionPlacement.VerticalRatio);
+        }
+        else if (settings.FloatingBadgeHorizontalRatio is not null && settings.FloatingBadgeVerticalRatio is not null)
         {
             requested = FloatingBadgePlacement.PositionFromRatios(
                 monitor, badgePixels, settings.FloatingBadgeHorizontalRatio, settings.FloatingBadgeVerticalRatio);
@@ -240,29 +291,93 @@ public sealed class FloatingBadgeManager(
             requested = FloatingBadgePlacement.PositionFromRatios(monitor, badgePixels, 1, 0);
         }
         FloatingBadgePlacement.SetBadgePixelPosition(badge, monitor, requested);
+        _lastBadgePlacement = CaptureBadgePlacement(badge);
     }
 
-    private static void ConstrainBadgeToCurrentMonitor(FloatingBadgeWindow badge)
+    private static BadgePlacementSnapshot ConstrainAndCaptureBadgePlacement(FloatingBadgeWindow badge)
     {
         var topLeft = FloatingBadgePlacement.GetWindowPixelTopLeft(badge);
         var monitor = FloatingBadgePlacement.GetMonitorAt(topLeft);
         FloatingBadgePlacement.SetBadgePixelPosition(badge, monitor, topLeft);
+        return CaptureBadgePlacement(badge);
     }
 
-    private async Task SaveBadgePositionAsync(FloatingBadgeWindow badge, CancellationToken cancellationToken = default)
+    private static BadgePlacementSnapshot CaptureBadgePlacement(FloatingBadgeWindow badge)
     {
         var topLeft = FloatingBadgePlacement.GetWindowPixelTopLeft(badge);
         var monitor = FloatingBadgePlacement.GetMonitorAt(topLeft);
         var badgePixels = FloatingBadgePlacement.GetBadgePixelSize(badge, monitor);
         var ratios = FloatingBadgePlacement.RatiosFromPosition(monitor, topLeft, badgePixels);
+        var persistedDips = FloatingBadgePlacement.PixelPositionToDips(monitor, topLeft);
+        return new BadgePlacementSnapshot(
+            monitor.DeviceName,
+            ratios.Horizontal,
+            ratios.Vertical,
+            double.IsFinite(persistedDips.X) ? persistedDips.X : null,
+            double.IsFinite(persistedDips.Y) ? persistedDips.Y : null);
+    }
+
+    private Task QueueBadgePositionSave(BadgePlacementSnapshot placement)
+    {
+        var previous = _pendingBadgePositionSave;
+        _pendingBadgePositionSave = PersistAfterAsync(previous, placement);
+        return _pendingBadgePositionSave;
+    }
+
+    private async Task PersistAfterAsync(Task previous, BadgePlacementSnapshot placement)
+    {
+        try { await previous.ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"Could not complete an earlier badge position save: {exception.GetType().Name}");
+        }
+
+        try { await SaveBadgePositionAsync(placement, CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"Could not save badge position: {exception.GetType().Name}");
+        }
+    }
+
+    private async Task AwaitPendingBadgePositionSaveAsync()
+    {
+        try { await _pendingBadgePositionSave.ConfigureAwait(true); }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"Could not complete pending badge position save: {exception.GetType().Name}");
+        }
+    }
+
+    private async Task PersistActiveBadgePositionBestEffortAsync()
+    {
+        var badge = _badgeWindow;
+        if (badge is null) return;
+
+        try
+        {
+            var placement = ConstrainAndCaptureBadgePlacement(badge);
+            _lastBadgePlacement = placement;
+            await AwaitPendingBadgePositionSaveAsync().ConfigureAwait(true);
+            await SaveBadgePositionAsync(placement, CancellationToken.None).ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"Could not save badge position during exit: {exception.GetType().Name}");
+        }
+    }
+
+    private async Task SaveBadgePositionAsync(
+        BadgePlacementSnapshot placement,
+        CancellationToken cancellationToken = default)
+    {
         await settingsService.UpdateAsync(settings =>
         {
-            settings.FloatingBadgeLeft = badge.Left;
-            settings.FloatingBadgeTop = badge.Top;
-            settings.HasFloatingBadgePosition = double.IsFinite(badge.Left) && double.IsFinite(badge.Top);
-            settings.FloatingBadgeMonitorDeviceName = monitor.DeviceName;
-            settings.FloatingBadgeHorizontalRatio = ratios.Horizontal;
-            settings.FloatingBadgeVerticalRatio = ratios.Vertical;
+            settings.FloatingBadgeLeft = placement.LeftDips;
+            settings.FloatingBadgeTop = placement.TopDips;
+            settings.HasFloatingBadgePosition = placement.LeftDips is not null && placement.TopDips is not null;
+            settings.FloatingBadgeMonitorDeviceName = placement.MonitorDeviceName;
+            settings.FloatingBadgeHorizontalRatio = placement.HorizontalRatio;
+            settings.FloatingBadgeVerticalRatio = placement.VerticalRatio;
         }, cancellationToken);
     }
 
@@ -302,6 +417,13 @@ public sealed class FloatingBadgeManager(
         _disposed = true;
         PrepareForApplicationExit();
     }
+
+    private sealed record BadgePlacementSnapshot(
+        string MonitorDeviceName,
+        double HorizontalRatio,
+        double VerticalRatio,
+        double? LeftDips,
+        double? TopDips);
 
     private sealed record WindowSnapshot(WindowState State, Rect Bounds, bool ShowInTaskbar)
     {

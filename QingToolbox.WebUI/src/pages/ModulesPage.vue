@@ -11,6 +11,7 @@ import QBadge from '../design-system/components/QBadge.vue'
 import QEmptyState from '../design-system/components/QEmptyState.vue'
 import QSkeleton from '../design-system/components/QSkeleton.vue'
 import QIcon from '../design-system/components/QIcon.vue'
+import ModuleIcon from '../modules/ModuleIcon.vue'
 import {
   summarizeModuleStates,
 } from '../modules/moduleStateSummary'
@@ -412,7 +413,7 @@ onBeforeUnmount(() => {
         <div v-else class="wpf-module-stack">
           <article v-for="module in store.visibleModules" :key="module.id" class="wpf-module-card" :class="{ selected: store.selectedModuleId === module.id }" tabindex="0" :aria-label="`${t('modules.card.details')}: ${module.displayName}`" @click="openDetailsFromCard($event, module.id)" @keydown.enter.self.prevent="openDetails(module.id)" @keydown.space.self.prevent="openDetails(module.id)">
             <header>
-              <span class="module-icon">{{ module.displayName.slice(0, 1).toUpperCase() }}</span>
+              <ModuleIcon :icon-data-url="module.iconDataUrl" :alt="module.displayName" :fallback="module.displayName" />
               <div><h2>{{ module.displayName }} <small>v{{ module.version }}</small></h2></div>
               <div class="module-card-badges">
                 <QBadge :tone="tone(module)">{{ runtimeLabel(module) }}</QBadge>
@@ -443,7 +444,7 @@ onBeforeUnmount(() => {
       </section>
       <aside v-if="store.selectedModule" class="wpf-module-details">
         <button class="wpf-back" :aria-label="t('modules.details.back')" @click="store.selectedModuleId = null"><QIcon name="back" /></button>
-        <header><span class="module-icon">{{ store.selectedModule.displayName.slice(0, 1).toUpperCase() }}</span><div><h2>{{ store.selectedModule.displayName }}</h2><small>v{{ store.selectedModule.version }}</small></div></header>
+        <header><ModuleIcon :icon-data-url="store.selectedModule.iconDataUrl" :alt="store.selectedModule.displayName" :fallback="store.selectedModule.displayName" /><div><h2>{{ store.selectedModule.displayName }}</h2><small>v{{ store.selectedModule.version }}</small></div></header>
         <QBadge :tone="tone(store.selectedModule)">{{ runtimeLabel(store.selectedModule) }}</QBadge>
         <p>{{ store.selectedModule.displayDescription }}</p>
         <p v-if="store.selectedModule.isExecutionBlocked" class="module-operation-blocked">{{ t('modules.card.operationsBlocked') }}</p>

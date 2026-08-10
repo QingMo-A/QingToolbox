@@ -10,6 +10,8 @@ export interface ModuleSnapshotItem {
   updateStatus: ModuleUpdateStatus; targetVersion: string|null; releaseNotes: string|null; isFromStaleCache: boolean
   canCheckForUpdate: boolean; isUpdateCheckBusy: boolean; canDownloadUpdate: boolean; downloadStatus: ModuleDownloadStatus
   isDownloadActive: boolean; downloadBytesReceived: number; downloadExpectedBytes: number; canInstallVerifiedUpdate: boolean
+  /** Host-projected SVG icon. Older hosts may omit this optional field. */
+  iconDataUrl?: string|null
 }
 export interface ModuleSnapshot { generatedAt: string; modules: ModuleSnapshotItem[] }
 export interface ModuleImportResult {
@@ -28,6 +30,18 @@ export interface ModuleUpdateInstallResult {
   snapshot: ModuleSnapshot
 }
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string')
+const moduleIconDataPrefix = 'data:image/svg+xml;base64,'
+export const maximumModuleIconBytes = 256 * 1024
+export const maximumModuleIconDataUrlLength = moduleIconDataPrefix.length + Math.ceil(maximumModuleIconBytes / 3) * 4
+export const isModuleIconDataUrl = (value: unknown): value is string => {
+  if (typeof value !== 'string' || !value.startsWith(moduleIconDataPrefix) || value.length > maximumModuleIconDataUrlLength)
+    return false
+  const encoded = value.slice(moduleIconDataPrefix.length)
+  if (encoded.length === 0 || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) return false
+  const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0
+  const decodedBytes = encoded.length / 4 * 3 - padding
+  return decodedBytes > 0 && decodedBytes <= maximumModuleIconBytes
+}
 const updateStatuses: ModuleUpdateStatus[] = ['NotChecked','Checking','NotOfficial','NoPublishedRelease','UpToDate','UpdateAvailable','HostUpdateRequired','ModuleApiIncompatible','HostVersionIncompatible','LocalVersionNewer','InvalidLocalVersion','SourceUnavailable','SourceInvalid','DisabledByEnvironment']
 const downloadStatuses: ModuleDownloadStatus[] = ['NotDownloaded','ConfirmingMetadata','MetadataChanged','MetadataStale','Downloading','Verifying','Verified','AlreadyVerified','Cancelled','SizeMismatch','HashMismatch','SourceUnavailable','SourceInvalid','UntrustedRedirect','StorageUnavailable','Failed','DisabledByEnvironment','TransferTimedOut']
 const nonNegativeFinite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
@@ -44,7 +58,8 @@ const isItem = (value: any): value is ModuleSnapshotItem => !!value &&
   typeof value.canCheckForUpdate === 'boolean' && typeof value.isUpdateCheckBusy === 'boolean' &&
   typeof value.canDownloadUpdate === 'boolean' && downloadStatuses.includes(value.downloadStatus) &&
   typeof value.isDownloadActive === 'boolean' && nonNegativeFinite(value.downloadBytesReceived) &&
-  nonNegativeFinite(value.downloadExpectedBytes) && typeof value.canInstallVerifiedUpdate === 'boolean'
+  nonNegativeFinite(value.downloadExpectedBytes) && typeof value.canInstallVerifiedUpdate === 'boolean' &&
+  (value.iconDataUrl === undefined || value.iconDataUrl === null || isModuleIconDataUrl(value.iconDataUrl))
 export const isModuleSnapshot = (value: any): value is ModuleSnapshot => !!value &&
   typeof value.generatedAt === 'string' && !Number.isNaN(Date.parse(value.generatedAt)) &&
   Array.isArray(value.modules) && value.modules.every(isItem)

@@ -39,3 +39,12 @@ describe('SettingsClient language mutation', () => {
       .rejects.toThrow('Settings snapshot validation failed.')
   })
 })
+
+describe('SettingsClient appearance preset mutation', () => {
+  it('uses the host command and preserves the preset id in the response', async () => {
+    const request = vi.fn().mockResolvedValue({ ...snapshot, appearancePresetId: 'neon-circuit' })
+    const client = new SettingsClient({ request } as any)
+    await expect(client.setAppearancePreset('neon-circuit')).resolves.toMatchObject({ appearancePresetId: 'neon-circuit' })
+    expect(request).toHaveBeenCalledWith('settings.setAppearancePreset', { appearancePresetId: 'neon-circuit' })
+  })
+})

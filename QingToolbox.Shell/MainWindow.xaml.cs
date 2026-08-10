@@ -37,6 +37,8 @@ public partial class MainWindow : Window
     private Task? _backgroundStartupTask;
     private long _workspaceTransitionVersion;
     private int _closeRequestPending;
+    private int _floatingBadgeEntryPending;
+    private System.Windows.Controls.Button? _floatingBadgeButton;
     private HwndSource? _nativeWindowSource;
     private WindowState _notificationAreaRestoreState = WindowState.Normal;
 
@@ -76,6 +78,7 @@ public partial class MainWindow : Window
         _webBridgeHost = webBridgeHost;
         _webWorkspacePresentation = new WebWorkspacePresentationState(webShellInitializer.IsAllowed);
         _webBridgeHost.ThemeChanged += OnWebThemeChanged;
+        _floatingBadgeManager.StateChanged += OnFloatingBadgeStateChanged;
         SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
         WindowTitleBarThemeManager.Apply(WebShellThemeMode.System);
         _startupSession.Attach(this, floatingBadgeManager);
@@ -112,6 +115,7 @@ public partial class MainWindow : Window
             _nativeWindowSource = null;
         }
         _webBridgeHost.ThemeChanged -= OnWebThemeChanged;
+        _floatingBadgeManager.StateChanged -= OnFloatingBadgeStateChanged;
         SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
     }
 
@@ -143,11 +147,36 @@ public partial class MainWindow : Window
 
     private async void OnFloatingBadgeClick(object sender, RoutedEventArgs e)
     {
-        var button = (System.Windows.Controls.Button)sender;
-        button.IsEnabled = false;
+        _floatingBadgeButton = (System.Windows.Controls.Button)sender;
+        if (_floatingBadgeManager.State != FloatingBadgeState.Normal)
+        {
+            UpdateFloatingBadgeButtonState();
+            return;
+        }
+        if (Interlocked.CompareExchange(ref _floatingBadgeEntryPending, 1, 0) != 0)
+            return;
+
+        UpdateFloatingBadgeButtonState();
         try { await _floatingBadgeManager.EnterAsync(); }
         catch { _viewModel.StatusMessage = _viewModel.Strings["floatingBadge.restoreFailed"]; }
-        finally { button.IsEnabled = true; }
+        finally
+        {
+            Interlocked.Exchange(ref _floatingBadgeEntryPending, 0);
+            UpdateFloatingBadgeButtonState();
+        }
+    }
+
+    private void OnFloatingBadgeStateChanged(object? sender, EventArgs e)
+    {
+        if (Dispatcher.CheckAccess()) UpdateFloatingBadgeButtonState();
+        else Dispatcher.BeginInvoke(UpdateFloatingBadgeButtonState);
+    }
+
+    private void UpdateFloatingBadgeButtonState()
+    {
+        if (!IsInitialized || Dispatcher.HasShutdownStarted || _floatingBadgeButton is null) return;
+        _floatingBadgeButton.IsEnabled = Volatile.Read(ref _floatingBadgeEntryPending) == 0 &&
+            _floatingBadgeManager.State == FloatingBadgeState.Normal;
     }
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e)

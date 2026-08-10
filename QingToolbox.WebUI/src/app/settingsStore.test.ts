@@ -5,6 +5,7 @@ import type { SettingsSnapshot } from '../contracts/settings'
 
 const snapshot: SettingsSnapshot = {
   generatedAt: '2026-07-25T12:00:00Z',
+  appearancePresetId: 'qing-default',
   language: {
     code: 'en-US',
     effectiveCode: 'en-US',
@@ -67,5 +68,33 @@ describe('Settings Store language mutation', () => {
     store.isUpdatingLogsVisibility = false
     store.isUpdatingLanguage = true
     expect(await store.updateCloseBehavior({ setMainWindowCloseBehavior: vi.fn() } as any, 'ExitApplication')).toBe('busy')
+  })
+})
+
+describe('Settings Store appearance mutation', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('commits only the complete host-confirmed preset snapshot', async () => {
+    let resolve!: (value: SettingsSnapshot) => void
+    const pending = new Promise<SettingsSnapshot>(done => { resolve = done })
+    const store = useSettingsStore(); store.complete(snapshot)
+    const operation = store.updateAppearancePreset({ setAppearancePreset: vi.fn(() => pending) } as any, 'qing-nova')
+    expect(store.snapshot).toEqual(snapshot)
+    expect(store.isUpdatingAppearance).toBe(true)
+    const changed = { ...snapshot, generatedAt: '2026-07-25T13:00:00Z', appearancePresetId: 'qing-nova' }
+    resolve(changed)
+    await expect(operation).resolves.toBe('success')
+    expect(store.snapshot).toEqual(changed)
+  })
+
+  it('restores the previous confirmed preset when persistence fails', async () => {
+    const store = useSettingsStore(); store.complete(snapshot)
+    const result = await store.updateAppearancePreset({
+      setAppearancePreset: vi.fn().mockRejectedValue(new Error('C:\\private\\settings.json')),
+    } as any, 'aurora-flow')
+    expect(result).toBe('failure')
+    expect(store.snapshot).toEqual(snapshot)
+    expect(store.status).toBe('ready')
+    expect(store.appearanceError).not.toContain('settings.json')
   })
 })

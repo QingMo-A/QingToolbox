@@ -2,6 +2,7 @@
 import { inject, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useThemeStore } from './themeStore'
+import { useAppearancePresetStore } from '../design-system/tokens/appearancePresets'
 import { useAppStore } from './store'
 import { useSettingsStore } from './settingsStore'
 import type { SettingsClient } from '../bridge/clients/SettingsClient'
@@ -13,6 +14,7 @@ import { useLocalization } from '../localization/localization'
 import { routeTitleKeyByPath } from './router'
 
 const theme = useThemeStore()
+const appearance = useAppearancePresetStore()
 const app = useAppStore()
 const settings = useSettingsStore()
 const client = inject<SettingsClient>('settingsClient')!
@@ -35,11 +37,15 @@ function onGlobalKeydown(event: KeyboardEvent) {
 
 onMounted(() => {
   theme.set(theme.mode)
+  appearance.set(appearance.id)
   window.addEventListener('keydown', onGlobalKeydown)
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 watch(() => app.bridge, bridge => {
   if (bridge === 'Connected' && settings.status === 'idle') void loadSettings()
+}, { immediate: true })
+watch(() => settings.snapshot?.appearancePresetId, presetId => {
+  if (presetId !== undefined) appearance.set(presetId)
 }, { immediate: true })
 watchEffect(() => {
   if (route.path === '/diagnostics' && app.snapshot && app.snapshot.environmentKind !== 'Development') {

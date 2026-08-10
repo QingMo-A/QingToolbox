@@ -41,9 +41,10 @@
                     Source="pack://application:,,,/QingToolbox.Shell;component/Assets/Branding/QingToolbox.Mark.svg"/>
             </controls:WindowTitleBar.IconSource>
             <controls:WindowTitleBar.AdditionalActions>
-                <Button Style="{StaticResource WindowCaptionButtonStyle}"
+                <Button Style="{StaticResource WindowFloatingBadgeButtonStyle}"
                         ToolTip="{Binding Strings[floatingBadge.enableTooltip]}"
                         AutomationProperties.Name="{Binding Strings[floatingBadge.enable]}"
+                        AutomationProperties.HelpText="{Binding Strings[floatingBadge.enableTooltip]}"
                         Click="OnFloatingBadgeClick">
                     <TextBlock Text="&#xE718;"
                                FontFamily="Segoe Fluent Icons"

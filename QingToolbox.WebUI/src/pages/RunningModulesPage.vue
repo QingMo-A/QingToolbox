@@ -9,6 +9,7 @@ import { useToastStore } from '../app/toastStore'
 import QPage from '../design-system/components/QPage.vue'
 import QButton from '../design-system/components/QButton.vue'
 import QIcon from '../design-system/components/QIcon.vue'
+import ModuleIcon from '../modules/ModuleIcon.vue'
 import QSkeleton from '../design-system/components/QSkeleton.vue'
 import { useLocalization } from '../localization/localization'
 import {
@@ -77,7 +78,7 @@ const runtimeLabel = (runtimeState: string) => {
     <section v-else-if="hasConfirmedSnapshot && modules.runningModules.length === 0" class="q-empty running-empty"><div class="q-empty-icon"><QIcon name="running" :size="28" /></div><h3>{{ t(staleSnapshot ? 'running.empty.stale' : 'running.empty.live') }}</h3><p>{{ t('running.empty.description') }}</p><RouterLink class="q-button" to="/modules">{{ t('running.empty.goToModules') }}</RouterLink></section>
     <section v-else-if="modules.runningModules.length" class="running-module-stack">
       <article v-for="module in modules.runningModules" :key="module.id" class="running-module-card">
-        <span class="module-icon">{{ module.displayName.slice(0, 1).toUpperCase() }}</span>
+        <ModuleIcon :icon-data-url="module.iconDataUrl" :alt="module.displayName" :fallback="module.displayName" />
         <div class="running-module-info">
           <div class="running-module-heading"><h2>{{ module.displayName }} <small>v{{ module.version }}</small></h2><span class="q-badge is-success">{{ runtimeLabel(module.runtimeState) }}</span></div>
           <p>{{ module.displayDescription }}</p>

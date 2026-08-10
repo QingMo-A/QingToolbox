@@ -12,7 +12,7 @@ import type { EffectiveLanguageCode, LanguageCode, SettingsSnapshot } from '../.
 
 const wrappers: VueWrapper[] = []
 const scrollIntoView = vi.fn()
-const moduleItem = (id: string, state = 'NotLoaded'): ModuleSnapshotItem => ({
+const moduleItem = (id: string, state = 'NotLoaded', overrides: Partial<ModuleSnapshotItem> = {}): ModuleSnapshotItem => ({
   id, displayName: id === 'qing.alpha' ? 'Alpha Tools' : 'Beta Tools',
   displayDescription: id === 'qing.alpha' ? 'Format useful text' : 'Monitor a server',
   version: '1.0.0', author: id === 'qing.alpha' ? 'QingMo-A' : 'Example Author',
@@ -21,6 +21,7 @@ const moduleItem = (id: string, state = 'NotLoaded'): ModuleSnapshotItem => ({
   isUserInstalled: true, canRemove: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false,
   canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false,
   startupAuthorizationState: 'NotEnabled', canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false, updateStatus: 'NotChecked', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: true, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'NotDownloaded', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0, canInstallVerifiedUpdate: false,
+  ...overrides,
 })
 const settingsSnapshot = (code: LanguageCode, effectiveCode: EffectiveLanguageCode): SettingsSnapshot => ({
   generatedAt: new Date().toISOString(), language: { code, effectiveCode, displayName: code, options: [
@@ -102,6 +103,20 @@ describe('QCommandPalette', () => {
       .map((icon: VueWrapper) => (icon.props() as { name: string }).name)
     expect(iconNames).toEqual(['home', 'modules', 'running', 'logs', 'settings', 'diagnostics'])
     expect(new Set(iconNames).size).toBe(6)
+  })
+
+  it('projects a module icon through the reusable image component and keeps its 34px palette slot', async () => {
+    const pinia = createPinia(); setActivePinia(pinia)
+    useAppStore().rebuild({ environmentKind: 'Development', environmentDisplayName: 'Development', hostVersion: '1', protocolVersion: 4, totalModuleCount: 0, validModuleCount: 0, runningModuleCount: 0, generatedAt: new Date().toISOString() })
+    const store = useModuleStore()
+    store.modules = [moduleItem('qing.alpha', 'Running', { iconDataUrl: 'data:image/svg+xml;base64,PHN2Zy8+' })]
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<div />' } }, { path: '/modules', component: { template: '<div />' } }] })
+    await router.push('/'); await router.isReady()
+    const wrapper = mount(QCommandPalette, { attachTo: document.body, props: { open: true }, global: { plugins: [pinia, router] } })
+    wrappers.push(wrapper); await flushPromises()
+    const moduleIcon = wrapper.get('.q-command-result-icon.module')
+    expect(moduleIcon.find('img').attributes('src')).toBe('data:image/svg+xml;base64,PHN2Zy8+')
+    expect(moduleIcon.classes()).toEqual(expect.arrayContaining(['module-icon', 'q-command-result-icon', 'module']))
   })
 
   it.each([

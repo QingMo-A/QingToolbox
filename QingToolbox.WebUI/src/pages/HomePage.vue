@@ -9,6 +9,7 @@ import QPage from '../design-system/components/QPage.vue'
 import QButton from '../design-system/components/QButton.vue'
 import QBadge from '../design-system/components/QBadge.vue'
 import QIcon from '../design-system/components/QIcon.vue'
+import ModuleIcon from '../modules/ModuleIcon.vue'
 import QSkeleton from '../design-system/components/QSkeleton.vue'
 import { useLocalization } from '../localization/localization'
 import { bridgeStateKey } from '../presentation/workspacePresentation'
@@ -122,7 +123,7 @@ const viewModule = (module: ModuleSnapshotItem) => browse('all', module.id)
           <header><div><h2 id="running-title">{{t('home.runningNow')}}</h2><p>{{t('home.runningHint')}}</p></div><RouterLink v-if="modules.runningModules.length" to="/running">{{t('home.viewAll')}}</RouterLink></header>
           <div v-if="runningPreview.length" class="dashboard-running-list">
             <article v-for="module in runningPreview" :key="module.id">
-              <span class="module-icon">{{ module.displayName.slice(0, 1).toUpperCase() }}</span>
+              <ModuleIcon :icon-data-url="module.iconDataUrl" :alt="module.displayName" :fallback="module.displayName" />
               <div><div class="dashboard-module-title"><strong>{{module.displayName}}</strong><QBadge tone="success">{{t('moduleState.running')}}</QBadge></div><small>v{{module.version}}</small><p>{{module.displayDescription}}</p></div>
               <button @click="viewModule(module)">{{t('home.details')}}</button>
             </article>

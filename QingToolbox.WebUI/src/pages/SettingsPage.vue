@@ -7,6 +7,7 @@ import { useAppStore } from '../app/store'
 import { useSettingsStore } from '../app/settingsStore'
 import { useModuleStore } from '../app/moduleStore'
 import { useThemeStore, type ThemeMode } from '../app/themeStore'
+import { useAppearancePresetStore, normalizeAppearancePresetId, type AppearancePresetId } from '../design-system/tokens/appearancePresets'
 import { useToastStore } from '../app/toastStore'
 import QPage from '../design-system/components/QPage.vue'
 import QButton from '../design-system/components/QButton.vue'
@@ -22,6 +23,8 @@ import {
   settingsSections,
   startupPresentation,
   themeModeLabelKey,
+  appearancePresetOptions,
+  appearancePresetPresentation,
   type SettingsSection,
 } from '../presentation/settingsPresentation'
 
@@ -31,10 +34,12 @@ const app = useAppStore()
 const settings = useSettingsStore()
 const modules = useModuleStore()
 const theme = useThemeStore()
+const appearance = useAppearancePresetStore()
 const toast = useToastStore()
 const { currentLocale, t } = useLocalization()
 const activeSection = ref<SettingsSection>('general')
 const isSynchronizingLanguage = ref(false)
+const isSynchronizingAppearance = ref(false)
 const themes: ThemeMode[] = ['system', 'light', 'dark']
 const closeBehaviors: MainWindowCloseBehavior[] = ['Ask', 'MinimizeToNotificationArea', 'ExitApplication']
 const startupPresentations: StartupPresentationMode[] = ['MainWindow', 'Minimized', 'FloatingBadge']
@@ -46,6 +51,9 @@ const environment = computed(() => app.snapshot?.environmentDisplayName || app.m
 const hostControlsDisabled = computed(() => app.bridge !== 'Connected')
 const languageControlsDisabled = computed(() => hostControlsDisabled.value || settings.status === 'loading' || settings.isHostMutationBusy || isSynchronizingLanguage.value)
 const hostMutationDisabled = computed(() => hostControlsDisabled.value || settings.isUpdatingLanguage || isSynchronizingLanguage.value)
+const appearanceControlsDisabled = computed(() => hostControlsDisabled.value || !settings.snapshot ||
+  settings.status === 'loading' || settings.isHostMutationBusy || isSynchronizingAppearance.value)
+const appearancePresetId = computed<AppearancePresetId>(() => normalizeAppearancePresetId(settings.snapshot?.appearancePresetId ?? appearance.id))
 const languageName = (code: string) => code === 'system'
   ? t('settings.appearance.system')
   : settings.snapshot?.language.options.find(option => option.code === code)?.nativeName ?? code
@@ -78,6 +86,9 @@ async function refresh() {
 watch(() => app.bridge, bridge => {
   if (bridge === 'Connected' && settings.status === 'idle') void refresh()
 }, { immediate: true })
+watch(() => settings.snapshot?.appearancePresetId, value => {
+  if (value !== undefined) appearance.set(value)
+}, { immediate: true })
 
 const yesNo = (value: boolean) => t(value ? 'settings.startup.yes' : 'settings.startup.no')
 const bridgeLabel = computed(() => {
@@ -104,6 +115,29 @@ async function selectLanguage(languageCode: LanguageCode) {
   } finally {
     isSynchronizingLanguage.value = false
   }
+}
+async function selectAppearancePreset(value: AppearancePresetId) {
+  const next = normalizeAppearancePresetId(value)
+  if (appearanceControlsDisabled.value || appearancePresetId.value === next) return
+  const previous = appearancePresetId.value
+  appearance.set(next)
+  isSynchronizingAppearance.value = true
+  try {
+    const result = await settings.updateAppearancePreset(client, next)
+    if (result === 'success' || result === 'unchanged') toast.show(t('settings.toast.appearanceSaved'), 'success')
+    else {
+      appearance.set(previous)
+      toast.show(t('settings.toast.appearanceFailed'), 'error')
+    }
+  } catch {
+    appearance.set(previous)
+    toast.show(t('settings.toast.appearanceFailed'), 'error')
+  } finally {
+    isSynchronizingAppearance.value = false
+  }
+}
+async function restoreDefaultAppearance() {
+  await selectAppearancePreset('qing-default')
 }
 async function toggleLogs() {
   if (!settings.snapshot || hostMutationDisabled.value || settings.isUpdatingLogsVisibility) return
@@ -157,6 +191,15 @@ async function repairStartup() {
           <section v-if="activeSection === 'general'" aria-labelledby="settings-general-title">
             <header class="settings-section-heading"><h2 id="settings-general-title">{{ t('settings.section.general') }}</h2><p>{{ t('settings.general.description') }}</p></header>
             <article class="settings-card"><h3>{{ t('settings.appearance.title') }}</h3><p>{{ t('settings.appearance.description') }}</p><div class="theme-switch settings-theme"><button v-for="mode in themes" :key="mode" type="button" :class="{ active: theme.mode === mode }" @click="theme.set(mode)">{{ t(themeModeLabelKey(mode)) }}</button></div></article>
+            <article class="settings-card appearance-preset-card">
+              <div class="settings-card-title"><div><h3>{{ t('settings.appearancePreset.title') }}</h3><p>{{ t('settings.appearancePreset.description') }}</p></div><QButton class="appearance-restore-button" :disabled="appearancePresetId === 'qing-default' || appearanceControlsDisabled" @click="restoreDefaultAppearance">{{ t('settings.appearancePreset.restoreDefault') }}</QButton></div>
+              <div class="appearance-preset-grid" role="radiogroup" :aria-label="t('settings.appearancePreset.ariaLabel')" :aria-busy="isSynchronizingAppearance">
+                <button v-for="preset in appearancePresetOptions" :key="preset" type="button" role="radio" :aria-checked="appearancePresetId === preset" :disabled="appearanceControlsDisabled" @click="selectAppearancePreset(preset)">
+                  <span class="appearance-preset-swatch" :data-preset="preset"><span /><span /></span>
+                  <span><strong>{{ t(appearancePresetPresentation(preset).labelKey) }}</strong><small>{{ t(appearancePresetPresentation(preset).descriptionKey) }}</small></span>
+                </button>
+              </div>
+            </article>
             <template v-if="settings.snapshot">
               <article class="settings-card language-settings-card">
                 <div class="settings-card-title"><div><h3>{{ t('settings.language.title') }}</h3><p>{{ t('settings.language.description') }}</p></div><QBadge tone="info">{{ t('settings.language.hostSetting') }}</QBadge></div>

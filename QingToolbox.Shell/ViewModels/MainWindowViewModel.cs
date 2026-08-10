@@ -68,6 +68,7 @@ public sealed partial class MainWindowViewModel(
     private readonly SemaphoreSlim _presentationSaveGate = new(1, 1);
     private readonly SemaphoreSlim _closeBehaviorSaveGate = new(1, 1);
     private readonly SemaphoreSlim _languageChangeGate = new(1, 1);
+    private readonly SemaphoreSlim _appearancePresetGate = new(1, 1);
     private readonly SemaphoreSlim _webModuleUpdateGate = new(1, 1);
     private readonly SemaphoreSlim _recentModulesGate = new(1, 1);
     private readonly CancellationTokenSource _updateCancellation = new();
@@ -114,6 +115,9 @@ public sealed partial class MainWindowViewModel(
     [ObservableProperty]
     private string _selectedLanguageCode =
         localizationManager.ConfiguredLanguageCode;
+
+    [ObservableProperty]
+    private string _appearancePresetId = AppearancePresetIds.QingDefault;
 
     [ObservableProperty]
     private int _totalModuleCount;
@@ -277,6 +281,12 @@ public sealed partial class MainWindowViewModel(
         sessionLog.Information("Settings", $"Log navigation visibility initialized: {ShowLogsInSidebar}.");
     }
 
+    public void InitializeAppearanceSettings(string? presetId)
+    {
+        AppearancePresetId = AppearancePresetIds.Normalize(presetId);
+        sessionLog.Information("Settings", $"Appearance preset initialized: {AppearancePresetId}.");
+    }
+
     [RelayCommand]
     private void OpenLogsDirectory()
     {
@@ -414,6 +424,42 @@ public sealed partial class MainWindowViewModel(
         string languageCode,
         CancellationToken cancellationToken) =>
         ApplyLanguageSelectionAsync(languageCode, cancellationToken);
+
+    public async Task<WebSettingsMutationResult> SetAppearancePresetFromWebAsync(
+        string presetId,
+        CancellationToken cancellationToken)
+    {
+        if (!AppearancePresetIds.IsSupported(presetId)) return WebSettingsMutationResult.Failed;
+
+        await _appearancePresetGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (AppearancePresetId == presetId) return WebSettingsMutationResult.Succeeded;
+            try
+            {
+                await settingsService.UpdateAsync(
+                    settings => settings.AppearancePresetId = presetId,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                sessionLog.Error("Settings", "Appearance preset could not be saved.", exception);
+                return WebSettingsMutationResult.Failed;
+            }
+
+            AppearancePresetId = presetId;
+            sessionLog.Information("Settings", $"Appearance preset changed by Web Settings: {presetId}.");
+            return WebSettingsMutationResult.Succeeded;
+        }
+        finally
+        {
+            _appearancePresetGate.Release();
+        }
+    }
 
     private async Task<WebSettingsMutationResult> ApplyLanguageSelectionAsync(
         string languageCode,
@@ -1842,6 +1888,7 @@ public sealed partial class MainWindowViewModel(
 
     public void ApplyStartupPreferences(StartupPreferenceSnapshot snapshot)
     {
+        InitializeAppearanceSettings(snapshot.AppearancePresetId);
         _suppressPresentationSave = true;
         SelectedStartupPresentationMode = snapshot.PresentationMode;
         _persistedStartupPresentationMode = snapshot.PresentationMode;

@@ -23,6 +23,20 @@
   pointer-events: none;
 }
 
+/* Fluent glyphs sit a touch high against mixed Chinese/Latin text metrics. The
+   transformed icon cell stays horizontally centered in the collapsed rail. */
+:root {
+  --q-sidebar-icon-baseline-shift: 3px;
+}
+
+.q-sidebar-icon {
+  transform: none;
+}
+
+.q-sidebar-icon > .q-icon {
+  transform: translateY(var(--q-sidebar-icon-baseline-shift));
+}
+
 .q-sidebar nav .q-fluent-icon {
   display: inline-flex !important;
 }

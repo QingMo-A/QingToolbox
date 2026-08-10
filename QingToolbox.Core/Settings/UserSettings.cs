@@ -2,8 +2,9 @@ namespace QingToolbox.Core.Settings;
 
 public sealed class UserSettings
 {
-    public int SettingsSchemaVersion { get; set; } = 7;
+    public int SettingsSchemaVersion { get; set; } = 8;
     public string Language { get; set; } = "system";
+    public string AppearancePresetId { get; set; } = AppearancePresetIds.QingDefault;
     public double? FloatingBadgeLeft { get; set; }
     public double? FloatingBadgeTop { get; set; }
     public bool HasFloatingBadgePosition { get; set; }
@@ -21,8 +22,9 @@ public sealed class UserSettings
 
     internal void Normalize()
     {
-        SettingsSchemaVersion = Math.Max(7, SettingsSchemaVersion);
+        SettingsSchemaVersion = Math.Max(8, SettingsSchemaVersion);
         Language = string.IsNullOrWhiteSpace(Language) ? "system" : Language;
+        AppearancePresetId = AppearancePresetIds.Normalize(AppearancePresetId);
         StartupRegistrationBackend = StartupRegistrationBackend is "TaskScheduler" or "RegistryRun"
             ? StartupRegistrationBackend : "None";
         FloatingBadgeLeft = FiniteOrNull(FloatingBadgeLeft);
@@ -53,6 +55,30 @@ public sealed class UserSettings
 
     private static double? RatioOrNull(double? value) =>
         value is { } number && double.IsFinite(number) ? Math.Clamp(number, 0, 1) : null;
+}
+
+public static class AppearancePresetIds
+{
+    public const string QingDefault = "qing-default";
+    public const string NeonCircuit = "neon-circuit";
+    public const string Greenline = "greenline";
+    public const string AuroraFlow = "aurora-flow";
+    public const string QingNova = "qing-nova";
+
+    private static readonly HashSet<string> Supported = new(StringComparer.Ordinal)
+    {
+        QingDefault,
+        NeonCircuit,
+        Greenline,
+        AuroraFlow,
+        QingNova
+    };
+
+    public static bool IsSupported(string? presetId) =>
+        presetId is not null && Supported.Contains(presetId);
+
+    public static string Normalize(string? presetId) =>
+        IsSupported(presetId) ? presetId! : QingDefault;
 }
 
 public static class RecentModuleHistory

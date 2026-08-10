@@ -33,6 +33,12 @@ public partial class FloatingBadgeWindow : Window, INotifyPropertyChanged
     public event EventHandler? RestoreRequested;
     public event EventHandler? ExitRequested;
     public event EventHandler? DragCompleted;
+    /// <summary>
+    /// Raised after a completed drag and awaited by the badge manager before
+    /// the next restore/exit transition. The legacy <see cref="DragCompleted"/>
+    /// event remains available for synchronous consumers.
+    /// </summary>
+    public event Func<Task>? DragCompletedAsync;
     public event PropertyChangedEventHandler? PropertyChanged;
 
     internal void AllowClose() => _allowClose = true;
@@ -46,7 +52,7 @@ public partial class FloatingBadgeWindow : Window, INotifyPropertyChanged
         e.Handled = true;
     }
 
-    private void OnMouseMove(object sender, MouseEventArgs e)
+    private async void OnMouseMove(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed || !BadgeSurface.IsMouseCaptured || _dragStarted) return;
         var current = e.GetPosition(this);
@@ -61,7 +67,25 @@ public partial class FloatingBadgeWindow : Window, INotifyPropertyChanged
         catch (InvalidOperationException) { }
         finally
         {
-            if (completed) DragCompleted?.Invoke(this, EventArgs.Empty);
+            if (completed) await RaiseDragCompletedAsync();
+        }
+    }
+
+    private async Task RaiseDragCompletedAsync()
+    {
+        // Keep the original synchronous notification for existing consumers,
+        // then await each async subscriber in registration order. A subscriber
+        // must not be able to tear down the WPF mouse event loop, so failures
+        // are contained at this boundary.
+        try { DragCompleted?.Invoke(this, EventArgs.Empty); }
+        catch (Exception exception) { System.Diagnostics.Debug.WriteLine($"Floating badge drag callback failed: {exception.GetType().Name}"); }
+
+        var handlers = DragCompletedAsync;
+        if (handlers is null) return;
+        foreach (Func<Task> handler in handlers.GetInvocationList())
+        {
+            try { await handler().ConfigureAwait(true); }
+            catch (Exception exception) { System.Diagnostics.Debug.WriteLine($"Floating badge async drag callback failed: {exception.GetType().Name}"); }
         }
     }
 

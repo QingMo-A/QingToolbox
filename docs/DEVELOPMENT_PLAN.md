@@ -33,7 +33,7 @@
 - Plan 012 UI-5A3A commit: `3ddedcb7849831f865e40cc82ed998b908d623a9`.
 - Plan 012 UI-5A3B1 read-only workspaces: Implementation Complete.
 - Plan 012 UI-5A3B2 Settings localization and module metadata refresh: Implementation Complete. Successful language changes refresh one complete host-localized Module Snapshot. Plan 012 is complete.
-- Plan 013: **Implementation Complete / Frozen**. Installer-only delivery, discovery, verified download, user confirmation, and Inno Setup handoff are complete.
+- Plan 013: **Implementation Complete / Frozen, with one tracked P1 handoff remediation**. Installer-only delivery, discovery, verified download, user confirmation, and Inno Setup handoff are complete. A real-user report shows that an in-app upgrade can advance the installed executable version while the next launch falls back to the native WPF workspace, whereas a manual installer overlay on the same machine restores the Production Vue workspace. This narrowly reopens only the 013D process-exit and installer-handoff acceptance boundary; it does not reopen discovery, download verification, the Web Bridge, or the broader update architecture.
 - Development Web module updates now support an explicit, inline-confirmed installation of a host-authorized verified package through the frozen B1/B2.1 transaction boundary. This is manual and Development-only; it is not automatic installation.
 - Production Web UI: Implemented for the next release candidate. Production now uses the same verified local Vue assets and ready handshake, with the native WPF workspace retained as the initialization and process-failure fallback.
 - Production module-update installation transactions and automatic module installation remain deferred. Development Diagnostics and verified module-update installation are not exposed by the Production Web workspace. The Vue update banner and Settings panel project the existing host-owned discovery, download, verification, confirmation, and installer handoff without moving those security operations into JavaScript.
@@ -41,11 +41,11 @@
 
 The shared Vue workspace currently contains Home, Modules, Running, Session Logs, and Settings;
 Development additionally exposes Development Diagnostics. Plan 009's original boundary remains the read-only module center and
-visual foundation; Running, Logs, Settings, and the three narrow settings mutations added afterward
+visual foundation; Running, Logs, Settings, and the narrow settings mutations added afterward
 are incremental implementation, not a retroactive expansion of Plan 009.
 
-The completed Development Web Settings mutations are limited to host-confirmed `Language`, `ShowLogsInSidebar`,
-`MainWindowCloseBehavior`, `StartupPresentationMode`, host-confirmed `LaunchAtLogin`, and the bounded
+The completed Web Settings mutations are limited to host-confirmed `Language`, `AppearancePresetId`,
+`ShowLogsInSidebar`, `MainWindowCloseBehavior`, `StartupPresentationMode`, host-confirmed `LaunchAtLogin`, and the bounded
 startup-registration repair action. These completed additions do not authorize further Startup health
 parity work or additional Settings Bridge commands. Any future user-visible Settings feature must be
 selected and reviewed independently. B2.1 boundaries, session security, environment isolation, and

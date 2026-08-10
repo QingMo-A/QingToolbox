@@ -44,6 +44,7 @@ const summaryValues = (wrapper: ReturnType<typeof mount>) => Object.fromEntries(
     Number(article.get('strong').text()),
   ]),
 )
+const iconDataUrl = 'data:image/svg+xml;base64,PHN2Zy8+'
 
 describe('ModulesPage lifecycle controls', () => {
   it('imports once through the native picker and selects the confirmed module', async () => {
@@ -157,6 +158,13 @@ describe('ModulesPage lifecycle controls', () => {
     expect(details.text()).not.toContain('Module actions')
     expect(details.find('.module-detail-actions').exists()).toBe(false)
     expect(details.text()).toContain('Module information')
+  })
+
+  it('projects the host icon into both the module card and detail header', async () => {
+    const { wrapper } = page(item({ iconDataUrl }))
+    expect(wrapper.get('.wpf-module-card .module-icon img').attributes('src')).toBe(iconDataUrl)
+    await wrapper.get('.wpf-module-card').trigger('click')
+    expect(wrapper.get('.wpf-module-details .module-icon img').attributes('src')).toBe(iconDataUrl)
   })
 
   it('hides execution-sensitive actions when the host reports execution blocked', async () => {

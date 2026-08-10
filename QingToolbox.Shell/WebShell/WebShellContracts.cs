@@ -31,11 +31,11 @@ public sealed record WebModuleSnapshotItem(string Id, string DisplayName, string
     string UpdateStatus, string? TargetVersion, string? ReleaseNotes, bool IsFromStaleCache,
     bool CanCheckForUpdate, bool IsUpdateCheckBusy, bool CanDownloadUpdate, string DownloadStatus,
     bool IsDownloadActive, long DownloadBytesReceived, long DownloadExpectedBytes,
-    bool CanInstallVerifiedUpdate);
+    bool CanInstallVerifiedUpdate, string? IconDataUrl = null);
 public sealed record WebLogSnapshot(DateTimeOffset GeneratedAt, IReadOnlyList<WebLogSnapshotEntry> Entries);
 public sealed record WebLogSnapshotEntry(DateTimeOffset Timestamp, string Level, string Category, string Message);
 public sealed record WebSettingsSnapshot(DateTimeOffset GeneratedAt, WebSettingsLanguage Language,
-    bool ShowLogsInSidebar, string MainWindowCloseBehavior, string CloseBehaviorMessage,
+    string AppearancePresetId, bool ShowLogsInSidebar, string MainWindowCloseBehavior, string CloseBehaviorMessage,
     bool LaunchAtLogin, bool CanConfigureLaunchAtLogin, bool CanRepairStartup, string StartupPresentationMode,
     string StartupBackend, string StartupStatus, string StartupMessage);
 public sealed record WebSettingsLanguage(string Code, string EffectiveCode, string DisplayName,

@@ -27,6 +27,18 @@ describe('QSidebarLayout localization and icons', () => {
     expect(wrapper.get('[aria-label="Pin sidebar"]').attributes('title')).toBe('Pin sidebar')
   })
 
+  it('keeps the baseline-adjusted glyph inside one centered icon cell in both rails', async () => {
+    const wrapper = mountSidebar()
+    const iconCells = wrapper.findAll('.q-sidebar-icon')
+    expect(iconCells.length).toBeGreaterThanOrEqual(5)
+    expect(iconCells.every(icon => icon.element.closest('nav, .q-sidebar-quick-open') !== null)).toBe(true)
+    expect(wrapper.findAll('.q-sidebar-icon > .q-icon')).toHaveLength(iconCells.length)
+    expect(wrapper.get('.q-shell').classes()).not.toContain('expanded')
+    await wrapper.get('.q-sidebar').trigger('mouseenter')
+    expect(wrapper.get('.q-shell').classes()).toContain('expanded')
+    expect(wrapper.findAll('.q-sidebar-icon')).toHaveLength(iconCells.length)
+  })
+
   it('shows localized Quick Open and preserves its event', async () => {
     const pinia = createPinia(); setActivePinia(pinia); const store = useSettingsStore(); const wrapper = mount(QSidebarLayout, { global: { plugins: [pinia], stubs: { RouterLink: { template: '<a><slot/></a>' } } } })
     store.complete(snapshot(true, 'zh-CN', 'system')); await wrapper.vm.$nextTick()

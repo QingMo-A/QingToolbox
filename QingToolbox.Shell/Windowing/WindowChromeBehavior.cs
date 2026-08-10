@@ -2,12 +2,22 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shell;
+using System.Runtime.InteropServices;
 using QingToolbox.Shell.Controls;
 
 namespace QingToolbox.Shell.Windowing;
 
 public static class WindowChromeBehavior
 {
+    internal const int DwmWindowCornerPreferenceAttribute = 33;
+    internal const int DwmWindowCornerPreferenceDoNotRound = 1;
+    internal const int DwmWindowCornerPreferenceRound = 2;
+
+    internal static int GetDwmCornerPreference(WindowState state) =>
+        state == WindowState.Maximized
+            ? DwmWindowCornerPreferenceDoNotRound
+            : DwmWindowCornerPreferenceRound;
+
     public static readonly DependencyProperty IsEnabledProperty =
         DependencyProperty.RegisterAttached(
             "IsEnabled", typeof(bool), typeof(WindowChromeBehavior),
@@ -69,6 +79,7 @@ public static class WindowChromeBehavior
             window.SourceInitialized += OnSourceInitialized;
             window.Loaded += OnWindowLoaded;
             window.ContentRendered += OnContentRendered;
+            window.StateChanged += OnWindowStateChanged;
             window.Deactivated += OnWindowDeactivated;
             window.Closed += OnClosed;
         }
@@ -118,6 +129,35 @@ public static class WindowChromeBehavior
 
             _source = (HwndSource?)PresentationSource.FromVisual(_window);
             _source?.AddHook(WindowProcedure);
+            ApplyDwmWindowCornerPreference();
+        }
+
+        private void OnWindowStateChanged(object? sender, EventArgs e) => ApplyDwmWindowCornerPreference();
+
+        private void ApplyDwmWindowCornerPreference()
+        {
+            if (_source is null || !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+            {
+                return;
+            }
+
+            var preference = GetDwmCornerPreference(_window.WindowState);
+            try
+            {
+                _ = DwmSetWindowAttribute(
+                    _source.Handle,
+                    DwmWindowCornerPreferenceAttribute,
+                    ref preference,
+                    sizeof(int));
+            }
+            catch (DllNotFoundException)
+            {
+                // DWM is optional on older Windows/compatibility environments.
+            }
+            catch (EntryPointNotFoundException)
+            {
+                // Keep the native chrome usable when the attribute is unavailable.
+            }
         }
 
         private IntPtr WindowProcedure(
@@ -250,6 +290,7 @@ public static class WindowChromeBehavior
             _window.SourceInitialized -= OnSourceInitialized;
             _window.Loaded -= OnWindowLoaded;
             _window.ContentRendered -= OnContentRendered;
+            _window.StateChanged -= OnWindowStateChanged;
             _window.Deactivated -= OnWindowDeactivated;
             _window.Closed -= OnClosed;
             CancelMaximizeInteraction();
@@ -260,5 +301,12 @@ public static class WindowChromeBehavior
                 _source = null;
             }
         }
+
+        [DllImport("dwmapi.dll", ExactSpelling = true)]
+        private static extern int DwmSetWindowAttribute(
+            IntPtr hwnd,
+            int attribute,
+            ref int value,
+            int valueSize);
     }
 }

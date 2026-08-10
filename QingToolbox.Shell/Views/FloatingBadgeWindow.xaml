@@ -12,7 +12,7 @@
         KeyDown="OnKeyDown" Closing="OnClosing"
         AutomationProperties.Name="{Binding AutomationName, RelativeSource={RelativeSource AncestorType=Window}}">
     <Border x:Name="BadgeSurface" Margin="4" Padding="8"
-            CornerRadius="20" Background="Transparent"
+            CornerRadius="20"
             Style="{StaticResource FloatingBadgeButtonStyle}"
             Focusable="True"
             AutomationProperties.Name="{Binding AutomationName, RelativeSource={RelativeSource AncestorType=Window}}"

@@ -32,19 +32,19 @@ const showDiagnostics = computed(() => app.snapshot?.environmentKind === 'Develo
 
       <nav :aria-label="t('navigation.workspace')">
         <RouterLink to="/" :title="t('navigation.home')" :aria-label="t('navigation.home')">
-          <b><QIcon name="home" /></b>
+          <b class="q-sidebar-icon"><QIcon name="home" /></b>
           <span>{{ t('navigation.home') }}</span>
         </RouterLink>
         <RouterLink to="/modules" :title="t('navigation.modules')" :aria-label="t('navigation.modules')">
-          <b><QIcon name="modules" /></b>
+          <b class="q-sidebar-icon"><QIcon name="modules" /></b>
           <span>{{ t('navigation.modules') }}</span>
         </RouterLink>
         <RouterLink to="/running" :title="t('navigation.running')" :aria-label="t('navigation.running')">
-          <b><QIcon name="running" /></b>
+          <b class="q-sidebar-icon"><QIcon name="running" /></b>
           <span>{{ t('navigation.running') }}</span>
         </RouterLink>
         <RouterLink v-if="showLogs" to="/logs" :title="t('navigation.logs')" :aria-label="t('navigation.logs')">
-          <b><QIcon name="logs" /></b>
+          <b class="q-sidebar-icon"><QIcon name="logs" /></b>
           <span>{{ t('navigation.logs') }}</span>
         </RouterLink>
       </nav>
@@ -56,7 +56,7 @@ const showDiagnostics = computed(() => app.snapshot?.environmentKind === 'Develo
         :title="t('navigation.quickOpenShortcut')"
         @click="emit('openCommandPalette')"
       >
-        <b><QIcon name="search" /></b>
+        <b class="q-sidebar-icon"><QIcon name="search" /></b>
         <span>{{ t('navigation.quickOpen') }}</span>
       </button>
 
@@ -64,7 +64,7 @@ const showDiagnostics = computed(() => app.snapshot?.environmentKind === 'Develo
 
       <nav class="q-sidebar-secondary">
         <RouterLink v-if="showDiagnostics" to="/diagnostics" :title="t('navigation.diagnostics')" :aria-label="t('navigation.diagnostics')">
-          <b><QIcon name="diagnostics" /></b>
+          <b class="q-sidebar-icon"><QIcon name="diagnostics" /></b>
           <span>{{ t('navigation.diagnostics') }}</span>
         </RouterLink>
         <button
@@ -73,11 +73,11 @@ const showDiagnostics = computed(() => app.snapshot?.environmentKind === 'Develo
           :title="pinned ? t('navigation.unpinSidebar') : t('navigation.pinSidebar')"
           @click="pinned = !pinned"
         >
-          <b><QIcon :name="pinned ? 'unpin' : 'pin'" /></b>
+          <b class="q-sidebar-icon"><QIcon :name="pinned ? 'unpin' : 'pin'" /></b>
           <span>{{ pinned ? t('navigation.unpinSidebar') : t('navigation.pinSidebar') }}</span>
         </button>
         <RouterLink to="/settings" :title="t('navigation.settings')" :aria-label="t('navigation.settings')">
-          <b><QIcon name="settings" /></b>
+          <b class="q-sidebar-icon"><QIcon name="settings" /></b>
           <span>{{ t('navigation.settings') }}</span>
         </RouterLink>
       </nav>

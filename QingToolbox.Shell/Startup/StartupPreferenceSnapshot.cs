@@ -8,13 +8,15 @@ public sealed record StartupPreferenceSnapshot(
     bool LaunchAtLogin,
     StartupPresentationMode PresentationMode,
     MainWindowCloseBehavior CloseBehavior,
-    string Language)
+    string Language,
+    string AppearancePresetId)
 {
     public static StartupPreferenceSnapshot SafeDefault(bool startup) => new(
         false,
         startup ? StartupPresentationMode.FloatingBadge : StartupPresentationMode.MainWindow,
         MainWindowCloseBehavior.Ask,
-        "system");
+        "system",
+        AppearancePresetIds.QingDefault);
 }
 
 public sealed class StartupPreferenceReader
@@ -34,9 +36,14 @@ public sealed class StartupPreferenceReader
             var launch = root.TryGetProperty(nameof(UserSettings.LaunchAtLogin), out var launchElement) && launchElement.ValueKind is JsonValueKind.True;
             var language = root.TryGetProperty(nameof(UserSettings.Language), out var languageElement) && languageElement.ValueKind == JsonValueKind.String
                 ? languageElement.GetString() ?? "system" : "system";
+            var appearancePresetId = root.TryGetProperty(nameof(UserSettings.AppearancePresetId), out var presetElement) &&
+                                     presetElement.ValueKind == JsonValueKind.String
+                ? AppearancePresetIds.Normalize(presetElement.GetString())
+                : AppearancePresetIds.QingDefault;
             var mode = ReadEnum(root, nameof(UserSettings.StartupPresentationMode), fallback.PresentationMode);
             var close = ReadEnum(root, nameof(UserSettings.MainWindowCloseBehavior), fallback.CloseBehavior);
-            return new(launch, mode, close, string.IsNullOrWhiteSpace(language) ? "system" : language);
+            return new(launch, mode, close, string.IsNullOrWhiteSpace(language) ? "system" : language,
+                appearancePresetId);
         }
         catch (OperationCanceledException) { throw; }
         catch { return fallback; }

@@ -5,6 +5,7 @@ import { useModuleStore } from '../../app/moduleStore'
 import { useAppStore } from '../../app/store'
 import type { ModuleSnapshotItem } from '../../contracts/modules'
 import QIcon from './QIcon.vue'
+import ModuleIcon from '../../modules/ModuleIcon.vue'
 import { useLocalization, translate } from '../../localization/localization'
 import type { TranslationKey } from '../../localization/messages/en-US'
 
@@ -199,7 +200,7 @@ onBeforeUnmount(() => {
             @mouseenter="activeIndex = results.findIndex(result => result.kind === 'module' && result.module.id === module.id)"
             @click="select({ kind: 'module', module })"
           >
-            <span class="q-command-result-icon module">{{ module.displayName.slice(0, 1).toUpperCase() }}</span>
+            <ModuleIcon class="q-command-result-icon module" :icon-data-url="module.iconDataUrl" :alt="module.displayName" :fallback="module.displayName" />
             <span><strong>{{ module.displayName }} <small>v{{ module.version }}</small></strong><small>{{ module.displayDescription }}</small></span>
             <em>{{ module.runtimeState }}</em>
           </button>

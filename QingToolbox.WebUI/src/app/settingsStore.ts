@@ -8,6 +8,7 @@ import type {
 import type { SettingsClient } from '../bridge/clients/SettingsClient'
 
 const languageFailure = 'The language setting could not be updated.'
+const appearanceFailure = 'The appearance preset could not be updated.'
 
 export const useSettingsStore = defineStore('settings', {
   state: () => ({
@@ -17,6 +18,8 @@ export const useSettingsStore = defineStore('settings', {
     errorMessage: '',
     isUpdatingLanguage: false,
     languageError: '',
+    isUpdatingAppearance: false,
+    appearanceError: '',
     isUpdatingLogsVisibility: false,
     logsVisibilityError: '',
     isUpdatingCloseBehavior: false,
@@ -29,7 +32,7 @@ export const useSettingsStore = defineStore('settings', {
     startupRepairError: '',
   }),
   getters: {
-    isHostMutationBusy: state => state.isUpdatingLanguage || state.isUpdatingLogsVisibility ||
+    isHostMutationBusy: state => state.isUpdatingLanguage || state.isUpdatingAppearance || state.isUpdatingLogsVisibility ||
       state.isUpdatingCloseBehavior || state.isUpdatingStartupPresentation ||
       state.launchAtLoginBusy || state.startupRepairBusy,
   },
@@ -63,6 +66,26 @@ export const useSettingsStore = defineStore('settings', {
         return 'failure' as const
       } finally {
         this.isUpdatingLanguage = false
+      }
+    },
+    async updateAppearancePreset(client: SettingsClient, appearancePresetId: string) {
+      const previous = this.snapshot
+      if (!previous) return 'failure' as const
+      if (previous.appearancePresetId === appearancePresetId) return 'unchanged' as const
+      if (this.isHostMutationBusy) return 'busy' as const
+      this.isUpdatingAppearance = true
+      this.appearanceError = ''
+      try {
+        this.complete(await client.setAppearancePreset(appearancePresetId))
+        return 'success' as const
+      } catch {
+        this.snapshot = previous
+        this.generatedAt = previous.generatedAt
+        this.status = 'ready'
+        this.appearanceError = appearanceFailure
+        return 'failure' as const
+      } finally {
+        this.isUpdatingAppearance = false
       }
     },
     async updateLogsVisibility(client: SettingsClient, value: boolean) {
