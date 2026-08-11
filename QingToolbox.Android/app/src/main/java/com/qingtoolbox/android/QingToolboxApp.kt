@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.QrCode2
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +57,7 @@ private sealed class MobileDestination(
     data object FileHash : MobileDestination("tools/file-hash", "File Hash", Icons.Outlined.Calculate)
     data object TextCodec : MobileDestination("tools/text-codec", "Text Codec", Icons.Outlined.Code)
     data object DeviceInfo : MobileDestination("tools/device-info", "Device Info", Icons.Outlined.DevicesOther)
+    data object QrCode : MobileDestination("tools/qr-code", "QR Code", Icons.Outlined.QrCode2)
 }
 
 private val destinations = listOf(
@@ -89,7 +91,8 @@ private fun QingToolboxShell(
         ?: MobileDestination.Home
     val isToolDetail = currentRoute == MobileDestination.FileHash.route ||
         currentRoute == MobileDestination.TextCodec.route ||
-        currentRoute == MobileDestination.DeviceInfo.route
+        currentRoute == MobileDestination.DeviceInfo.route ||
+        currentRoute == MobileDestination.QrCode.route
     val selectedDestination = if (isToolDetail) {
         MobileDestination.Tools
     } else {
@@ -99,6 +102,7 @@ private fun QingToolboxShell(
         MobileDestination.FileHash.route -> MobileDestination.FileHash
         MobileDestination.TextCodec.route -> MobileDestination.TextCodec
         MobileDestination.DeviceInfo.route -> MobileDestination.DeviceInfo
+        MobileDestination.QrCode.route -> MobileDestination.QrCode
         else -> currentDestination
     }
 
@@ -155,6 +159,7 @@ private fun QingToolboxShell(
                     onFileHashClick = { navigateTo(navController, MobileDestination.FileHash) },
                     onTextCodecClick = { navigateTo(navController, MobileDestination.TextCodec) },
                     onDeviceInfoClick = { navigateTo(navController, MobileDestination.DeviceInfo) },
+                    onQrCodeClick = { navigateTo(navController, MobileDestination.QrCode) },
                 )
             }
             composable(MobileDestination.Tools.route) {
@@ -162,12 +167,14 @@ private fun QingToolboxShell(
                     onFileHashClick = { navigateTo(navController, MobileDestination.FileHash) },
                     onTextCodecClick = { navigateTo(navController, MobileDestination.TextCodec) },
                     onDeviceInfoClick = { navigateTo(navController, MobileDestination.DeviceInfo) },
+                    onQrCodeClick = { navigateTo(navController, MobileDestination.QrCode) },
                 )
             }
             composable(MobileDestination.Devices.route) { DevicesScreen() }
             composable(MobileDestination.FileHash.route) { FileHashScreen() }
             composable(MobileDestination.TextCodec.route) { TextCodecScreen() }
             composable(MobileDestination.DeviceInfo.route) { DeviceInfoScreen() }
+            composable(MobileDestination.QrCode.route) { QrCodeScreen() }
             composable(MobileDestination.Settings.route) {
                 SettingsScreen(
                     currentAppearance = currentAppearance,
@@ -193,6 +200,7 @@ private fun HomeScreen(
     onFileHashClick: () -> Unit,
     onTextCodecClick: () -> Unit,
     onDeviceInfoClick: () -> Unit,
+    onQrCodeClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val heroContentColor = if (LocalQingAppearance.current.primaryBrush() != null) {
@@ -266,6 +274,14 @@ private fun HomeScreen(
                 onClick = onDeviceInfoClick,
             )
         }
+        item {
+            PlaceholderCard(
+                icon = Icons.Outlined.QrCode2,
+                title = "QR Code",
+                body = "Generate and share a QR code from text.",
+                onClick = onQrCodeClick,
+            )
+        }
         item { SectionHeader(title = "Recently used") }
         item {
             PlaceholderCard(
@@ -282,6 +298,7 @@ private fun ToolsScreen(
     onFileHashClick: () -> Unit,
     onTextCodecClick: () -> Unit,
     onDeviceInfoClick: () -> Unit,
+    onQrCodeClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -312,6 +329,14 @@ private fun ToolsScreen(
                 title = "Device Info",
                 body = "View Android system, hardware and app information.",
                 onClick = onDeviceInfoClick,
+            )
+        }
+        item {
+            PlaceholderCard(
+                icon = Icons.Outlined.QrCode2,
+                title = "QR Code",
+                body = "Generate and share a QR code from text.",
+                onClick = onQrCodeClick,
             )
         }
     }
