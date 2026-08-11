@@ -28,6 +28,75 @@
   --q-shadow-sm: 0 4px 14px rgba(43, 76, 120, .06);
   --q-shadow-md: 0 8px 22px rgba(43, 76, 120, .09);
   --q-shadow-lg: 0 16px 42px rgba(43, 76, 120, .14);
+  --control-primary-bg: var(--q-primary);
+  --control-primary-bg-hover: var(--q-primary-hover);
+  --control-primary-bg-active: var(--q-primary-pressed);
+  --control-primary-fg: #fff;
+  --control-primary-glow: 0 0 0 transparent;
+  --control-secondary-bg: var(--q-secondary);
+  --control-secondary-bg-hover: var(--q-secondary-hover);
+  --control-secondary-fg: var(--q-text);
+  --control-secondary-border: var(--q-border);
+  --control-secondary-border-hover: var(--q-border-strong);
+  --control-danger-bg: var(--q-danger);
+  --control-danger-bg-hover: var(--q-danger-hover);
+  --control-danger-bg-active: var(--q-danger-pressed);
+  --control-danger-fg: #fff;
+  --control-ghost-bg: transparent;
+  --control-ghost-bg-hover: var(--q-hover);
+  --control-ghost-fg: var(--q-primary);
+  --control-input-bg: var(--q-input);
+  --control-input-border: var(--q-border);
+  --control-input-border-hover: var(--q-border-strong);
+  --control-input-focus-border: var(--q-focus);
+  --control-input-focus-shadow: 0 0 0 3px color-mix(in srgb, var(--q-focus) 20%, transparent);
+  --control-toggle-track: var(--q-toggle);
+  --control-toggle-track-active: var(--q-primary);
+  --control-toggle-knob: var(--q-input);
+  --control-toggle-width: 38px;
+  --control-toggle-height: 22px;
+  --control-toggle-radius: 11px;
+  --control-toggle-offset: 3px;
+  --control-radio-border: var(--q-border-strong);
+  --control-radio-selected-bg: var(--q-primary);
+  --control-radio-selected-ring: var(--q-input);
+  --control-radius: var(--q-radius-sm);
+  --control-focus-ring: color-mix(in srgb, var(--q-focus) 28%, transparent);
+  --control-disabled-bg: var(--q-disabled);
+  --control-disabled-fg: var(--q-text-disabled);
+  --control-shadow: var(--q-shadow-sm);
+  --control-hover-shadow: var(--q-shadow-md);
+  /* Category aliases keep shared controls readable while presets own the
+     concrete control-* values above. */
+  --primary-bg: var(--control-primary-bg);
+  --primary-bg-hover: var(--control-primary-bg-hover);
+  --primary-bg-active: var(--control-primary-bg-active);
+  --primary-fg: var(--control-primary-fg);
+  --primary-glow: var(--control-primary-glow);
+  --secondary-bg: var(--control-secondary-bg);
+  --secondary-bg-hover: var(--control-secondary-bg-hover);
+  --secondary-fg: var(--control-secondary-fg);
+  --danger-bg: var(--control-danger-bg);
+  --danger-bg-hover: var(--control-danger-bg-hover);
+  --danger-bg-active: var(--control-danger-bg-active);
+  --danger-fg: var(--control-danger-fg);
+  --input-bg: var(--control-input-bg);
+  --input-border: var(--control-input-border);
+  --input-border-hover: var(--control-input-border-hover);
+  --toggle-track: var(--control-toggle-track);
+  --toggle-track-active: var(--control-toggle-track-active);
+  --toggle-knob: var(--control-toggle-knob);
+  --toggle-width: var(--control-toggle-width);
+  --toggle-height: var(--control-toggle-height);
+  --toggle-radius: var(--control-toggle-radius);
+  --toggle-offset: var(--control-toggle-offset);
+  --secondary-border: var(--control-secondary-border);
+  --secondary-border-hover: var(--control-secondary-border-hover);
+  --input-focus-border: var(--control-input-focus-border);
+  --input-focus-shadow: var(--control-input-focus-shadow);
+  --radio-border: var(--control-radio-border);
+  --radio-selected-bg: var(--control-radio-selected-bg);
+  --radio-selected-ring: var(--control-radio-selected-ring);
 }
 
 :root[data-appearance-preset='qing-default'] {
@@ -72,6 +141,44 @@
   --q-shadow-md: 0 8px 22px rgba(43, 76, 120, .09);
   --q-shadow-lg: 0 16px 42px rgba(43, 76, 120, .14);
   --q-shadow: var(--q-shadow-md);
+  --control-primary-bg: var(--q-primary);
+  --control-primary-bg-hover: var(--q-primary-hover);
+  --control-primary-bg-active: var(--q-primary-pressed);
+  --control-primary-fg: #fff;
+  --control-primary-glow: 0 0 0 transparent;
+  --control-secondary-bg: var(--q-secondary);
+  --control-secondary-bg-hover: var(--q-secondary-hover);
+  --control-secondary-fg: var(--q-text);
+  --control-secondary-border: var(--q-border);
+  --control-secondary-border-hover: var(--q-border-strong);
+  --control-danger-bg: var(--q-danger);
+  --control-danger-bg-hover: var(--q-danger-hover);
+  --control-danger-bg-active: var(--q-danger-pressed);
+  --control-danger-fg: #fff;
+  --control-ghost-bg: transparent;
+  --control-ghost-bg-hover: var(--q-hover);
+  --control-ghost-fg: var(--q-primary);
+  --control-input-bg: var(--q-input);
+  --control-input-border: var(--q-border);
+  --control-input-border-hover: var(--q-border-strong);
+  --control-input-focus-border: var(--q-focus);
+  --control-input-focus-shadow: 0 0 0 3px color-mix(in srgb, var(--q-focus) 20%, transparent);
+  --control-toggle-track: var(--q-toggle);
+  --control-toggle-track-active: var(--q-primary);
+  --control-toggle-knob: var(--q-input);
+  --control-toggle-width: 38px;
+  --control-toggle-height: 22px;
+  --control-toggle-radius: 11px;
+  --control-toggle-offset: 3px;
+  --control-radio-border: var(--q-border-strong);
+  --control-radio-selected-bg: var(--q-primary);
+  --control-radio-selected-ring: var(--q-input);
+  --control-radius: 10px;
+  --control-focus-ring: color-mix(in srgb, var(--q-focus) 28%, transparent);
+  --control-disabled-bg: var(--q-disabled);
+  --control-disabled-fg: var(--q-text-disabled);
+  --control-shadow: var(--q-shadow-sm);
+  --control-hover-shadow: var(--q-shadow-md);
 }
 
 :root[data-appearance-preset='neon-circuit'] {
@@ -119,6 +226,44 @@
   --q-shadow-md: 0 10px 28px rgba(32, 201, 231, .12);
   --q-shadow-lg: 0 18px 48px rgba(0, 0, 0, .38);
   --q-shadow: var(--q-shadow-md);
+  --control-primary-bg: linear-gradient(135deg, #20c9e7, #5de4ff);
+  --control-primary-bg-hover: linear-gradient(135deg, #35dff0, #8bf0ff);
+  --control-primary-bg-active: linear-gradient(135deg, #0794b9, #20c9e7);
+  --control-primary-fg: #03141c;
+  --control-primary-glow: 0 0 18px rgba(93, 228, 255, .32);
+  --control-secondary-bg: #15213a;
+  --control-secondary-bg-hover: #1c3153;
+  --control-secondary-fg: #d9f8ff;
+  --control-secondary-border: #2d6f92;
+  --control-secondary-border-hover: #5de4ff;
+  --control-danger-bg: linear-gradient(135deg, #e13f6c, #ff5478);
+  --control-danger-bg-hover: linear-gradient(135deg, #f0527e, #ff7593);
+  --control-danger-bg-active: linear-gradient(135deg, #b82b53, #d6325a);
+  --control-danger-fg: #19050d;
+  --control-ghost-bg: transparent;
+  --control-ghost-bg-hover: #12324a;
+  --control-ghost-fg: #5de4ff;
+  --control-input-bg: #0d1527;
+  --control-input-border: #24365a;
+  --control-input-border-hover: #5de4ff;
+  --control-input-focus-border: #5de4ff;
+  --control-input-focus-shadow: 0 0 0 2px rgba(93, 228, 255, .28), 0 0 16px rgba(93, 228, 255, .16);
+  --control-toggle-track: #365181;
+  --control-toggle-track-active: #20c9e7;
+  --control-toggle-knob: #071522;
+  --control-toggle-width: 42px;
+  --control-toggle-height: 20px;
+  --control-toggle-radius: 5px;
+  --control-toggle-offset: 3px;
+  --control-radio-border: #365181;
+  --control-radio-selected-bg: #20c9e7;
+  --control-radio-selected-ring: #071522;
+  --control-radius: 7px;
+  --control-focus-ring: rgba(93, 228, 255, .34);
+  --control-disabled-bg: #152033;
+  --control-disabled-fg: #597187;
+  --control-shadow: 0 4px 16px rgba(32, 201, 231, .08);
+  --control-hover-shadow: 0 0 18px rgba(93, 228, 255, .24);
   color-scheme: dark;
 }
 
@@ -166,6 +311,44 @@
   --q-shadow-md: none;
   --q-shadow-lg: 0 0 0 1px rgba(85, 240, 131, .08);
   --q-shadow: none;
+  --control-primary-bg: #37d769;
+  --control-primary-bg-hover: #64f68d;
+  --control-primary-bg-active: #1faa4d;
+  --control-primary-fg: #04130a;
+  --control-primary-glow: 0 0 0 transparent;
+  --control-secondary-bg: #102519;
+  --control-secondary-bg-hover: #173622;
+  --control-secondary-fg: #d8f8df;
+  --control-secondary-border: rgba(85, 240, 131, .3);
+  --control-secondary-border-hover: #55f083;
+  --control-danger-bg: #ef6172;
+  --control-danger-bg-hover: #ff7b89;
+  --control-danger-bg-active: #c94456;
+  --control-danger-fg: #19070b;
+  --control-ghost-bg: transparent;
+  --control-ghost-bg-hover: #113821;
+  --control-ghost-fg: #55f083;
+  --control-input-bg: #08150c;
+  --control-input-border: #183a22;
+  --control-input-border-hover: #2e6b3d;
+  --control-input-focus-border: #55f083;
+  --control-input-focus-shadow: 0 0 0 2px rgba(85, 240, 131, .24);
+  --control-toggle-track: #2e6b3d;
+  --control-toggle-track-active: #37d769;
+  --control-toggle-knob: #061009;
+  --control-toggle-width: 34px;
+  --control-toggle-height: 18px;
+  --control-toggle-radius: 4px;
+  --control-toggle-offset: 2px;
+  --control-radio-border: #2e6b3d;
+  --control-radio-selected-bg: #37d769;
+  --control-radio-selected-ring: #061009;
+  --control-radius: 6px;
+  --control-focus-ring: rgba(85, 240, 131, .32);
+  --control-disabled-bg: #122218;
+  --control-disabled-fg: #577261;
+  --control-shadow: 0 0 0 transparent;
+  --control-hover-shadow: 0 0 0 transparent;
   color-scheme: dark;
 }
 
@@ -213,6 +396,44 @@
   --q-shadow-md: 0 16px 38px rgba(4, 9, 28, .26);
   --q-shadow-lg: 0 24px 58px rgba(4, 9, 28, .34);
   --q-shadow: var(--q-shadow-md);
+  --control-primary-bg: linear-gradient(135deg, #65d9d1, #718dff 52%, #9b7df6);
+  --control-primary-bg-hover: linear-gradient(135deg, #82ece3, #8da4ff 52%, #b090ff);
+  --control-primary-bg-active: linear-gradient(135deg, #4cb8b0, #5870dd 52%, #795ac5);
+  --control-primary-fg: #f9fbff;
+  --control-primary-glow: 0 0 22px rgba(125, 231, 225, .25);
+  --control-secondary-bg: rgba(31, 49, 92, .82);
+  --control-secondary-bg-hover: rgba(49, 70, 123, .9);
+  --control-secondary-fg: #f1f5ff;
+  --control-secondary-border: rgba(129, 174, 255, .34);
+  --control-secondary-border-hover: rgba(125, 231, 225, .62);
+  --control-danger-bg: linear-gradient(135deg, #db5d86, #ef7299);
+  --control-danger-bg-hover: linear-gradient(135deg, #ee7199, #ff8bab);
+  --control-danger-bg-active: linear-gradient(135deg, #b84370, #cb5279);
+  --control-danger-fg: #fff7fb;
+  --control-ghost-bg: transparent;
+  --control-ghost-bg-hover: rgba(92, 118, 219, .24);
+  --control-ghost-fg: #7de7e1;
+  --control-input-bg: rgba(10, 21, 49, .8);
+  --control-input-border: rgba(125, 151, 222, .28);
+  --control-input-border-hover: rgba(129, 174, 255, .5);
+  --control-input-focus-border: #7de7e1;
+  --control-input-focus-shadow: 0 0 0 3px rgba(125, 231, 225, .24), 0 0 18px rgba(113, 141, 255, .15);
+  --control-toggle-track: #4b5f95;
+  --control-toggle-knob: #f1f5ff;
+  --control-toggle-width: 44px;
+  --control-toggle-height: 24px;
+  --control-toggle-radius: 12px;
+  --control-toggle-offset: 3px;
+  --control-toggle-track-active: linear-gradient(90deg, #65d9d1, #718dff 52%, #9b7df6);
+  --control-radio-border: rgba(129, 174, 255, .5);
+  --control-radio-selected-bg: #718dff;
+  --control-radio-selected-ring: #f1f5ff;
+  --control-radius: 12px;
+  --control-focus-ring: rgba(125, 231, 225, .34);
+  --control-disabled-bg: rgba(32, 43, 72, .88);
+  --control-disabled-fg: #69779d;
+  --control-shadow: 0 8px 24px rgba(4, 9, 28, .2);
+  --control-hover-shadow: 0 0 24px rgba(125, 231, 225, .2);
   --q-ambient-background: radial-gradient(circle at 12% 12%, rgba(53, 214, 192, .15), transparent 34%), radial-gradient(circle at 78% 18%, rgba(82, 132, 255, .18), transparent 38%), radial-gradient(circle at 64% 88%, rgba(151, 86, 226, .15), transparent 40%), #080f25;
   color-scheme: dark;
 }
@@ -261,6 +482,44 @@
   --q-shadow-md: 0 14px 34px rgba(2, 10, 18, .25), 0 0 22px rgba(55, 183, 232, .06);
   --q-shadow-lg: 0 22px 52px rgba(2, 10, 18, .34), 0 0 34px rgba(86, 86, 221, .08);
   --q-shadow: var(--q-shadow-md);
+  --control-primary-bg: linear-gradient(135deg, #57d9e9, #37b7e8 52%, #8b7df6);
+  --control-primary-bg-hover: linear-gradient(135deg, #72e6ef, #42c9f0 52%, #b09aff);
+  --control-primary-bg-active: linear-gradient(135deg, #3aaebf, #218ab9 52%, #725ac5);
+  --control-primary-fg: #04141e;
+  --control-primary-glow: 0 0 20px rgba(87, 217, 233, .24);
+  --control-secondary-bg: rgba(17, 48, 68, .9);
+  --control-secondary-bg-hover: rgba(24, 67, 92, .94);
+  --control-secondary-fg: #e9fbff;
+  --control-secondary-border: rgba(59, 183, 220, .34);
+  --control-secondary-border-hover: rgba(98, 232, 208, .62);
+  --control-danger-bg: linear-gradient(135deg, #e05270, #f06882);
+  --control-danger-bg-hover: linear-gradient(135deg, #f06b86, #ff8399);
+  --control-danger-bg-active: linear-gradient(135deg, #b93e5b, #c94b65);
+  --control-danger-fg: #fff5f7;
+  --control-ghost-bg: transparent;
+  --control-ghost-bg-hover: rgba(47, 164, 202, .2);
+  --control-ghost-fg: #57d9e9;
+  --control-input-bg: rgba(7, 24, 38, .9);
+  --control-input-border: rgba(59, 183, 220, .3);
+  --control-input-border-hover: rgba(81, 218, 238, .56);
+  --control-input-focus-border: #62e8d0;
+  --control-input-focus-shadow: 0 0 0 3px rgba(98, 232, 208, .24), 0 0 16px rgba(55, 183, 232, .14);
+  --control-toggle-track: #356b7e;
+  --control-toggle-track-active: linear-gradient(90deg, #57d9e9, #37b7e8 52%, #8b7df6);
+  --control-toggle-knob: #071522;
+  --control-toggle-width: 40px;
+  --control-toggle-height: 22px;
+  --control-toggle-radius: 8px;
+  --control-toggle-offset: 3px;
+  --control-radio-border: rgba(81, 218, 238, .56);
+  --control-radio-selected-bg: #37b7e8;
+  --control-radio-selected-ring: #071522;
+  --control-radius: 10px;
+  --control-focus-ring: rgba(98, 232, 208, .34);
+  --control-disabled-bg: rgba(22, 45, 57, .9);
+  --control-disabled-fg: #5f7e87;
+  --control-shadow: 0 6px 18px rgba(2, 10, 18, .18), 0 0 0 1px rgba(77, 210, 231, .04);
+  --control-hover-shadow: 0 0 20px rgba(87, 217, 233, .2);
   --q-ambient-background: radial-gradient(circle at 18% 10%, rgba(48, 217, 198, .11), transparent 34%), radial-gradient(circle at 80% 24%, rgba(74, 118, 226, .13), transparent 38%), radial-gradient(circle at 58% 88%, rgba(128, 79, 194, .09), transparent 42%), #071522;
   color-scheme: dark;
 }
@@ -277,6 +536,11 @@
   --q-panel: #1b2a41;
   --q-border: #2b405e;
   --q-border-strong: #466486;
+  --q-brand: #79a8ff;
+  --q-primary: #79a8ff;
+  --q-primary-hover: #94b9ff;
+  --q-primary-pressed: #5c8ee7;
+  --q-brand-soft: #203a65;
   --q-secondary: #1b2a41;
   --q-input: #122035;
   --q-select: #122035;
@@ -287,7 +551,9 @@
   --q-text-muted: #b6c5da;
   --q-text-disabled: #70829d;
   --q-hover: var(--q-brand-soft);
+  --q-pressed: #294b80;
   --q-disabled: #25344b;
+  --q-focus: #79a8ff;
   --q-shadow-sm: 0 4px 16px rgba(0, 0, 0, .2);
   --q-shadow-md: 0 10px 28px rgba(0, 0, 0, .25);
   --q-shadow-lg: 0 18px 48px rgba(0, 0, 0, .38);
@@ -454,3 +720,278 @@ select, .logs-level-filter select { background: var(--q-select); }
 .appearance-preset-swatch[data-preset='qing-nova'] { --preset-bg: #071522; --preset-primary: #37b7e8; --preset-surface: #0d2234; }
 @media (max-width: 900px) { .appearance-preset-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 500px) { .appearance-preset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Shared control states -------------------------------------------------- */
+.q-button, .q-icon-button {
+  position: relative;
+  isolation: isolate;
+  transition: background-color var(--q-fast), border-color var(--q-fast),
+    color var(--q-fast), box-shadow var(--q-fast), transform var(--q-fast), opacity var(--q-fast);
+}
+.q-button.is-loading, .q-icon-button.is-loading { cursor: wait; }
+.q-button.is-loading .q-button-content, .q-icon-button.is-loading .q-icon-button-content { opacity: .72; }
+.q-button-spinner, .q-icon-button-spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-inline-end: .5em;
+  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: q-control-spin .72s linear infinite;
+  flex: 0 0 auto;
+}
+.q-icon-button-spinner { margin-inline-end: 0; }
+.q-button:active:not(:disabled), .q-icon-button:active:not(:disabled),
+.theme-switch button:active:not(:disabled), .filters button:active:not(:disabled),
+[role='tab']:active:not(:disabled), [role='radio']:active:not(:disabled),
+[role='checkbox']:active:not(:disabled), [role='switch']:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.q-button:focus-visible, .q-icon-button:focus-visible,
+.theme-switch button:focus-visible, .filters button:focus-visible,
+[role='tab']:focus-visible, [role='radio']:focus-visible,
+[role='checkbox']:focus-visible, [role='switch']:focus-visible {
+  z-index: 1;
+  border-color: var(--q-focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--q-focus) 24%, transparent);
+}
+.q-button:disabled, .q-icon-button:disabled,
+.theme-switch button:disabled, .filters button:disabled,
+[role='tab']:disabled, [role='radio']:disabled,
+[role='checkbox']:disabled, [role='switch']:disabled {
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Native form controls and the small radio/switch primitives used by the
+   settings and module pages all consume the same surface and focus tokens. */
+input:not([type='checkbox']):not([type='radio']), select, textarea {
+  min-height: var(--q-control);
+  border: 1px solid var(--q-border);
+  border-radius: var(--q-radius-sm);
+  background: var(--q-input);
+  color: var(--q-text);
+  transition: background-color var(--q-fast), border-color var(--q-fast),
+    box-shadow var(--q-fast), color var(--q-fast);
+}
+input:not([type='checkbox']):not([type='radio']):hover:not(:disabled),
+select:hover:not(:disabled), textarea:hover:not(:disabled) {
+  border-color: var(--q-border-strong);
+  background: var(--q-hover);
+}
+input:not([type='checkbox']):not([type='radio']):focus-visible,
+select:focus-visible, textarea:focus-visible {
+  border-color: var(--q-focus);
+  background: var(--q-input);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--q-focus) 20%, transparent);
+}
+input::placeholder, textarea::placeholder { color: var(--q-text-disabled); opacity: 1; }
+input[type='checkbox'], input[type='radio'] {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--radio-selected-bg);
+}
+.close-radio {
+  border-color: var(--q-border-strong);
+  background: var(--q-input);
+  transition: background-color var(--q-fast), border-color var(--q-fast), box-shadow var(--q-fast), transform var(--q-fast);
+}
+.close-behavior-group > button:hover:not(:disabled) .close-radio { border-color: var(--q-primary); }
+.close-behavior-group > button[aria-checked='true'] .close-radio {
+  border-color: var(--q-primary);
+  background: var(--q-primary);
+  box-shadow: inset 0 0 0 3px var(--q-input);
+}
+.q-switch {
+  transition: background-color var(--q-fast), border-color var(--q-fast), color var(--q-fast), box-shadow var(--q-fast), transform var(--q-fast);
+}
+.q-switch:active:not(:disabled) { transform: translateY(1px); }
+.q-switch:focus-visible { border-color: var(--q-focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--q-focus) 22%, transparent); }
+.q-switch > span { transition: background-color var(--q-fast), box-shadow var(--q-fast); }
+.q-switch > span::after { background: var(--q-input); box-shadow: 0 1px 3px color-mix(in srgb, var(--q-text) 30%, transparent); }
+.q-switch[aria-busy='true'] { cursor: wait; }
+
+/* Segmented controls and tabs share a compact pressed/selected language. */
+.theme-switch, .filters, [role='tablist'] {
+  border-color: var(--q-border);
+  border-radius: var(--q-radius-sm);
+  background: var(--q-panel);
+  box-shadow: var(--q-shadow-sm);
+}
+.theme-switch button, .filters button, [role='tab'] {
+  border: 1px solid transparent;
+  border-radius: var(--q-radius-xs);
+  background: transparent;
+  color: var(--q-text-muted);
+  cursor: pointer;
+  transition: background-color var(--q-fast), border-color var(--q-fast), color var(--q-fast), transform var(--q-fast);
+}
+.theme-switch button:hover:not(:disabled), .filters button:hover:not(:disabled),
+[role='tab']:hover:not(:disabled) { background: var(--q-hover); color: var(--q-primary); }
+.theme-switch button.active, .filters button.active,
+[role='tab'][aria-selected='true'], [role='tab'][aria-current='page'] {
+  border-color: color-mix(in srgb, var(--q-primary) 25%, var(--q-border));
+  background: var(--q-brand-soft);
+  color: var(--q-primary);
+  box-shadow: var(--q-shadow-sm);
+}
+.theme-switch button:disabled, .filters button:disabled, [role='tab']:disabled { opacity: .58; }
+
+/* Keep icon-only actions legible in every preset, including loading/disabled
+   states where a slot may be temporarily replaced by the spinner. */
+.q-icon-button { background: var(--q-secondary); color: var(--q-text); }
+.q-icon-button:hover:not(:disabled) { background: var(--q-hover); color: var(--q-primary); }
+.q-icon-button:active:not(:disabled) { background: var(--q-pressed); color: var(--q-primary-pressed); }
+.q-icon-button-content { display: inline-flex; align-items: center; justify-content: center; }
+@keyframes q-control-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .q-button-spinner, .q-icon-button-spinner { animation: none; } }
+
+/* Final control token projection. Keeping this block last means legacy
+   component rules remain structurally intact while every preset can change
+   the control language (solid, glow, gradient, or deliberately flat). */
+.q-button, .q-icon-button {
+  border-radius: var(--control-radius);
+  background: var(--secondary-bg);
+  color: var(--secondary-fg);
+  border-color: var(--secondary-border);
+  box-shadow: var(--control-shadow);
+}
+.q-button:hover:not(:disabled), .q-icon-button:hover:not(:disabled) {
+  background: var(--secondary-bg-hover);
+  color: var(--secondary-fg);
+  border-color: var(--secondary-border-hover);
+  box-shadow: var(--control-hover-shadow);
+}
+.q-button:active:not(:disabled), .q-icon-button:active:not(:disabled) {
+  background: var(--q-pressed);
+  color: var(--secondary-fg);
+  box-shadow: var(--control-shadow);
+}
+.q-button.is-primary {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  border-color: transparent;
+  box-shadow: var(--primary-glow), var(--control-shadow);
+}
+.q-button.is-primary:hover:not(:disabled) {
+  background: var(--primary-bg-hover);
+  color: var(--primary-fg);
+  border-color: transparent;
+  box-shadow: var(--primary-glow), var(--control-hover-shadow);
+}
+.q-button.is-primary:active:not(:disabled) {
+  background: var(--primary-bg-active);
+  color: var(--primary-fg);
+  box-shadow: var(--primary-glow), var(--control-shadow);
+}
+.q-button.is-danger {
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  border-color: transparent;
+  box-shadow: var(--control-shadow);
+}
+.q-button.is-danger:hover:not(:disabled) {
+  background: var(--danger-bg-hover);
+  color: var(--danger-fg);
+  border-color: transparent;
+  box-shadow: var(--control-hover-shadow);
+}
+.q-button.is-danger:active:not(:disabled) {
+  background: var(--danger-bg-active);
+  color: var(--danger-fg);
+  box-shadow: var(--control-shadow);
+}
+.q-button.is-ghost {
+  background: var(--control-ghost-bg);
+  color: var(--control-ghost-fg);
+  border-color: transparent;
+  box-shadow: none;
+}
+.q-button.is-ghost:hover:not(:disabled) {
+  background: var(--control-ghost-bg-hover);
+  color: var(--control-ghost-fg);
+  box-shadow: none;
+}
+.q-button:disabled, .q-icon-button:disabled,
+button:disabled, input:disabled, select:disabled, textarea:disabled {
+  background: var(--control-disabled-bg);
+  color: var(--control-disabled-fg);
+  border-color: var(--q-border);
+  box-shadow: none;
+}
+input:not([type='checkbox']):not([type='radio']), select, textarea {
+  border-radius: var(--control-radius);
+  background: var(--input-bg);
+  border-color: var(--input-border);
+  color: var(--q-text);
+}
+input:not([type='checkbox']):not([type='radio']):hover:not(:disabled),
+select:hover:not(:disabled), textarea:hover:not(:disabled) {
+  background: var(--input-bg);
+  border-color: var(--input-border-hover);
+}
+input:not([type='checkbox']):not([type='radio']):focus-visible,
+select:focus-visible, textarea:focus-visible {
+  border-color: var(--input-focus-border);
+  box-shadow: var(--input-focus-shadow);
+}
+.q-switch {
+  min-height: calc(var(--control-toggle-height) + 10px);
+  border-radius: var(--control-toggle-radius);
+  background: var(--secondary-bg);
+  color: var(--secondary-fg);
+  border-color: var(--secondary-border);
+  box-shadow: var(--control-shadow);
+}
+.q-switch > span {
+  width: var(--toggle-width);
+  height: var(--toggle-height);
+  border-radius: var(--toggle-radius);
+  background: var(--toggle-track);
+}
+.q-switch > span::after {
+  top: var(--toggle-offset);
+  left: var(--toggle-offset);
+  width: calc(var(--toggle-height) - (var(--toggle-offset) * 2));
+  height: calc(var(--toggle-height) - (var(--toggle-offset) * 2));
+  border-radius: var(--toggle-radius);
+  background: var(--toggle-knob);
+}
+.q-switch[aria-checked='true'] > span { background: var(--toggle-track-active); }
+.q-switch[aria-checked='true'] > span::after {
+  transform: translateX(calc(var(--toggle-width) - var(--toggle-height)));
+}
+.q-switch:hover:not(:disabled) { border-color: var(--secondary-border-hover); box-shadow: var(--control-hover-shadow); }
+.q-switch:focus-visible { box-shadow: 0 0 0 3px var(--control-focus-ring); }
+.q-icon-button { border-radius: var(--control-radius); }
+.q-button-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: inherit;
+  min-width: 0;
+}
+.close-radio {
+  border-color: var(--radio-border);
+  background: var(--input-bg);
+}
+.close-behavior-group > button:hover:not(:disabled) .close-radio { border-color: var(--radio-selected-bg); }
+.close-behavior-group > button[aria-checked='true'] .close-radio {
+  border-color: var(--radio-selected-bg);
+  background: var(--radio-selected-bg);
+  box-shadow: inset 0 0 0 3px var(--radio-selected-ring), 0 0 0 1px var(--radio-selected-bg);
+}
+[role='checkbox'] {
+  border: 1px solid var(--radio-border);
+  border-radius: var(--control-radius);
+  background: var(--input-bg);
+  color: var(--q-text);
+}
+[role='checkbox'][aria-checked='true'] {
+  border-color: var(--radio-selected-bg);
+  background: var(--radio-selected-bg);
+  color: var(--primary-fg);
+  box-shadow: 0 0 0 2px var(--control-focus-ring);
+}

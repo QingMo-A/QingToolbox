@@ -1,2 +1,2 @@
-<script setup lang="ts">withDefaults(defineProps<{variant?:'primary'|'secondary'|'danger'|'ghost';disabled?:boolean}>(),{variant:'secondary'})</script>
-<template><button class="q-button" :class="`is-${variant}`" :disabled="disabled"><slot/></button></template>
+<script setup lang="ts">withDefaults(defineProps<{variant?:'primary'|'secondary'|'danger'|'ghost';disabled?:boolean;loading?:boolean}>(),{variant:'secondary',loading:false})</script>
+<template><button class="q-button" :class="[`is-${variant}`, { 'is-loading': loading }]" :disabled="disabled || loading" :aria-busy="loading || undefined"><span v-if="loading" class="q-button-spinner" aria-hidden="true" /><span class="q-button-content"><slot /></span></button></template>
