@@ -27,7 +27,12 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,6 +74,7 @@ fun QingClickableCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    selected: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val style = LocalQingAppearance.current
@@ -79,8 +85,15 @@ fun QingClickableCard(
         enabled = enabled,
         shape = shape,
         border = BorderStroke(
-            width = if (enabled) style.borderWidth else 1.dp,
-            color = if (enabled) style.cardBorderColor else MaterialTheme.colorScheme.outlineVariant,
+            width = when {
+                selected && enabled -> (style.borderWidth * 1.5f).coerceAtLeast(1.dp)
+                else -> style.borderWidth
+            },
+            color = when {
+                selected && enabled -> MaterialTheme.colorScheme.primary
+                enabled -> style.cardBorderColor
+                else -> MaterialTheme.colorScheme.outlineVariant
+            },
         ),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -130,12 +143,17 @@ fun QingHeroCard(
     } else {
         Modifier.background(MaterialTheme.colorScheme.primaryContainer, shape)
     }
+    val borderColor = if (style.glowStrength > 0f) {
+        style.glowColor.copy(alpha = style.glowStrength * 0.30f)
+    } else {
+        style.cardBorderColor
+    }
     Column(
         modifier = modifier
             .shadow(style.cardElevation, shape)
             .clip(shape)
             .then(backgroundModifier)
-            .border(style.borderWidth, style.cardBorderColor, shape)
+            .border(style.borderWidth, borderColor, shape)
             .padding(20.dp),
         content = content,
     )
@@ -221,6 +239,112 @@ fun QingListItem(
         colors = ListItemDefaults.colors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
+    )
+}
+
+@Composable
+fun QingSwitch(
+    checked: Boolean,
+    onCheckedChange: ((Boolean) -> Unit)?,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val style = LocalQingAppearance.current
+    val scheme = MaterialTheme.colorScheme
+    val checkedBorder = style.controlBorderColor.copy(
+        alpha = (0.55f + style.focusEmphasis).coerceAtMost(1f),
+    )
+    val uncheckedBorder = style.controlBorderColor.copy(
+        alpha = (0.40f + style.hoverEmphasis).coerceAtMost(1f),
+    )
+    val colors = when (style.navigationStyle) {
+        QingNavigationStyle.CIRCUIT -> SwitchDefaults.colors(
+            checkedThumbColor = scheme.onPrimary,
+            checkedTrackColor = scheme.primary,
+            checkedBorderColor = checkedBorder,
+            uncheckedThumbColor = scheme.primaryContainer,
+            uncheckedTrackColor = scheme.surface,
+            uncheckedBorderColor = uncheckedBorder,
+        )
+        QingNavigationStyle.TERMINAL -> SwitchDefaults.colors(
+            checkedThumbColor = scheme.onPrimary,
+            checkedTrackColor = scheme.primary,
+            checkedBorderColor = checkedBorder,
+            uncheckedThumbColor = scheme.surfaceContainerHigh,
+            uncheckedTrackColor = scheme.surface,
+            uncheckedBorderColor = uncheckedBorder,
+        )
+        QingNavigationStyle.SOFT -> SwitchDefaults.colors(
+            checkedThumbColor = scheme.onPrimary,
+            checkedTrackColor = scheme.primary,
+            checkedBorderColor = checkedBorder,
+            uncheckedThumbColor = scheme.onSurfaceVariant,
+            uncheckedTrackColor = scheme.surfaceContainerHigh,
+            uncheckedBorderColor = uncheckedBorder,
+        )
+        QingNavigationStyle.NOVA -> SwitchDefaults.colors(
+            checkedThumbColor = scheme.onPrimary,
+            checkedTrackColor = scheme.primary,
+            checkedBorderColor = checkedBorder,
+            uncheckedThumbColor = scheme.primaryContainer,
+            uncheckedTrackColor = scheme.surface,
+            uncheckedBorderColor = uncheckedBorder,
+        )
+        QingNavigationStyle.STANDARD -> SwitchDefaults.colors(
+            checkedThumbColor = scheme.onPrimary,
+            checkedTrackColor = scheme.primary,
+            checkedBorderColor = checkedBorder,
+            uncheckedThumbColor = scheme.outline,
+            uncheckedTrackColor = scheme.surfaceContainerLow,
+            uncheckedBorderColor = uncheckedBorder,
+        )
+    }
+    Switch(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+        enabled = enabled,
+        colors = colors,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun QingTopAppBar(
+    title: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val style = LocalQingAppearance.current
+    val shape = RoundedCornerShape(
+        bottomStart = style.cardCornerRadius,
+        bottomEnd = style.cardCornerRadius,
+    )
+    val containerColor = when (style.navigationStyle) {
+        QingNavigationStyle.CIRCUIT -> MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
+        QingNavigationStyle.TERMINAL -> MaterialTheme.colorScheme.surface
+        QingNavigationStyle.SOFT -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.94f)
+        QingNavigationStyle.NOVA -> MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
+        QingNavigationStyle.STANDARD -> MaterialTheme.colorScheme.background
+    }
+    TopAppBar(
+        modifier = modifier
+            .clip(shape)
+            .border(style.borderWidth, style.cardBorderColor, shape),
+        title = title,
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = containerColor,
+            scrolledContainerColor = containerColor,
+        ),
+    )
+}
+
+@Composable
+fun QingDivider(modifier: Modifier = Modifier) {
+    val style = LocalQingAppearance.current
+    HorizontalDivider(
+        modifier = modifier,
+        thickness = style.borderWidth,
+        color = style.cardBorderColor,
     )
 }
 
@@ -369,7 +493,11 @@ fun QingThemePreview(
                 modifier = Modifier.weight(1f),
                 borderColor = style.controlBorderColor,
             )
-            Switch(checked = false, onCheckedChange = null, enabled = false)
+            QingSwitch(
+                checked = true,
+                onCheckedChange = {},
+                enabled = true,
+            )
         }
     }
 }

@@ -151,7 +151,7 @@ internal fun qingAppearanceStyle(
             controlCornerRadius = 11.dp,
             cardCornerRadius = 11.dp,
             borderWidth = 1.dp,
-            cardBorderColor = Color(0xFF9F92FF).copy(alpha = 0.56f),
+            cardBorderColor = Color(0xFF5E8CC7).copy(alpha = 0.54f),
             controlBorderColor = Color(0xFF78D9DD).copy(alpha = 0.68f),
             cardElevation = 1.dp,
             controlElevation = 1.dp,
@@ -161,11 +161,11 @@ internal fun qingAppearanceStyle(
             primaryGradient = listOf(
                 Color(0xFF52E6D2),
                 Color(0xFF4C9AFF),
-                Color(0xFF9C7CFF),
+                Color(0xFF7587E6),
             ),
             usePrimaryGradient = true,
-            glowColor = Color(0xFF718DFF),
-            glowStrength = 0.10f,
+            glowColor = Color(0xFF4C9AFF),
+            glowStrength = 0.06f,
             navigationStyle = QingNavigationStyle.NOVA,
             technicalMonospaceEnabled = true,
         )

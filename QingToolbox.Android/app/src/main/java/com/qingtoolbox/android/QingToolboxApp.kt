@@ -2,7 +2,6 @@ package com.qingtoolbox.android
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -24,14 +23,10 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -76,7 +71,6 @@ fun QingToolboxApp(viewModel: QingToolboxViewModel) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QingToolboxShell(
     currentAppearance: AppearanceTheme,
@@ -94,7 +88,7 @@ private fun QingToolboxShell(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            QingTopAppBar(
                 title = {
                     Column {
                         Text(
@@ -109,9 +103,6 @@ private fun QingToolboxShell(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
             )
         },
         bottomBar = {
@@ -297,7 +288,7 @@ private fun SettingsScreen(
                 supportingContent = { Text("English (default) · More languages are planned") },
             )
         }
-        item { HorizontalDivider() }
+        item { QingDivider() }
         item { SectionHeader(title = "About") }
         item {
             QingListItem(
@@ -331,6 +322,7 @@ private fun AppearanceOption(
     QingClickableCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
+        selected = selected,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
