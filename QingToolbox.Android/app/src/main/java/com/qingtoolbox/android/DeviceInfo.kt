@@ -27,25 +27,26 @@ data class DeviceInfoSnapshot(
 object DeviceInfoProvider {
     fun read(context: Context): DeviceInfoSnapshot {
         val applicationContext = context.applicationContext
+        val unavailable = applicationContext.getString(R.string.unavailable)
         val displayMetrics = applicationContext.resources.displayMetrics
         val packageInfo = applicationContext.packageManager.getPackageInfo(applicationContext.packageName, 0)
         return DeviceInfoSnapshot(
-            manufacturer = Build.MANUFACTURER.valueOrUnavailable(),
-            brand = Build.BRAND.valueOrUnavailable(),
-            model = Build.MODEL.valueOrUnavailable(),
-            device = Build.DEVICE.valueOrUnavailable(),
-            product = Build.PRODUCT.valueOrUnavailable(),
-            androidVersion = Build.VERSION.RELEASE.valueOrUnavailable(),
+            manufacturer = Build.MANUFACTURER.valueOrUnavailable(unavailable),
+            brand = Build.BRAND.valueOrUnavailable(unavailable),
+            model = Build.MODEL.valueOrUnavailable(unavailable),
+            device = Build.DEVICE.valueOrUnavailable(unavailable),
+            product = Build.PRODUCT.valueOrUnavailable(unavailable),
+            androidVersion = Build.VERSION.RELEASE.valueOrUnavailable(unavailable),
             apiLevel = Build.VERSION.SDK_INT,
-            buildId = Build.ID.valueOrUnavailable(),
+            buildId = Build.ID.valueOrUnavailable(unavailable),
             securityPatch = Build.VERSION.SECURITY_PATCH.takeIf { it.isNotBlank() },
-            supportedAbis = Build.SUPPORTED_ABIS.toList().ifEmpty { listOf("Unavailable") },
+            supportedAbis = Build.SUPPORTED_ABIS.toList().ifEmpty { listOf(unavailable) },
             availableProcessors = Runtime.getRuntime().availableProcessors(),
             displayWidthPixels = displayMetrics.widthPixels,
             displayHeightPixels = displayMetrics.heightPixels,
             displayDensity = displayMetrics.density,
             displayDensityDpi = displayMetrics.densityDpi,
-            appVersionName = packageInfo.versionName.valueOrUnavailable(),
+            appVersionName = packageInfo.versionName.valueOrUnavailable(unavailable),
             appVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 packageInfo.longVersionCode
             } else {
@@ -56,17 +57,41 @@ object DeviceInfoProvider {
         )
     }
 
-    private fun String?.valueOrUnavailable(): String = this?.takeIf { it.isNotBlank() } ?: "Unavailable"
+    private fun String?.valueOrUnavailable(unavailable: String): String =
+        this?.takeIf { it.isNotBlank() } ?: unavailable
 }
 
+data class DeviceInfoSummaryLabels(
+    val device: String,
+    val manufacturer: String,
+    val brand: String,
+    val model: String,
+    val deviceCodename: String,
+    val product: String,
+    val android: String,
+    val version: String,
+    val buildId: String,
+    val securityPatch: String,
+    val hardware: String,
+    val supportedAbis: String,
+    val availableProcessors: String,
+    val display: String,
+    val size: String,
+    val density: String,
+    val app: String,
+    val qingToolbox: String,
+    val packageName: String,
+    val unavailable: String,
+)
+
 object DeviceInfoFormat {
-    fun abiList(abis: List<String>): String =
-        abis.map { it.trim() }.filter { it.isNotEmpty() }.ifEmpty { listOf("Unavailable") }.joinToString(", ")
+    fun abiList(abis: List<String>, unavailable: String): String =
+        abis.map { it.trim() }.filter { it.isNotEmpty() }.ifEmpty { listOf(unavailable) }.joinToString(", ")
 
-    fun androidVersion(release: String?, apiLevel: Int): String =
-        "Android ${release.orUnavailable()} (API $apiLevel)"
+    fun androidVersion(release: String?, apiLevel: Int, unavailable: String): String =
+        "Android ${release.orUnavailable(unavailable)} (API $apiLevel)"
 
-    fun securityPatch(patch: String?): String = patch.orUnavailable()
+    fun securityPatch(patch: String?, unavailable: String): String = patch.orUnavailable(unavailable)
 
     fun displaySize(widthPixels: Int, heightPixels: Int): String =
         "$widthPixels × $heightPixels px"
@@ -75,34 +100,34 @@ object DeviceInfoFormat {
 
     fun densityDpi(densityDpi: Int): String = "$densityDpi dpi"
 
-    fun appVersion(versionName: String?, versionCode: Long): String =
-        "${versionName.orUnavailable()} (code $versionCode)"
+    fun appVersion(versionName: String?, versionCode: Long, unavailable: String): String =
+        "${versionName.orUnavailable(unavailable)} (code $versionCode)"
 
-    fun summary(snapshot: DeviceInfoSnapshot): String = buildString {
-        appendLine("Device")
-        appendLine("Manufacturer: ${snapshot.manufacturer}")
-        appendLine("Brand: ${snapshot.brand}")
-        appendLine("Model: ${snapshot.model}")
-        appendLine("Device: ${snapshot.device}")
-        appendLine("Product: ${snapshot.product}")
+    fun summary(snapshot: DeviceInfoSnapshot, labels: DeviceInfoSummaryLabels): String = buildString {
+        appendLine(labels.device)
+        appendLine("${labels.manufacturer}: ${snapshot.manufacturer}")
+        appendLine("${labels.brand}: ${snapshot.brand}")
+        appendLine("${labels.model}: ${snapshot.model}")
+        appendLine("${labels.deviceCodename}: ${snapshot.device}")
+        appendLine("${labels.product}: ${snapshot.product}")
         appendLine()
-        appendLine("Android")
-        appendLine("Version: ${androidVersion(snapshot.androidVersion, snapshot.apiLevel)}")
-        appendLine("Build ID: ${snapshot.buildId}")
-        snapshot.securityPatch?.takeIf { it.isNotBlank() }?.let { appendLine("Security patch: $it") }
+        appendLine(labels.android)
+        appendLine("${labels.version}: ${androidVersion(snapshot.androidVersion, snapshot.apiLevel, labels.unavailable)}")
+        appendLine("${labels.buildId}: ${snapshot.buildId}")
+        snapshot.securityPatch?.takeIf { it.isNotBlank() }?.let { appendLine("${labels.securityPatch}: $it") }
         appendLine()
-        appendLine("Hardware")
-        appendLine("Supported ABIs: ${abiList(snapshot.supportedAbis)}")
-        appendLine("Available processors: ${snapshot.availableProcessors}")
+        appendLine(labels.hardware)
+        appendLine("${labels.supportedAbis}: ${abiList(snapshot.supportedAbis, labels.unavailable)}")
+        appendLine("${labels.availableProcessors}: ${snapshot.availableProcessors}")
         appendLine()
-        appendLine("Display")
-        appendLine("Size: ${displaySize(snapshot.displayWidthPixels, snapshot.displayHeightPixels)}")
-        appendLine("Density: ${density(snapshot.displayDensity)} (${densityDpi(snapshot.displayDensityDpi)})")
+        appendLine(labels.display)
+        appendLine("${labels.size}: ${displaySize(snapshot.displayWidthPixels, snapshot.displayHeightPixels)}")
+        appendLine("${labels.density}: ${density(snapshot.displayDensity)} (${densityDpi(snapshot.displayDensityDpi)})")
         appendLine()
-        appendLine("App")
-        appendLine("QingToolbox: ${appVersion(snapshot.appVersionName, snapshot.appVersionCode)}")
-        append("Package: ${snapshot.appPackageName}")
+        appendLine(labels.app)
+        appendLine("${labels.qingToolbox}: ${appVersion(snapshot.appVersionName, snapshot.appVersionCode, labels.unavailable)}")
+        append("${labels.packageName}: ${snapshot.appPackageName}")
     }
 
-    private fun String?.orUnavailable(): String = this?.takeIf { it.isNotBlank() } ?: "Unavailable"
+    private fun String?.orUnavailable(unavailable: String): String = this?.takeIf { it.isNotBlank() } ?: unavailable
 }

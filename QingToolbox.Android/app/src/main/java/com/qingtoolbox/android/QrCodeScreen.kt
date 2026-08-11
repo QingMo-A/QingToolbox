@@ -41,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -76,7 +77,7 @@ fun QrCodeScreen(modifier: Modifier = Modifier) {
             errorMessage = null
         } catch (_: Exception) {
             generated = null
-            errorMessage = "Could not generate a QR code for this text."
+            errorMessage = context.getString(R.string.qr_code_error)
         }
     }
 
@@ -111,12 +112,12 @@ fun QrCodeScreen(modifier: Modifier = Modifier) {
                             }
                             Column {
                                 Text(
-                                    text = "QR Code",
+                                    text = stringResource(R.string.qr_code_title),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold,
                                 )
                                 Text(
-                                    text = "Generate a black-and-white QR code from text.",
+                                    text = stringResource(R.string.qr_code_body),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = scheme.onSurfaceVariant,
                                 )
@@ -132,8 +133,8 @@ fun QrCodeScreen(modifier: Modifier = Modifier) {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(156.dp),
-                            label = { Text("Text") },
-                            placeholder = { Text("Enter text, URL, or multiple lines") },
+                            label = { Text(stringResource(R.string.qr_code_input_label)) },
+                            placeholder = { Text(stringResource(R.string.qr_code_input_placeholder)) },
                             minLines = 6,
                             maxLines = 6,
                             isError = errorMessage != null,
@@ -141,7 +142,7 @@ fun QrCodeScreen(modifier: Modifier = Modifier) {
                             colors = fieldColors,
                         )
                         Text(
-                            text = "${input.length} characters",
+                            text = stringResource(R.string.qr_code_characters, input.length),
                             style = MaterialTheme.typography.labelSmall,
                             color = scheme.onSurfaceVariant,
                         )
@@ -156,7 +157,7 @@ fun QrCodeScreen(modifier: Modifier = Modifier) {
                             ) {
                                 Icon(Icons.Outlined.QrCode2, contentDescription = null)
                                 Spacer(Modifier.size(8.dp))
-                                Text("Generate")
+                                Text(stringResource(R.string.qr_code_generate))
                             }
                             QingSecondaryButton(
                                 onClick = ::clear,
@@ -164,7 +165,7 @@ fun QrCodeScreen(modifier: Modifier = Modifier) {
                             ) {
                                 Icon(Icons.Outlined.Clear, contentDescription = null)
                                 Spacer(Modifier.size(8.dp))
-                                Text("Clear")
+                                Text(stringResource(R.string.qr_code_clear))
                             }
                         }
                     }
@@ -190,7 +191,7 @@ fun QrCodeScreen(modifier: Modifier = Modifier) {
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             Text(
-                                text = "Preview",
+                                text = stringResource(R.string.qr_code_preview),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -203,7 +204,7 @@ fun QrCodeScreen(modifier: Modifier = Modifier) {
                             ) {
                                 Image(
                                     bitmap = generated!!.asImageBitmap(),
-                                    contentDescription = "Generated QR code",
+                                    contentDescription = stringResource(R.string.qr_code_content_description),
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -218,7 +219,7 @@ fun QrCodeScreen(modifier: Modifier = Modifier) {
                             ) {
                                 Icon(Icons.Outlined.Share, contentDescription = null)
                                 Spacer(Modifier.size(8.dp))
-                                Text("Share QR Code")
+                                Text(stringResource(R.string.qr_code_share))
                             }
                         }
                     }
@@ -227,14 +228,14 @@ fun QrCodeScreen(modifier: Modifier = Modifier) {
             if (generated == null && errorMessage == null) {
                 item {
                     QingStatusText(
-                        text = "Generate a QR code to preview it here. The preview stays black and white for reliable reading.",
+                        text = stringResource(R.string.qr_code_status_empty),
                         modifier = Modifier.padding(top = 4.dp, bottom = 20.dp),
                     )
                 }
             } else {
                 item {
                     QingStatusText(
-                        text = "QR images are staged in app cache only when you choose Share.",
+                        text = stringResource(R.string.qr_code_status_ready),
                         modifier = Modifier.padding(top = 4.dp, bottom = 20.dp),
                     )
                 }
@@ -264,7 +265,7 @@ private fun shareQrCode(context: Context, bitmap: Bitmap, onMessage: (String) ->
     try {
         val shareDirectory = File(context.cacheDir, "qr-share")
         if (!shareDirectory.exists() && !shareDirectory.mkdirs()) {
-            onMessage("Could not prepare the QR code for sharing.")
+            onMessage(context.getString(R.string.qr_code_share_prepare_error))
             return
         }
         val output = File(shareDirectory, "qrcode.png")
@@ -281,8 +282,10 @@ private fun shareQrCode(context: Context, bitmap: Bitmap, onMessage: (String) ->
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(shareIntent, "Share QR Code"))
+        context.startActivity(
+            Intent.createChooser(shareIntent, context.getString(R.string.qr_code_share_chooser)),
+        )
     } catch (_: Exception) {
-        onMessage("Could not share the QR code.")
+        onMessage(context.getString(R.string.qr_code_share_error))
     }
 }

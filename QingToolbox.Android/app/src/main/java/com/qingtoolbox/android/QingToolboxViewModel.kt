@@ -3,6 +3,7 @@ package com.qingtoolbox.android
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -11,14 +12,14 @@ import kotlinx.coroutines.flow.update
 
 enum class AppearanceTheme(
     val id: String,
-    val label: String,
-    val description: String,
+    @StringRes val labelRes: Int,
+    @StringRes val descriptionRes: Int,
 ) {
-    QING_DEFAULT("qing-default", "Qing Default", "Calm teal with a clear, everyday surface"),
-    NEON_CIRCUIT("neon-circuit", "Neon Circuit", "High-contrast cyan and electric green"),
-    GREENLINE("greenline", "Greenline", "Focused green accents for a practical workspace"),
-    AURORA_FLOW("aurora-flow", "Aurora Flow", "Cool blue-violet tones with a soft glow"),
-    QING_NOVA("qing-nova", "Qing Nova", "Deep blue-green with a focused technical glow"),
+    QING_DEFAULT("qing-default", R.string.theme_qing_default, R.string.theme_qing_default_description),
+    NEON_CIRCUIT("neon-circuit", R.string.theme_neon_circuit, R.string.theme_neon_circuit_description),
+    GREENLINE("greenline", R.string.theme_greenline, R.string.theme_greenline_description),
+    AURORA_FLOW("aurora-flow", R.string.theme_aurora_flow, R.string.theme_aurora_flow_description),
+    QING_NOVA("qing-nova", R.string.theme_qing_nova, R.string.theme_qing_nova_description),
     ;
 
     companion object {

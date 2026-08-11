@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -90,12 +91,12 @@ fun TextCodecScreen(modifier: Modifier = Modifier) {
                             }
                             Column {
                                 Text(
-                                    text = "Text Codec",
+                                    text = stringResource(R.string.text_codec_title),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold,
                                 )
                                 Text(
-                                    text = "Encode or decode UTF-8 text locally.",
+                                    text = stringResource(R.string.text_codec_body),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = scheme.onSurfaceVariant,
                                 )
@@ -110,8 +111,8 @@ fun TextCodecScreen(modifier: Modifier = Modifier) {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(156.dp),
-                            label = { Text("Input") },
-                            placeholder = { Text("Enter text to convert") },
+                            label = { Text(stringResource(R.string.text_codec_input_label)) },
+                            placeholder = { Text(stringResource(R.string.text_codec_input_placeholder)) },
                             minLines = 6,
                             maxLines = 6,
                             isError = errorMessage != null,
@@ -119,7 +120,7 @@ fun TextCodecScreen(modifier: Modifier = Modifier) {
                             colors = fieldColors,
                         )
                         Text(
-                            text = "${input.length} characters",
+                            text = stringResource(R.string.text_codec_characters, input.length),
                             style = MaterialTheme.typography.labelSmall,
                             color = scheme.onSurfaceVariant,
                         )
@@ -133,7 +134,7 @@ fun TextCodecScreen(modifier: Modifier = Modifier) {
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
-                            text = "Operation",
+                            text = stringResource(R.string.text_codec_operation),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(horizontal = 6.dp),
@@ -165,12 +166,12 @@ fun TextCodecScreen(modifier: Modifier = Modifier) {
                                 errorMessage = null
                             } catch (error: TextCodecException) {
                                 result = null
-                                errorMessage = error.message ?: "Unable to convert this text."
+                                errorMessage = context.getString(error.error.messageRes())
                             }
                         },
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Convert")
+                        Text(stringResource(R.string.text_codec_convert))
                     }
                     QingSecondaryButton(
                         onClick = {
@@ -180,7 +181,7 @@ fun TextCodecScreen(modifier: Modifier = Modifier) {
                         },
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Clear")
+                        Text(stringResource(R.string.clear))
                     }
                 }
             }
@@ -203,18 +204,18 @@ fun TextCodecScreen(modifier: Modifier = Modifier) {
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Text(
-                            text = "Result",
+                            text = stringResource(R.string.text_codec_result),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
                         when {
                             result == null -> Text(
-                                text = "Converted text will appear here.",
+                                text = stringResource(R.string.text_codec_result_placeholder),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = scheme.onSurfaceVariant,
                             )
                             result!!.isEmpty() -> Text(
-                                text = "Result is empty.",
+                                text = stringResource(R.string.text_codec_result_empty),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = scheme.onSurfaceVariant,
                             )
@@ -225,7 +226,7 @@ fun TextCodecScreen(modifier: Modifier = Modifier) {
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(156.dp),
-                                label = { Text("Read-only result") },
+                                label = { Text(stringResource(R.string.text_codec_result_readonly)) },
                                 minLines = 6,
                                 maxLines = 6,
                                 shape = fieldShape,
@@ -236,21 +237,25 @@ fun TextCodecScreen(modifier: Modifier = Modifier) {
                             onClick = {
                                 val converted = result ?: return@QingSecondaryButton
                                 copyResult(context, converted)
-                                scope.launch { snackbarHostState.showSnackbar("Result copied") }
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        context.getString(R.string.text_codec_result_copied),
+                                    )
+                                }
                             },
                             enabled = result != null,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Icon(Icons.Outlined.ContentCopy, contentDescription = null)
                             Spacer(Modifier.size(8.dp))
-                            Text("Copy Result")
+                            Text(stringResource(R.string.text_codec_copy_result))
                         }
                     }
                 }
             }
             item {
                 QingStatusText(
-                    text = "Conversions stay on this device. URL encoding uses UTF-8 percent escapes.",
+                    text = stringResource(R.string.text_codec_status),
                     modifier = Modifier.padding(top = 4.dp, bottom = 20.dp),
                 )
             }
@@ -322,7 +327,7 @@ private fun OperationCard(
                 )
             }
             Text(
-                text = operation.label,
+                text = stringResource(operation.labelRes),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             )
@@ -332,5 +337,11 @@ private fun OperationCard(
 
 private fun copyResult(context: Context, result: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-    clipboard?.setPrimaryClip(ClipData.newPlainText("Text Codec result", result))
+    clipboard?.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.text_codec_result), result))
+}
+
+private fun TextCodecError.messageRes(): Int = when (this) {
+    TextCodecError.INVALID_BASE64 -> R.string.text_codec_invalid_base64
+    TextCodecError.INVALID_URL_PERCENT -> R.string.text_codec_invalid_url_percent
+    TextCodecError.INVALID_URL_UTF8 -> R.string.text_codec_invalid_url_utf8
 }

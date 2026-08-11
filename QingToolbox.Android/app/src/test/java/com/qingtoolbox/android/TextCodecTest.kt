@@ -15,12 +15,12 @@ class TextCodecTest {
     }
 
     @Test
-    fun base64RejectsInvalidInputWithClearMessage() {
+    fun base64RejectsInvalidInputWithTypedError() {
         val error = assertThrows(TextCodecException::class.java) {
             TextCodec.decodeBase64("%%%not-base64%%")
         }
 
-        assertEquals("Invalid Base64 input.", error.message)
+        assertEquals(TextCodecError.INVALID_BASE64, error.error)
     }
 
     @Test
@@ -39,9 +39,9 @@ class TextCodecTest {
                 TextCodec.decodeUrl(invalid)
             }
             assertEquals(
-                if (invalid == "%E4%A0") "Invalid URL UTF-8 encoding."
-                else "Invalid URL percent-encoding.",
-                error.message,
+                if (invalid == "%E4%A0") TextCodecError.INVALID_URL_UTF8
+                else TextCodecError.INVALID_URL_PERCENT,
+                error.error,
             )
         }
     }

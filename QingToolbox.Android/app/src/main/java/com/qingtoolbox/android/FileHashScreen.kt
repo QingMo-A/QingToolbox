@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -55,6 +56,7 @@ fun FileHashScreen(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val errorMessage = state.errorMessage
+    val unavailable = stringResource(R.string.size_unavailable)
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -70,6 +72,7 @@ fun FileHashScreen(
             item {
                 FileSelectionCard(
                     state = state,
+                    unavailable = unavailable,
                     onChooseFile = { filePicker.launch(arrayOf("*/*")) },
                 )
             }
@@ -82,6 +85,7 @@ fun FileHashScreen(
             item {
                 HashActionCard(
                     state = state,
+                    unavailable = unavailable,
                     onCalculate = viewModel::calculate,
                     onCancel = viewModel::cancelCalculation,
                 )
@@ -90,7 +94,7 @@ fun FileHashScreen(
                 item { HashErrorCard(message = errorMessage) }
             }
             if (state.results.isNotEmpty()) {
-                item { FileHashSectionHeader(title = "Results") }
+                item { FileHashSectionHeader(title = stringResource(R.string.file_hash_results)) }
                 items(state.results.size) { index ->
                     val result = state.results[index]
                     HashResultCard(
@@ -98,7 +102,9 @@ fun FileHashScreen(
                         onCopy = {
                             copyToClipboard(context, result)
                             scope.launch {
-                                snackbarHostState.showSnackbar("${result.algorithm.label} copied")
+                                snackbarHostState.showSnackbar(
+                                    context.getString(R.string.file_hash_copied, result.algorithm.label),
+                                )
                             }
                         },
                     )
@@ -106,7 +112,7 @@ fun FileHashScreen(
             }
             item {
                 QingStatusText(
-                    text = "Files stay on this device. Hashing uses the Android file picker and a streaming read.",
+                    text = stringResource(R.string.file_hash_status),
                     modifier = Modifier.padding(top = 4.dp, bottom = 20.dp),
                 )
             }
@@ -133,6 +139,7 @@ private fun FileHashSectionHeader(title: String) {
 @Composable
 private fun FileSelectionCard(
     state: FileHashUiState,
+    unavailable: String,
     onChooseFile: () -> Unit,
 ) {
     QingCard(modifier = Modifier.fillMaxWidth()) {
@@ -150,14 +157,14 @@ private fun FileSelectionCard(
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = state.fileName ?: "No file selected",
+                    text = state.fileName ?: stringResource(R.string.file_hash_no_file),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
                     text = when (state.phase) {
-                        FileHashPhase.LOADING_FILE -> "Loading file details..."
-                        else -> formatBytes(state.fileSize)
+                        FileHashPhase.LOADING_FILE -> stringResource(R.string.file_hash_loading_details)
+                        else -> formatBytes(state.fileSize, unavailable)
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -166,7 +173,7 @@ private fun FileSelectionCard(
                 QingSecondaryButton(onClick = onChooseFile) {
                     Icon(Icons.Outlined.FolderOpen, contentDescription = null)
                     Spacer(Modifier.size(8.dp))
-                    Text("Choose file")
+                    Text(stringResource(R.string.file_hash_choose_file))
                 }
             }
         }
@@ -181,7 +188,7 @@ private fun HashAlgorithmCard(
     QingCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(vertical = 8.dp)) {
             Text(
-                text = "Algorithms",
+                text = stringResource(R.string.file_hash_algorithms),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
@@ -218,6 +225,7 @@ private fun HashAlgorithmCard(
 @Composable
 private fun HashActionCard(
     state: FileHashUiState,
+    unavailable: String,
     onCalculate: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -244,10 +252,14 @@ private fun HashActionCard(
                     )
                 }
                 QingStatusText(
-                    text = "Calculating: ${formatBytes(state.bytesRead)} / ${formatBytes(state.fileSize)}",
+                    text = stringResource(
+                        R.string.file_hash_calculating,
+                        formatBytes(state.bytesRead, unavailable),
+                        formatBytes(state.fileSize, unavailable),
+                    ),
                 )
                 QingSecondaryButton(onClick = onCancel) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.file_hash_cancel))
                 }
             } else {
                 QingPrimaryButton(
@@ -257,17 +269,25 @@ private fun HashActionCard(
                 ) {
                     Icon(Icons.Outlined.Calculate, contentDescription = null)
                     Spacer(Modifier.size(8.dp))
-                    Text(if (state.phase == FileHashPhase.COMPLETE) "Calculate again" else "Calculate")
+                    Text(
+                        stringResource(
+                            if (state.phase == FileHashPhase.COMPLETE) {
+                                R.string.file_hash_calculate_again
+                            } else {
+                                R.string.file_hash_calculate
+                            },
+                        ),
+                    )
                 }
                 if (state.fileUri == null) {
                     Text(
-                        text = "Choose a file, then select one or more algorithms.",
+                        text = stringResource(R.string.file_hash_choose_guidance),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else if (state.selectedAlgorithms.isEmpty()) {
                     Text(
-                        text = "Select at least one algorithm to calculate.",
+                        text = stringResource(R.string.file_hash_select_guidance),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -310,9 +330,12 @@ private fun HashResultCard(
                 QingStatusText(text = result.value)
             }
             QingSecondaryButton(onClick = onCopy) {
-                Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy ${result.algorithm.label}")
+                Icon(
+                    Icons.Outlined.ContentCopy,
+                    contentDescription = stringResource(R.string.file_hash_copy_content_description, result.algorithm.label),
+                )
                 Spacer(Modifier.size(6.dp))
-                Text("Copy")
+                Text(stringResource(R.string.copy))
             }
         }
     }
@@ -321,12 +344,12 @@ private fun HashResultCard(
 private fun copyToClipboard(context: Context, result: HashDigestResult) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
     clipboard?.setPrimaryClip(
-        ClipData.newPlainText("${result.algorithm.label} hash", result.value),
+        ClipData.newPlainText(context.getString(R.string.file_hash_copy_content_description, result.algorithm.label), result.value),
     )
 }
 
-private fun formatBytes(bytes: Long?): String {
-    if (bytes == null || bytes < 0L) return "Size unavailable"
+private fun formatBytes(bytes: Long?, unavailable: String): String {
+    if (bytes == null || bytes < 0L) return unavailable
     if (bytes < 1024L) return "$bytes B"
     val units = arrayOf("KB", "MB", "GB", "TB")
     var value = bytes.toDouble()

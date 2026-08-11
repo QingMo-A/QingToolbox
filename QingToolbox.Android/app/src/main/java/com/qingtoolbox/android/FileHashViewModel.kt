@@ -56,7 +56,9 @@ class FileHashViewModel(application: Application) : AndroidViewModel(application
             _uiState.update { state ->
                 if (state.fileUri != uri) return@update state
                 state.copy(
-                    fileName = metadata?.name ?: uri.lastPathSegment ?: "Selected file",
+                    fileName = metadata?.name
+                        ?: uri.lastPathSegment
+                        ?: getApplication<Application>().getString(R.string.file_hash_selected_file),
                     fileSize = metadata?.size,
                     phase = FileHashPhase.READY,
                     bytesRead = 0L,
@@ -114,7 +116,7 @@ class FileHashViewModel(application: Application) : AndroidViewModel(application
                         },
                         shouldCancel = { !coroutineContext.isActive },
                     )
-                } ?: throw IllegalStateException("The selected file could not be opened.")
+                } ?: throw IllegalStateException()
 
                 _uiState.update { current ->
                     if (current.fileUri == uri) {
@@ -131,9 +133,14 @@ class FileHashViewModel(application: Application) : AndroidViewModel(application
             } catch (_: CancellationException) {
                 // A user cancellation or a new file selection owns the next state.
             } catch (error: SecurityException) {
-                setError(uri, "Permission to read this file was denied.", error)
+                setError(uri, getApplication<Application>().getString(R.string.file_hash_permission_error), error)
             } catch (error: Exception) {
-                setError(uri, "QingToolbox could not calculate hashes for this file.", error)
+                val message = if (error is IllegalStateException) {
+                    getApplication<Application>().getString(R.string.file_hash_open_error)
+                } else {
+                    getApplication<Application>().getString(R.string.file_hash_calculation_error)
+                }
+                setError(uri, message, error)
             }
         }
     }

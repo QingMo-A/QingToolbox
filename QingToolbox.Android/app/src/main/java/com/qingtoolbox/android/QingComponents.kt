@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
 private val QingTransparent = Color.Transparent
@@ -503,7 +504,7 @@ fun QingThemePreview(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             PreviewSwatch(
-                label = "Primary",
+                label = stringResource(R.string.preview_primary),
                 shape = shape,
                 brush = primaryBrush,
                 color = MaterialTheme.colorScheme.primary,
@@ -511,7 +512,7 @@ fun QingThemePreview(
                 modifier = Modifier.weight(1f),
             )
             PreviewSwatch(
-                label = "Secondary",
+                label = stringResource(R.string.preview_secondary),
                 shape = shape,
                 brush = null,
                 color = MaterialTheme.colorScheme.secondaryContainer,

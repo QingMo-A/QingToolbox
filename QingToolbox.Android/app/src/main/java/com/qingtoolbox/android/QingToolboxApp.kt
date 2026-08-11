@@ -1,5 +1,6 @@
 package com.qingtoolbox.android
 
+import androidx.annotation.StringRes
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -31,11 +32,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -47,17 +54,17 @@ import androidx.navigation.compose.rememberNavController
 
 private sealed class MobileDestination(
     val route: String,
-    val label: String,
+    @StringRes val labelRes: Int,
     val icon: ImageVector,
 ) {
-    data object Home : MobileDestination("home", "Home", Icons.Outlined.Home)
-    data object Tools : MobileDestination("tools", "Tools", Icons.Outlined.Build)
-    data object Devices : MobileDestination("devices", "Devices", Icons.Outlined.DevicesOther)
-    data object Settings : MobileDestination("settings", "Settings", Icons.Outlined.Settings)
-    data object FileHash : MobileDestination("tools/file-hash", "File Hash", Icons.Outlined.Calculate)
-    data object TextCodec : MobileDestination("tools/text-codec", "Text Codec", Icons.Outlined.Code)
-    data object DeviceInfo : MobileDestination("tools/device-info", "Device Info", Icons.Outlined.DevicesOther)
-    data object QrCode : MobileDestination("tools/qr-code", "QR Code", Icons.Outlined.QrCode2)
+    data object Home : MobileDestination("home", R.string.nav_home, Icons.Outlined.Home)
+    data object Tools : MobileDestination("tools", R.string.nav_tools, Icons.Outlined.Build)
+    data object Devices : MobileDestination("devices", R.string.nav_devices, Icons.Outlined.DevicesOther)
+    data object Settings : MobileDestination("settings", R.string.nav_settings, Icons.Outlined.Settings)
+    data object FileHash : MobileDestination("tools/file-hash", R.string.destination_file_hash, Icons.Outlined.Calculate)
+    data object TextCodec : MobileDestination("tools/text-codec", R.string.destination_text_codec, Icons.Outlined.Code)
+    data object DeviceInfo : MobileDestination("tools/device-info", R.string.destination_device_info, Icons.Outlined.DevicesOther)
+    data object QrCode : MobileDestination("tools/qr-code", R.string.destination_qr_code, Icons.Outlined.QrCode2)
 }
 
 private val destinations = listOf(
@@ -120,12 +127,12 @@ private fun QingToolboxShell(
                 title = {
                     Column {
                         Text(
-                            text = titleDestination.label,
+                            text = stringResource(titleDestination.labelRes),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = "QingToolbox mobile",
+                            text = stringResource(R.string.shell_subtitle),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -140,7 +147,7 @@ private fun QingToolboxShell(
                         selected = selectedDestination.route == destination.route,
                         onClick = { navigateTo(navController, destination) },
                         icon = { Icon(destination.icon, contentDescription = null) },
-                        label = { Text(destination.label) },
+                        label = { Text(stringResource(destination.labelRes)) },
                     )
                 }
             }
@@ -234,14 +241,14 @@ private fun HomeScreen(
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Welcome to QingToolbox",
+                            text = stringResource(R.string.home_welcome_title),
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = heroContentColor,
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            text = "A native Android shell for your everyday toolbox.",
+                            text = stringResource(R.string.home_welcome_body),
                             style = MaterialTheme.typography.bodyMedium,
                             color = heroContentColor,
                         )
@@ -249,45 +256,45 @@ private fun HomeScreen(
                 }
             }
         }
-        item { SectionHeader(title = "Quick tools") }
+        item { SectionHeader(title = stringResource(R.string.home_quick_tools)) }
         item {
             PlaceholderCard(
                 icon = Icons.Outlined.Calculate,
-                title = "File Hash",
-                body = "Calculate common hashes for a local file.",
+                title = stringResource(R.string.destination_file_hash),
+                body = stringResource(R.string.tool_file_hash_description),
                 onClick = onFileHashClick,
             )
         }
         item {
             PlaceholderCard(
                 icon = Icons.Outlined.Code,
-                title = "Text Codec",
-                body = "Encode and decode Base64 or URL text.",
+                title = stringResource(R.string.destination_text_codec),
+                body = stringResource(R.string.tool_text_codec_description),
                 onClick = onTextCodecClick,
             )
         }
         item {
             PlaceholderCard(
                 icon = Icons.Outlined.DevicesOther,
-                title = "Device Info",
-                body = "View Android system, hardware and app information.",
+                title = stringResource(R.string.destination_device_info),
+                body = stringResource(R.string.tool_device_info_description),
                 onClick = onDeviceInfoClick,
             )
         }
         item {
             PlaceholderCard(
                 icon = Icons.Outlined.QrCode2,
-                title = "QR Code",
-                body = "Generate and share a QR code from text.",
+                title = stringResource(R.string.destination_qr_code),
+                body = stringResource(R.string.tool_qr_code_description),
                 onClick = onQrCodeClick,
             )
         }
-        item { SectionHeader(title = "Recently used") }
+        item { SectionHeader(title = stringResource(R.string.home_recently_used)) }
         item {
             PlaceholderCard(
                 icon = Icons.Outlined.Build,
-                title = "No recent activity",
-                body = "When you use a tool, its latest activity will be easy to find here.",
+                title = stringResource(R.string.home_no_recent_activity),
+                body = stringResource(R.string.home_recent_body),
             )
         }
     }
@@ -306,36 +313,36 @@ private fun ToolsScreen(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { SectionHeader(title = "Tools") }
+        item { SectionHeader(title = stringResource(R.string.nav_tools)) }
         item {
             PlaceholderCard(
                 icon = Icons.Outlined.Calculate,
-                title = "File Hash",
-                body = "Calculate common hashes for a local file.",
+                title = stringResource(R.string.destination_file_hash),
+                body = stringResource(R.string.tool_file_hash_description),
                 onClick = onFileHashClick,
             )
         }
         item {
             PlaceholderCard(
                 icon = Icons.Outlined.Code,
-                title = "Text Codec",
-                body = "Encode and decode Base64 or URL text.",
+                title = stringResource(R.string.destination_text_codec),
+                body = stringResource(R.string.tool_text_codec_description),
                 onClick = onTextCodecClick,
             )
         }
         item {
             PlaceholderCard(
                 icon = Icons.Outlined.DevicesOther,
-                title = "Device Info",
-                body = "View Android system, hardware and app information.",
+                title = stringResource(R.string.destination_device_info),
+                body = stringResource(R.string.tool_device_info_description),
                 onClick = onDeviceInfoClick,
             )
         }
         item {
             PlaceholderCard(
                 icon = Icons.Outlined.QrCode2,
-                title = "QR Code",
-                body = "Generate and share a QR code from text.",
+                title = stringResource(R.string.destination_qr_code),
+                body = stringResource(R.string.tool_qr_code_description),
                 onClick = onQrCodeClick,
             )
         }
@@ -353,8 +360,8 @@ private fun DevicesScreen(modifier: Modifier = Modifier) {
                 tint = MaterialTheme.colorScheme.primary,
             )
         },
-        title = "No devices connected",
-        body = "Cross-device connections are planned for a future milestone.",
+        title = stringResource(R.string.devices_no_connected),
+        body = stringResource(R.string.devices_cross_future),
     )
 }
 
@@ -364,17 +371,19 @@ private fun SettingsScreen(
     onAppearanceSelected: (AppearanceTheme) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var showLanguageDialog by remember { mutableStateOf(false) }
+    val currentLanguage = AppLanguageManager.current()
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { SectionHeader(title = "Appearance") }
+        item { SectionHeader(title = stringResource(R.string.settings_appearance)) }
         item {
             SettingsSummaryCard(
                 icon = Icons.Outlined.Palette,
-                title = "Theme",
-                body = currentAppearance.label,
+                title = stringResource(R.string.settings_theme),
+                body = stringResource(currentAppearance.labelRes),
             )
         }
         item {
@@ -388,38 +397,89 @@ private fun SettingsScreen(
                 }
             }
         }
-        item { SectionHeader(title = "Language") }
+        item { SectionHeader(title = stringResource(R.string.settings_language)) }
         item {
-            QingListItem(
-                leadingContent = {
-                    Icon(Icons.Outlined.Language, contentDescription = null)
-                },
-                headlineContent = { Text("Language") },
-                supportingContent = { Text("English (default) · More languages are planned") },
-            )
+            QingClickableCard(
+                onClick = { showLanguageDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                QingListItem(
+                    leadingContent = {
+                        Icon(Icons.Outlined.Language, contentDescription = null)
+                    },
+                    headlineContent = { Text(stringResource(R.string.settings_language)) },
+                    supportingContent = {
+                        Text(stringResource(R.string.settings_language_current, stringResource(currentLanguage.labelRes)))
+                    },
+                )
+            }
         }
         item { QingDivider() }
-        item { SectionHeader(title = "About") }
+        item { SectionHeader(title = stringResource(R.string.settings_about)) }
         item {
             QingListItem(
                 leadingContent = { Icon(Icons.Outlined.Info, contentDescription = null) },
-                headlineContent = { Text("QingToolbox Android") },
-                supportingContent = { Text("A first-class mobile shell built with Jetpack Compose") },
+                headlineContent = { Text(stringResource(R.string.settings_qing_android)) },
+                supportingContent = { Text(stringResource(R.string.settings_about_body)) },
             )
         }
         item {
             QingListItem(
                 leadingContent = { Icon(Icons.Outlined.Check, contentDescription = null) },
-                headlineContent = { Text("Version") },
-                supportingContent = { Text("${BuildConfig.VERSION_NAME} · M0 shell") },
+                headlineContent = { Text(stringResource(R.string.settings_version)) },
+                supportingContent = {
+                    Text(stringResource(R.string.settings_version_body, BuildConfig.VERSION_NAME))
+                },
             )
         }
         item {
             QingStatusText(
-                text = "Root capabilities, cross-device transfer, and mobile modules are intentionally not part of M0.",
+                text = stringResource(R.string.settings_scope_note),
                 modifier = Modifier.padding(top = 4.dp, bottom = 20.dp),
             )
         }
+    }
+    if (showLanguageDialog) {
+        AlertDialog(
+            onDismissRequest = { showLanguageDialog = false },
+            title = { Text(stringResource(R.string.language_choose_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AppLanguage.entries.forEach { language ->
+                        QingClickableCard(
+                            onClick = {
+                                showLanguageDialog = false
+                                AppLanguageManager.apply(language)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            selected = language == currentLanguage,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = stringResource(language.labelRes),
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (language == currentLanguage) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Check,
+                                        contentDescription = stringResource(R.string.selected),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLanguageDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 }
 
@@ -442,12 +502,12 @@ private fun AppearanceOption(
             ThemeSwatch(theme = theme, selected = selected)
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = theme.label,
+                    text = stringResource(theme.labelRes),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 )
                 Text(
-                    text = theme.description,
+                    text = stringResource(theme.descriptionRes),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -455,7 +515,7 @@ private fun AppearanceOption(
             if (selected) {
                 Icon(
                     imageVector = Icons.Outlined.Check,
-                    contentDescription = "Selected",
+                    contentDescription = stringResource(R.string.selected),
                     tint = MaterialTheme.colorScheme.primary,
                 )
             }
@@ -514,7 +574,7 @@ private fun PlaceholderCard(
             if (onClick != null) {
                 Icon(
                     imageVector = Icons.Outlined.ChevronRight,
-                    contentDescription = "Open $title",
+                    contentDescription = stringResource(R.string.open_item_content_description, title),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

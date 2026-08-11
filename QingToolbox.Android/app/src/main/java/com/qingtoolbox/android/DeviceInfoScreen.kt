@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -45,11 +46,34 @@ fun DeviceInfoScreen(modifier: Modifier = Modifier) {
     val snapshot = remember(context) { DeviceInfoProvider.read(context) }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val unavailable = stringResource(R.string.unavailable)
+    val summaryLabels = DeviceInfoSummaryLabels(
+        device = stringResource(R.string.device_info_section_device),
+        manufacturer = stringResource(R.string.device_info_manufacturer),
+        brand = stringResource(R.string.device_info_brand),
+        model = stringResource(R.string.device_info_model),
+        deviceCodename = stringResource(R.string.device_info_device),
+        product = stringResource(R.string.device_info_product),
+        android = stringResource(R.string.device_info_section_android),
+        version = stringResource(R.string.device_info_version),
+        buildId = stringResource(R.string.device_info_build_id),
+        securityPatch = stringResource(R.string.device_info_security_patch),
+        hardware = stringResource(R.string.device_info_section_hardware),
+        supportedAbis = stringResource(R.string.device_info_supported_abis),
+        availableProcessors = stringResource(R.string.device_info_available_processors),
+        display = stringResource(R.string.device_info_section_display),
+        size = stringResource(R.string.device_info_screen_size),
+        density = stringResource(R.string.device_info_density),
+        app = stringResource(R.string.device_info_section_app),
+        qingToolbox = stringResource(R.string.device_info_qingtoolbox),
+        packageName = stringResource(R.string.device_info_package),
+        unavailable = unavailable,
+    )
 
     fun copyValue(label: String, value: String) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         clipboard?.setPrimaryClip(ClipData.newPlainText(label, value))
-        scope.launch { snackbarHostState.showSnackbar("Copied $label") }
+        scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.copied_value, label)) }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -60,74 +84,93 @@ fun DeviceInfoScreen(modifier: Modifier = Modifier) {
         ) {
             item {
                 DeviceInfoHero(
-                    onCopySummary = { copyValue("summary", DeviceInfoFormat.summary(snapshot)) },
+                    onCopySummary = {
+                        copyValue(
+                            context.getString(R.string.device_info_summary),
+                            DeviceInfoFormat.summary(snapshot, summaryLabels),
+                        )
+                    },
                 )
             }
             item {
                 DeviceInfoGroup(
-                    title = "Device",
+                    title = stringResource(R.string.device_info_section_device),
                     icon = Icons.Outlined.DevicesOther,
                 ) {
-                    DeviceInfoRow("Manufacturer", snapshot.manufacturer)
-                    DeviceInfoRow("Brand", snapshot.brand)
-                    DeviceInfoRow("Model", snapshot.model) { copyValue("Model", snapshot.model) }
-                    DeviceInfoRow("Device", snapshot.device)
-                    DeviceInfoRow("Product", snapshot.product)
+                    DeviceInfoRow(stringResource(R.string.device_info_manufacturer), snapshot.manufacturer)
+                    DeviceInfoRow(stringResource(R.string.device_info_brand), snapshot.brand)
+                    DeviceInfoRow(stringResource(R.string.device_info_model), snapshot.model) {
+                        copyValue(context.getString(R.string.device_info_model), snapshot.model)
+                    }
+                    DeviceInfoRow(stringResource(R.string.device_info_device), snapshot.device)
+                    DeviceInfoRow(stringResource(R.string.device_info_product), snapshot.product)
                 }
             }
             item {
                 DeviceInfoGroup(
-                    title = "Android",
+                    title = stringResource(R.string.device_info_section_android),
                     icon = Icons.Outlined.Info,
                 ) {
                     DeviceInfoRow(
-                        label = "Android version / API",
-                        value = DeviceInfoFormat.androidVersion(snapshot.androidVersion, snapshot.apiLevel),
+                        label = stringResource(R.string.device_info_android_version_api),
+                        value = DeviceInfoFormat.androidVersion(snapshot.androidVersion, snapshot.apiLevel, unavailable),
                     ) {
-                        copyValue("Android version", DeviceInfoFormat.androidVersion(snapshot.androidVersion, snapshot.apiLevel))
+                        copyValue(
+                            context.getString(R.string.device_info_android_version),
+                            DeviceInfoFormat.androidVersion(snapshot.androidVersion, snapshot.apiLevel, unavailable),
+                        )
                     }
-                    DeviceInfoRow("Build ID", snapshot.buildId) { copyValue("Build ID", snapshot.buildId) }
+                    DeviceInfoRow(stringResource(R.string.device_info_build_id), snapshot.buildId) {
+                        copyValue(context.getString(R.string.device_info_build_id), snapshot.buildId)
+                    }
                     snapshot.securityPatch?.let { patch ->
-                        DeviceInfoRow("Security patch", patch)
+                        DeviceInfoRow(stringResource(R.string.device_info_security_patch), patch)
                     }
                 }
             }
             item {
                 DeviceInfoGroup(
-                    title = "Hardware",
+                    title = stringResource(R.string.device_info_section_hardware),
                     icon = Icons.Outlined.Build,
                 ) {
-                    val abiText = DeviceInfoFormat.abiList(snapshot.supportedAbis)
-                    DeviceInfoRow("Supported ABIs", abiText) { copyValue("Supported ABIs", abiText) }
-                    DeviceInfoRow("Available processors", snapshot.availableProcessors.toString())
+                    val abiText = DeviceInfoFormat.abiList(snapshot.supportedAbis, unavailable)
+                    DeviceInfoRow(stringResource(R.string.device_info_supported_abis), abiText) {
+                        copyValue(context.getString(R.string.device_info_supported_abis), abiText)
+                    }
+                    DeviceInfoRow(
+                        stringResource(R.string.device_info_available_processors),
+                        snapshot.availableProcessors.toString(),
+                    )
                 }
             }
             item {
                 DeviceInfoGroup(
-                    title = "Display",
+                    title = stringResource(R.string.device_info_section_display),
                     icon = Icons.Outlined.DisplaySettings,
                 ) {
                     DeviceInfoRow(
-                        "Screen size",
+                        stringResource(R.string.device_info_screen_size),
                         DeviceInfoFormat.displaySize(snapshot.displayWidthPixels, snapshot.displayHeightPixels),
                     )
-                    DeviceInfoRow("Density", DeviceInfoFormat.density(snapshot.displayDensity))
-                    DeviceInfoRow("Density DPI", DeviceInfoFormat.densityDpi(snapshot.displayDensityDpi))
+                    DeviceInfoRow(stringResource(R.string.device_info_density), DeviceInfoFormat.density(snapshot.displayDensity))
+                    DeviceInfoRow(stringResource(R.string.device_info_density_dpi), DeviceInfoFormat.densityDpi(snapshot.displayDensityDpi))
                 }
             }
             item {
                 DeviceInfoGroup(
-                    title = "App",
+                    title = stringResource(R.string.device_info_section_app),
                     icon = Icons.Outlined.Code,
                 ) {
-                    val versionText = DeviceInfoFormat.appVersion(snapshot.appVersionName, snapshot.appVersionCode)
-                    DeviceInfoRow("QingToolbox", versionText) { copyValue("App version", versionText) }
-                    DeviceInfoRow("Package", snapshot.appPackageName)
+                    val versionText = DeviceInfoFormat.appVersion(snapshot.appVersionName, snapshot.appVersionCode, unavailable)
+                    DeviceInfoRow(stringResource(R.string.device_info_qingtoolbox), versionText) {
+                        copyValue(context.getString(R.string.device_info_app_version), versionText)
+                    }
+                    DeviceInfoRow(stringResource(R.string.device_info_package), snapshot.appPackageName)
                 }
             }
             item {
                 QingStatusText(
-                    text = "Reads public device and app properties only. Nothing is stored or uploaded.",
+                    text = stringResource(R.string.device_info_status),
                     modifier = Modifier.padding(top = 4.dp, bottom = 20.dp),
                 )
             }
@@ -161,12 +204,12 @@ private fun DeviceInfoHero(onCopySummary: () -> Unit) {
                 }
                 Column {
                     Text(
-                        text = "Device Info",
+                        text = stringResource(R.string.device_info_title),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "A quick, permission-free view of this device.",
+                        text = stringResource(R.string.device_info_body),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -178,7 +221,7 @@ private fun DeviceInfoHero(onCopySummary: () -> Unit) {
             ) {
                 Icon(Icons.Outlined.ContentCopy, contentDescription = null)
                 Spacer(Modifier.size(8.dp))
-                Text("Copy summary")
+                Text(stringResource(R.string.device_info_copy_summary))
             }
         }
     }
@@ -236,7 +279,7 @@ private fun ColumnScope.DeviceInfoRow(
             IconButton(onClick = onCopy) {
                 Icon(
                     imageVector = Icons.Outlined.ContentCopy,
-                    contentDescription = "Copy $label",
+                    contentDescription = stringResource(R.string.copy_value_content_description, label),
                     tint = MaterialTheme.colorScheme.primary,
                 )
             }
