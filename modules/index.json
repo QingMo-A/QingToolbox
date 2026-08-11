@@ -11,6 +11,9 @@
     "qing.texttools": {
       "updateManifest": "TextTools/update.json"
     },
+    "qing.qingtransfer": {
+      "updateManifest": "QingTransfer/update.json"
+    },
     "qing.windowtopmost": {
       "updateManifest": "WindowTopmost/update.json"
     }

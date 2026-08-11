@@ -1,0 +1,21 @@
+{
+  "module.name": "QingTransfer",
+  "module.description": "Transfer files between QingToolbox devices on the local network.",
+  "view.title": "QingTransfer",
+  "view.subtitle": "Discover nearby QingToolbox devices on this local network.",
+  "view.empty": "No QingToolbox devices are online yet.",
+  "view.hint": "Discovery uses local DNS-SD. No connection or transfer is started here.",
+  "view.footer": "Nearby devices",
+  "status.searching": "Looking for nearby devices...",
+  "status.paused": "Discovery paused.",
+  "status.failed": "Discovery is unavailable: ",
+  "status.online": "Online",
+  "platform.windows": "Windows",
+  "platform.android": "Android",
+  "actions.refresh": "Refresh",
+  "columns.device": "Device",
+  "columns.platform": "Platform",
+  "columns.status": "Status",
+  "columns.endpoint": "Endpoint",
+  "automation.peerList": "Nearby QingTransfer devices"
+}

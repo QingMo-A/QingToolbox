@@ -8,6 +8,7 @@ The official QingToolbox module set contains independently packaged, manually lo
 | PowerGuard | Confirms a sustained connectivity outage and can request a normal Windows shutdown after an explicit opt-in countdown. | 0.1.1 | 0.1.0 | Manual | Network probes and optional, user-enabled normal shutdown. No service, scheduled task, tray process, remote commands, or forced shutdown. | `qing.powerguard-0.1.1.qmod` |
 | WindowTopmost | Lists eligible visible windows and toggles their always-on-top state. | 0.1.1 | 0.1.0 | Manual | Calls bounded Win32 window enumeration and positioning APIs only after user action. | `qing.windowtopmost-0.1.1.qmod` |
 | ScreenPin | Captures a selected screen region and keeps it visible in a resizable floating window. | 0.1.1 | 0.1.0 | Manual | Captures only after explicit user action and creates user-controlled floating image windows. | `qing.screenpin-0.1.1.qmod` |
+| QingTransfer | Discovers nearby QingToolbox devices with local DNS-SD; D0 has no transfer or pairing action. | 0.1.0 | 0.1.0 | Manual | Advertises an ephemeral TCP endpoint and closes unexpected connections; no data protocol. | `qing.qingtransfer-0.1.0.qmod` |
 
 Each package has a same-name SHA256 sidecar, for example `qing.texttools-0.1.1.qmod.sha256`.
 

@@ -1,0 +1,21 @@
+{
+  "module.name": "QingTransfer",
+  "module.description": "在局域网中的 QingToolbox 设备之间传输文件。",
+  "view.title": "QingTransfer",
+  "view.subtitle": "发现当前局域网中的 QingToolbox 附近设备。",
+  "view.empty": "暂无在线的 QingToolbox 设备。",
+  "view.hint": "通过本地 DNS-SD 发现，此处不会建立连接或传输。",
+  "view.footer": "附近设备",
+  "status.searching": "正在查找附近设备...",
+  "status.paused": "发现已暂停。",
+  "status.failed": "无法使用发现：",
+  "status.online": "在线",
+  "platform.windows": "Windows",
+  "platform.android": "Android",
+  "actions.refresh": "刷新",
+  "columns.device": "设备",
+  "columns.platform": "平台",
+  "columns.status": "状态",
+  "columns.endpoint": "端点",
+  "automation.peerList": "QingTransfer 附近设备"
+}

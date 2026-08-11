@@ -1,0 +1,21 @@
+{
+  "id": "qing.qingtransfer",
+  "name": "QingTransfer",
+  "description": "Transfer files between QingToolbox devices on the local network.",
+  "version": "0.1.0",
+  "author": "QingMo",
+  "minimumHostVersion": "0.1.0",
+  "entry": "QingToolbox.Modules.QingTransfer.dll",
+  "runtimeType": "InProcess",
+  "loadMode": "Manual",
+  "permissions": [],
+  "icon": "icon.svg",
+  "defaultLanguage": "en-US",
+  "localization": {
+    "basePath": "i18n",
+    "resources": {
+      "en-US": "i18n/en-US.json",
+      "zh-CN": "i18n/zh-CN.json"
+    }
+  }
+}
