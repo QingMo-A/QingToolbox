@@ -155,14 +155,27 @@ function Assert-ReleaseInputs {
     if ($Version -cne $ConfirmVersion) {
         throw "The two target version entries must match exactly."
     }
-    if (-not (Test-StrictSemVer $Version)) {
-        throw "Target version '$Version' is not a valid SemVer 2.0 value."
+
+    # The GitHub UI and this BAT display tags with a leading v. Accept the same
+    # notation from the user, but keep build metadata and asset names on the
+    # repository's canonical bare SemVer value.
+    $normalizedVersion = if ($Version.StartsWith("v", [StringComparison]::OrdinalIgnoreCase)) {
+        $Version.Substring(1)
+    } else { $Version }
+    if (-not (Test-StrictSemVer $normalizedVersion)) {
+        throw "Target version '$Version' is not a valid SemVer 2.0 value or v-prefixed release tag."
     }
+    $Version = $normalizedVersion
+    $ConfirmVersion = $normalizedVersion
+    $script:Version = $normalizedVersion
+    $script:ConfirmVersion = $normalizedVersion
 
     . (Join-Path $PSScriptRoot "get-preview-release-metadata.ps1")
     $metadata = Get-PreviewReleaseMetadata
     if ([string]$metadata.Version -cne $Version) {
-        throw "Target version '$Version' does not match Directory.Build.props Version '$($metadata.Version)'."
+        throw "Target version '$Version' is not prepared in this checkout. " +
+            "Directory.Build.props still declares '$($metadata.Version)'. Prepare and commit the target " +
+            "version metadata plus docs/releases/$Version.md, push toolbox, then run the BAT again."
     }
 
     $notesPath = Join-Path (Join-Path $repoRoot "docs\releases") "$Version.md"

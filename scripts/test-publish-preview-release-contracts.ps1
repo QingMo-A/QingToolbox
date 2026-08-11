@@ -66,11 +66,24 @@ foreach ($contract in @(
         'QING_RELEASE_VERSION_FIRST',
         'QING_RELEASE_VERSION_SECOND',
         'Test-StrictSemVer',
+        'StartsWith("v", [StringComparison]::OrdinalIgnoreCase)',
+        '$script:Version = $normalizedVersion',
         'Get-PreviewReleaseMetadata',
         'docs\releases',
         'Target version',
         'Version -cne $ConfirmVersion')) {
     Assert-Contains $orchestrator $contract
+}
+
+$releaseMetadata = & (Join-Path $PSScriptRoot 'get-preview-release-metadata.ps1')
+$prefixedVersion = "v$($releaseMetadata.Version)"
+$prefixedTestOutput = @(& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
+    -File $orchestratorPath -Version $prefixedVersion -ConfirmVersion $prefixedVersion -TestMode 2>&1)
+$prefixedTestExitCode = $LASTEXITCODE
+$prefixedTestText = ($prefixedTestOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+if ($prefixedTestExitCode -ne 0 -or
+    $prefixedTestText -notmatch [regex]::Escape("validated $($releaseMetadata.Version)")) {
+    throw "The release hand-off does not accept and normalize its displayed v-prefixed tag.`n$($prefixedTestOutput -join [Environment]::NewLine)"
 }
 
 # PowerShell 5.1 strict mode must still represent a clean diff as an empty
