@@ -42,8 +42,11 @@ $orchestrator = Get-Content -LiteralPath $orchestratorPath -Raw
 if (([regex]::Matches($bat, '(?im)^\s*set\s+/p\s+')).Count -ne 2) {
     throw "Release BAT must prompt for the target version exactly twice."
 }
-Assert-Contains $bat 'gh release view --repo QingMo-A/QingToolbox' 'BAT does not display the latest remote Release first.'
+Assert-Contains $bat 'gh release list --repo QingMo-A/QingToolbox --limit 1' 'BAT does not display the latest published Release first.'
 Assert-Contains $bat '-json tagName,name' 'BAT does not request the remote Release tag/version.'
+if ($bat -match 'gh release view --repo QingMo-A/QingToolbox(?!.*\bv)') {
+    throw 'BAT uses gh release view without a tag, which fails when every public Release is a prerelease.'
+}
 Assert-Contains $bat '-ReadVersionFromEnvironment' 'BAT does not use the fixed environment-data handoff.'
 if ($bat -match '%QING_RELEASE_VERSION_(?:FIRST|SECOND)%') {
     throw 'Release BAT interpolates an untrusted version into a command line.'

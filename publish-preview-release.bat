@@ -7,7 +7,10 @@ rem containing ! is never re-expanded by cmd.exe.
 set "SCRIPT_DIR=%~dp0"
 
 echo Latest QingMo-A/QingToolbox release:
-gh release view --repo QingMo-A/QingToolbox --json tagName,name --template "{{.tagName}} ({{.name}})"
+rem `gh release view` without a tag ignores repositories that only have
+rem prereleases.  The product is currently alpha-only, so list the newest
+rem published Release explicitly instead.
+gh release list --repo QingMo-A/QingToolbox --limit 1 --json tagName,name,publishedAt --template "{{range .}}{{.tagName}} ({{.name}}){{end}}"
 if errorlevel 1 (
     echo Unable to query the latest QingMo-A/QingToolbox Release. >&2
     pause
