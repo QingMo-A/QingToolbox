@@ -79,6 +79,10 @@ foreach ($contract in @(
 if ($orchestrator -notmatch '(?s)\$diffIssues\s*=\s*@\(\s*@\(.*?diff.*?--check.*?diff.*?--cached.*?--check.*?\)\s*\|\s*Where-Object.*?\s*\)') {
     throw 'Clean diff output is not protected by an outer array expression.'
 }
+if (([regex]::Matches($orchestrator, '\$previousErrorActionPreference\s*=\s*\$ErrorActionPreference')).Count -lt 5 -or
+    ([regex]::Matches($orchestrator, '\$ErrorActionPreference\s*=\s*["'']Continue["'']')).Count -lt 5) {
+    throw 'Native git/gh capture does not protect normal stderr under Windows PowerShell 5.1 strict error handling.'
+}
 
 # Source, authentication, and existing tag/Release guards.
 foreach ($contract in @(

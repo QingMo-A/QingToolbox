@@ -67,8 +67,17 @@ function Test-StrictSemVer {
 function Invoke-Git {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-    $output = @(& git -C $repoRoot @Arguments 2>&1)
-    $exitCode = $LASTEXITCODE
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        # Windows PowerShell 5.1 turns any native stderr record into a
+        # terminating NativeCommandError when Stop is active. Git legitimately
+        # writes fetch progress to stderr, so capture both streams and decide
+        # success exclusively from the native exit code.
+        $ErrorActionPreference = "Continue"
+        $output = @(& git -C $repoRoot @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousErrorActionPreference }
     if ($exitCode -ne 0) {
         throw "Git failed (exit $exitCode): git -C `"$repoRoot`" $($Arguments -join ' ')`n$(Get-OutputText $output)"
     }
@@ -78,18 +87,29 @@ function Invoke-Git {
 function Invoke-GitProbe {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-    $output = @(& git -C $repoRoot @Arguments 2>&1)
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = @(& git -C $repoRoot @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousErrorActionPreference }
     return [pscustomobject]@{
         Output = $output
-        ExitCode = $LASTEXITCODE
+        ExitCode = $exitCode
     }
 }
 
 function Invoke-Gh {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-    $output = @(& gh @Arguments 2>&1)
-    $exitCode = $LASTEXITCODE
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = @(& gh @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousErrorActionPreference }
     if ($exitCode -ne 0) {
         throw "GitHub CLI failed (exit $exitCode): gh $($Arguments -join ' ')`n$(Get-OutputText $output)"
     }
@@ -99,10 +119,16 @@ function Invoke-Gh {
 function Invoke-GhProbe {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-    $output = @(& gh @Arguments 2>&1)
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = @(& gh @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousErrorActionPreference }
     return [pscustomobject]@{
         Output = $output
-        ExitCode = $LASTEXITCODE
+        ExitCode = $exitCode
     }
 }
 
@@ -349,8 +375,13 @@ function Wait-ForSuccessfulWorkflowRun {
 
     $runId = [long]$Run.databaseId
     Write-Host "Watching workflow_dispatch run $runId (HEAD $ExpectedHeadSha)."
-    $watchOutput = @(& gh run watch ([string]$runId) --repo $repository --exit-status 2>&1)
-    $watchExitCode = $LASTEXITCODE
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $watchOutput = @(& gh run watch ([string]$runId) --repo $repository --exit-status 2>&1)
+        $watchExitCode = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousErrorActionPreference }
     $finalRun = Get-WorkflowRun $runId
     Assert-ExactWorkflowRun -Run $finalRun -ExpectedHeadSha $ExpectedHeadSha -ExpectedBranch $ExpectedBranch
     if ($watchExitCode -ne 0 -or [string]$finalRun.status -ne "completed" -or
