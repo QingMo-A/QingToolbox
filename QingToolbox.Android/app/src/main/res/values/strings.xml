@@ -25,6 +25,18 @@
     <string name="devices_no_connected">No devices connected</string>
     <string name="devices_cross_future">Cross-device connections are planned for a future milestone.</string>
 
+    <string name="qing_transfer_title">QingTransfer</string>
+    <string name="qing_transfer_body">Discover nearby QingToolbox devices on this local network.</string>
+    <string name="qing_transfer_searching">Looking for nearby devices...</string>
+    <string name="qing_transfer_empty">No QingToolbox devices are online yet.</string>
+    <string name="qing_transfer_hint">Discovery uses local DNS-SD. No connection or transfer is started here.</string>
+    <string name="qing_transfer_error">Local discovery is unavailable right now.</string>
+    <string name="qing_transfer_refresh">Refresh</string>
+    <string name="qing_transfer_online">Online</string>
+    <string name="qing_transfer_offline">Offline</string>
+    <string name="qing_transfer_windows">Windows</string>
+    <string name="qing_transfer_android">Android</string>
+
     <string name="settings_appearance">Appearance</string>
     <string name="settings_theme">Theme</string>
     <string name="settings_language">Language</string>

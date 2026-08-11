@@ -177,7 +177,7 @@ private fun QingToolboxShell(
                     onQrCodeClick = { navigateTo(navController, MobileDestination.QrCode) },
                 )
             }
-            composable(MobileDestination.Devices.route) { DevicesScreen() }
+            composable(MobileDestination.Devices.route) { QingTransferDevicesScreen() }
             composable(MobileDestination.FileHash.route) { FileHashScreen() }
             composable(MobileDestination.TextCodec.route) { TextCodecScreen() }
             composable(MobileDestination.DeviceInfo.route) { DeviceInfoScreen() }
@@ -347,22 +347,6 @@ private fun ToolsScreen(
             )
         }
     }
-}
-
-@Composable
-private fun DevicesScreen(modifier: Modifier = Modifier) {
-    QingEmptyState(
-        modifier = modifier,
-        icon = {
-            Icon(
-                imageVector = Icons.Outlined.DevicesOther,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-        },
-        title = stringResource(R.string.devices_no_connected),
-        body = stringResource(R.string.devices_cross_future),
-    )
 }
 
 @Composable

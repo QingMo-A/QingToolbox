@@ -25,6 +25,18 @@
     <string name="devices_no_connected">暂无已连接设备</string>
     <string name="devices_cross_future">跨设备连接将在后续里程碑中提供。</string>
 
+    <string name="qing_transfer_title">QingTransfer</string>
+    <string name="qing_transfer_body">发现当前局域网中的 QingToolbox 附近设备。</string>
+    <string name="qing_transfer_searching">正在查找附近设备...</string>
+    <string name="qing_transfer_empty">暂无在线的 QingToolbox 设备。</string>
+    <string name="qing_transfer_hint">通过本地 DNS-SD 发现，此处不会建立连接或传输。</string>
+    <string name="qing_transfer_error">暂时无法使用本地发现。</string>
+    <string name="qing_transfer_refresh">刷新</string>
+    <string name="qing_transfer_online">在线</string>
+    <string name="qing_transfer_offline">离线</string>
+    <string name="qing_transfer_windows">Windows</string>
+    <string name="qing_transfer_android">Android</string>
+
     <string name="settings_appearance">外观</string>
     <string name="settings_theme">主题</string>
     <string name="settings_language">语言</string>
