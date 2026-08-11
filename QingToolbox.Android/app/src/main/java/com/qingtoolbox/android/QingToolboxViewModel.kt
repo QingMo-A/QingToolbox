@@ -18,7 +18,7 @@ enum class AppearanceTheme(
     NEON_CIRCUIT("neon-circuit", "Neon Circuit", "High-contrast cyan and electric green"),
     GREENLINE("greenline", "Greenline", "Focused green accents for a practical workspace"),
     AURORA_FLOW("aurora-flow", "Aurora Flow", "Cool blue-violet tones with a soft glow"),
-    QING_NOVA("qing-nova", "Qing Nova", "Confident violet and rose for a brighter mood"),
+    QING_NOVA("qing-nova", "Qing Nova", "Deep blue-green with a focused technical glow"),
     ;
 
     companion object {

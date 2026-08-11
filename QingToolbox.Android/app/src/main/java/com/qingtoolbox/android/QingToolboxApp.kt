@@ -1,8 +1,6 @@
 package com.qingtoolbox.android
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,17 +24,11 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -46,7 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -124,9 +115,9 @@ private fun QingToolboxShell(
             )
         },
         bottomBar = {
-            NavigationBar {
+            QingNavigationBar {
                 destinations.forEach { destination ->
-                    NavigationBarItem(
+                    QingNavigationBarItem(
                         selected = currentDestination.route == destination.route,
                         onClick = { navigateTo(navController, destination) },
                         icon = { Icon(destination.icon, contentDescription = null) },
@@ -169,47 +160,47 @@ private fun navigateTo(navController: NavHostController, destination: MobileDest
 
 @Composable
 private fun HomeScreen(modifier: Modifier = Modifier) {
+    val heroContentColor = if (LocalQingAppearance.current.primaryBrush() != null) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
-            Surface(
+            QingHeroCard(
                 modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = MaterialTheme.shapes.extraLarge,
             ) {
                 Row(
-                    modifier = Modifier.padding(20.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Surface(
+                    QingIconSurface(
                         modifier = Modifier.size(56.dp),
-                        shape = MaterialTheme.shapes.large,
-                        color = MaterialTheme.colorScheme.primary,
+                        usePrimaryBrush = true,
+                        containerColor = MaterialTheme.colorScheme.primary,
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Outlined.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                        )
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Welcome to QingToolbox",
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            color = heroContentColor,
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
                             text = "A native Android shell for your everyday toolbox.",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            color = heroContentColor,
                         )
                     }
                 }
@@ -236,9 +227,15 @@ private fun HomeScreen(modifier: Modifier = Modifier) {
 
 @Composable
 private fun ToolsScreen(modifier: Modifier = Modifier) {
-    EmptyStateScreen(
+    QingEmptyState(
         modifier = modifier,
-        icon = Icons.Outlined.Build,
+        icon = {
+            Icon(
+                imageVector = Icons.Outlined.Build,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        },
         title = "No tools yet",
         body = "QingToolbox mobile tools will appear here as they become available.",
     )
@@ -246,9 +243,15 @@ private fun ToolsScreen(modifier: Modifier = Modifier) {
 
 @Composable
 private fun DevicesScreen(modifier: Modifier = Modifier) {
-    EmptyStateScreen(
+    QingEmptyState(
         modifier = modifier,
-        icon = Icons.Outlined.DevicesOther,
+        icon = {
+            Icon(
+                imageVector = Icons.Outlined.DevicesOther,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        },
         title = "No devices connected",
         body = "Cross-device connections are planned for a future milestone.",
     )
@@ -286,7 +289,7 @@ private fun SettingsScreen(
         }
         item { SectionHeader(title = "Language") }
         item {
-            ListItem(
+            QingListItem(
                 leadingContent = {
                     Icon(Icons.Outlined.Language, contentDescription = null)
                 },
@@ -297,24 +300,22 @@ private fun SettingsScreen(
         item { HorizontalDivider() }
         item { SectionHeader(title = "About") }
         item {
-            ListItem(
+            QingListItem(
                 leadingContent = { Icon(Icons.Outlined.Info, contentDescription = null) },
                 headlineContent = { Text("QingToolbox Android") },
                 supportingContent = { Text("A first-class mobile shell built with Jetpack Compose") },
             )
         }
         item {
-            ListItem(
+            QingListItem(
                 leadingContent = { Icon(Icons.Outlined.Check, contentDescription = null) },
                 headlineContent = { Text("Version") },
                 supportingContent = { Text("${BuildConfig.VERSION_NAME} · M0 shell") },
             )
         }
         item {
-            Text(
+            QingStatusText(
                 text = "Root capabilities, cross-device transfer, and mobile modules are intentionally not part of M0.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp, bottom = 20.dp),
             )
         }
@@ -327,22 +328,9 @@ private fun AppearanceOption(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        border = if (selected) {
-            BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
-        } else {
-            null
-        },
-        colors = CardDefaults.cardColors(
-            containerColor = if (selected) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerLow
-            },
-        ),
+    QingClickableCard(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -370,6 +358,10 @@ private fun AppearanceOption(
                 )
             }
         }
+        QingThemePreview(
+            theme = theme,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp),
+        )
     }
 }
 
@@ -380,81 +372,29 @@ private fun ThemeSwatch(theme: AppearanceTheme, selected: Boolean) {
         AppearanceTheme.NEON_CIRCUIT -> androidx.compose.ui.graphics.Color(0xFF006874)
         AppearanceTheme.GREENLINE -> androidx.compose.ui.graphics.Color(0xFF426500)
         AppearanceTheme.AURORA_FLOW -> androidx.compose.ui.graphics.Color(0xFF465D91)
-        AppearanceTheme.QING_NOVA -> androidx.compose.ui.graphics.Color(0xFF7A4A7E)
+        AppearanceTheme.QING_NOVA -> androidx.compose.ui.graphics.Color(0xFF4C9AFF)
     }
-    Surface(
+    QingIconSurface(
         modifier = Modifier.size(if (selected) 44.dp else 40.dp),
-        shape = MaterialTheme.shapes.large,
-        color = color,
+        containerColor = color,
     ) {}
 }
 
 @Composable
-private fun EmptyStateScreen(
-    icon: ImageVector,
-    title: String,
-    body: String,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            ),
-        ) {
-            Column(
-                modifier = Modifier.padding(28.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center,
-                )
-                Text(
-                    text = body,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun PlaceholderCard(icon: ImageVector, title: String, body: String) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
+    QingCard(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.padding(18.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(28.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
+            QingIconSurface(modifier = Modifier.size(44.dp)) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
             Column {
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(4.dp))
@@ -470,13 +410,8 @@ private fun PlaceholderCard(icon: ImageVector, title: String, body: String) {
 
 @Composable
 private fun SettingsSummaryCard(icon: ImageVector, title: String, body: String) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        ListItem(
+    QingCard(modifier = Modifier.fillMaxWidth()) {
+        QingListItem(
             leadingContent = { Icon(icon, contentDescription = null) },
             headlineContent = { Text(title) },
             supportingContent = { Text(body) },
