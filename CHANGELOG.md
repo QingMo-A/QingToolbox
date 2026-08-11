@@ -2,7 +2,15 @@
 
 ## Unreleased
 
-- Added searchable system-font selection and managed font-file imports with a reliable Restore default action across the native and Vue workspaces.
+## 0.2.5-alpha - 2026-08-11
+
+- Added five composable appearance presets with distinct shared-control states across light and dark modes.
+- Added searchable system-font selection, managed font-file imports, a cached installed-font catalog, and an explicit refresh action.
+- Synchronized font and appearance changes with the native title bar and retained a reliable Restore default action.
+- Projected validated module SVG icons into the Vue workspace with safe fallbacks.
+- Refined sidebar icon alignment, caption-button interactions, window corners, and floating-badge placement restoration.
+- Added a double-confirmed GitHub Actions release hand-off and hardened it for prerelease discovery, clean worktrees, native stderr, and `v`-prefixed tags.
+- Updated the installer upgrade gate and obsolete-host cleanup baseline for `v0.2.4-alpha` to `0.2.5-alpha`.
 
 ## 0.2.4-alpha - 2026-08-01
 

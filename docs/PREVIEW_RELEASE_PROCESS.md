@@ -1,8 +1,8 @@
 # Preview Release Candidate Process
 
-本文说明 QingToolbox `0.2.4-alpha` 的安装器唯一 Release Candidate 构建与人工发布交接流程。
+本文说明 QingToolbox `0.2.5-alpha` 的安装器唯一 Release Candidate 构建与人工发布交接流程。
 
-0.2.4-alpha RC 必须使用经过官方 SHA256 sidecar 验证的 `v0.2.3-alpha` 安装器，
+0.2.5-alpha RC 必须使用经过官方 SHA256 sidecar 验证的 `v0.2.4-alpha` 安装器，
 完成原地覆盖、同版本修复、降级拒绝、用户状态保留和单一卸载身份验证。
 该流程只验证候选产物，不创建 GitHub Release、tag，也不上传正式发布资产。
 
@@ -73,7 +73,7 @@ RC 脚本和 CI 都不会替发布者创建 Release/tag，不会推送代码，�
 `artifacts/`，也不会更改版本或签名状态。
 
 `0.2.0-alpha` 是未发布的 Preview 2 内部开发目标，不是可下载的官方升级来源。真实
-`v0.2.3-alpha → 0.2.4-alpha` 升级测试会启动 Production 模式的旧宿主。Windows Known Folder 不能通过修改
+`v0.2.4-alpha → 0.2.5-alpha` 升级测试会启动 Production 模式的旧宿主。Windows Known Folder 不能通过修改
 `APPDATA`/`LOCALAPPDATA` 环境变量安全重定向，因此该自动化只允许在一次性 GitHub Actions
 Windows 账户中运行。普通本机 RC 应将这一阶段报告为 **Blocked**，不得强制关闭用户 Shell 或
 以真实用户配置换取测试通过。

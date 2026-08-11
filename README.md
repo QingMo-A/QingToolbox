@@ -21,9 +21,9 @@ QingToolbox 以当前 Windows 用户为范围保持单实例运行。Pipe Server
 QingToolbox 是面向 Windows 的轻量模块化工具箱。Shell 提供现代化界面、
 模块发现和生命周期管理，实际工具功能由独立模块按需提供。
 
-当前 Alpha：**0.2.4-alpha**（发布 Tag：`v0.2.4-alpha`）。该版本修复安装维护期间无法可靠关闭托盘宿主的问题，并延续 Vue 外观与原生标题栏同步、宿主安全更新、
+当前 Alpha：**0.2.5-alpha**（发布 Tag：`v0.2.5-alpha`）。该版本新增可组合外观预设、受控字体选择与导入，并让 Vue 工作区和原生标题栏共享一致的字体与主题表现，同时延续宿主安全更新、
 真正的最近使用模块和一键启动体验，但仍不是正式稳定版，也不代表生产环境可用。
-正式下载仅提供 `QingToolbox-0.2.4-alpha-win-x64-setup.exe` 及其同名 SHA256；安装器
+正式下载仅提供 `QingToolbox-0.2.5-alpha-win-x64-setup.exe` 及其同名 SHA256；安装器
 尚未数字签名。TextTools、PowerGuard 和 WindowTopmost 继续独立交付，不随安装器提供。
 
 ## 主要功能
@@ -45,7 +45,7 @@ QingToolbox 是面向 Windows 的轻量模块化工具箱。Shell 提供现代�
 
 ### 当前用户安装版
 
-当前发布使用 `QingToolbox-0.2.4-alpha-win-x64-setup.exe`。安装器基于 Inno Setup，
+当前发布使用 `QingToolbox-0.2.5-alpha-win-x64-setup.exe`。安装器基于 Inno Setup，
 只为当前用户安装，不需要管理员权限，也不会触发 UAC。默认目录为：
 
 ```text
@@ -79,7 +79,7 @@ Release 页面，不会猜测安装目录或自动启动安装器。
 
 TextTools `0.1.1`、PowerGuard `0.1.0` 和 WindowTopmost `0.1.1` 已在 modules 提交
 `c4c1b8fe15a37c16b38192aab3b26735bc232be6` 单独完成适配与 `.qmod` 验证。宿主安装器和
-宿主 `0.2.4-alpha` Release 均不捆绑模块 DLL 或 `.qmod`；这些模块将由项目所有者通过独立模块
+宿主 `0.2.5-alpha` Release 均不捆绑模块 DLL 或 `.qmod`；这些模块将由项目所有者通过独立模块
 交付路径提供。安装宿主、启动宿主或刷新模块不会自动加载或执行它们。
 
 开发环境运行：
@@ -100,7 +100,7 @@ dotnet run --project QingToolbox.Shell
 
 ## `.qmod` 安全提醒
 
-`.qmod` 本质是 ZIP 模块包。`0.2.4-alpha` 尚未实现包签名；模块加载后拥有
+`.qmod` 本质是 ZIP 模块包。`0.2.5-alpha` 尚未实现包签名；模块加载后拥有
 当前用户权限，因此只应导入可信来源模块。格式和校验规则参见
 [`docs/QMOD_FORMAT.md`](docs/QMOD_FORMAT.md)。
 
@@ -116,7 +116,8 @@ dotnet run --project QingToolbox.Shell
 - 模块契约与本地化：[`docs/MODULE_DEVELOPMENT.md`](docs/MODULE_DEVELOPMENT.md)
 - 本地化：[`docs/LOCALIZATION.md`](docs/LOCALIZATION.md)
 - 开发环境：[`docs/DEVELOPMENT_SETUP.md`](docs/DEVELOPMENT_SETUP.md)
-- 0.2.4-alpha 发布说明：[`docs/releases/0.2.4-alpha.md`](docs/releases/0.2.4-alpha.md)
+- 0.2.5-alpha 发布说明：[`docs/releases/0.2.5-alpha.md`](docs/releases/0.2.5-alpha.md)
+- 0.2.4-alpha 历史发布说明：[`docs/releases/0.2.4-alpha.md`](docs/releases/0.2.4-alpha.md)
 - 0.2.3-alpha 历史发布说明：[`docs/releases/0.2.3-alpha.md`](docs/releases/0.2.3-alpha.md)
 - 0.2.2-alpha 历史发布说明：[`docs/releases/0.2.2-alpha.md`](docs/releases/0.2.2-alpha.md)
 - 0.2.1-alpha 历史发布说明：[`docs/releases/0.2.1-alpha.md`](docs/releases/0.2.1-alpha.md)
