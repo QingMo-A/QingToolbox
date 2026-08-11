@@ -100,5 +100,20 @@ Windows 账户中运行。普通本机 RC 应将这一阶段报告为 **Blocked*
 ./scripts/verify-preview-final-head.ps1
 ```
 
+## Automated Release hand-off
+
+After the candidate gate is complete, run `publish-preview-release.bat` from a
+clean `toolbox` checkout. The BAT displays the latest public Release, asks for
+the target SemVer twice, and passes the entries to PowerShell through inherited
+environment data (they are never interpolated into a command line).
+
+The PowerShell hand-off checks the metadata and release notes, branch/clean/origin
+guards, authentication, and absent tag/Release. It dispatches
+`preview-release-validation.yml` with `publish_release=false`, watches the exact
+HEAD run, creates and pushes `v<version>`, then dispatches the tag with
+`publish_release=true` and that successful `candidate_run_id`. It verifies the
+published installer and same-name `.sha256` assets. `-WhatIf` and `-TestMode`
+validate local inputs only and never mutate or wait on git/GitHub.
+
 人工证据记录在 [`PREVIEW_2_ACCEPTANCE_CHECKLIST.md`](PREVIEW_2_ACCEPTANCE_CHECKLIST.md)。
 远程自动化成功不能替代其中的人工登录、升级、Repair、卸载和代表性环境验收。

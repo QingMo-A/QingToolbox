@@ -1,6 +1,8 @@
+using System.IO;
 using QingToolbox.Core.Settings;
 using QingToolbox.Core.Localization;
 using QingToolbox.Shell.ViewModels;
+using QingToolbox.Shell.Services;
 
 namespace QingToolbox.Shell.WebShell;
 
@@ -9,6 +11,16 @@ public sealed record WebSettingsSnapshotValues(WebSettingsLanguage Language, str
     string MainWindowCloseBehavior, string CloseBehaviorMessage, bool LaunchAtLogin,
     bool CanConfigureLaunchAtLogin, bool CanRepairStartup, string StartupPresentationMode, string StartupBackend,
     string StartupStatus, string StartupMessage);
+
+public sealed record WebFontSnapshot(WebFontSelection Current, IReadOnlyList<WebFontOption> Options);
+public interface IWebFontSettingsSnapshotSource { WebFontSnapshot Read(); }
+public interface IWebFontSettingsOperations
+{
+    Task<WebFontMutationResult> SetAsync(string id, CancellationToken cancellationToken);
+    Task<WebFontMutationResult> ImportAsync(CancellationToken cancellationToken);
+    Task<WebFontMutationResult> RefreshAsync(CancellationToken cancellationToken);
+}
+public enum WebFontMutationResult { Succeeded, Cancelled, Invalid, Failed }
 
 public interface IWebSettingsSnapshotSource { WebSettingsSnapshotValues Read(); }
 public interface IWebSettingsMutation
@@ -85,14 +97,67 @@ public sealed class WebSettingsSnapshotSource(
     }
 }
 
-public sealed class WebSettingsSnapshotProvider(IWebSettingsSnapshotSource source, TimeProvider timeProvider)
+public sealed class WebSettingsSnapshotProvider(IWebSettingsSnapshotSource source, TimeProvider timeProvider,
+    IWebFontSettingsSnapshotSource? fonts = null)
 {
     public WebSettingsSnapshot Create()
     {
         var value = source.Read();
+        var font = fonts?.Read();
         return new(timeProvider.GetUtcNow(), value.Language, value.AppearancePresetId, value.ShowLogsInSidebar,
             value.MainWindowCloseBehavior, value.CloseBehaviorMessage, value.LaunchAtLogin,
             value.CanConfigureLaunchAtLogin, value.CanRepairStartup, value.StartupPresentationMode, value.StartupBackend,
-            value.StartupStatus, value.StartupMessage);
+            value.StartupStatus, value.StartupMessage, font?.Current, font?.Options);
+    }
+}
+
+public sealed class WebFontSettingsAdapter(FontSettingsService service) :
+    IWebFontSettingsSnapshotSource, IWebFontSettingsOperations
+{
+    public WebFontSnapshot Read()
+    {
+        var snapshot = service.CreateSnapshot();
+        static WebFontOption Project(FontSettingsService.FontCatalogItem item) =>
+            new(item.Id, item.Source, item.DisplayName, item.FamilyName, item.ResourceUrl);
+        var options = snapshot.Options.Select(Project).ToArray();
+        var current = Project(snapshot.Current);
+        return new(new(current.Id, current.Source, current.DisplayName, current.FamilyName, current.ResourceUrl), options);
+    }
+
+    public async Task<WebFontMutationResult> SetAsync(string id, CancellationToken cancellationToken)
+    {
+        var result = await service.SetAsync(id, cancellationToken).ConfigureAwait(false);
+        return result.Disposition switch
+        {
+            FontSettingsService.FontSelectionDisposition.Succeeded => WebFontMutationResult.Succeeded,
+            FontSettingsService.FontSelectionDisposition.Invalid => WebFontMutationResult.Invalid,
+            _ => WebFontMutationResult.Failed
+        };
+    }
+
+    public async Task<WebFontMutationResult> ImportAsync(CancellationToken cancellationToken)
+    {
+        var result = await service.ImportAsync(cancellationToken).ConfigureAwait(false);
+        return result.Disposition switch
+        {
+            FontSettingsService.FontImportDisposition.Imported => WebFontMutationResult.Succeeded,
+            FontSettingsService.FontImportDisposition.Cancelled => WebFontMutationResult.Cancelled,
+            FontSettingsService.FontImportDisposition.Invalid => WebFontMutationResult.Invalid,
+            _ => WebFontMutationResult.Failed
+        };
+    }
+
+    public async Task<WebFontMutationResult> RefreshAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await service.RefreshSystemFontsAsync(cancellationToken).ConfigureAwait(false);
+            return WebFontMutationResult.Succeeded;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        { throw; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+            InvalidOperationException or ArgumentException or NotSupportedException)
+        { return WebFontMutationResult.Failed; }
     }
 }

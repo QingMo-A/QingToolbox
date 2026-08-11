@@ -2,7 +2,7 @@
 import { computed, inject, ref, watch } from 'vue'
 import type { SettingsClient } from '../bridge/clients/SettingsClient'
 import type { ModuleClient } from '../bridge/clients/ModuleClient'
-import type { LanguageCode, MainWindowCloseBehavior, StartupPresentationMode } from '../contracts/settings'
+import { normalizeFont, normalizeFontOptions, type LanguageCode, type MainWindowCloseBehavior, type SettingsFont, type StartupPresentationMode } from '../contracts/settings'
 import { useAppStore } from '../app/store'
 import { useSettingsStore } from '../app/settingsStore'
 import { useModuleStore } from '../app/moduleStore'
@@ -40,6 +40,8 @@ const { currentLocale, t } = useLocalization()
 const activeSection = ref<SettingsSection>('general')
 const isSynchronizingLanguage = ref(false)
 const isSynchronizingAppearance = ref(false)
+const fontSearch = ref('')
+const isSynchronizingFont = ref(false)
 const themes: ThemeMode[] = ['system', 'light', 'dark']
 const closeBehaviors: MainWindowCloseBehavior[] = ['Ask', 'MinimizeToNotificationArea', 'ExitApplication']
 const startupPresentations: StartupPresentationMode[] = ['MainWindow', 'Minimized', 'FloatingBadge']
@@ -54,6 +56,15 @@ const hostMutationDisabled = computed(() => hostControlsDisabled.value || settin
 const appearanceControlsDisabled = computed(() => hostControlsDisabled.value || !settings.snapshot ||
   settings.status === 'loading' || settings.isHostMutationBusy || isSynchronizingAppearance.value)
 const appearancePresetId = computed<AppearancePresetId>(() => normalizeAppearancePresetId(settings.snapshot?.appearancePresetId ?? appearance.id))
+const selectedFont = computed(() => normalizeFont(settings.snapshot?.font))
+const fontOptions = computed(() => normalizeFontOptions(settings.snapshot?.fonts))
+const filteredFonts = computed(() => {
+  const query = fontSearch.value.trim().toLocaleLowerCase(currentLocale.value)
+  return fontOptions.value.filter(option => !query || `${option.displayName} ${option.familyName ?? ''}`.toLocaleLowerCase(currentLocale.value).includes(query))
+})
+const systemFonts = computed(() => filteredFonts.value.filter(font => font.source === 'system'))
+const importedFonts = computed(() => filteredFonts.value.filter(font => font.source === 'imported'))
+const fontControlsDisabled = computed(() => hostControlsDisabled.value || !settings.snapshot || settings.status === 'loading' || settings.isHostMutationBusy || isSynchronizingFont.value)
 const languageName = (code: string) => code === 'system'
   ? t('settings.appearance.system')
   : settings.snapshot?.language.options.find(option => option.code === code)?.nativeName ?? code
@@ -139,6 +150,35 @@ async function selectAppearancePreset(value: AppearancePresetId) {
 async function restoreDefaultAppearance() {
   await selectAppearancePreset('qing-default')
 }
+async function selectFont(font: SettingsFont) {
+  if (fontControlsDisabled.value || selectedFont.value.id === font.id) return
+  isSynchronizingFont.value = true
+  try {
+    const result = await settings.updateFont(client, font.id)
+    if (result === 'success' || result === 'unchanged') {
+      toast.show(t('settings.font.saving'), 'success')
+    } else toast.show(t('settings.font.updateFailed'), 'error')
+  } finally { isSynchronizingFont.value = false }
+}
+async function importFont() {
+  if (fontControlsDisabled.value) return
+  isSynchronizingFont.value = true
+  try {
+    const result = await settings.importFont(client)
+    if (result === 'success') {
+      toast.show(t('settings.font.saving'), 'success')
+    } else if (result === 'failure') toast.show(t('settings.font.importFailed'), 'error')
+  } finally { isSynchronizingFont.value = false }
+}
+async function refreshFonts() {
+  if (fontControlsDisabled.value) return
+  isSynchronizingFont.value = true
+  try {
+    const result = await settings.refreshFonts(client)
+    if (result === 'failure') toast.show(t('settings.font.refreshFailed'), 'error')
+  } finally { isSynchronizingFont.value = false }
+}
+async function restoreDefaultFont() { await selectFont(normalizeFont(null)) }
 async function toggleLogs() {
   if (!settings.snapshot || hostMutationDisabled.value || settings.isUpdatingLogsVisibility) return
   const result = await settings.updateLogsVisibility(client, !settings.snapshot.showLogsInSidebar)
@@ -199,6 +239,17 @@ async function repairStartup() {
                   <span><strong>{{ t(appearancePresetPresentation(preset).labelKey) }}</strong><small>{{ t(appearancePresetPresentation(preset).descriptionKey) }}</small></span>
                 </button>
               </div>
+            </article>
+            <article class="settings-card font-settings-card">
+              <div class="settings-card-title"><div><h3>{{ t('settings.font.title') }}</h3><p>{{ t('settings.font.description') }}</p></div><div class="font-card-actions"><QButton :disabled="selectedFont.id === 'Default' || fontControlsDisabled" @click="restoreDefaultFont">{{ t('settings.font.restoreDefault') }}</QButton><QButton :disabled="fontControlsDisabled" @click="importFont"><QIcon name="import" /> {{ t(isSynchronizingFont ? 'settings.font.importing' : 'settings.font.import') }}</QButton><QButton class="font-refresh-button" :loading="settings.isRefreshingFonts" :disabled="fontControlsDisabled" @click="refreshFonts"><QIcon name="refresh" /> {{ t(settings.isRefreshingFonts ? 'settings.font.refreshing' : 'settings.font.refresh') }}</QButton></div></div>
+              <div class="font-search-row"><label for="settings-font-search">{{ t('settings.font.searchLabel') }}</label><input id="settings-font-search" v-model="fontSearch" type="search" :placeholder="t('settings.font.searchPlaceholder')" :disabled="fontControlsDisabled" /></div>
+              <div class="font-groups" role="radiogroup" :aria-label="t('settings.font.ariaLabel')" :aria-busy="isSynchronizingFont">
+                <section class="font-group"><h4>{{ t('settings.font.system') }}</h4><button v-for="font in systemFonts" :key="font.id" type="button" role="radio" :aria-checked="selectedFont.id === font.id" :disabled="fontControlsDisabled" @click="selectFont(font)"><span class="font-option-name">{{ font.displayName }}</span><QBadge tone="info">{{ t('settings.font.systemBadge') }}</QBadge></button><p v-if="systemFonts.length === 0" class="font-empty">{{ t('settings.font.none') }}</p></section>
+                <section class="font-group"><h4>{{ t('settings.font.imported') }}</h4><button v-for="font in importedFonts" :key="font.id" type="button" role="radio" :aria-checked="selectedFont.id === font.id" :disabled="fontControlsDisabled" @click="selectFont(font)"><span class="font-option-name">{{ font.displayName }}</span><QBadge tone="success">{{ t('settings.font.importedBadge') }}</QBadge></button><p v-if="importedFonts.length === 0" class="font-empty">{{ t('settings.font.none') }}</p></section>
+              </div>
+              <p v-if="selectedFont.id === 'Default'" class="font-current-label">{{ t('settings.font.default') }}</p>
+              <p v-if="settings.fontError" class="settings-inline-error">{{ t('settings.font.updateFailed') }}</p>
+              <p v-if="settings.fontRefreshError" class="settings-inline-error">{{ t('settings.font.refreshFailed') }}</p>
             </article>
             <template v-if="settings.snapshot">
               <article class="settings-card language-settings-card">

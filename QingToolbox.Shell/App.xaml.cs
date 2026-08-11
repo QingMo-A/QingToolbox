@@ -160,6 +160,7 @@ public partial class App : Application
             services.AddSingleton<INotificationAreaIcon>(provider => provider.GetRequiredService<NotificationAreaService>());
             services.AddSingleton<ApplicationExitCoordinator>();
             services.AddSingleton(applicationPaths);
+            services.AddSingleton<FontSettingsService>();
             services.AddSingleton<SessionLogService>();
             services.AddSingleton<ModuleProcessBroker>();
             services.AddSingleton(provider => new ModuleTransactionRecoveryGate(entry =>
@@ -314,6 +315,11 @@ public partial class App : Application
                 services.AddSingleton<WebLogSnapshotProvider>();
                 services.AddSingleton<IWebSettingsSnapshotSource, WebSettingsSnapshotSource>();
                 services.AddSingleton<IWebSettingsMutation, WebSettingsMutation>();
+                services.AddSingleton<WebFontSettingsAdapter>();
+                services.AddSingleton<IWebFontSettingsSnapshotSource>(provider =>
+                    provider.GetRequiredService<WebFontSettingsAdapter>());
+                services.AddSingleton<IWebFontSettingsOperations>(provider =>
+                    provider.GetRequiredService<WebFontSettingsAdapter>());
                 services.AddSingleton<WebSettingsSnapshotProvider>();
                 services.AddSingleton<WebHostUpdateOperations>();
                 services.AddSingleton<IWebCommandHandler, WebPingCommandHandler>();
@@ -341,6 +347,9 @@ public partial class App : Application
                 services.AddSingleton<IWebCommandHandler, WebHostUpdateInstallCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetLanguageCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetAppearancePresetCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebSetFontCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebImportFontCommandHandler>();
+                services.AddSingleton<IWebCommandHandler, WebRefreshFontsCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetShowLogsInSidebarCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetMainWindowCloseBehaviorCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebSetStartupPresentationModeCommandHandler>();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isSettingsSnapshot } from './settings'
+import { DEFAULT_FONT_ID, isSettingsSnapshot, normalizeFont, normalizeSettingsSnapshot } from './settings'
 
 const language = {
   code: 'system',
@@ -37,5 +37,14 @@ describe('settings snapshot contract', () => {
   })
   it('rejects a malformed host preset id', () => {
     expect(isSettingsSnapshot({ ...valid, appearancePresetId: { value: 'neon-circuit' } })).toBe(false)
+  })
+  it('accepts a safe font projection and normalizes unknown ids to Default', () => {
+    const imported = { id: `imported:${'a'.repeat(64)}`, source: 'imported', displayName: 'Imported Sans', familyName: 'Imported Sans', resourceUrl: `https://app.qingtoolbox.local/user-fonts/${'a'.repeat(64)}.ttf` }
+    expect(isSettingsSnapshot({ ...valid, font: imported, fonts: [imported] })).toBe(true)
+    expect(normalizeFont({ id: 'imported:../../private', source: 'imported', displayName: 'bad', resourceUrl: 'file:///C:/private.ttf' }).id).toBe(DEFAULT_FONT_ID)
+    expect(normalizeSettingsSnapshot({ ...valid, font: { id: 'future-font', source: 'system', displayName: 'Future', familyName: 'Future' } } as any).font?.id).toBe(DEFAULT_FONT_ID)
+  })
+  it('rejects font DTOs that carry non-string fields', () => {
+    expect(isSettingsSnapshot({ ...valid, font: { id: 'Default', source: 'default', displayName: 42 } })).toBe(false)
   })
 })

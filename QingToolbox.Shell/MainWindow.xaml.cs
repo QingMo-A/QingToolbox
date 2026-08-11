@@ -78,9 +78,10 @@ public partial class MainWindow : Window
         _webBridgeHost = webBridgeHost;
         _webWorkspacePresentation = new WebWorkspacePresentationState(webShellInitializer.IsAllowed);
         _webBridgeHost.ThemeChanged += OnWebThemeChanged;
+        _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _floatingBadgeManager.StateChanged += OnFloatingBadgeStateChanged;
         SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
-        WindowTitleBarThemeManager.Apply(WebShellThemeMode.System);
+        WindowTitleBarThemeManager.Apply(WebShellThemeMode.System, _viewModel.AppearancePresetId);
         _startupSession.Attach(this, floatingBadgeManager);
         _floatingBadgeManager.Attach(this);
         DataContext = viewModel;
@@ -97,13 +98,23 @@ public partial class MainWindow : Window
     private void OnWebThemeChanged(WebShellThemeMode mode) => Dispatcher.BeginInvoke(() =>
     {
         _webThemeMode = mode;
-        WindowTitleBarThemeManager.Apply(mode);
+        WindowTitleBarThemeManager.Apply(mode, _viewModel.AppearancePresetId);
     });
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(MainWindowViewModel.AppearancePresetId)) return;
+
+        void ApplyTheme() => WindowTitleBarThemeManager.Apply(_webThemeMode, _viewModel.AppearancePresetId);
+        if (Dispatcher.CheckAccess()) ApplyTheme();
+        else Dispatcher.BeginInvoke(ApplyTheme);
+    }
 
     private void OnSystemPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
     {
         if (_webThemeMode == WebShellThemeMode.System)
-            Dispatcher.BeginInvoke(() => WindowTitleBarThemeManager.Apply(WebShellThemeMode.System));
+            Dispatcher.BeginInvoke(() => WindowTitleBarThemeManager.Apply(
+                WebShellThemeMode.System, _viewModel.AppearancePresetId));
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -115,6 +126,7 @@ public partial class MainWindow : Window
             _nativeWindowSource = null;
         }
         _webBridgeHost.ThemeChanged -= OnWebThemeChanged;
+        _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _floatingBadgeManager.StateChanged -= OnFloatingBadgeStateChanged;
         SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
     }
@@ -341,7 +353,11 @@ public partial class MainWindow : Window
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             { System.Diagnostics.Debug.WriteLine($"Startup settings read degraded: {exception.GetType().Name}"); }
 
-            if (settings is not null) _viewModel.InitializeLogSettings(settings);
+            if (settings is not null)
+            {
+                _viewModel.InitializeLogSettings(settings);
+                await _viewModel.InitializeFontSettingsAsync(settings, token);
+            }
 
             var startupSettings = settings;
             ModuleTransactionRecoveryOutcome? recoveryOutcome = null;

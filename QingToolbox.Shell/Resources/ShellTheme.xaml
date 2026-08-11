@@ -36,6 +36,7 @@
     <SolidColorBrush x:Key="WindowTitleBarHoverBrush" Color="#E8F0FF"/>
     <SolidColorBrush x:Key="WindowTitleBarPressedBrush" Color="#D8E7FF"/>
     <SolidColorBrush x:Key="WindowTitleBarAccentBrush" Color="#2563EB"/>
+    <SolidColorBrush x:Key="WindowTitleBarDisabledBrush" Color="#9AA9BB"/>
     <SolidColorBrush x:Key="FloatingBadgeSurfaceBrush" Color="#F2FFFFFF"/>
     <SolidColorBrush x:Key="FloatingBadgeBorderBrush" Color="#DCE6F3"/>
     <SolidColorBrush x:Key="FloatingBadgeHoverBrush" Color="#E8F0FF"/>
@@ -43,6 +44,11 @@
     <SolidColorBrush x:Key="FloatingBadgeFocusBrush" Color="#2563EB"/>
     <SolidColorBrush x:Key="FloatingBadgeMenuSurfaceBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="FloatingBadgeMenuForegroundBrush" Color="#10213D"/>
+    <SolidColorBrush x:Key="WindowTitleActionBackgroundBrush" Color="#E8F0FF"/>
+    <SolidColorBrush x:Key="WindowTitleActionHoverBrush" Color="#DCE9FF"/>
+    <SolidColorBrush x:Key="WindowTitleActionPressedBrush" Color="#C8DCFF"/>
+    <SolidColorBrush x:Key="WindowTitleActionFocusBrush" Color="#2563EB"/>
+    <SolidColorBrush x:Key="WindowTitleActionDisabledBrush" Color="#9AA9BB"/>
     <CornerRadius x:Key="GlassPanelCornerRadius">24</CornerRadius>
     <CornerRadius x:Key="CardCornerRadius">18</CornerRadius>
     <CornerRadius x:Key="ButtonCornerRadius">12</CornerRadius>
@@ -149,6 +155,11 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource WindowTitleBarDisabledBrush}"/>
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <Style x:Key="WindowCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource WindowCaptionButtonStyle}">
@@ -239,22 +250,26 @@
     <Style x:Key="WindowTitleActionButtonStyle" TargetType="Button">
         <Setter Property="Height" Value="32"/>
         <Setter Property="Padding" Value="10,0"/>
-        <Setter Property="Background" Value="{StaticResource PrimaryAccentSoftBrush}"/>
-        <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource WindowTitleActionBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource WindowTitleBarForegroundBrush}"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Focusable" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="9"
-                            BorderBrush="{StaticResource AccentBrush}" BorderThickness="0">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            BorderBrush="{DynamicResource WindowTitleActionFocusBrush}" BorderThickness="0">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
                     </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="#DCE9FF"/></Trigger>
-                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Background" Value="#C8DCFF"/></Trigger>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource WindowTitleActionHoverBrush}"/></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource WindowTitleActionPressedBrush}"/></Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderThickness" Value="1"/></Trigger>
-                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Surface" Property="Opacity" Value="0.58"/>
+                            <Setter Property="Foreground" Value="{DynamicResource WindowTitleActionDisabledBrush}"/>
+                        </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -292,7 +307,7 @@
     </Style>
 
     <Style x:Key="WindowTitleBarDividerStyle" TargetType="Border">
-        <Setter Property="BorderBrush" Value="{StaticResource WindowTitleBarDividerBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource WindowTitleBarDividerBrush}"/>
         <Setter Property="BorderThickness" Value="0,0,0,1"/>
     </Style>
 

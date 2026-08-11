@@ -37,10 +37,16 @@ public sealed record WebLogSnapshotEntry(DateTimeOffset Timestamp, string Level,
 public sealed record WebSettingsSnapshot(DateTimeOffset GeneratedAt, WebSettingsLanguage Language,
     string AppearancePresetId, bool ShowLogsInSidebar, string MainWindowCloseBehavior, string CloseBehaviorMessage,
     bool LaunchAtLogin, bool CanConfigureLaunchAtLogin, bool CanRepairStartup, string StartupPresentationMode,
-    string StartupBackend, string StartupStatus, string StartupMessage);
+    string StartupBackend, string StartupStatus, string StartupMessage,
+    WebFontSelection? Font = null, IReadOnlyList<WebFontOption>? Fonts = null);
+public sealed record WebFontImportResponse(string Disposition, WebSettingsSnapshot Snapshot);
 public sealed record WebSettingsLanguage(string Code, string EffectiveCode, string DisplayName,
     IReadOnlyList<WebSettingsLanguageOption> Options);
 public sealed record WebSettingsLanguageOption(string Code, string DisplayName, string NativeName);
+public sealed record WebFontSelection(string Id, string Source, string DisplayName, string? FamilyName,
+    string? ResourceUrl);
+public sealed record WebFontOption(string Id, string Source, string DisplayName, string? FamilyName,
+    string? ResourceUrl);
 public sealed record WebHostUpdateSnapshot(DateTimeOffset GeneratedAt, string State, string CurrentVersion,
     string LatestVersion, string PublishedAt, string LastChecked, string Summary, bool ShowBanner,
     string DownloadState, long BytesReceived, long ExpectedBytes, string DownloadError,

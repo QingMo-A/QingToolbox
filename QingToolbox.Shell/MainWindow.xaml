@@ -8,6 +8,7 @@
         xmlns:windowing="clr-namespace:QingToolbox.Shell.Windowing"
         xmlns:settings="clr-namespace:QingToolbox.Core.Settings;assembly=QingToolbox.Core"
         Title="{Binding Title}"
+        FontFamily="{Binding NativeFontFamily}"
         Width="1180"
         Height="760"
         MinWidth="500"
@@ -30,6 +31,7 @@
         </Grid.RowDefinitions>
         <controls:WindowTitleBar Grid.Row="0"
                                  Title="{Binding Title}"
+                                 FontFamily="{Binding NativeFontFamily}"
                                  MinimizeText="{Binding Strings[window.minimize]}"
                                  MaximizeText="{Binding Strings[window.maximize]}"
                                  RestoreText="{Binding Strings[window.restore]}"

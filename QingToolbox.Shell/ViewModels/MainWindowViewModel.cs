@@ -8,6 +8,7 @@ using QingToolbox.Core.Runtime;
 using QingToolbox.ModuleLoader;
 using QingToolbox.Shell.Services;
 using System.Windows;
+using System.Windows.Media;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Core.Localization;
 using Microsoft.Win32;
@@ -46,6 +47,7 @@ public sealed partial class MainWindowViewModel(
     ModuleUpdateRuntimeCoordinator updateRuntimeCoordinator,
     ModuleProcessBroker moduleProcessBroker,
     QmodPackageStagingService qmodPackageStagingService,
+    FontSettingsService fontSettingsService,
     GatedModuleUpdateTransactionCoordinator? gatedModuleUpdateTransactions = null) : ObservableObject
 {
     public void ApplyNotificationAvailability(NotificationAvailabilityChangedEventArgs change)
@@ -89,6 +91,7 @@ public sealed partial class MainWindowViewModel(
     private List<string> _recentModuleIds = [];
     private bool _logSettingInitialized;
     private bool _processExitSubscribed;
+    private bool _fontPresentationSubscribed;
     [ObservableProperty] private bool _isCheckingModuleUpdates;
     [ObservableProperty] private int _moduleUpdateCount;
     [ObservableProperty] private string _moduleUpdateSummary = string.Empty;
@@ -186,6 +189,7 @@ public sealed partial class MainWindowViewModel(
     public string MissingStartupAuthorizationSummary => localization.GetString("startup.missingSummary", MissingStartupAuthorizationCount);
 
     public string Title => executionEnvironment.DisplayName;
+    public FontFamily NativeFontFamily => fontSettingsService.CurrentFontFamily;
     public bool CanConfigureWindowsStartup => executionEnvironment.AllowWindowsStartupRegistration && !IsStartupSettingsBusy;
     public string VersionDisplay =>
         typeof(MainWindowViewModel).Assembly
@@ -285,6 +289,23 @@ public sealed partial class MainWindowViewModel(
     {
         AppearancePresetId = AppearancePresetIds.Normalize(presetId);
         sessionLog.Information("Settings", $"Appearance preset initialized: {AppearancePresetId}.");
+    }
+
+    public async Task InitializeFontSettingsAsync(UserSettings settings, CancellationToken cancellationToken = default)
+    {
+        if (!_fontPresentationSubscribed)
+        {
+            _fontPresentationSubscribed = true;
+            fontSettingsService.Changed += (_, _) =>
+            {
+                var dispatcher = Application.Current?.Dispatcher;
+                if (dispatcher is not null && !dispatcher.CheckAccess())
+                    dispatcher.BeginInvoke(() => OnPropertyChanged(nameof(NativeFontFamily)));
+                else OnPropertyChanged(nameof(NativeFontFamily));
+            };
+        }
+        await fontSettingsService.InitializeAsync(settings, cancellationToken);
+        OnPropertyChanged(nameof(NativeFontFamily));
     }
 
     [RelayCommand]

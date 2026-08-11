@@ -14,6 +14,8 @@ afterEach(() => {
   wrappers.splice(0).forEach(wrapper => wrapper.unmount())
   document.title = originalTitle
   document.documentElement.lang = originalLanguage
+  document.documentElement.style.removeProperty('--q-font-family')
+  delete document.documentElement.dataset.fontId
 })
 
 const snapshot = (code: LanguageCode, effectiveCode: EffectiveLanguageCode): SettingsSnapshot => ({
@@ -96,6 +98,18 @@ describe('App Quick Open integration', () => {
     settings.complete(snapshot('en-US', 'en-US')); await wrapper.vm.$nextTick()
     expect(document.title).toBe('Modules · QingToolbox')
     expect(getSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('applies the host-confirmed font globally without visiting Settings', async () => {
+    const { wrapper, settings } = app()
+    settings.complete({
+      ...snapshot('en-US', 'en-US'),
+      font: { id: 'system:Inter', source: 'system', displayName: 'Inter', familyName: 'Inter', resourceUrl: null },
+      fonts: [],
+    })
+    await wrapper.vm.$nextTick()
+    expect(document.documentElement.dataset.fontId).toBe('system:Inter')
+    expect(document.documentElement.style.getPropertyValue('--q-font-family')).toContain('Inter')
   })
 
   it('redirects a Production host away from Development diagnostics', async () => {

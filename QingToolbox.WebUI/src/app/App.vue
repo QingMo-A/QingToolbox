@@ -12,6 +12,7 @@ import QToast from '../design-system/components/QToast.vue'
 import QHostUpdateBanner from '../design-system/components/QHostUpdateBanner.vue'
 import { useLocalization } from '../localization/localization'
 import { routeTitleKeyByPath } from './router'
+import { applyFontPresentation } from '../presentation/fontPresentation'
 
 const theme = useThemeStore()
 const appearance = useAppearancePresetStore()
@@ -47,6 +48,9 @@ watch(() => app.bridge, bridge => {
 watch(() => settings.snapshot?.appearancePresetId, presetId => {
   if (presetId !== undefined) appearance.set(presetId)
 }, { immediate: true })
+watch(() => settings.snapshot?.font, font => {
+  void applyFontPresentation(font)
+}, { immediate: true, deep: true })
 watchEffect(() => {
   if (route.path === '/diagnostics' && app.snapshot && app.snapshot.environmentKind !== 'Development') {
     void router.replace('/')

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import SettingsPage from './SettingsPage.vue'
@@ -18,7 +19,7 @@ const languageOptions = [
   { code: 'zh-CN' as const, displayName: 'Simplified Chinese', nativeName: '简体中文' },
   { code: 'en-US' as const, displayName: 'English', nativeName: 'English' },
 ]
-const snapshot: SettingsSnapshot = { generatedAt: '2026-07-25T12:00:00Z', appearancePresetId: 'qing-default', language: { code: 'en-US', effectiveCode: 'en-US', displayName: 'English', options: languageOptions }, showLogsInSidebar: true, mainWindowCloseBehavior: 'Ask', closeBehaviorMessage: 'Ask before closing.', launchAtLogin: false, canConfigureLaunchAtLogin: true, canRepairStartup: false, startupPresentationMode: 'FloatingBadge', startupBackend: 'Registry Run', startupStatus: 'Healthy', startupMessage: 'Registration is healthy.' }
+const snapshot: SettingsSnapshot = { generatedAt: '2026-07-25T12:00:00Z', appearancePresetId: 'qing-default', font: { id: 'Default', source: 'default', displayName: 'Default', familyName: null, resourceUrl: null }, fonts: [{ id: 'Default', source: 'default', displayName: 'Default', familyName: null, resourceUrl: null }, { id: 'system:Inter', source: 'system', displayName: 'Inter', familyName: 'Inter', resourceUrl: null }, { id: `imported:${'c'.repeat(64)}`, source: 'imported', displayName: 'Imported Sans', familyName: 'Imported Sans', resourceUrl: `https://app.qingtoolbox.local/user-fonts/${'c'.repeat(64)}.ttf` }], language: { code: 'en-US', effectiveCode: 'en-US', displayName: 'English', options: languageOptions }, showLogsInSidebar: true, mainWindowCloseBehavior: 'Ask', closeBehaviorMessage: 'Ask before closing.', launchAtLogin: false, canConfigureLaunchAtLogin: true, canRepairStartup: false, startupPresentationMode: 'FloatingBadge', startupBackend: 'Registry Run', startupStatus: 'Healthy', startupMessage: 'Registration is healthy.' }
 const moduleItem: ModuleSnapshotItem = { id: 'hello', displayName: 'Hello', displayDescription: 'English host metadata', version: '1.0.0', author: 'QingMo', runtimeType: 'InProcess', loadMode: 'Manual', runtimeState: 'NotLoaded', isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2.0', isUserInstalled: true, canRemove: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false, canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled' as const, canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false, updateStatus: 'NotChecked', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: true, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'NotDownloaded', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0, canInstallVerifiedUpdate: false }
 type PageOptions = {
   bridge?: 'Connecting'|'Connected'|'Unavailable'; status?: 'idle'|'loading'|'ready'|'error'; hasSnapshot?: boolean
@@ -27,6 +28,8 @@ type PageOptions = {
   closeImpl?: (value: 'Ask'|'MinimizeToNotificationArea'|'ExitApplication') => Promise<SettingsSnapshot>
   startupImpl?: (value: 'MainWindow'|'Minimized'|'FloatingBadge') => Promise<SettingsSnapshot>
   appearanceImpl?: (value: string) => Promise<SettingsSnapshot>
+  fontImpl?: (value: string) => Promise<SettingsSnapshot>
+  importFontImpl?: () => Promise<{ disposition: 'Imported'|'Cancelled', snapshot: SettingsSnapshot }>
   launchImpl?: (value: boolean) => Promise<SettingsSnapshot>
   repairImpl?: () => Promise<SettingsSnapshot>
   moduleImpl?: () => Promise<ModuleSnapshot>
@@ -45,12 +48,14 @@ function page(options: PageOptions = {}) {
   const setMainWindowCloseBehavior = vi.fn(options.closeImpl ?? (async value => ({ ...snapshot, mainWindowCloseBehavior: value })))
   const setStartupPresentationMode = vi.fn(options.startupImpl ?? (async value => ({ ...snapshot, startupPresentationMode: value })))
   const setAppearancePreset = vi.fn(options.appearanceImpl ?? (async value => ({ ...snapshot, appearancePresetId: value })))
+  const setFont = vi.fn(options.fontImpl ?? (async value => ({ ...snapshot, font: snapshot.fonts?.find(font => font.id === value) ?? snapshot.font })))
+  const importFont = vi.fn(options.importFontImpl ?? (async () => ({ disposition: 'Cancelled' as const, snapshot })))
   const setLaunchAtLogin = vi.fn(options.launchImpl ?? (async value => ({ ...snapshot, launchAtLogin: value, generatedAt: '2026-07-25T13:00:00Z' })))
   const repairStartupRegistration = vi.fn(options.repairImpl ?? (async () => ({ ...snapshot, launchAtLogin: true, canRepairStartup: false, generatedAt: '2026-07-25T13:00:00Z' })))
   const getModuleSnapshot = vi.fn(options.moduleImpl ?? (async () => ({ generatedAt: '2026-07-25T12:01:00Z', modules: [] })))
-  const wrapper = mount(SettingsPage, { global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, setAppearancePreset, setLaunchAtLogin, repairStartupRegistration }, moduleClient: { getSnapshot: getModuleSnapshot } } } })
+  const wrapper = mount(SettingsPage, { global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, setAppearancePreset, setFont, importFont, setLaunchAtLogin, repairStartupRegistration }, moduleClient: { getSnapshot: getModuleSnapshot } } } })
   wrappers.push(wrapper)
-  return { wrapper, app, settings, modules: useModuleStore(), getSnapshot, getModuleSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, setAppearancePreset, setLaunchAtLogin, repairStartupRegistration, theme: useThemeStore(), toast: useToastStore() }
+  return { wrapper, app, settings, modules: useModuleStore(), getSnapshot, getModuleSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, setAppearancePreset, setFont, importFont, setLaunchAtLogin, repairStartupRegistration, theme: useThemeStore(), toast: useToastStore() }
 }
 
 async function openSection(wrapper: VueWrapper, title: string) {
@@ -74,6 +79,36 @@ describe('SettingsPage information architecture', () => {
   it('renders all interface presets and applies one immediately', async () => { const x = page(); const group = x.wrapper.get('[aria-label="Interface style preset"]'); expect(group.findAll('[role="radio"]')).toHaveLength(5); await group.findAll('[role="radio"]')[1].trigger('click'); expect(document.documentElement.dataset.appearancePreset).toBe('neon-circuit'); expect(x.settings.snapshot?.appearancePresetId).toBe('neon-circuit'); expect(x.setAppearancePreset).toHaveBeenCalledWith('neon-circuit') })
   it('restores the default interface preset without changing page layout', async () => { const x = page(); const group = x.wrapper.get('[aria-label="Interface style preset"]'); await group.findAll('[role="radio"]')[2].trigger('click'); await flushPromises(); expect(x.settings.snapshot?.appearancePresetId).toBe('greenline'); await x.wrapper.get('.appearance-restore-button').trigger('click'); await flushPromises(); expect(x.setAppearancePreset).toHaveBeenLastCalledWith('qing-default'); expect(x.settings.snapshot?.appearancePresetId).toBe('qing-default'); expect(x.wrapper.find('.settings-workspace').exists()).toBe(true) })
   it('normalizes an unknown host preset to qing-default', async () => { const x = page(); x.settings.complete({ ...snapshot, appearancePresetId: 'untrusted-theme' }); await x.wrapper.vm.$nextTick(); expect(x.wrapper.get('[aria-label="Interface style preset"]').findAll('[role="radio"]')[0].attributes('aria-checked')).toBe('true') })
+  it('groups searchable system and imported fonts and applies the selected font', async () => {
+    const x = page(); const card = x.wrapper.get('.font-settings-card')
+    expect(card.get('[aria-label="Workspace font"]').findAll('[role="radio"]')).toHaveLength(2)
+    await card.get('#settings-font-search').setValue('imported')
+    expect(card.get('[aria-label="Workspace font"]').findAll('[role="radio"]')).toHaveLength(1)
+    await card.get('[aria-label="Workspace font"]').find('[role="radio"]').trigger('click')
+    await flushPromises()
+    expect(x.setFont).toHaveBeenCalledWith(`imported:${'c'.repeat(64)}`)
+    expect(x.settings.snapshot?.font?.source).toBe('imported')
+  })
+  it('keeps font settings controls readable with the default UI stack', () => {
+    const x = page(); const card = x.wrapper.get('.font-settings-card')
+    expect(card.get('h3').attributes('style')).toBeUndefined()
+    expect(card.get('.font-option-name').attributes('style')).toBeUndefined()
+    expect(readFileSync('src/styles/main.css', 'utf8')).toContain('.font-settings-card{font-family:"Segoe UI Variable","Segoe UI",sans-serif}')
+  })
+  it('restores Default and does not report a cancelled native import as success', async () => {
+    const x = page({ fontImpl: async value => ({ ...snapshot, font: snapshot.fonts!.find(font => font.id === value) }) })
+    await x.wrapper.get('.font-settings-card').get('[aria-label="Workspace font"]').findAll('[role="radio"]')[0].trigger('click')
+    await flushPromises()
+    await x.wrapper.get('.font-settings-card').get('button').trigger('click')
+    await flushPromises()
+    expect(x.setFont).toHaveBeenLastCalledWith('Default')
+    expect(x.settings.snapshot?.font?.id).toBe('Default')
+    const messageBeforeCancel = x.toast.message
+    await x.wrapper.get('.font-card-actions').findAll('button')[1].trigger('click')
+    await flushPromises()
+    expect(x.importFont).toHaveBeenCalledTimes(1)
+    expect(x.toast.message).toBe(messageBeforeCancel)
+  })
   it('shows three close behavior radios in Window', async () => { const x = page(); await openSection(x.wrapper, 'Window'); expect(x.wrapper.get('[aria-label="Main window close behavior"]').findAll('[role="radio"]')).toHaveLength(3) })
   it('persists close behavior', async () => { const x = page(); await openSection(x.wrapper, 'Window'); await x.wrapper.get('[aria-label="Main window close behavior"]').findAll('[role="radio"]')[2].trigger('click'); await flushPromises(); expect(x.setMainWindowCloseBehavior).toHaveBeenCalledWith('ExitApplication'); expect(x.settings.snapshot?.mainWindowCloseBehavior).toBe('ExitApplication'); expect(x.toast.kind).toBe('success') })
   it('preserves close behavior after failure', async () => { const x = page({ closeImpl: async () => { throw new Error('denied') } }); await openSection(x.wrapper, 'Window'); await x.wrapper.get('[aria-label="Main window close behavior"]').findAll('[role="radio"]')[1].trigger('click'); await flushPromises(); expect(x.settings.snapshot?.mainWindowCloseBehavior).toBe('Ask'); expect(x.wrapper.text()).toContain('close behavior was not changed') })
@@ -106,7 +141,7 @@ describe('SettingsPage information architecture', () => {
   it('preserves logs visibility after failure', async () => { const x = page({ logsImpl: async () => { throw new Error('denied') } }); await x.wrapper.get('[role="switch"]').trigger('click'); await flushPromises(); expect(x.settings.snapshot?.showLogsInSidebar).toBe(true); expect(x.wrapper.text()).toContain('preference was not changed') })
   it('does not lock independent host settings while saving logs', async () => { let resolve!: (value: SettingsSnapshot) => void; const pending = new Promise<SettingsSnapshot>(done => { resolve = done }); const x = page({ logsImpl: () => pending }); await x.wrapper.get('[role="switch"]').trigger('click'); expect(x.wrapper.get('[role="switch"]').attributes('disabled')).toBeDefined(); await openSection(x.wrapper, 'Window'); expect(x.wrapper.findAll('[role="radio"]').every(radio => radio.attributes('disabled') === undefined)).toBe(true); resolve({ ...snapshot, showLogsInSidebar: false }); await flushPromises() })
   it('does not expose Save, Apply, or Reset actions', () => expect(page().wrapper.findAll('button').map(button => button.text())).not.toEqual(expect.arrayContaining(['Save','Apply','Reset'])))
-  it('uses a stable responsive workspace structure', () => { const wrapper = page().wrapper; expect(wrapper.find('.settings-workspace').exists()).toBe(true); expect(wrapper.find('.settings-section-nav').exists()).toBe(true); expect(wrapper.find('.settings-section-content').exists()).toBe(true) })
+  it('uses a stable responsive workspace structure', () => { const wrapper = page().wrapper; expect(wrapper.find('.settings-workspace').exists()).toBe(true); expect(wrapper.find('.settings-section-nav').exists()).toBe(true); expect(wrapper.find('.settings-section-content').exists()).toBe(true); const css = readFileSync('src/styles/main.css', 'utf8'); expect(css).toContain('@media(max-width:719px){.font-groups{grid-template-columns:1fr'); expect(css).toContain('.font-group,.font-group button{min-width:0}') })
   it('localizes all four sections immediately for an effective Chinese locale', async () => { const x=page(); x.settings.complete({...snapshot,language:{...snapshot.language,code:'system',effectiveCode:'zh-CN'}}); await x.wrapper.vm.$nextTick(); expect(x.wrapper.findAll('.settings-section-nav strong').map(item=>item.text())).toEqual(['常规','窗口','启动','关于']); expect(x.wrapper.text()).toContain('外观'); expect(x.wrapper.attributes()).not.toHaveProperty('data-reloaded') })
   it('formats refresh time with the effective locale', async () => { const format=vi.spyOn(Date.prototype,'toLocaleTimeString').mockReturnValue('localized-time'); const x=page(); expect(format).toHaveBeenCalledWith('en-US'); x.settings.complete({...snapshot,language:{...snapshot.language,effectiveCode:'zh-CN'}}); await x.wrapper.vm.$nextTick(); expect(format).toHaveBeenCalledWith('zh-CN'); format.mockRestore() })
   it('keeps host-projected free text unchanged in Chinese', async () => { const x=page(); x.settings.complete({...snapshot,language:{...snapshot.language,effectiveCode:'zh-CN'},closeBehaviorMessage:'HOST CLOSE TEXT',startupBackend:'Registry Run',startupStatus:'Degraded',startupMessage:'HOST STARTUP TEXT'}); await x.wrapper.vm.$nextTick(); await openSection(x.wrapper,'窗口'); expect(x.wrapper.text()).toContain('HOST CLOSE TEXT'); await openSection(x.wrapper,'启动'); expect(x.wrapper.text()).toContain('Registry Run'); expect(x.wrapper.text()).toContain('Degraded'); expect(x.wrapper.text()).toContain('HOST STARTUP TEXT') })

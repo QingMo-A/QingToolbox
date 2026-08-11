@@ -48,3 +48,27 @@ describe('SettingsClient appearance preset mutation', () => {
     expect(request).toHaveBeenCalledWith('settings.setAppearancePreset', { appearancePresetId: 'neon-circuit' })
   })
 })
+
+describe('SettingsClient font mutations', () => {
+  it('uses the exact font command and payload', async () => {
+    const request = vi.fn().mockResolvedValue({ ...snapshot, font: { id: 'Default', source: 'default', displayName: 'Default' }, fonts: [] })
+    const client = new SettingsClient({ request } as any)
+    await expect(client.setFont('Default')).resolves.toMatchObject({ font: { id: 'Default' } })
+    expect(request).toHaveBeenCalledWith('settings.setFont', { fontId: 'Default' })
+  })
+
+  it('distinguishes an import cancellation from a completed import', async () => {
+    const response = { disposition: 'Cancelled', snapshot: { ...snapshot, font: { id: 'Default', source: 'default', displayName: 'Default' }, fonts: [] } }
+    const request = vi.fn().mockResolvedValue(response)
+    const client = new SettingsClient({ request } as any)
+    await expect(client.importFont()).resolves.toMatchObject({ disposition: 'Cancelled' })
+    expect(request).toHaveBeenCalledWith('settings.importFont', {})
+  })
+
+  it('refreshes the system catalog with an empty payload', async () => {
+    const request = vi.fn().mockResolvedValue({ ...snapshot, font: { id: 'Default', source: 'default', displayName: 'Default' }, fonts: [] })
+    const client = new SettingsClient({ request } as any)
+    await expect(client.refreshFonts()).resolves.toMatchObject({ font: { id: 'Default' } })
+    expect(request).toHaveBeenCalledWith('settings.refreshFonts', {})
+  })
+})

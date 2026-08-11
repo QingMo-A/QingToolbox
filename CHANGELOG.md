@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added searchable system-font selection and managed font-file imports with a reliable Restore default action across the native and Vue workspaces.
+
 ## 0.2.4-alpha - 2026-08-01
 
 - Allowed Windows Restart Manager maintenance shutdowns to bypass the normal close-to-tray preference and run the existing orderly exit pipeline.

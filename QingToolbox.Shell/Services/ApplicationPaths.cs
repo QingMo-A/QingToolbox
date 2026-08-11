@@ -24,10 +24,13 @@ public sealed class ApplicationPaths
         }
         SettingsPath = Path.Combine(RoamingRoot, "settings.json");
         UserModulesDirectory = Path.Combine(LocalRoot, environment.IsProduction ? "Modules" : "modules");
+        ImportedFontsDirectory = Path.Combine(LocalRoot, "Fonts", "Imported");
         ModuleDataDirectory = Path.Combine(RoamingRoot, environment.IsProduction ? "Data" : "data");
         LogsDirectory = Path.Combine(LocalRoot, "logs");
         WebView2UserDataDirectory = Path.Combine(LocalRoot, "webview2", environment.ProfileName);
         CacheDirectory = Path.Combine(LocalRoot, "cache");
+        FontCacheDirectory = Path.Combine(CacheDirectory, "Fonts");
+        FontCatalogCachePath = Path.Combine(FontCacheDirectory, "system-fonts.v1.json");
         HostUpdateCachePath = Path.Combine(CacheDirectory, "HostUpdates", "official-releases.json");
         HostUpdateInstallerDirectory = Path.Combine(CacheDirectory, "HostUpdates", "Installers");
         QmodStagingDirectory = Path.Combine(CacheDirectory, "ModulePackages", "Staging");
@@ -49,10 +52,15 @@ public sealed class ApplicationPaths
     public string SettingsPath { get; }
     public string DevelopmentModulesDirectory { get; }
     public string UserModulesDirectory { get; }
+    /// <summary>Environment-scoped, host-owned copies of user imported fonts.</summary>
+    public string ImportedFontsDirectory { get; }
     public string ModuleDataDirectory { get; }
     public string LogsDirectory { get; }
     public string WebView2UserDataDirectory { get; }
     public string CacheDirectory { get; }
+    /// <summary>Environment-isolated cache for the enumerated system font catalog.</summary>
+    public string FontCacheDirectory { get; }
+    public string FontCatalogCachePath { get; }
     public string HostUpdateCachePath { get; }
     public string HostUpdateInstallerDirectory { get; }
     public string QmodStagingDirectory { get; }
@@ -71,9 +79,9 @@ public sealed class ApplicationPaths
             ApplicationExecutionEnvironment.AssertNoSandboxReparsePoints(
                 _environment.Kind, _environment.ProfileName, _environment.RepositoryRoot!, _environment.SandboxRoot!);
         var directories = _isProduction
-            ? new[] { UserModulesDirectory, ModuleDataDirectory, StartupDirectory }
+            ? new[] { UserModulesDirectory, ModuleDataDirectory, StartupDirectory, ImportedFontsDirectory, FontCacheDirectory }
             : new[] { RoamingRoot, LocalRoot, UserModulesDirectory,
-                ModuleDataDirectory, LogsDirectory, CacheDirectory, TempDirectory };
+                ModuleDataDirectory, LogsDirectory, CacheDirectory, TempDirectory, ImportedFontsDirectory, FontCacheDirectory };
         foreach (var directory in directories)
             Directory.CreateDirectory(directory);
         if (!_isProduction)

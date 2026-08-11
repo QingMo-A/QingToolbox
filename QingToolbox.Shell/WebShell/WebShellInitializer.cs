@@ -24,7 +24,8 @@ public sealed class DisabledWebShellInitializer : IWebShellInitializer
 
 public sealed class WebShellInitializer(
     ApplicationExecutionEnvironment environment, ApplicationLaunchOptions launchOptions, ApplicationPaths paths,
-    WebShellState state, WebNavigationPolicy navigation, Lazy<WebAssetIdentity> assetIdentity, WebBridgeHost bridge, SessionLogService log) : IWebShellInitializer, IDisposable
+    WebShellState state, WebNavigationPolicy navigation, Lazy<WebAssetIdentity> assetIdentity, WebBridgeHost bridge,
+    FontSettingsService fonts, SessionLogService log) : IWebShellInitializer, IDisposable
 {
     internal static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan EnvironmentTimeout = TimeSpan.FromSeconds(30);
@@ -170,6 +171,13 @@ public sealed class WebShellInitializer(
             {
                 if (!Uri.TryCreate(args.Request.Uri, UriKind.Absolute, out var uri) || !navigation.IsAllowed(uri))
                 { log.Warning("WebShell", "External web resource request denied."); args.Response = core.Environment.CreateWebResourceResponse(null, 403, "Forbidden", "Content-Type: text/plain"); return; }
+                if (fonts.TryOpenWebResource(uri.AbsolutePath, out var fontContent, out var fontContentType))
+                {
+                    args.Response = core.Environment.CreateWebResourceResponse(fontContent, 200, "OK",
+                        $"Content-Type: {fontContentType}\r\nCache-Control: no-store");
+                    log.Information("WebShell", $"Controlled user font served; path={uri.AbsolutePath}.");
+                    return;
+                }
                 if (!assets.TryResolve(uri.AbsolutePath, out var asset))
                 { args.Response = core.Environment.CreateWebResourceResponse(null, 404, "Not Found", "Content-Type: text/plain"); return; }
                 args.Response = core.Environment.CreateWebResourceResponse(asset.OpenRead(), 200, "OK", $"Content-Type: {asset.ContentType}\r\nCache-Control: no-store");

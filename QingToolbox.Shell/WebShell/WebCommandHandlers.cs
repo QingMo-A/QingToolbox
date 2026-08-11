@@ -445,6 +445,83 @@ public sealed class WebSetAppearancePresetCommandHandler(IWebSettingsMutation mu
     }
 }
 
+public sealed class WebSetFontCommandHandler(IWebFontSettingsOperations fonts,
+    WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "settings.setFont";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } =
+        new HashSet<string>(StringComparer.Ordinal) { "fontId" };
+
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context,
+        CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        if (!payload.TryGetProperty("fontId", out var property) ||
+            property.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(property.GetString()) ||
+            property.GetString()!.Length > 256 || !IsSafeFontId(property.GetString()!))
+            throw new WebBridgeValidationException("InvalidPayload", "A supported font id is required.");
+
+        var result = await fonts.SetAsync(property.GetString()!, context.SessionCancellation);
+        return result switch
+        {
+            WebFontMutationResult.Succeeded => snapshots.Create(),
+            WebFontMutationResult.Invalid => throw new WebBridgeValidationException("InvalidPayload", "The selected font is unavailable."),
+            _ => throw new WebBridgeValidationException("SettingsMutationFailed", "The font setting could not be updated.")
+        };
+    }
+
+    private static bool IsSafeFontId(string id)
+    {
+        if (!string.Equals(id, id.Trim(), StringComparison.Ordinal)) return false;
+        if (string.Equals(id, FontPreferenceIds.Default, StringComparison.Ordinal)) return true;
+        if (id.StartsWith("system:", StringComparison.Ordinal))
+            return FontPreferenceIds.IsSafeFamilyName(id["system:".Length..]);
+        if (id.StartsWith("imported:", StringComparison.Ordinal))
+            return FontPreferenceIds.IsSha256(id["imported:".Length..]);
+        return false;
+    }
+}
+
+public sealed class WebImportFontCommandHandler(IWebFontSettingsOperations fonts,
+    WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "settings.importFont";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string>(StringComparer.Ordinal);
+
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context,
+        CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        var result = await fonts.ImportAsync(context.SessionCancellation);
+        return result switch
+        {
+            WebFontMutationResult.Succeeded => new WebFontImportResponse("Imported", snapshots.Create()),
+            WebFontMutationResult.Cancelled => new WebFontImportResponse("Cancelled", snapshots.Create()),
+            WebFontMutationResult.Invalid => throw new WebBridgeValidationException("FontImportInvalid", "The selected font file could not be imported."),
+            _ => throw new WebBridgeValidationException("FontImportFailed", "The selected font file could not be imported.")
+        };
+    }
+}
+
+public sealed class WebRefreshFontsCommandHandler(IWebFontSettingsOperations fonts,
+    WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
+{
+    public string Command => "settings.refreshFonts";
+    public IReadOnlySet<string> AllowedPayloadProperties { get; } = new HashSet<string>(StringComparer.Ordinal);
+
+    public async Task<object> HandleAsync(JsonElement payload, WebBridgeRequestContext context,
+        CancellationToken cancellationToken)
+    {
+        activation.RequireActivated(context.Generation, context.SessionCancellation);
+        var result = await fonts.RefreshAsync(context.SessionCancellation);
+        return result switch
+        {
+            WebFontMutationResult.Succeeded => snapshots.Create(),
+            _ => throw new WebBridgeValidationException("FontRefreshFailed", "The system font catalog could not be refreshed.")
+        };
+    }
+}
+
 public sealed class WebSetShowLogsInSidebarCommandHandler(IWebSettingsMutation mutation,
     WebSettingsSnapshotProvider snapshots, WebActivationSession activation) : IWebCommandHandler
 {

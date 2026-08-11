@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Windows;
 using QingToolbox.Core.Settings;
 using QingToolbox.Core.Localization;
+using QingToolbox.Shell.Services;
 using QingToolbox.Shell.Startup;
 using QingToolbox.Shell.WebShell;
 using QingToolbox.Shell.Windowing;
@@ -129,6 +130,22 @@ Require(WebShellThemeNotification.TryParse("{\"kind\":\"qing.ui.theme\",\"mode\"
     "The native title bar must accept a bounded Web theme notification.");
 foreach (var invalidTheme in new[] { "{}", "{\"kind\":\"qing.ui.theme\",\"mode\":\"invalid\"}", "{\"kind\":\"qing.ui.theme\",\"mode\":\"dark\",\"extra\":true}" })
     Require(!WebShellThemeNotification.TryParse(invalidTheme, out _), "Malformed or extended theme notifications must be rejected.");
+var defaultLightTitleBar = WindowTitleBarThemeManager.Project(AppearancePresetIds.QingDefault, WebShellThemeMode.Light);
+var defaultDarkTitleBar = WindowTitleBarThemeManager.Project(AppearancePresetIds.QingDefault, WebShellThemeMode.Dark);
+Require(defaultLightTitleBar.Background != defaultDarkTitleBar.Background &&
+        defaultLightTitleBar.Foreground != defaultDarkTitleBar.Foreground,
+    "The native title bar must preserve the light/dark combination for qing-default.");
+var titleBarPresets = new[]
+{
+    AppearancePresetIds.QingDefault, AppearancePresetIds.NeonCircuit, AppearancePresetIds.Greenline,
+    AppearancePresetIds.AuroraFlow, AppearancePresetIds.QingNova
+}.Select(id => WindowTitleBarThemeManager.Project(id, WebShellThemeMode.Light)).ToArray();
+Require(titleBarPresets.Length == 5 && titleBarPresets.Select(item => item.Accent).Distinct(StringComparer.Ordinal).Count() == 5 &&
+        titleBarPresets.All(item => !string.IsNullOrWhiteSpace(item.Background) && !string.IsNullOrWhiteSpace(item.Disabled)),
+    "Every host appearance preset must project distinct native title-bar accent and safe disabled tokens.");
+var titleBarFallback = WindowTitleBarThemeManager.Project("invalid-preset", WebShellThemeMode.Light);
+Require(titleBarFallback == defaultLightTitleBar,
+    "An invalid host appearance preset must fall back to the qing-default native palette.");
 
 Console.WriteLine("Verifying activated read-only module projection...");
 var moduleActivation = new WebActivationSession();
@@ -467,6 +484,194 @@ var extraSettingsPayload = JsonSerializer.Serialize(new { protocolVersion = 4, r
 var extraSettingsResult = await settingsDispatcher.DispatchAsync(extraSettingsPayload, new(31, CancellationToken.None));
 Require(!extraSettingsResult.Response.Success && extraSettingsResult.Response.Error?.Code == "InvalidPayload", "Settings projection must reject additional payload properties.");
 Require(WebBridgeProtocol.Version == 4, "Settings projection must preserve protocol version 4.");
+
+Console.WriteLine("Verifying font settings schema and bridge boundaries...");
+var legacyFontSettingsPath = Path.Combine(Path.GetTempPath(), "QingToolbox-font-settings-" + Guid.NewGuid().ToString("N") + ".json");
+try
+{
+    File.WriteAllText(legacyFontSettingsPath,
+        "{\"SettingsSchemaVersion\":8,\"FontSource\":\"imported\",\"FontId\":\"imported:not-a-sha\",\"FontFamilyName\":\"unsafe\\\\family\"}");
+    using var legacyFontSettings = new UserSettingsService(legacyFontSettingsPath);
+    var normalizedLegacy = await legacyFontSettings.ReadAsync();
+    Require(normalizedLegacy.SettingsSchemaVersion == 9 && normalizedLegacy.FontId == FontPreferenceIds.Default &&
+            normalizedLegacy.FontSource == FontPreferenceSources.Default && normalizedLegacy.FontFamilyName is null,
+        "Legacy or malformed font settings must normalize to schema 9 Default.");
+}
+finally { try { File.Delete(legacyFontSettingsPath); } catch { } }
+
+var fontRouteSettingsPath = Path.Combine(Path.GetTempPath(), "QingToolbox-font-route-" + Guid.NewGuid().ToString("N") + ".json");
+using (var fontRouteSettings = new UserSettingsService(fontRouteSettingsPath))
+{
+    var fontPaths = new ApplicationPaths(dev);
+    fontPaths.EnsureDirectories();
+    var fontService = new FontSettingsService(fontPaths, fontRouteSettings);
+    var validHash = new string('a', 64);
+    Require(!fontService.TryOpenWebResource("/user-fonts/../" + validHash + ".ttf", out _, out _),
+        "Font resource route must reject path traversal.");
+    Require(!fontService.TryOpenWebResource("/user-fonts/" + validHash + ".ttf/extra", out _, out _),
+        "Font resource route must reject nested route leaves.");
+    Require(!fontService.TryOpenWebResource("/user-fonts/" + validHash + ".ttf", out _, out _),
+        "Font resource route must reject a missing controlled copy.");
+    Require(!fontService.TryOpenWebResource("/user-fonts/not-a-hash.ttf", out _, out _),
+        "Font resource route must reject malformed hashes.");
+
+    var systemFontsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
+    var sourceFont = Directory.EnumerateFiles(systemFontsDirectory, "*.ttf").FirstOrDefault();
+    Require(sourceFont is not null, "Windows must expose at least one installed TTF for the font import smoke test.");
+    var sourceHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sourceFont!))).ToLowerInvariant();
+    var controlledCopy = Path.Combine(fontPaths.ImportedFontsDirectory,
+        $"font-{sourceHash}{Path.GetExtension(sourceFont!).ToLowerInvariant()}");
+    var controlledCopyExisted = File.Exists(controlledCopy);
+    try
+    {
+        var import = await fontService.ImportFromPathAsync(sourceFont!);
+        var importedSelection = import.Selection;
+        Require(import.Disposition == FontSettingsService.FontImportDisposition.Imported &&
+                importedSelection is { Source: FontPreferenceSources.Imported, FilePath: not null } &&
+                File.Exists(importedSelection.FilePath),
+            $"A valid installed font file must be copied into the environment-scoped managed font directory; disposition={import.Disposition}.");
+        var resourcePath = new Uri(importedSelection!.ResourceUrl!, UriKind.Absolute).AbsolutePath;
+        Require(fontService.TryOpenWebResource(resourcePath, out var fontContent, out var fontContentType) &&
+                fontContent is not null && fontContent.Length > 0 && fontContentType == "font/ttf",
+            "An imported font must be readable only through its verified same-origin resource route.");
+        fontContent?.Dispose();
+        var persisted = await fontRouteSettings.ReadAsync();
+        Require(persisted.FontId == importedSelection.Id && persisted.FontSource == FontPreferenceSources.Imported,
+            "A successful import must persist only the opaque imported font id and safe family metadata.");
+        Require((await fontService.SetAsync(FontPreferenceIds.Default)).Disposition ==
+                FontSettingsService.FontSelectionDisposition.Succeeded,
+            "The managed font catalog must always allow restoring the built-in Default.");
+    }
+    finally
+    {
+        if (!controlledCopyExisted)
+        {
+            try { File.Delete(controlledCopy); } catch { }
+        }
+    }
+}
+try { File.Delete(fontRouteSettingsPath); } catch { }
+
+Console.WriteLine("Verifying persistent system font cache and explicit refresh semantics...");
+var cacheEnvironment = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "FontCacheSmoke", root);
+var cachePaths = new ApplicationPaths(cacheEnvironment);
+cachePaths.EnsureDirectories();
+try { File.Delete(cachePaths.FontCatalogCachePath); } catch { }
+var cacheEnumerationCount = 0;
+IReadOnlyList<string> FirstEnumeration()
+{
+    Interlocked.Increment(ref cacheEnumerationCount);
+    return ["Cache Sans", "Cache Mono"];
+}
+var cacheSettingsPathA = Path.Combine(cachePaths.RoamingRoot, "cache-a-settings.json");
+var cacheSettingsPathB = Path.Combine(cachePaths.RoamingRoot, "cache-b-settings.json");
+var cacheSettingsPathC = Path.Combine(cachePaths.RoamingRoot, "cache-c-settings.json");
+using (var cacheSettingsA = new UserSettingsService(cacheSettingsPathA))
+{
+    var firstService = new FontSettingsService(cachePaths, cacheSettingsA, FirstEnumeration);
+    var firstSnapshot = firstService.CreateSnapshot();
+    Require(cacheEnumerationCount == 1 && firstSnapshot.Options.Any(item => item.Id == "system:Cache Sans") &&
+            File.Exists(cachePaths.FontCatalogCachePath),
+        "The first font catalog load must enumerate once and persist a versioned cache.");
+    var cacheJson = File.ReadAllText(cachePaths.FontCatalogCachePath);
+    Require(cacheJson.Contains("\"schemaVersion\":1", StringComparison.Ordinal) &&
+            cacheJson.Contains("Cache Sans", StringComparison.Ordinal),
+        "The system font cache must include its schema version and validated family names.");
+}
+using (var cacheSettingsB = new UserSettingsService(cacheSettingsPathB))
+{
+    var cacheHitService = new FontSettingsService(cachePaths, cacheSettingsB, () =>
+    {
+        Interlocked.Increment(ref cacheEnumerationCount);
+        return ["Should Not Enumerate"];
+    });
+    var cacheHitSnapshot = cacheHitService.CreateSnapshot();
+    Require(cacheEnumerationCount == 1 && cacheHitSnapshot.Options.Any(item => item.Id == "system:Cache Sans") &&
+            !cacheHitSnapshot.Options.Any(item => item.Id == "system:Should Not Enumerate"),
+        "A second process must use the environment-scoped system font cache without enumerating.");
+}
+File.WriteAllText(cachePaths.FontCatalogCachePath, "{ this is not valid json");
+using (var cacheSettingsC = new UserSettingsService(cacheSettingsPathC))
+{
+    var recoveryService = new FontSettingsService(cachePaths, cacheSettingsC, () =>
+    {
+        Interlocked.Increment(ref cacheEnumerationCount);
+        return ["Recovered Sans"];
+    });
+    var recoveredSnapshot = recoveryService.CreateSnapshot();
+    Require(cacheEnumerationCount == 2 && recoveredSnapshot.Options.Any(item => item.Id == "system:Recovered Sans"),
+        "A corrupt cache must be ignored safely and rebuilt from one enumeration.");
+    var refreshed = await recoveryService.RefreshSystemFontsAsync();
+    Require(cacheEnumerationCount == 3 && refreshed.Options.Any(item => item.Id == "system:Recovered Sans"),
+        "Only explicit refresh must force a second system font enumeration.");
+
+    var sourceFonts = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
+    var sourceFontForCache = Directory.Exists(sourceFonts)
+        ? Directory.EnumerateFiles(sourceFonts, "*.ttf").FirstOrDefault()
+        : null;
+    if (sourceFontForCache is not null)
+    {
+        var sourceHashForCache = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sourceFontForCache))).ToLowerInvariant();
+        var managedCopyForCache = Path.Combine(cachePaths.ImportedFontsDirectory,
+            $"font-{sourceHashForCache}{Path.GetExtension(sourceFontForCache).ToLowerInvariant()}");
+        var managedCopyExistedForCache = File.Exists(managedCopyForCache);
+        try
+        {
+            var importedWithoutRescan = await recoveryService.ImportFromPathAsync(sourceFontForCache);
+            Require(importedWithoutRescan.Disposition == FontSettingsService.FontImportDisposition.Imported &&
+                    cacheEnumerationCount == 3,
+                "Importing a font must update the imported group without invalidating the system cache.");
+        }
+        finally
+        {
+            if (!managedCopyExistedForCache)
+            {
+                try { File.Delete(managedCopyForCache); } catch { }
+            }
+        }
+    }
+}
+try { File.Delete(cacheSettingsPathA); } catch { }
+try { File.Delete(cacheSettingsPathB); } catch { }
+try { File.Delete(cacheSettingsPathC); } catch { }
+
+var fontSnapshotSource = new FontSnapshotSource();
+var fontOperations = new FontOperations();
+var fontSnapshotProvider = new WebSettingsSnapshotProvider(new SettingsSnapshotSource(), TimeProvider.System, fontSnapshotSource);
+var fontDispatcher = new WebBridgeDispatcher([
+    new WebSetFontCommandHandler(fontOperations, fontSnapshotProvider, settingsActivation),
+    new WebImportFontCommandHandler(fontOperations, fontSnapshotProvider, settingsActivation),
+    new WebRefreshFontsCommandHandler(fontOperations, fontSnapshotProvider, settingsActivation)]);
+string FontRequest(string command, object payload) => JsonSerializer.Serialize(new
+{
+    protocolVersion = WebBridgeProtocol.Version,
+    requestId = Guid.NewGuid(), command, payload
+});
+var malformedFont = await fontDispatcher.DispatchAsync(FontRequest("settings.setFont", new { fontId = "../private" }), new(31, CancellationToken.None));
+Require(!malformedFont.Response.Success && malformedFont.Response.Error?.Code == "InvalidPayload",
+    "Font selection must reject an unsafe or overlong id before invoking the adapter.");
+var selectedFont = await fontDispatcher.DispatchAsync(FontRequest("settings.setFont", new { fontId = "system:Segoe UI" }), new(31, CancellationToken.None));
+Require(selectedFont.Response.Success && fontOperations.SetCount == 1 && selectedFont.Response.Payload is WebSettingsSnapshot { Font: not null },
+    "Font selection must return a complete host-confirmed snapshot.");
+var selectedFontJson = JsonSerializer.Serialize(selectedFont.Response.Payload);
+Require(!selectedFontJson.Contains("FilePath", StringComparison.OrdinalIgnoreCase) &&
+        !selectedFontJson.Contains(root, StringComparison.OrdinalIgnoreCase),
+    "Font snapshots must not expose local paths.");
+fontOperations.ImportResult = WebFontMutationResult.Cancelled;
+var cancelledFontImport = await fontDispatcher.DispatchAsync(FontRequest("settings.importFont", new { }), new(31, CancellationToken.None));
+Require(cancelledFontImport.Response.Success && cancelledFontImport.Response.Payload is WebFontImportResponse { Disposition: "Cancelled" },
+    "Cancelling native font import must return an explicit non-error disposition.");
+fontOperations.ImportResult = WebFontMutationResult.Succeeded;
+var importedFont = await fontDispatcher.DispatchAsync(FontRequest("settings.importFont", new { }), new(31, CancellationToken.None));
+Require(importedFont.Response.Success && importedFont.Response.Payload is WebFontImportResponse { Disposition: "Imported" } && fontOperations.ImportCount == 2,
+    "Successful native font import must return an explicit Imported disposition.");
+var refreshedFonts = await fontDispatcher.DispatchAsync(FontRequest("settings.refreshFonts", new { }), new(31, CancellationToken.None));
+Require(refreshedFonts.Response.Success && refreshedFonts.Response.Payload is WebSettingsSnapshot && fontOperations.RefreshCount == 1,
+    "Explicit font refresh must invoke the host refresh operation and return a complete snapshot.");
+var malformedFontRefresh = await fontDispatcher.DispatchAsync(FontRequest("settings.refreshFonts", new { extra = true }), new(31, CancellationToken.None));
+Require(!malformedFontRefresh.Response.Success && malformedFontRefresh.Response.Error?.Code == "InvalidPayload",
+    "Font refresh must reject additional payload properties.");
+Require(WebBridgeProtocol.Version == 4, "Font settings commands must preserve protocol v4.");
 
 Console.WriteLine("Verifying host-confirmed language mutation...");
 var languageSource = new SettingsMutationSource(false);
@@ -894,6 +1099,32 @@ file sealed class SettingsSnapshotSource : IWebSettingsSnapshotSource
             false, "Ask", "Ask before closing.", true, true, false,
             "FloatingBadge", "Task Scheduler", "Healthy", "Startup registration is healthy.");
     }
+}
+file sealed class FontSnapshotSource : IWebFontSettingsSnapshotSource
+{
+    private static readonly string ImportedHash = new('b', 64);
+    public WebFontSnapshot Read() => new(
+        new WebFontSelection("system:Segoe UI", FontPreferenceSources.System, "Segoe UI", "Segoe UI", null),
+        [
+            new WebFontOption(FontPreferenceIds.Default, FontPreferenceSources.Default, "Default", null, null),
+            new WebFontOption("system:Segoe UI", FontPreferenceSources.System, "Segoe UI", "Segoe UI", null),
+            new WebFontOption(FontPreferenceIds.Imported(ImportedHash), FontPreferenceSources.Imported,
+                "Imported Sans", "Imported Sans", FontSettingsService.ResourceUrlPrefix + ImportedHash + ".ttf")
+        ]);
+}
+file sealed class FontOperations : IWebFontSettingsOperations
+{
+    public WebFontMutationResult SetResult { get; set; } = WebFontMutationResult.Succeeded;
+    public WebFontMutationResult ImportResult { get; set; } = WebFontMutationResult.Cancelled;
+    public int SetCount { get; private set; }
+    public int ImportCount { get; private set; }
+    public int RefreshCount { get; private set; }
+    public Task<WebFontMutationResult> SetAsync(string id, CancellationToken cancellationToken)
+    { cancellationToken.ThrowIfCancellationRequested(); SetCount++; return Task.FromResult(SetResult); }
+    public Task<WebFontMutationResult> ImportAsync(CancellationToken cancellationToken)
+    { cancellationToken.ThrowIfCancellationRequested(); ImportCount++; return Task.FromResult(ImportResult); }
+    public Task<WebFontMutationResult> RefreshAsync(CancellationToken cancellationToken)
+    { cancellationToken.ThrowIfCancellationRequested(); RefreshCount++; return Task.FromResult(WebFontMutationResult.Succeeded); }
 }
 file sealed class SettingsMutationSource(bool initialValue) : IWebSettingsSnapshotSource, IWebSettingsMutation
 {
