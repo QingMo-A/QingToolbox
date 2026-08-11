@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DevicesOther
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Info
@@ -53,6 +54,7 @@ private sealed class MobileDestination(
     data object Devices : MobileDestination("devices", "Devices", Icons.Outlined.DevicesOther)
     data object Settings : MobileDestination("settings", "Settings", Icons.Outlined.Settings)
     data object FileHash : MobileDestination("tools/file-hash", "File Hash", Icons.Outlined.Calculate)
+    data object TextCodec : MobileDestination("tools/text-codec", "Text Codec", Icons.Outlined.Code)
 }
 
 private val destinations = listOf(
@@ -84,19 +86,21 @@ private fun QingToolboxShell(
     val currentRoute = backStackEntry?.destination?.route
     val currentDestination = destinations.firstOrNull { it.route == currentRoute }
         ?: MobileDestination.Home
-    val selectedDestination = if (currentRoute == MobileDestination.FileHash.route) {
+    val isToolDetail = currentRoute == MobileDestination.FileHash.route ||
+        currentRoute == MobileDestination.TextCodec.route
+    val selectedDestination = if (isToolDetail) {
         MobileDestination.Tools
     } else {
         currentDestination
     }
-    val titleDestination = if (currentRoute == MobileDestination.FileHash.route) {
-        MobileDestination.FileHash
-    } else {
-        currentDestination
+    val titleDestination = when (currentRoute) {
+        MobileDestination.FileHash.route -> MobileDestination.FileHash
+        MobileDestination.TextCodec.route -> MobileDestination.TextCodec
+        else -> currentDestination
     }
 
     BackHandler(enabled = navController.previousBackStackEntry != null) {
-        if (currentRoute == MobileDestination.FileHash.route) {
+        if (isToolDetail) {
             navigateTo(navController, MobileDestination.Tools)
         } else {
             navController.popBackStack()
@@ -144,13 +148,20 @@ private fun QingToolboxShell(
                 .padding(innerPadding),
         ) {
             composable(MobileDestination.Home.route) {
-                HomeScreen(onFileHashClick = { navigateTo(navController, MobileDestination.FileHash) })
+                HomeScreen(
+                    onFileHashClick = { navigateTo(navController, MobileDestination.FileHash) },
+                    onTextCodecClick = { navigateTo(navController, MobileDestination.TextCodec) },
+                )
             }
             composable(MobileDestination.Tools.route) {
-                ToolsScreen(onFileHashClick = { navigateTo(navController, MobileDestination.FileHash) })
+                ToolsScreen(
+                    onFileHashClick = { navigateTo(navController, MobileDestination.FileHash) },
+                    onTextCodecClick = { navigateTo(navController, MobileDestination.TextCodec) },
+                )
             }
             composable(MobileDestination.Devices.route) { DevicesScreen() }
             composable(MobileDestination.FileHash.route) { FileHashScreen() }
+            composable(MobileDestination.TextCodec.route) { TextCodecScreen() }
             composable(MobileDestination.Settings.route) {
                 SettingsScreen(
                     currentAppearance = currentAppearance,
@@ -174,6 +185,7 @@ private fun navigateTo(navController: NavHostController, destination: MobileDest
 @Composable
 private fun HomeScreen(
     onFileHashClick: () -> Unit,
+    onTextCodecClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val heroContentColor = if (LocalQingAppearance.current.primaryBrush() != null) {
@@ -222,13 +234,21 @@ private fun HomeScreen(
                 }
             }
         }
-        item { SectionHeader(title = "Frequently used") }
+        item { SectionHeader(title = "Quick tools") }
         item {
             PlaceholderCard(
                 icon = Icons.Outlined.Calculate,
                 title = "File Hash",
                 body = "Calculate common hashes for a local file.",
                 onClick = onFileHashClick,
+            )
+        }
+        item {
+            PlaceholderCard(
+                icon = Icons.Outlined.Code,
+                title = "Text Codec",
+                body = "Encode and decode Base64 or URL text.",
+                onClick = onTextCodecClick,
             )
         }
         item { SectionHeader(title = "Recently used") }
@@ -245,6 +265,7 @@ private fun HomeScreen(
 @Composable
 private fun ToolsScreen(
     onFileHashClick: () -> Unit,
+    onTextCodecClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -259,6 +280,14 @@ private fun ToolsScreen(
                 title = "File Hash",
                 body = "Calculate common hashes for a local file.",
                 onClick = onFileHashClick,
+            )
+        }
+        item {
+            PlaceholderCard(
+                icon = Icons.Outlined.Code,
+                title = "Text Codec",
+                body = "Encode and decode Base64 or URL text.",
+                onClick = onTextCodecClick,
             )
         }
     }
