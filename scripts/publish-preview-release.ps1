@@ -162,9 +162,11 @@ function Assert-SourceGuards {
     }
 
     $diffIssues = @(
-        @(Invoke-Git @("diff", "--check"))
-        @(Invoke-Git @("diff", "--cached", "--check"))
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+        @(
+            @(Invoke-Git @("diff", "--check"))
+            @(Invoke-Git @("diff", "--cached", "--check"))
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    )
     if ($diffIssues.Count -ne 0) {
         throw "Git whitespace validation failed:`n$(Get-OutputText $diffIssues)"
     }

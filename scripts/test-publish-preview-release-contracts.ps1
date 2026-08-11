@@ -73,6 +73,13 @@ foreach ($contract in @(
     Assert-Contains $orchestrator $contract
 }
 
+# PowerShell 5.1 strict mode must still represent a clean diff as an empty
+# array. Piping outside @() unwraps zero results to $null and makes .Count fail
+# before the release guards can run.
+if ($orchestrator -notmatch '(?s)\$diffIssues\s*=\s*@\(\s*@\(.*?diff.*?--check.*?diff.*?--cached.*?--check.*?\)\s*\|\s*Where-Object.*?\s*\)') {
+    throw 'Clean diff output is not protected by an outer array expression.'
+}
+
 # Source, authentication, and existing tag/Release guards.
 foreach ($contract in @(
         'branch", "--show-current',
