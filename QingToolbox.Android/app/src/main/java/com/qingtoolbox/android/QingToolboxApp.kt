@@ -3,6 +3,7 @@ package com.qingtoolbox.android
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,13 +17,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Calculate
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.DevicesOther
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -50,6 +52,7 @@ private sealed class MobileDestination(
     data object Tools : MobileDestination("tools", "Tools", Icons.Outlined.Build)
     data object Devices : MobileDestination("devices", "Devices", Icons.Outlined.DevicesOther)
     data object Settings : MobileDestination("settings", "Settings", Icons.Outlined.Settings)
+    data object FileHash : MobileDestination("tools/file-hash", "File Hash", Icons.Outlined.Calculate)
 }
 
 private val destinations = listOf(
@@ -81,9 +84,23 @@ private fun QingToolboxShell(
     val currentRoute = backStackEntry?.destination?.route
     val currentDestination = destinations.firstOrNull { it.route == currentRoute }
         ?: MobileDestination.Home
+    val selectedDestination = if (currentRoute == MobileDestination.FileHash.route) {
+        MobileDestination.Tools
+    } else {
+        currentDestination
+    }
+    val titleDestination = if (currentRoute == MobileDestination.FileHash.route) {
+        MobileDestination.FileHash
+    } else {
+        currentDestination
+    }
 
     BackHandler(enabled = navController.previousBackStackEntry != null) {
-        navController.popBackStack()
+        if (currentRoute == MobileDestination.FileHash.route) {
+            navigateTo(navController, MobileDestination.Tools)
+        } else {
+            navController.popBackStack()
+        }
     }
 
     Scaffold(
@@ -92,7 +109,7 @@ private fun QingToolboxShell(
                 title = {
                     Column {
                         Text(
-                            text = currentDestination.label,
+                            text = titleDestination.label,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -109,7 +126,7 @@ private fun QingToolboxShell(
             QingNavigationBar {
                 destinations.forEach { destination ->
                     QingNavigationBarItem(
-                        selected = currentDestination.route == destination.route,
+                        selected = selectedDestination.route == destination.route,
                         onClick = { navigateTo(navController, destination) },
                         icon = { Icon(destination.icon, contentDescription = null) },
                         label = { Text(destination.label) },
@@ -126,9 +143,14 @@ private fun QingToolboxShell(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            composable(MobileDestination.Home.route) { HomeScreen() }
-            composable(MobileDestination.Tools.route) { ToolsScreen() }
+            composable(MobileDestination.Home.route) {
+                HomeScreen(onFileHashClick = { navigateTo(navController, MobileDestination.FileHash) })
+            }
+            composable(MobileDestination.Tools.route) {
+                ToolsScreen(onFileHashClick = { navigateTo(navController, MobileDestination.FileHash) })
+            }
             composable(MobileDestination.Devices.route) { DevicesScreen() }
+            composable(MobileDestination.FileHash.route) { FileHashScreen() }
             composable(MobileDestination.Settings.route) {
                 SettingsScreen(
                     currentAppearance = currentAppearance,
@@ -150,7 +172,10 @@ private fun navigateTo(navController: NavHostController, destination: MobileDest
 }
 
 @Composable
-private fun HomeScreen(modifier: Modifier = Modifier) {
+private fun HomeScreen(
+    onFileHashClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val heroContentColor = if (LocalQingAppearance.current.primaryBrush() != null) {
         MaterialTheme.colorScheme.onPrimary
     } else {
@@ -200,9 +225,10 @@ private fun HomeScreen(modifier: Modifier = Modifier) {
         item { SectionHeader(title = "Frequently used") }
         item {
             PlaceholderCard(
-                icon = Icons.Outlined.Tune,
-                title = "Your frequent tools will appear here",
-                body = "Built-in mobile tools are planned for the next milestone.",
+                icon = Icons.Outlined.Calculate,
+                title = "File Hash",
+                body = "Calculate common hashes for a local file.",
+                onClick = onFileHashClick,
             )
         }
         item { SectionHeader(title = "Recently used") }
@@ -217,19 +243,25 @@ private fun HomeScreen(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ToolsScreen(modifier: Modifier = Modifier) {
-    QingEmptyState(
-        modifier = modifier,
-        icon = {
-            Icon(
-                imageVector = Icons.Outlined.Build,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+private fun ToolsScreen(
+    onFileHashClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item { SectionHeader(title = "Tools") }
+        item {
+            PlaceholderCard(
+                icon = Icons.Outlined.Calculate,
+                title = "File Hash",
+                body = "Calculate common hashes for a local file.",
+                onClick = onFileHashClick,
             )
-        },
-        title = "No tools yet",
-        body = "QingToolbox mobile tools will appear here as they become available.",
-    )
+        }
+    }
 }
 
 @Composable
@@ -373,8 +405,13 @@ private fun ThemeSwatch(theme: AppearanceTheme, selected: Boolean) {
 }
 
 @Composable
-private fun PlaceholderCard(icon: ImageVector, title: String, body: String) {
-    QingCard(modifier = Modifier.fillMaxWidth()) {
+private fun PlaceholderCard(
+    icon: ImageVector,
+    title: String,
+    body: String,
+    onClick: (() -> Unit)? = null,
+) {
+    val content: @Composable ColumnScope.() -> Unit = {
         Row(
             modifier = Modifier.padding(18.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -387,7 +424,7 @@ private fun PlaceholderCard(icon: ImageVector, title: String, body: String) {
                     tint = MaterialTheme.colorScheme.primary,
                 )
             }
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -396,7 +433,19 @@ private fun PlaceholderCard(icon: ImageVector, title: String, body: String) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            if (onClick != null) {
+                Icon(
+                    imageVector = Icons.Outlined.ChevronRight,
+                    contentDescription = "Open $title",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
+    }
+    if (onClick != null) {
+        QingClickableCard(onClick = onClick, modifier = Modifier.fillMaxWidth(), content = content)
+    } else {
+        QingCard(modifier = Modifier.fillMaxWidth(), content = content)
     }
 }
 

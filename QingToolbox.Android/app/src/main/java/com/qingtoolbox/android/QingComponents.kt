@@ -19,6 +19,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -305,6 +307,30 @@ fun QingSwitch(
         modifier = modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
         enabled = enabled,
         colors = colors,
+    )
+}
+
+@Composable
+fun QingCheckbox(
+    checked: Boolean,
+    onCheckedChange: ((Boolean) -> Unit)?,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val style = LocalQingAppearance.current
+    val scheme = MaterialTheme.colorScheme
+    Checkbox(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+        enabled = enabled,
+        colors = CheckboxDefaults.colors(
+            checkedColor = scheme.primary,
+            checkmarkColor = scheme.onPrimary,
+            uncheckedColor = style.controlBorderColor,
+            disabledCheckedColor = scheme.primary.copy(alpha = 0.38f),
+            disabledUncheckedColor = scheme.outline.copy(alpha = 0.38f),
+        ),
     )
 }
 
