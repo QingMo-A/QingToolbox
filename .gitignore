@@ -20,3 +20,4 @@ coverage/
 # Android/Gradle local state
 .gradle/
 local.properties
+/QingToolbox.Android/**/build/
