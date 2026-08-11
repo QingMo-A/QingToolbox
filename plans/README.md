@@ -66,6 +66,12 @@ Read these plans in order unless the user says otherwise:
     - Keep module-summary correctness as an independent P1 prerequisite instead of hiding the Bug inside the localization phase.
     - **Implementation Complete — all current Development Web workspaces have English and Simplified Chinese primary UI coverage, and successful language changes refresh one complete host-localized Module Snapshot.**
 
+13. [`013-android-mobile-shell-and-root-capability-foundation.md`](013-android-mobile-shell-and-root-capability-foundation.md)
+    - **Direction Approved — implementation requires a separate bounded Codex prompt.**
+    - Build a first-class Android QingToolbox Shell before expanding cross-device infrastructure.
+    - Keep Root and Xposed/LSPosed-compatible capabilities optional and isolated from the normal mobile startup path.
+    - Queue QingTransfer as the first planned symmetric PC/Android LAN module after the mobile Shell and real module requirements are proven.
+
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 
 A plan marked `Draft — Pending User Approval` is review material only. Codex must not implement its slices until the user explicitly approves the plan and an execution prompt selects one bounded slice. An active plan still authorizes only the single slice selected by the current Codex prompt.
