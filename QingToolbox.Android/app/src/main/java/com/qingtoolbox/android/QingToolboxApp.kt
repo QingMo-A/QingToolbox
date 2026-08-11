@@ -55,6 +55,7 @@ private sealed class MobileDestination(
     data object Settings : MobileDestination("settings", "Settings", Icons.Outlined.Settings)
     data object FileHash : MobileDestination("tools/file-hash", "File Hash", Icons.Outlined.Calculate)
     data object TextCodec : MobileDestination("tools/text-codec", "Text Codec", Icons.Outlined.Code)
+    data object DeviceInfo : MobileDestination("tools/device-info", "Device Info", Icons.Outlined.DevicesOther)
 }
 
 private val destinations = listOf(
@@ -87,7 +88,8 @@ private fun QingToolboxShell(
     val currentDestination = destinations.firstOrNull { it.route == currentRoute }
         ?: MobileDestination.Home
     val isToolDetail = currentRoute == MobileDestination.FileHash.route ||
-        currentRoute == MobileDestination.TextCodec.route
+        currentRoute == MobileDestination.TextCodec.route ||
+        currentRoute == MobileDestination.DeviceInfo.route
     val selectedDestination = if (isToolDetail) {
         MobileDestination.Tools
     } else {
@@ -96,6 +98,7 @@ private fun QingToolboxShell(
     val titleDestination = when (currentRoute) {
         MobileDestination.FileHash.route -> MobileDestination.FileHash
         MobileDestination.TextCodec.route -> MobileDestination.TextCodec
+        MobileDestination.DeviceInfo.route -> MobileDestination.DeviceInfo
         else -> currentDestination
     }
 
@@ -151,17 +154,20 @@ private fun QingToolboxShell(
                 HomeScreen(
                     onFileHashClick = { navigateTo(navController, MobileDestination.FileHash) },
                     onTextCodecClick = { navigateTo(navController, MobileDestination.TextCodec) },
+                    onDeviceInfoClick = { navigateTo(navController, MobileDestination.DeviceInfo) },
                 )
             }
             composable(MobileDestination.Tools.route) {
                 ToolsScreen(
                     onFileHashClick = { navigateTo(navController, MobileDestination.FileHash) },
                     onTextCodecClick = { navigateTo(navController, MobileDestination.TextCodec) },
+                    onDeviceInfoClick = { navigateTo(navController, MobileDestination.DeviceInfo) },
                 )
             }
             composable(MobileDestination.Devices.route) { DevicesScreen() }
             composable(MobileDestination.FileHash.route) { FileHashScreen() }
             composable(MobileDestination.TextCodec.route) { TextCodecScreen() }
+            composable(MobileDestination.DeviceInfo.route) { DeviceInfoScreen() }
             composable(MobileDestination.Settings.route) {
                 SettingsScreen(
                     currentAppearance = currentAppearance,
@@ -186,6 +192,7 @@ private fun navigateTo(navController: NavHostController, destination: MobileDest
 private fun HomeScreen(
     onFileHashClick: () -> Unit,
     onTextCodecClick: () -> Unit,
+    onDeviceInfoClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val heroContentColor = if (LocalQingAppearance.current.primaryBrush() != null) {
@@ -251,6 +258,14 @@ private fun HomeScreen(
                 onClick = onTextCodecClick,
             )
         }
+        item {
+            PlaceholderCard(
+                icon = Icons.Outlined.DevicesOther,
+                title = "Device Info",
+                body = "View Android system, hardware and app information.",
+                onClick = onDeviceInfoClick,
+            )
+        }
         item { SectionHeader(title = "Recently used") }
         item {
             PlaceholderCard(
@@ -266,6 +281,7 @@ private fun HomeScreen(
 private fun ToolsScreen(
     onFileHashClick: () -> Unit,
     onTextCodecClick: () -> Unit,
+    onDeviceInfoClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -288,6 +304,14 @@ private fun ToolsScreen(
                 title = "Text Codec",
                 body = "Encode and decode Base64 or URL text.",
                 onClick = onTextCodecClick,
+            )
+        }
+        item {
+            PlaceholderCard(
+                icon = Icons.Outlined.DevicesOther,
+                title = "Device Info",
+                body = "View Android system, hardware and app information.",
+                onClick = onDeviceInfoClick,
             )
         }
     }
