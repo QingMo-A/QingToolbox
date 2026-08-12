@@ -277,11 +277,14 @@ internal static class Program
     {
         var entry = Path.Combine(root, "capability-probe.dll");
         File.WriteAllBytes(entry, [0]);
+        var webEntry = Path.Combine(root, "index.html");
+        File.WriteAllText(webEntry, "<!doctype html><title>canary</title>");
         var validator = new ModuleManifestValidator();
         ModuleManifest Manifest(ModuleRuntimeIsolation? isolation, ModuleUiKind? ui) => new()
         {
             Id = "capability.probe", Name = "Capability Probe", Version = "1.0.0",
-            Entry = Path.GetFileName(entry), RuntimeIsolation = isolation, UiKind = ui
+            Entry = Path.GetFileName(entry), RuntimeIsolation = isolation, UiKind = ui,
+            WebEntry = ui == ModuleUiKind.Web ? Path.GetFileName(webEntry) : null
         };
         IReadOnlyList<ModuleDiscoveryError> Validate(ModuleRuntimeIsolation? isolation, ModuleUiKind? ui) =>
             validator.Validate(Manifest(isolation, ui), root, Path.Combine(root, "module.json"));
@@ -306,6 +309,21 @@ internal static class Program
                 Validate(ModuleRuntimeIsolation.LegacyInProcess, ModuleUiKind.None).Any(x =>
                     x.Code == "Manifest.RuntimeCapabilityUnsupported"),
             "An unsupported runtime capability combination was accepted.");
+        Require(Validate(ModuleRuntimeIsolation.OutOfProcess, ModuleUiKind.Web).Count == 0,
+            "Out-of-process Web capability was rejected.");
+        var webManifest = new ModuleManifest
+        {
+            Id = "web.probe", Name = "Web Probe", Version = "1.0.0", Entry = string.Empty,
+            WebEntry = "index.html", RuntimeIsolation = ModuleRuntimeIsolation.OutOfProcess, UiKind = ModuleUiKind.Web
+        };
+        Require(validator.Validate(webManifest, root, Path.Combine(root, "module.json")).Count == 0,
+            "A valid Web entry was rejected.");
+        foreach (var invalid in new[] { "missing.html", "../index.html", "C:\\outside.html", "index.txt" })
+        {
+            var bad = webManifest with { WebEntry = invalid };
+            Require(validator.Validate(bad, root, Path.Combine(root, "module.json")).Count > 0,
+                $"Invalid Web entry '{invalid}' was accepted.");
+        }
         File.Delete(entry);
 
         var unknownDirectory = Path.Combine(root, "unknown-capability");
