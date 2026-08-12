@@ -114,8 +114,11 @@ internal class QingTransferConnection(
     }
 
     private fun closeToIdle() {
+        val job = ioJob
+        ioJob = null
+        job?.cancel()
         runCatching { socket?.close() }
-        socket = null; ioJob = null; incomingName = null; incomingPlatform = null
+        socket = null; incomingName = null; incomingPlatform = null
         _incomingPeer.value = null
         _state.value = QingTransferConnectionState.IDLE
     }
