@@ -191,9 +191,12 @@ public sealed class QingTransferModule : IWebToolModule
             PublishState();
             return;
         }
-        await session.AcceptIncomingFileAsync(dialog.FileName, cancellationToken).ConfigureAwait(false);
+        // The Save dialog is the user's decision boundary.  Clear the offer
+        // before awaiting the potentially long receive operation so the Web UI
+        // immediately switches from the decision modal to transfer progress.
         lock (_gate) _incomingOffer = null;
         PublishState();
+        await session.AcceptIncomingFileAsync(dialog.FileName, cancellationToken).ConfigureAwait(false);
     }
 
     private QingTransferReceiveSettings CurrentSettings()
