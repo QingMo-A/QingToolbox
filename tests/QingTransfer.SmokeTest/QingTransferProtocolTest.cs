@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.IO;
+using System.Text.Json;
 using QingToolbox.Modules.QingTransfer;
 
 namespace QingToolbox.Modules.QingTransfer;
@@ -31,6 +32,7 @@ public static class QingTransferProtocolTest
         Require(!QingTransferProtocol.TryDecodeFrame(QingTransferProtocol.EncodeFrame(new QingTransferProtocol.FileOfferMessage("../unsafe", 1)), out _), "Unsafe offer name was accepted.");
         await RunStreamingWireAsync(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23 });
         await RunStreamingWireAsync(Array.Empty<byte>());
+        RunMoveAfterDisposeRegression();
     }
 
     private static async Task RunStreamingWireAsync(byte[] payload)
@@ -63,6 +65,24 @@ public static class QingTransferProtocolTest
             if (read == 0) throw new EndOfStreamException();
             offset += read;
         }
+    }
+
+    private static void RunMoveAfterDisposeRegression()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "qingtransfer-smoke-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var temp = Path.Combine(directory, ".wire.bin.qingtransfer.part");
+        var destination = Path.Combine(directory, "wire.bin");
+        try
+        {
+            using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                output.WriteByte(0x42); output.Flush();
+            }
+            File.Move(temp, destination, false);
+            Require(File.ReadAllBytes(destination).SequenceEqual(new byte[] { 0x42 }), "Disposed temp stream could not be committed.");
+        }
+        finally { try { Directory.Delete(directory, true); } catch { } }
     }
 
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }

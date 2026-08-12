@@ -280,11 +280,17 @@ public sealed class QingTransferSession : IAsyncDisposable
         {
             var destination = Path.GetFullPath(decision.Destination); var directory = Path.GetDirectoryName(destination)!; Directory.CreateDirectory(directory); if (File.Exists(destination)) throw new IOException("The destination already exists.");
             temp = Path.Combine(directory, "." + offer.Name + ".qingtransfer.part"); if (File.Exists(temp)) File.Delete(temp);
-            using var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256); var buffer = new byte[128 * 1024]; long remaining = offer.Size, completed = 0;
             WriteTransferDiagnostic(correlation, $"raw-receive-begin declared={offer.Size}");
-            while (remaining > 0) { var read = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken).ConfigureAwait(false); if (read == 0) throw new EndOfStreamException(); hash.AppendData(buffer, 0, read); await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false); remaining -= read; completed += read; TransferProgress?.Invoke(this, new QingTransferProgress(offer.Name, completed, offer.Size, true)); }
-            await output.FlushAsync(cancellationToken).ConfigureAwait(false); var end = await QingTransferProtocol.ReadMessageAsync(stream, cancellationToken).ConfigureAwait(false); var expected = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+            // Close the destination stream before replacing the temporary file.
+            // FileShare.None intentionally prevents concurrent writers, so moving
+            // while this using scope is alive causes ERROR_SHARING_VIOLATION.
+            using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                while (remaining > 0) { var read = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken).ConfigureAwait(false); if (read == 0) throw new EndOfStreamException(); hash.AppendData(buffer, 0, read); await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false); remaining -= read; completed += read; TransferProgress?.Invoke(this, new QingTransferProgress(offer.Name, completed, offer.Size, true)); }
+                await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+            var end = await QingTransferProtocol.ReadMessageAsync(stream, cancellationToken).ConfigureAwait(false); var expected = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
             WriteTransferDiagnostic(correlation, $"raw-receive-end bytes={completed} declared={offer.Size} file-end={end is QingTransferProtocol.FileEndMessage}");
             if (end is not QingTransferProtocol.FileEndMessage fileEnd || !string.Equals(expected, fileEnd.Sha256, StringComparison.Ordinal)) throw new InvalidDataException("File hash mismatch.");
             File.Move(temp, destination, false); temp = null; ok = true;
