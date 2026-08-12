@@ -24,6 +24,8 @@ public sealed class QingTransferSession : IAsyncDisposable
     private readonly string _friendlyName;
     private readonly string _platform;
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly string? _diagnosticDirectory;
+    private long _transferSequence;
     private TcpClient? _client;
     private NetworkStream? _stream;
     private Task? _receiveTask;
@@ -41,6 +43,7 @@ public sealed class QingTransferSession : IAsyncDisposable
     public QingTransferSession(QingTransferDiscoveryService discovery, string friendlyName, string platform = "windows")
     {
         _discovery = discovery;
+        _diagnosticDirectory = discovery.DiagnosticDirectory;
         discovery.IncomingClientHandler = HandleIncomingAsync;
         _friendlyName = friendlyName;
         _platform = platform;
@@ -121,16 +124,21 @@ public sealed class QingTransferSession : IAsyncDisposable
         var info = new FileInfo(path);
         if (!info.Exists) throw new FileNotFoundException("File not found.", path);
         BeginTransfer();
+        var correlation = Interlocked.Increment(ref _transferSequence).ToString("x");
+        WriteTransferDiagnostic(correlation, $"offer-send nameLength={info.Name.Length} size={info.Length}");
         try
         {
             var offerResponse = NewMessageCompletion();
             var resultResponse = NewResultCompletion();
             await QingTransferProtocol.WriteMessageAsync(_stream, new QingTransferProtocol.FileOfferMessage(info.Name, info.Length), cancellationToken).ConfigureAwait(false);
+            WriteTransferDiagnostic(correlation, "offer-sent");
             var response = await offerResponse.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            WriteTransferDiagnostic(correlation, $"offer-response accepted={response is QingTransferProtocol.FileAcceptMessage}");
             if (response is not QingTransferProtocol.FileAcceptMessage) throw new InvalidOperationException("The peer rejected this file.");
             using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             var buffer = new byte[128 * 1024]; long completed = 0; int read;
+            WriteTransferDiagnostic(correlation, $"raw-receive-begin declared={info.Length}");
             while ((read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
             {
                 hash.AppendData(buffer, 0, read);
@@ -138,9 +146,13 @@ public sealed class QingTransferSession : IAsyncDisposable
                 completed += read; TransferProgress?.Invoke(this, new QingTransferProgress(info.Name, completed, info.Length, false));
             }
             await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            WriteTransferDiagnostic(correlation, $"raw-send-end bytes={completed} declared={info.Length}");
             await QingTransferProtocol.WriteMessageAsync(_stream, new QingTransferProtocol.FileEndMessage(Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant()), cancellationToken).ConfigureAwait(false);
+            WriteTransferDiagnostic(correlation, "file-end-sent");
             if (!await resultResponse.Task.WaitAsync(cancellationToken).ConfigureAwait(false)) throw new InvalidDataException("The peer reported a file error.");
+            WriteTransferDiagnostic(correlation, "result-received ok=true");
         }
+        catch (Exception ex) { WriteTransferDiagnostic(correlation, $"exception type={ex.GetType().Name} hresult=0x{ex.HResult:X8}"); throw; }
         finally { EndTransfer(); }
     }
 
@@ -250,6 +262,8 @@ public sealed class QingTransferSession : IAsyncDisposable
 
     private async Task HandleOfferAsync(NetworkStream stream, QingTransferProtocol.FileOfferMessage offer, CancellationToken cancellationToken)
     {
+        var correlation = Interlocked.Increment(ref _transferSequence).ToString("x");
+        WriteTransferDiagnostic(correlation, $"offer-parsed nameLength={offer.Name.Length} size={offer.Size}");
         lock (_gate)
         {
             if (_transferActive || _pendingOffer is not null) { _ = QingTransferProtocol.WriteMessageAsync(stream, new QingTransferProtocol.FileRejectMessage(), cancellationToken); return; }
@@ -257,8 +271,10 @@ public sealed class QingTransferSession : IAsyncDisposable
         }
         IncomingFileOffer?.Invoke(this, _pendingOffer);
         var decision = await _incomingDecision.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
-        if (!decision.Accepted || decision.Destination is null) { await QingTransferProtocol.WriteMessageAsync(stream, new QingTransferProtocol.FileRejectMessage(), cancellationToken).ConfigureAwait(false); EndTransfer(); return; }
+        WriteTransferDiagnostic(correlation, $"ui-decision accepted={decision.Accepted} hasDestination={decision.Destination is not null}");
+        if (!decision.Accepted || decision.Destination is null) { await QingTransferProtocol.WriteMessageAsync(stream, new QingTransferProtocol.FileRejectMessage(), cancellationToken).ConfigureAwait(false); WriteTransferDiagnostic(correlation, "reject-sent"); EndTransfer(); return; }
         await QingTransferProtocol.WriteMessageAsync(stream, new QingTransferProtocol.FileAcceptMessage(), cancellationToken).ConfigureAwait(false);
+        WriteTransferDiagnostic(correlation, "accept-sent");
         var ok = false; string? temp = null;
         try
         {
@@ -266,12 +282,15 @@ public sealed class QingTransferSession : IAsyncDisposable
             temp = Path.Combine(directory, "." + offer.Name + ".qingtransfer.part"); if (File.Exists(temp)) File.Delete(temp);
             using var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256); var buffer = new byte[128 * 1024]; long remaining = offer.Size, completed = 0;
+            WriteTransferDiagnostic(correlation, $"raw-receive-begin declared={offer.Size}");
             while (remaining > 0) { var read = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken).ConfigureAwait(false); if (read == 0) throw new EndOfStreamException(); hash.AppendData(buffer, 0, read); await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false); remaining -= read; completed += read; TransferProgress?.Invoke(this, new QingTransferProgress(offer.Name, completed, offer.Size, true)); }
             await output.FlushAsync(cancellationToken).ConfigureAwait(false); var end = await QingTransferProtocol.ReadMessageAsync(stream, cancellationToken).ConfigureAwait(false); var expected = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+            WriteTransferDiagnostic(correlation, $"raw-receive-end bytes={completed} declared={offer.Size} file-end={end is QingTransferProtocol.FileEndMessage}");
             if (end is not QingTransferProtocol.FileEndMessage fileEnd || !string.Equals(expected, fileEnd.Sha256, StringComparison.Ordinal)) throw new InvalidDataException("File hash mismatch.");
             File.Move(temp, destination, false); temp = null; ok = true;
         }
-        finally { if (temp is not null) try { File.Delete(temp); } catch { } await QingTransferProtocol.WriteMessageAsync(stream, new QingTransferProtocol.FileResultMessage(ok), cancellationToken).ConfigureAwait(false); _incomingCompletion?.TrySetResult(ok); EndTransfer(); }
+        catch (Exception ex) { WriteTransferDiagnostic(correlation, $"exception type={ex.GetType().Name} hresult=0x{ex.HResult:X8}"); throw; }
+        finally { if (temp is not null) try { File.Delete(temp); } catch { } try { await QingTransferProtocol.WriteMessageAsync(stream, new QingTransferProtocol.FileResultMessage(ok), cancellationToken).ConfigureAwait(false); WriteTransferDiagnostic(correlation, $"result-sent ok={ok}"); } catch (Exception ex) { WriteTransferDiagnostic(correlation, $"result-send-exception type={ex.GetType().Name} hresult=0x{ex.HResult:X8}"); throw; } _incomingCompletion?.TrySetResult(ok); EndTransfer(); }
     }
 
     private TaskCompletionSource<QingTransferProtocol.Message> NewMessageCompletion() { lock (_gate) { return _offerResponse = new(TaskCreationOptions.RunContinuationsAsynchronously); } }
@@ -280,5 +299,10 @@ public sealed class QingTransferSession : IAsyncDisposable
     private void EndTransfer() { lock (_gate) { _transferActive = false; _pendingOffer = null; _incomingDecision = null; _incomingCompletion = null; _offerResponse = null; _resultResponse = null; } }
     private static async Task RejectAndCloseAsync(TcpClient client, CancellationToken cancellationToken) { try { await using var stream = client.GetStream(); await QingTransferProtocol.WriteMessageAsync(stream, new QingTransferProtocol.RejectMessage(), cancellationToken).ConfigureAwait(false); } catch { } client.Dispose(); }
     private void RaiseStateChanged() => StateChanged?.Invoke(this, State);
+    private void WriteTransferDiagnostic(string correlation, string message)
+    {
+        if (_diagnosticDirectory is null) return;
+        try { Directory.CreateDirectory(_diagnosticDirectory); File.AppendAllText(Path.Combine(_diagnosticDirectory, "transfer-debug.log"), $"{DateTimeOffset.UtcNow:O} id={correlation} {message}{Environment.NewLine}"); } catch { }
+    }
     private void ThrowIfDisposed() { if (_disposed) throw new ObjectDisposedException(nameof(QingTransferSession)); }
 }

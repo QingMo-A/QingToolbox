@@ -73,6 +73,8 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
     /// <summary>Evict one failed or stale DNS-SD identity without probing it.</summary>
     internal void ForgetPeer(string serviceName) => RemovePeer(serviceName);
 
+    internal string? DiagnosticDirectory => _diagnosticPath is null ? null : Path.GetDirectoryName(_diagnosticPath);
+
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
