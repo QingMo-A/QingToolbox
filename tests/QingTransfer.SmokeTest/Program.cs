@@ -26,6 +26,12 @@ var created = QingTransferMetadata.Create("android", "Phone");
 Require(created["v"] == "1" && created["pf"] == "android" && created["cap"] == "file", "TXT metadata changed.");
 Require(Marshal.OffsetOf<QingTransferNative.DnsRecord>(nameof(QingTransferNative.DnsRecord.Data)).ToInt32() == 32,
     "DNS_RECORD Data offset must include dwTtl and dwReserved before the union.");
+var localPeer = new QingTransferPeer("QINGMO._qingtransfer._tcp.local.", "QINGMO", "windows", "1", ["file"], [], 1, true);
+Require(QingTransferIdentity.IsLocalWindowsRegistration(localPeer, "QINGMO"), "Local Windows service was not recognized.");
+var conflictPeer = localPeer with { ServiceName = "QINGMO (2)._qingtransfer._tcp.local" };
+Require(QingTransferIdentity.IsLocalWindowsRegistration(conflictPeer, "QINGMO"), "Local DNS-SD conflict service was not recognized.");
+var unrelatedPeer = localPeer with { ServiceName = "QINGMO-LAPTOP._qingtransfer._tcp.local" };
+Require(!QingTransferIdentity.IsLocalWindowsRegistration(unrelatedPeer, "QINGMO"), "Unrelated same-prefix service was incorrectly filtered.");
 
 var root = FindRoot(AppContext.BaseDirectory);
 var moduleRoot = Path.Combine(root, "modules", "QingTransfer");

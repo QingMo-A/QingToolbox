@@ -486,7 +486,12 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
                     operation.ServiceName, fields, PtrToString(native.HostName), native.Port,
                     ReadAddresses(native), DateTimeOffset.UtcNow);
                 WriteDiagnostic($"resolve-parse valid={peer is not null}");
-                if (peer is not null && !IsSelf(peer.ServiceName)) UpsertPeer(peer);
+                if (peer is not null && !IsSelf(peer.ServiceName))
+                {
+                    var localRegistration = QingTransferIdentity.IsLocalWindowsRegistration(peer, _friendlyName);
+                    WriteDiagnostic($"resolve-peer platform={peer.Platform} nameLength={peer.DisplayName.Length} port={peer.Port} localWindows={localRegistration}");
+                    if (!localRegistration) UpsertPeer(peer);
+                }
                 else RemovePeer(operation.ServiceName);
             }
         }
