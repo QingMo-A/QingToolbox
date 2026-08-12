@@ -103,7 +103,12 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
                         }
                     }
                     QingSecondaryButton(
-                        onClick = { discovery.restart() },
+                        onClick = {
+                            // A restart is a full foreground-session reset: no stale
+                            // connection may outlive the advertised listener.
+                            connection.disconnect()
+                            discovery.restart()
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Outlined.Refresh, contentDescription = null)
