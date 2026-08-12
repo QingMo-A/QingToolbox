@@ -32,7 +32,7 @@ internal class QingTransferConnection(
     private var incomingName: String? = null
     private var incomingPlatform: String? = null
 
-    init { discovery.onIncomingSocket = { client -> scope.launch { handleIncoming(client) } } }
+    init { discovery.onIncomingSocket = { client -> ioJob = scope.launch { handleIncoming(client) } } }
 
     fun connect(peer: QingTransferPeer) {
         if (_state.value != QingTransferConnectionState.IDLE) return
@@ -61,7 +61,7 @@ internal class QingTransferConnection(
                 }
                 receiveUntilClosed(client)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { _error.value = error.message ?: "Unable to connect to the device."; closeToIdle(); }
+            catch (error: Exception) { _error.value = error.message ?: "Unable to connect to the device."; closeToIdle() }
         }
     }
 
@@ -70,13 +70,13 @@ internal class QingTransferConnection(
         val client = socket ?: return
         scope.launch {
             runCatching { QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.Accept); _state.value = QingTransferConnectionState.CONNECTED }
-                .onFailure { closeToIdle() }
+                .onFailure { closeToIdle(client) }
         }
     }
 
     fun rejectIncoming() {
         val client = socket ?: return
-        scope.launch { runCatching { QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.Reject) }; closeToIdle() }
+        scope.launch { runCatching { QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.Reject) }; closeToIdle(client) }
     }
 
     fun disconnect() { closeToIdle() }
@@ -102,7 +102,7 @@ internal class QingTransferConnection(
             _state.value = QingTransferConnectionState.WAITING_APPROVAL
             // Approval is handled by the UI; keep this socket alive until it is accepted or rejected.
             receiveUntilClosed(client)
-        } catch (_: Exception) { closeToIdle() }
+        } catch (_: Exception) { closeToIdle(client) }
     }
 
     private suspend fun receiveUntilClosed(client: Socket) {
@@ -110,10 +110,14 @@ internal class QingTransferConnection(
             while (true) {
                 val message = QingTransferProtocol.read(client.getInputStream()) ?: error("Malformed message")
             }
-        } catch (_: Exception) { closeToIdle() }
+        } catch (_: Exception) { closeToIdle(client) }
     }
 
-    private fun closeToIdle() {
+    private fun closeToIdle(expectedSocket: Socket? = null) {
+        if (expectedSocket != null && socket !== expectedSocket) {
+            runCatching { expectedSocket.close() }
+            return
+        }
         val job = ioJob
         ioJob = null
         job?.cancel()
