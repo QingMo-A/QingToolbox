@@ -72,6 +72,12 @@ Read these plans in order unless the user says otherwise:
     - Keep Root and Xposed/LSPosed-compatible capabilities optional and isolated from the normal mobile startup path.
     - Queue QingTransfer as the first planned symmetric PC/Android LAN module after the mobile Shell and real module requirements are proven.
 
+14. [`014-web-module-ui-foundation.md`](014-web-module-ui-foundation.md)
+    - 014A: host validated module Web entries in an isolated WebView2 window.
+    - 014B: reserve the local host bridge and appearance/language projection boundary.
+    - 014C: migrate QingTransfer Vue UI only after the hosting canary is proven; retain WPF legacy compatibility.
+    - Stop rule: no module migration or bridge expansion until the bounded hosting contracts and smoke tests pass.
+
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 
 A plan marked `Draft — Pending User Approval` is review material only. Codex must not implement its slices until the user explicitly approves the plan and an execution prompt selects one bounded slice. An active plan still authorizes only the single slice selected by the current Codex prompt.

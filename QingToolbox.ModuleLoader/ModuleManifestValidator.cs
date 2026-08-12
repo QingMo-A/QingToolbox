@@ -19,11 +19,12 @@ public sealed class ModuleManifestValidator
         AddRequiredError(errors, manifest.Id, "Manifest.MissingId", "Id", manifestPath);
         AddRequiredError(errors, manifest.Name, "Manifest.MissingName", "Name", manifestPath);
         AddRequiredError(errors, manifest.Version, "Manifest.MissingVersion", "Version", manifestPath);
-        AddRequiredError(errors, manifest.Entry, "Manifest.MissingEntry", "Entry", manifestPath);
+        if (manifest.UiKind != ModuleUiKind.Web)
+            AddRequiredError(errors, manifest.Entry, "Manifest.MissingEntry", "Entry", manifestPath);
 
         ValidateRuntimeCapabilities(errors, manifest, manifestPath);
 
-        if (!string.IsNullOrWhiteSpace(manifest.Entry))
+        if (!string.IsNullOrWhiteSpace(manifest.Entry) && manifest.UiKind != ModuleUiKind.Web)
         {
             var entryPath = Path.Combine(moduleDirectory, manifest.Entry);
             if (!File.Exists(entryPath))
@@ -34,6 +35,9 @@ public sealed class ModuleManifestValidator
                     entryPath));
             }
         }
+
+        if (manifest.UiKind == ModuleUiKind.Web)
+            ValidateWebEntry(errors, manifest, moduleDirectory, manifestPath);
 
         return errors;
     }
@@ -62,6 +66,7 @@ public sealed class ModuleManifestValidator
             (ModuleRuntimeIsolation.LegacyInProcess, ModuleUiKind.Wpf) => true,
             (ModuleRuntimeIsolation.InProcessCollectible, ModuleUiKind.None) => true,
             (ModuleRuntimeIsolation.OutOfProcess, ModuleUiKind.Wpf) => true,
+            (ModuleRuntimeIsolation.OutOfProcess, ModuleUiKind.Web) => true,
             _ => false
         };
         if (!supported)
@@ -71,6 +76,35 @@ public sealed class ModuleManifestValidator
                 $"The runtime capability combination '{manifest.RuntimeIsolation} + {manifest.UiKind}' is unsupported.",
                 manifestPath));
         }
+    }
+
+    private static void ValidateWebEntry(
+        ICollection<ModuleDiscoveryError> errors,
+        ModuleManifest manifest,
+        string moduleDirectory,
+        string manifestPath)
+    {
+        var value = manifest.WebEntry;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            errors.Add(CreateError("Manifest.WebEntryMissing", "A Web module must declare webEntry.", manifestPath));
+            return;
+        }
+        var normalized = value.Replace('\\', '/');
+        if (Path.IsPathRooted(value) || normalized.Split('/').Any(part => part == ".."))
+        {
+            errors.Add(CreateError("Manifest.WebEntryInvalid", "webEntry must be a relative path inside the module.", manifestPath));
+            return;
+        }
+        var root = Path.GetFullPath(moduleDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var entryPath = Path.GetFullPath(Path.Combine(moduleDirectory, value));
+        if (!entryPath.StartsWith(root, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(Path.GetExtension(entryPath), ".html", StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add(CreateError("Manifest.WebEntryInvalid", "webEntry must be a relative .html path inside the module.", manifestPath));
+            return;
+        }
+        if (!File.Exists(entryPath)) errors.Add(CreateError("Manifest.WebEntryNotFound", $"The Web entry '{value}' does not exist.", entryPath));
     }
 
     private static void AddRequiredError(

@@ -1531,7 +1531,7 @@ public sealed partial class MainWindowViewModel(
     {
         var module = Modules.FirstOrDefault(item => item.Id == moduleId);
         return module is not null && ModuleRuntimeCapabilities.Resolve(module.Module.Manifest) is
-            { RuntimeIsolation: ModuleRuntimeIsolation.OutOfProcess, UiKind: ModuleUiKind.Wpf };
+            { RuntimeIsolation: ModuleRuntimeIsolation.OutOfProcess, UiKind: ModuleUiKind.Wpf or ModuleUiKind.Web };
     }
 
     private void RefreshRuntimeProjection(DiscoveredModuleViewModel module)

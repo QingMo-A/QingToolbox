@@ -7,7 +7,7 @@ public enum ModuleRuntimeIsolation
     OutOfProcess = 2
 }
 
-public enum ModuleUiKind { None = 0, Wpf = 1 }
+public enum ModuleUiKind { None = 0, Wpf = 1, Web = 2 }
 
 public enum ModuleUpdateCapability { Unsupported = 0, RestartRequired = 1, LiveTransaction = 2 }
 
@@ -25,7 +25,7 @@ public sealed record ModuleRuntimeCapabilities(
             {
                 ModuleRuntimeIsolation.InProcessCollectible when ui == ModuleUiKind.None =>
                     ModuleUpdateCapability.LiveTransaction,
-                ModuleRuntimeIsolation.OutOfProcess when ui == ModuleUiKind.Wpf =>
+                ModuleRuntimeIsolation.OutOfProcess when ui is ModuleUiKind.Wpf or ModuleUiKind.Web =>
                     ModuleUpdateCapability.LiveTransaction,
                 ModuleRuntimeIsolation.LegacyInProcess => ModuleUpdateCapability.RestartRequired,
                 _ => ModuleUpdateCapability.Unsupported

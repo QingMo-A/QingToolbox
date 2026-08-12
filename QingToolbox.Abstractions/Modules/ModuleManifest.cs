@@ -16,6 +16,9 @@ public sealed class ModuleManifest
 
     public string? Icon { get; init; }
 
+    /// <summary>Relative HTML entry used by modules declaring a Web UI.</summary>
+    public string? WebEntry { get; init; }
+
     public ModuleRuntimeType RuntimeType { get; init; } = ModuleRuntimeType.InProcess;
 
     public ModuleRuntimeIsolation? RuntimeIsolation { get; init; }
