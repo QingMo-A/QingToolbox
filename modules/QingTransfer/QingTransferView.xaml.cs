@@ -2,24 +2,28 @@ using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
+using Forms = System.Windows.Forms;
 using System.Windows.Threading;
 using QingToolbox.Abstractions.Localization;
 
 namespace QingToolbox.Modules.QingTransfer;
 
-public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyncDisposable
+public partial class QingTransferView : System.Windows.Controls.UserControl, ILocalizedModuleView, IAsyncDisposable
 {
     private readonly QingTransferDiscoveryService _discovery;
     private readonly QingTransferSession _session;
+    private readonly QingTransferReceiveSettingsStore _settingsStore;
+    private QingTransferReceiveSettings _settings;
+    private bool _updatingSettingsUi;
     private readonly ILocalizationService _localization;
     private readonly string _moduleId;
     private readonly ObservableCollection<PeerRow> _rows = [];
     private bool _disposed;
 
-    public QingTransferView(QingTransferDiscoveryService discovery, QingTransferSession session, ILocalizationService localization, string moduleId)
+    public QingTransferView(QingTransferDiscoveryService discovery, QingTransferSession session, QingTransferReceiveSettingsStore settingsStore, ILocalizationService localization, string moduleId)
     {
         InitializeComponent();
-        _discovery = discovery; _session = session; _localization = localization; _moduleId = moduleId;
+        _discovery = discovery; _session = session; _settingsStore = settingsStore; _settings = settingsStore.Load(); _localization = localization; _moduleId = moduleId;
         PeersList.ItemsSource = _rows;
         _discovery.PeersChanged += OnPeersChanged;
         _session.StateChanged += OnSessionStateChanged;
@@ -39,6 +43,20 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
         SubtitleText.Text = T("view.subtitle", "Discover nearby QingToolbox devices on this local network.");
         RefreshButtonText.Text = T("actions.refresh", "Refresh");
         SendFileButtonText.Text = T("actions.sendFile", "Send file");
+        ReceiveSettingsTitleText.Text = T("receive.title", "Receiving files");
+        ChooseDirectoryButtonText.Text = T("receive.chooseDirectory", "Choose folder");
+        ClearDirectoryButtonText.Text = T("receive.clearDirectory", "Clear");
+        UseDefaultDirectoryText.Text = T("receive.useDefault", "Use default folder");
+        AutoAcceptText.Text = T("receive.autoAccept", "Automatically accept files");
+        AutoAcceptHintText.Text = T("receive.autoAcceptHint", "Automatic acceptance is used only when the default folder is enabled, configured, and writable.");
+        _updatingSettingsUi = true;
+        try
+        {
+            UseDefaultDirectoryCheckBox.IsChecked = _settings.UseDefaultDirectory;
+            AutoAcceptCheckBox.IsChecked = _settings.AutoAccept;
+        }
+        finally { _updatingSettingsUi = false; }
+        ReceiveDirectoryText.Text = string.IsNullOrWhiteSpace(_settings.DefaultDirectory) ? T("receive.noDirectory", "No default folder configured") : _settings.DefaultDirectory;
         EmptyText.Text = T("view.empty", "No QingToolbox devices are online yet.");
         HintText.Text = T("view.hint", "Discovery uses local DNS-SD. No connection or transfer is started here.");
         FooterText.Text = T("view.footer", "Nearby devices");
@@ -68,10 +86,34 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
 
     private async void OnSendFile(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFileDialog { CheckFileExists = true, Multiselect = false };
+        var dialog = new Microsoft.Win32.OpenFileDialog { CheckFileExists = true, Multiselect = false };
         if (dialog.ShowDialog() == true)
             try { await _session.SendFileAsync(dialog.FileName); }
             catch (Exception ex) { StatusText.Text = T("status.failed", "Transfer failed: ") + ex.Message; }
+    }
+
+    private void OnChooseDirectory(object sender, RoutedEventArgs e)
+    {
+        using var dialog = new Forms.FolderBrowserDialog { Description = T("receive.chooseDirectory", "Choose a folder"), UseDescriptionForTitle = true, ShowNewFolderButton = true };
+        if (dialog.ShowDialog() != Forms.DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath)) return;
+        _settings = _settings with { DefaultDirectory = dialog.SelectedPath };
+        _settingsStore.Save(_settings);
+        RefreshLocalization();
+    }
+
+    private void OnClearDirectory(object sender, RoutedEventArgs e)
+    {
+        _settings = _settings with { DefaultDirectory = null, UseDefaultDirectory = false, AutoAccept = false };
+        _settingsStore.Save(_settings);
+        RefreshLocalization();
+    }
+
+    private void OnReceiveSettingChanged(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized || _updatingSettingsUi) return;
+        _settings = _settings with { UseDefaultDirectory = UseDefaultDirectoryCheckBox.IsChecked == true, AutoAccept = AutoAcceptCheckBox.IsChecked == true };
+        _settingsStore.Save(_settings);
+        RefreshLocalization();
     }
 
     private async void OnIncomingFileOffer(object? sender, QingTransferFileOffer offer)
@@ -82,7 +124,7 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
             // dialog on the WPF dispatcher, then return only its plain path.
             var destination = await Dispatcher.InvokeAsync(() =>
             {
-                var dialog = new SaveFileDialog
+                var dialog = new Microsoft.Win32.SaveFileDialog
                 {
                     FileName = offer.Name,
                     AddExtension = false,
@@ -114,7 +156,7 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
             var accepted = await Dispatcher.InvokeAsync(() =>
             {
                 var message = string.Format(T("status.incoming", "Incoming request from {0}. Accept?"), request.Name);
-                return MessageBox.Show(message, T("view.title", "QingTransfer"), MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+                return System.Windows.MessageBox.Show(message, T("view.title", "QingTransfer"), MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
             });
             if (accepted) await _session.AcceptIncomingAsync(); else await _session.RejectIncomingAsync();
         }

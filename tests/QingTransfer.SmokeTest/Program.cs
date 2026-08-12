@@ -32,6 +32,27 @@ Require(!QingTransferUiState.CanDisconnect(QingTransferSessionState.Idle, uiPeer
 Require(QingTransferUiState.CanDisconnect(QingTransferSessionState.Connected, uiPeer, uiPeer), "Connected active peer must expose Disconnect.");
 Require(!QingTransferUiState.CanDisconnect(QingTransferSessionState.Connected, uiPeer, uiPeer with { ServiceName = "Other._qingtransfer._tcp.local" }), "Non-active peers must not expose Disconnect.");
 
+var settingsDirectory = Path.Combine(Path.GetTempPath(), "qingtransfer-settings-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(settingsDirectory);
+try
+{
+    var settingsStore = new QingTransferReceiveSettingsStore(settingsDirectory);
+    Require(settingsStore.Load() == new QingTransferReceiveSettings(), "Missing settings did not use defaults.");
+    var receiveDirectory = Path.Combine(settingsDirectory, "receive");
+    Directory.CreateDirectory(receiveDirectory);
+    settingsStore.Save(new QingTransferReceiveSettings(receiveDirectory, true, true));
+    var loadedSettings = settingsStore.Load();
+    Require(loadedSettings.UseDefaultDirectory && loadedSettings.AutoAccept, "Receive settings were not persisted.");
+    Require(QingTransferReceivePolicy.TryGetAutomaticDestination(loadedSettings, "hello.txt", out var firstDestination) && firstDestination is not null, "Valid automatic destination was rejected.");
+    File.WriteAllText(firstDestination!, "existing");
+    Require(QingTransferReceivePolicy.TryGetAutomaticDestination(loadedSettings, "hello.txt", out var secondDestination) && secondDestination != firstDestination, "Automatic destination would overwrite an existing file.");
+    settingsStore.Save(new QingTransferReceiveSettings(receiveDirectory, false, true));
+    Require(!QingTransferReceivePolicy.TryGetAutomaticDestination(settingsStore.Load(), "hello.txt", out _), "Disabled default directory still auto-accepted.");
+    File.WriteAllText(Path.Combine(settingsDirectory, "receive-settings.json"), "{not-json");
+    Require(settingsStore.Load() == new QingTransferReceiveSettings(), "Corrupt settings did not safely fall back.");
+}
+finally { try { Directory.Delete(settingsDirectory, true); } catch { } }
+
 var root = FindRoot(AppContext.BaseDirectory);
 var moduleRoot = Path.Combine(root, "modules", "QingTransfer");
 using (var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(moduleRoot, "module.json"))))

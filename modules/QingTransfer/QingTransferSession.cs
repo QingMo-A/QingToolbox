@@ -25,6 +25,7 @@ public sealed class QingTransferSession : IAsyncDisposable
     private readonly string _platform;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly string? _diagnosticDirectory;
+    private readonly QingTransferReceiveSettingsStore? _receiveSettings;
     private long _transferSequence;
     private TcpClient? _client;
     private NetworkStream? _stream;
@@ -40,13 +41,14 @@ public sealed class QingTransferSession : IAsyncDisposable
 
     private sealed record FileDecision(bool Accepted, string? Destination);
 
-    public QingTransferSession(QingTransferDiscoveryService discovery, string friendlyName, string platform = "windows")
+    public QingTransferSession(QingTransferDiscoveryService discovery, string friendlyName, string platform = "windows", QingTransferReceiveSettingsStore? receiveSettings = null)
     {
         _discovery = discovery;
         _diagnosticDirectory = discovery.DiagnosticDirectory;
         discovery.IncomingClientHandler = HandleIncomingAsync;
         _friendlyName = friendlyName;
         _platform = platform;
+        _receiveSettings = receiveSettings;
     }
 
     public event EventHandler<QingTransferSessionState>? StateChanged;
@@ -269,7 +271,15 @@ public sealed class QingTransferSession : IAsyncDisposable
             if (_transferActive || _pendingOffer is not null) { _ = QingTransferProtocol.WriteMessageAsync(stream, new QingTransferProtocol.FileRejectMessage(), cancellationToken); return; }
             _transferActive = true; _pendingOffer = new QingTransferFileOffer(offer.Name, offer.Size); _incomingDecision = new(TaskCreationOptions.RunContinuationsAsynchronously); _incomingCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
-        IncomingFileOffer?.Invoke(this, _pendingOffer);
+        var settings = _receiveSettings?.Load() ?? new QingTransferReceiveSettings();
+        if (QingTransferReceivePolicy.TryGetAutomaticDestination(settings, offer.Name, out var automaticDestination))
+        {
+            _incomingDecision.TrySetResult(new FileDecision(true, automaticDestination));
+        }
+        else
+        {
+            IncomingFileOffer?.Invoke(this, _pendingOffer);
+        }
         var decision = await _incomingDecision.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         WriteTransferDiagnostic(correlation, $"ui-decision accepted={decision.Accepted} hasDestination={decision.Destination is not null}");
         if (!decision.Accepted || decision.Destination is null) { await QingTransferProtocol.WriteMessageAsync(stream, new QingTransferProtocol.FileRejectMessage(), cancellationToken).ConfigureAwait(false); WriteTransferDiagnostic(correlation, "reject-sent"); EndTransfer(); return; }

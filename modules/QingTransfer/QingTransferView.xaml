@@ -31,7 +31,7 @@
         </Style>
     </UserControl.Resources>
     <Grid Margin="24">
-        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Border Padding="20" CornerRadius="18" BorderBrush="#D9E7FA" BorderThickness="1">
             <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF"/><GradientStop Color="#EAF3FF" Offset="1"/></LinearGradientBrush></Border.Background>
             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -44,7 +44,23 @@
             <Button x:Name="SendFileButton" Grid.Column="1" Style="{StaticResource ActionButton}" Visibility="Collapsed" Click="OnSendFile"><TextBlock x:Name="SendFileButtonText"/></Button>
             <Button x:Name="RefreshButton" Grid.Column="2" Style="{StaticResource ActionButton}" Click="OnRefresh"><StackPanel Orientation="Horizontal"><TextBlock Margin="0,0,7,0" FontFamily="Segoe Fluent Icons" Text="&#xE72C;"/><TextBlock x:Name="RefreshButtonText"/></StackPanel></Button>
         </Grid>
-        <Border Grid.Row="2" Background="White" BorderBrush="#D9E7FA" BorderThickness="1" CornerRadius="12" Padding="1">
+        <Border Grid.Row="2" Margin="0,0,0,12" Padding="12" Background="#FFFFFF" BorderBrush="#D9E7FA" BorderThickness="1" CornerRadius="12">
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <TextBlock x:Name="ReceiveSettingsTitleText" FontWeight="SemiBold" Foreground="#10264A"/>
+                <Grid Grid.Row="1" Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <TextBlock x:Name="ReceiveDirectoryText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="#475569"/>
+                    <Button x:Name="ChooseDirectoryButton" Grid.Column="1" Style="{StaticResource ActionButton}" Click="OnChooseDirectory"><TextBlock x:Name="ChooseDirectoryButtonText"/></Button>
+                    <Button x:Name="ClearDirectoryButton" Grid.Column="2" Style="{StaticResource ActionButton}" Click="OnClearDirectory"><TextBlock x:Name="ClearDirectoryButtonText"/></Button>
+                </Grid>
+                <StackPanel Grid.Row="2" Margin="0,8,0,0">
+                    <CheckBox x:Name="UseDefaultDirectoryCheckBox" Checked="OnReceiveSettingChanged" Unchecked="OnReceiveSettingChanged"><TextBlock x:Name="UseDefaultDirectoryText"/></CheckBox>
+                    <CheckBox x:Name="AutoAcceptCheckBox" Margin="0,5,0,0" Checked="OnReceiveSettingChanged" Unchecked="OnReceiveSettingChanged"><TextBlock x:Name="AutoAcceptText"/></CheckBox>
+                    <TextBlock x:Name="AutoAcceptHintText" Margin="0,5,0,0" Foreground="#64748B" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+        <Border Grid.Row="3" Background="White" BorderBrush="#D9E7FA" BorderThickness="1" CornerRadius="12" Padding="1">
             <Grid><ListView x:Name="PeersList" BorderThickness="0" Background="Transparent"><ListView.View><GridView>
                 <GridViewColumn x:Name="DeviceColumn" Width="180" DisplayMemberBinding="{Binding DisplayName}"/>
                 <GridViewColumn x:Name="PlatformColumn" Width="105" DisplayMemberBinding="{Binding Platform}"/>
@@ -55,6 +71,6 @@
                 <StackPanel x:Name="EmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360"><TextBlock HorizontalAlignment="Center" FontSize="18" FontWeight="SemiBold" Foreground="#334155" Text="&#xE8CE;" FontFamily="Segoe Fluent Icons"/><TextBlock x:Name="EmptyText" Margin="0,10,0,0" HorizontalAlignment="Center" TextAlignment="Center" Foreground="#475569" TextWrapping="Wrap"/><TextBlock x:Name="HintText" Margin="0,7,0,0" HorizontalAlignment="Center" TextAlignment="Center" Foreground="#94A3B8" TextWrapping="Wrap"/></StackPanel>
             </Grid>
         </Border>
-        <Border Grid.Row="3" Margin="0,12,0,0" Padding="12,9" Background="#EAF3FF" BorderBrush="#D2E3FC" BorderThickness="1" CornerRadius="10"><TextBlock x:Name="FooterText" Foreground="#475569" TextWrapping="Wrap"/></Border>
+        <Border Grid.Row="4" Margin="0,12,0,0" Padding="12,9" Background="#EAF3FF" BorderBrush="#D2E3FC" BorderThickness="1" CornerRadius="10"><TextBlock x:Name="FooterText" Foreground="#475569" TextWrapping="Wrap"/></Border>
     </Grid>
 </UserControl>

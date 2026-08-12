@@ -8,6 +8,7 @@ public sealed class QingTransferModule : IToolModule
     private readonly List<WeakReference<QingTransferView>> _views = [];
     private QingTransferDiscoveryService? _discovery;
     private QingTransferSession? _session;
+    private QingTransferReceiveSettingsStore? _receiveSettings;
     private ModuleContext? _context;
     private bool _disposed;
 
@@ -19,8 +20,9 @@ public sealed class QingTransferModule : IToolModule
     {
         if (_context is not null) return Task.CompletedTask;
         _context = context;
+        _receiveSettings = new QingTransferReceiveSettingsStore(context.DataDirectory);
         _discovery = new QingTransferDiscoveryService(Environment.MachineName, context.DataDirectory);
-        _session = new QingTransferSession(_discovery, Environment.MachineName);
+        _session = new QingTransferSession(_discovery, Environment.MachineName, receiveSettings: _receiveSettings);
         context.Localization.CultureChanged += OnCultureChanged;
         return Task.CompletedTask;
     }
@@ -46,6 +48,7 @@ public sealed class QingTransferModule : IToolModule
         }
         _session = null;
         _discovery = null;
+        _receiveSettings = null;
         _context = null;
     }
 
@@ -54,7 +57,8 @@ public sealed class QingTransferModule : IToolModule
         var context = _context ?? throw new InvalidOperationException("Module context is not available.");
         var discovery = _discovery ?? throw new InvalidOperationException("Module is not loaded.");
         var session = _session ?? throw new InvalidOperationException("Module is not loaded.");
-        var view = new QingTransferView(discovery, session, context.Localization, context.ModuleId);
+        var settings = _receiveSettings ?? throw new InvalidOperationException("Module is not loaded.");
+        var view = new QingTransferView(discovery, session, settings, context.Localization, context.ModuleId);
         _views.Add(new(view));
         return view;
     }
