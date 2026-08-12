@@ -25,7 +25,14 @@ class QingTransferConnectionStateTest {
 
     @Test
     fun pickerLeaseOnlyPreservesSessionWhileActive() {
-        assertTrue(shouldKeepTransferSessionForPicker(true))
-        assertFalse(shouldKeepTransferSessionForPicker(false))
+        assertTrue(shouldKeepTransferSession(QingTransferConnectionState.CONNECTED))
+        assertFalse(shouldKeepTransferSession(QingTransferConnectionState.IDLE))
+    }
+
+    @Test
+    fun onlyConnectedSessionsAreRetainedWhenActivityStops() {
+        assertTrue(shouldKeepTransferSession(QingTransferConnectionState.CONNECTED))
+        assertFalse(shouldKeepTransferSession(QingTransferConnectionState.CONNECTING))
+        assertFalse(shouldKeepTransferSession(QingTransferConnectionState.WAITING_APPROVAL))
     }
 }

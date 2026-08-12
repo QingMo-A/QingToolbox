@@ -60,7 +60,6 @@
     <string name="qing_transfer_error_transfer_failed">The file transfer failed.</string>
     <string name="qing_transfer_error_canceled">The file transfer was canceled.</string>
     <string name="qing_transfer_error_disconnected">Connection disconnected.</string>
-    <string name="qing_transfer_error_picker_timeout">File selection timed out; connection closed.</string>
 
     <string name="settings_appearance">Appearance</string>
     <string name="settings_theme">Theme</string>
