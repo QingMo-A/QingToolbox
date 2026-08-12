@@ -1,5 +1,7 @@
 package com.qingtoolbox.android
 
+import java.util.Locale
+
 object QingTransferMetadata {
     const val serviceType = "_qingtransfer._tcp"
     const val androidServiceType = "_qingtransfer._tcp."
@@ -67,6 +69,11 @@ object QingTransferMetadata {
             else -> "$value.$serviceType.local"
         }
     }
+
+    /** Stable DNS-SD identity key: service names are case-insensitive and may
+     * arrive with a trailing root dot from different NSD implementations. */
+    fun canonicalServiceName(name: String?): String =
+        fullServiceName(name).trimEnd('.').lowercase(Locale.ROOT)
 
     fun sanitizeName(value: String): String {
         val safe = value.trim().filter { it.isLetterOrDigit() || it == '-' || it == '_' }

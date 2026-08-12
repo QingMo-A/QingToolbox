@@ -42,6 +42,10 @@ class QingTransferMetadataTest {
         assertEquals(mapOf("v" to "1", "pf" to "android", "name" to "Phone", "cap" to "file"), QingTransferMetadata.create("android", "Phone"))
         assertEquals("Phone._qingtransfer._tcp.local", QingTransferMetadata.fullServiceName("Phone"))
         assertEquals("Phone._qingtransfer._tcp.local", QingTransferMetadata.fullServiceName("Phone._qingtransfer._tcp."))
+        assertEquals(
+            "phone._qingtransfer._tcp.local",
+            QingTransferMetadata.canonicalServiceName("Phone._qingtransfer._tcp.local."),
+        )
     }
 
     @Test
@@ -58,7 +62,11 @@ class QingTransferMetadataTest {
         )
         assertTrue(table.upsert(peer))
         assertTrue(!table.upsert(peer))
+        val updated = peer.copy(addresses = listOf("192.168.1.8"), port = 43126)
+        assertTrue(table.upsert(updated))
         assertEquals(1, table.snapshot().size)
+        assertEquals(43126, table.snapshot().single().port)
+        assertEquals(listOf("192.168.1.8"), table.snapshot().single().addresses)
         assertTrue(table.remove("DESK._QINGTRANSFER._TCP.LOCAL."))
         assertTrue(table.snapshot().isEmpty())
     }

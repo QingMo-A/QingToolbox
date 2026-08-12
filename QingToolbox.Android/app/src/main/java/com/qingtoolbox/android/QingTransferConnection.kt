@@ -61,7 +61,11 @@ internal class QingTransferConnection(
                 }
                 receiveUntilClosed(client)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { _error.value = error.message ?: "Unable to connect to the device."; closeToIdle() }
+            catch (error: Exception) {
+                _error.value = error.message ?: "Unable to connect to the device."
+                discovery.forgetPeer(peer.serviceName)
+                closeToIdle()
+            }
         }
     }
 

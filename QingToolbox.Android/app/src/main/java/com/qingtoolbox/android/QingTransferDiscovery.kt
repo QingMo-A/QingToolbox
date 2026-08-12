@@ -88,7 +88,12 @@ class QingTransferDiscovery(
 
     @Synchronized
     fun stop() {
-        if (!active) return
+        if (!active) {
+            peers.clear()
+            onPeersChanged(emptyList())
+            onStateChanged(QingTransferDiscoveryState.IDLE)
+            return
+        }
         active = false
         registrationListener?.let { runCatching { nsd?.unregisterService(it) } }
         discoveryListener?.let { runCatching { nsd?.stopServiceDiscovery(it) } }
@@ -117,6 +122,9 @@ class QingTransferDiscovery(
     }
 
     fun snapshot(): List<QingTransferPeer> = peers.snapshot()
+
+    /** Remove one failed/stale endpoint without probing or retrying it. */
+    fun forgetPeer(serviceName: String) = removePeer(serviceName)
 
     private fun openEphemeralListener() {
         runCatching {
@@ -270,19 +278,21 @@ class QingTransferDiscovery(
     }
 
     private fun upsertPeer(peer: QingTransferPeer) {
-        peers.upsert(peer)
+        val canonical = QingTransferMetadata.canonicalServiceName(peer.serviceName)
+        if (isSelf(canonical)) return
+        peers.upsert(peer.copy(serviceName = canonical))
         onPeersChanged(snapshot())
         onStateChanged(QingTransferDiscoveryState.READY)
     }
 
     private fun removePeer(serviceName: String) {
-        peers.remove(serviceName)
+        peers.remove(QingTransferMetadata.canonicalServiceName(serviceName))
         onPeersChanged(snapshot())
     }
 
     private fun isSelf(serviceName: String): Boolean =
-        actualServiceName?.equals(serviceName, ignoreCase = true) == true ||
-            expectedServiceName?.equals(serviceName, ignoreCase = true) == true
+        actualServiceName?.let { QingTransferMetadata.canonicalServiceName(it) == QingTransferMetadata.canonicalServiceName(serviceName) } == true ||
+            expectedServiceName?.let { QingTransferMetadata.canonicalServiceName(it) == QingTransferMetadata.canonicalServiceName(serviceName) } == true
 
     @Suppress("NewApi")
     private fun stopOutstandingResolutions() {
