@@ -9,6 +9,7 @@ internal static class QingTransferNative
     internal const uint DnsRequestPending = 9506;
     internal const ushort DnsRecordTypePtr = 12;
     internal const uint DnsFreeRecordList = 1;
+    internal const uint DnsRecordDeleteFlag = 0x00000004;
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     internal delegate void ServiceComplete(uint status, IntPtr queryContext, IntPtr instance);
@@ -78,6 +79,8 @@ internal static class QingTransferNative
         public ushort Type;
         public ushort DataLength;
         public uint Flags;
+        public uint Ttl;
+        public uint Reserved;
         public IntPtr Data;
     }
 

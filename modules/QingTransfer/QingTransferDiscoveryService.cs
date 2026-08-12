@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -17,6 +18,7 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
     private readonly ConcurrentDictionary<IntPtr, ResolveOperation> _resolves = new();
     private readonly string _friendlyName;
     private readonly string _hostName;
+    private readonly string? _diagnosticPath;
     private readonly QingTransferNative.ServiceComplete _registerCallback;
     private readonly QingTransferNative.BrowseComplete _browseCallback;
     private readonly QingTransferNative.ServiceComplete _resolveCallback;
@@ -47,10 +49,11 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
         Canceling,
     }
 
-    public QingTransferDiscoveryService(string friendlyName)
+    public QingTransferDiscoveryService(string friendlyName, string? diagnosticDirectory = null)
     {
         _friendlyName = SanitizeFriendlyName(friendlyName);
         _hostName = $"{SanitizeDnsLabel(Environment.MachineName)}.local";
+        _diagnosticPath = string.IsNullOrWhiteSpace(diagnosticDirectory) ? null : Path.Combine(diagnosticDirectory, "discovery-debug.log");
         _registerCallback = OnRegisterComplete;
         _browseCallback = OnBrowseComplete;
         _resolveCallback = OnResolveComplete;
@@ -407,6 +410,7 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
 
     private void OnBrowseComplete(uint status, IntPtr queryContext, IntPtr records)
     {
+        WriteDiagnostic($"browse status={status} records={(records == IntPtr.Zero ? 0 : 1)}");
         if (status != 0 || records == IntPtr.Zero) return;
         try
         {
@@ -414,12 +418,15 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
             {
                 var record = Marshal.PtrToStructure<QingTransferNative.DnsRecord>(current);
                 var next = record.Next;
+                WriteDiagnostic($"browse-record type={record.Type} flags={record.Flags}");
                 if (record.Type == QingTransferNative.DnsRecordTypePtr)
                 {
                     var serviceName = ReadPtrRecord(record.Data);
+                    var self = !string.IsNullOrWhiteSpace(serviceName) && IsSelf(serviceName);
+                    WriteDiagnostic($"browse-ptr present={!string.IsNullOrWhiteSpace(serviceName)} self={self} length={serviceName?.Length ?? 0}");
                     if (!string.IsNullOrWhiteSpace(serviceName) && !IsSelf(serviceName))
                     {
-                        if ((record.Flags & 1u) != 0) RemovePeer(serviceName);
+                        if ((record.Flags & QingTransferNative.DnsRecordDeleteFlag) != 0) RemovePeer(serviceName);
                         else ResolveService(serviceName);
                     }
                 }
@@ -435,7 +442,10 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
 
     private void ResolveService(string serviceName)
     {
-        if (!IsRunning || IsSelf(serviceName)) return;
+        var self = IsSelf(serviceName);
+        WriteDiagnostic($"resolve-gate running={IsRunning} self={self} length={serviceName.Length}");
+        if (!IsRunning || self) return;
+        WriteDiagnostic("resolve-start");
         var operation = new ResolveOperation(NormalizeServiceName(serviceName));
         operation.Handle = GCHandle.Alloc(operation, GCHandleType.Normal);
         var context = GCHandle.ToIntPtr(operation.Handle);
@@ -453,6 +463,7 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
                 QueryContext = context,
             };
             var status = QingTransferNative.DnsServiceResolve(ref request, out operation.Cancel);
+            WriteDiagnostic($"resolve-submit status={status}");
             operation.HasCancel = status == QingTransferNative.DnsRequestPending || status == 0;
             if (status != 0 && status != QingTransferNative.DnsRequestPending) CompleteResolve(operation);
         }
@@ -462,6 +473,7 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
 
     private void OnResolveComplete(uint status, IntPtr queryContext, IntPtr instance)
     {
+        WriteDiagnostic($"resolve-callback status={status} instance={(instance == IntPtr.Zero ? 0 : 1)}");
         ResolveOperation? operation = null;
         try
         {
@@ -473,6 +485,7 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
                 var peer = QingTransferMetadata.Parse(
                     operation.ServiceName, fields, PtrToString(native.HostName), native.Port,
                     ReadAddresses(native), DateTimeOffset.UtcNow);
+                WriteDiagnostic($"resolve-parse valid={peer is not null}");
                 if (peer is not null && !IsSelf(peer.ServiceName)) UpsertPeer(peer);
                 else RemovePeer(operation.ServiceName);
             }
@@ -512,6 +525,18 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
 
     private void RaisePeersChanged() => PeersChanged?.Invoke(this, Peers);
 
+    private void WriteDiagnostic(string message)
+    {
+        var path = _diagnosticPath;
+        if (path is null) return;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
+        }
+        catch { }
+    }
+
     private bool IsSelf(string serviceName)
     {
         var normalized = NormalizeServiceName(serviceName);
@@ -544,9 +569,9 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
 
     private static string? ReadPtrRecord(IntPtr data)
     {
-        if (data == IntPtr.Zero) return null;
-        var pointer = Marshal.ReadIntPtr(data);
-        return PtrToString(pointer);
+        // DNS_RECORD.Data is the first member of the inline DNS_PTR_DATA
+        // union, so the managed IntPtr already contains pNameHost.
+        return PtrToString(data);
     }
 
     private static Dictionary<string, string?> ReadProperties(uint count, IntPtr keys, IntPtr values)

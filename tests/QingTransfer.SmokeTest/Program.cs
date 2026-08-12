@@ -1,5 +1,6 @@
 using System.IO;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using QingToolbox.Modules.QingTransfer;
 
@@ -23,6 +24,8 @@ Require(!table.Upsert(peer!), "Duplicate peer insert was reported as changed.");
 Require(table.Remove(peer!.ServiceName) && table.Snapshot().Count == 0, "Peer removal failed.");
 var created = QingTransferMetadata.Create("android", "Phone");
 Require(created["v"] == "1" && created["pf"] == "android" && created["cap"] == "file", "TXT metadata changed.");
+Require(Marshal.OffsetOf<QingTransferNative.DnsRecord>(nameof(QingTransferNative.DnsRecord.Data)).ToInt32() == 32,
+    "DNS_RECORD Data offset must include dwTtl and dwReserved before the union.");
 
 var root = FindRoot(AppContext.BaseDirectory);
 var moduleRoot = Path.Combine(root, "modules", "QingTransfer");

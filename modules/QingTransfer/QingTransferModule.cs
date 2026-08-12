@@ -19,7 +19,7 @@ public sealed class QingTransferModule : IToolModule
     {
         if (_context is not null) return Task.CompletedTask;
         _context = context;
-        _discovery = new QingTransferDiscoveryService(Environment.MachineName);
+        _discovery = new QingTransferDiscoveryService(Environment.MachineName, context.DataDirectory);
         _session = new QingTransferSession(_discovery, Environment.MachineName);
         context.Localization.CultureChanged += OnCultureChanged;
         return Task.CompletedTask;
