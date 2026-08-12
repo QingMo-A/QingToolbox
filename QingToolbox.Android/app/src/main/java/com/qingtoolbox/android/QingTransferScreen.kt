@@ -1,5 +1,6 @@
 package com.qingtoolbox.android
 
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +38,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
+internal fun shouldShowIncomingDialog(
+    state: QingTransferConnectionState,
+    peer: QingTransferPeer?,
+): Boolean = state == QingTransferConnectionState.WAITING_APPROVAL && peer != null
+
 @Composable
 fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -49,6 +56,10 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
     val connectionState by connection.state.collectAsStateWithLifecycle()
     val incomingPeer by connection.incomingPeer.collectAsStateWithLifecycle()
     val connectionError by connection.error.collectAsStateWithLifecycle()
+
+    LaunchedEffect(connectionState, incomingPeer) {
+        Log.d("QingTransferUi", "incomingDialog visible=${shouldShowIncomingDialog(connectionState, incomingPeer)} state=$connectionState peer=${incomingPeer != null}")
+    }
 
     DisposableEffect(lifecycleOwner, discovery, connection) {
         val observer = LifecycleEventObserver { _, event ->
@@ -67,7 +78,7 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    incomingPeer?.let { peer ->
+    if (shouldShowIncomingDialog(connectionState, incomingPeer)) incomingPeer?.let { peer ->
         AlertDialog(
             onDismissRequest = { connection.rejectIncoming() },
             title = { Text(stringResource(R.string.qing_transfer_incoming_title)) },

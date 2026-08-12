@@ -1,5 +1,6 @@
 package com.qingtoolbox.android
 
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +32,8 @@ internal class QingTransferConnection(
     private var ioJob: Job? = null
     private var incomingName: String? = null
     private var incomingPlatform: String? = null
+
+    private companion object { const val TAG = "QingTransferConnection" }
 
     init { discovery.onIncomingSocket = { client -> ioJob = scope.launch { handleIncoming(client) } } }
 
@@ -72,9 +75,27 @@ internal class QingTransferConnection(
     fun acceptIncoming() {
         if (_state.value != QingTransferConnectionState.WAITING_APPROVAL) return
         val client = socket ?: return
+        Log.d(TAG, "accept start socket=${System.identityHashCode(client)} state=${_state.value}")
         scope.launch {
-            runCatching { QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.Accept); _state.value = QingTransferConnectionState.CONNECTED }
-                .onFailure { closeToIdle(client) }
+            try {
+                QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.Accept)
+                // The dialog is derived from the pending peer state. Clear it
+                // in the same transition as Connected so it cannot linger.
+                if (_state.value == QingTransferConnectionState.WAITING_APPROVAL && socket === client) {
+                    _incomingPeer.value = null
+                    _state.value = QingTransferConnectionState.CONNECTED
+                    Log.d(TAG, "accept write success socket=${System.identityHashCode(client)} state=${_state.value}")
+                } else {
+                    Log.d(TAG, "accept stale socket=${System.identityHashCode(client)} state=${_state.value}")
+                    runCatching { client.close() }
+                }
+            } catch (error: Exception) {
+                Log.d(TAG, "accept write failure socket=${System.identityHashCode(client)}")
+                if (_state.value == QingTransferConnectionState.WAITING_APPROVAL && socket === client) {
+                    _error.value = error.message ?: "Unable to accept the request."
+                    closeToIdle(client)
+                } else runCatching { client.close() }
+            }
         }
     }
 
@@ -114,7 +135,10 @@ internal class QingTransferConnection(
             while (true) {
                 val message = QingTransferProtocol.read(client.getInputStream()) ?: error("Malformed message")
             }
-        } catch (_: Exception) { closeToIdle(client) }
+        } catch (_: Exception) {
+            Log.d(TAG, "receive closed socket=${System.identityHashCode(client)}")
+            closeToIdle(client)
+        }
     }
 
     private fun closeToIdle(expectedSocket: Socket? = null) {
