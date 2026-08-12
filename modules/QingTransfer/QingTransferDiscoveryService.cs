@@ -70,6 +70,9 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
         get { lock (_gate) return _peers.Snapshot(); }
     }
 
+    /// <summary>Evict one failed or stale DNS-SD identity without probing it.</summary>
+    internal void ForgetPeer(string serviceName) => RemovePeer(serviceName);
+
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -488,9 +491,8 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
                 WriteDiagnostic($"resolve-parse valid={peer is not null}");
                 if (peer is not null && !IsSelf(peer.ServiceName))
                 {
-                    var localRegistration = QingTransferIdentity.IsLocalWindowsRegistration(peer, _friendlyName);
-                    WriteDiagnostic($"resolve-peer platform={peer.Platform} nameLength={peer.DisplayName.Length} port={peer.Port} localWindows={localRegistration}");
-                    if (!localRegistration) UpsertPeer(peer);
+                    WriteDiagnostic($"resolve-peer service={peer.ServiceName} platform={peer.Platform} nameLength={peer.DisplayName.Length} port={peer.Port}");
+                    UpsertPeer(peer);
                 }
                 else RemovePeer(operation.ServiceName);
             }

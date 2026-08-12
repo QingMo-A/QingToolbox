@@ -15,6 +15,7 @@ public enum QingTransferSessionState
 public sealed class QingTransferSession : IAsyncDisposable
 {
     private readonly object _gate = new();
+    private readonly QingTransferDiscoveryService _discovery;
     private readonly string _friendlyName;
     private readonly string _platform;
     private readonly CancellationTokenSource _lifetime = new();
@@ -26,6 +27,7 @@ public sealed class QingTransferSession : IAsyncDisposable
 
     public QingTransferSession(QingTransferDiscoveryService discovery, string friendlyName, string platform = "windows")
     {
+        _discovery = discovery;
         discovery.IncomingClientHandler = HandleIncomingAsync;
         _friendlyName = friendlyName;
         _platform = platform;
@@ -67,6 +69,7 @@ public sealed class QingTransferSession : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            _discovery.ForgetPeer(peer.ServiceName);
             Error?.Invoke(this, ex.Message);
             await DisconnectAsync().ConfigureAwait(false);
         }
