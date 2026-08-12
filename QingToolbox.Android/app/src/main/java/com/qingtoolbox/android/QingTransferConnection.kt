@@ -31,6 +31,8 @@ internal enum class QingTransferErrorCode {
     INVALID_PROTOCOL,
     TRANSFER_FAILED,
     CANCELED,
+    DISCONNECTED,
+    PICKER_TIMEOUT,
 }
 
 internal data class QingTransferFileOffer(val name: String, val size: Long)
@@ -176,6 +178,10 @@ internal class QingTransferConnection(
     }
 
     fun disconnect() { closeToIdle() }
+    fun pickerTimedOut() {
+        _error.value = QingTransferErrorCode.PICKER_TIMEOUT
+        closeToIdle()
+    }
     fun clearError() { _error.value = null }
     fun reportTransferFailure() { _error.value = QingTransferErrorCode.TRANSFER_FAILED }
 
@@ -216,7 +222,12 @@ internal class QingTransferConnection(
                     else -> Unit
                 }
             }
-        } catch (_: Exception) { closeToIdle(client) }
+        } catch (_: Exception) {
+            if (_state.value == QingTransferConnectionState.CONNECTED && _error.value == null) {
+                _error.value = QingTransferErrorCode.DISCONNECTED
+            }
+            closeToIdle(client)
+        }
     }
 
     private suspend fun handleIncomingFile(client: Socket, offer: QingTransferMessage.FileOffer) {
@@ -310,4 +321,6 @@ internal fun QingTransferErrorCode.messageRes(): Int = when (this) {
     QingTransferErrorCode.INVALID_PROTOCOL -> R.string.qing_transfer_error_invalid_protocol
     QingTransferErrorCode.TRANSFER_FAILED -> R.string.qing_transfer_error_transfer_failed
     QingTransferErrorCode.CANCELED -> R.string.qing_transfer_error_canceled
+    QingTransferErrorCode.DISCONNECTED -> R.string.qing_transfer_error_disconnected
+    QingTransferErrorCode.PICKER_TIMEOUT -> R.string.qing_transfer_error_picker_timeout
 }

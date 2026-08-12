@@ -22,4 +22,10 @@ class QingTransferConnectionStateTest {
         assertEquals(QingTransferErrorCode.entries.size, resources.distinct().size)
         resources.forEach { assertNotEquals(0, it) }
     }
+
+    @Test
+    fun pickerLeaseOnlyPreservesSessionWhileActive() {
+        assertTrue(shouldKeepTransferSessionForPicker(true))
+        assertFalse(shouldKeepTransferSessionForPicker(false))
+    }
 }

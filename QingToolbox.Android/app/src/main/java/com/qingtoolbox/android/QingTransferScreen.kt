@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +41,10 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.provider.OpenableColumns
 import android.content.res.AssetFileDescriptor
+import kotlinx.coroutines.delay
+
+internal const val QING_TRANSFER_PICKER_LEASE_MS = 120_000L
+internal fun shouldKeepTransferSessionForPicker(pickerActive: Boolean): Boolean = pickerActive
 
 internal fun shouldShowIncomingDialog(
     state: QingTransferConnectionState,
@@ -62,7 +67,9 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
     val transferProgress by connection.progress.collectAsStateWithLifecycle()
     val connectionError by connection.error.collectAsStateWithLifecycle()
     var saveOffer by remember { mutableStateOf<QingTransferFileOffer?>(null) }
+    var pickerActive by remember { mutableStateOf(false) }
     val sendLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        pickerActive = false
         if (uri != null) {
             val details = queryTransferFile(context, uri)
             if (details == null || details.second < 0L) connection.reportTransferFailure()
@@ -70,16 +77,33 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
         }
     }
     val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        pickerActive = false
         val offer = saveOffer
         saveOffer = null
         if (offer != null && uri != null) connection.acceptIncoming(uri) else if (offer != null) connection.rejectIncomingFile()
+    }
+
+    LaunchedEffect(pickerActive) {
+        if (pickerActive) {
+            delay(QING_TRANSFER_PICKER_LEASE_MS)
+            if (pickerActive) {
+                pickerActive = false
+                connection.pickerTimedOut()
+                discovery.stop()
+            }
+        }
     }
 
     DisposableEffect(lifecycleOwner, discovery, connection) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> discovery.start()
-                Lifecycle.Event.ON_STOP -> { connection.disconnect(); discovery.stop() }
+                Lifecycle.Event.ON_STOP -> {
+                    if (!shouldKeepTransferSessionForPicker(pickerActive)) {
+                        connection.disconnect()
+                        discovery.stop()
+                    }
+                }
                 else -> Unit
             }
         }
@@ -106,7 +130,15 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
             onDismissRequest = { connection.rejectIncomingFile() },
             title = { Text(stringResource(R.string.qing_transfer_incoming_file_title)) },
             text = { Text(stringResource(R.string.qing_transfer_incoming_file_body, incomingPeer?.displayName ?: "QingToolbox", offer.name, offer.size)) },
-            confirmButton = { TextButton(onClick = { saveOffer = offer; saveLauncher.launch(offer.name) }) { Text(stringResource(R.string.qing_transfer_accept)) } },
+            confirmButton = { TextButton(onClick = {
+                saveOffer = offer
+                pickerActive = true
+                runCatching { saveLauncher.launch(offer.name) }.onFailure {
+                    pickerActive = false
+                    saveOffer = null
+                    connection.rejectIncomingFile()
+                }
+            }) { Text(stringResource(R.string.qing_transfer_accept)) } },
             dismissButton = { TextButton(onClick = { connection.rejectIncomingFile() }) { Text(stringResource(R.string.qing_transfer_reject)) } },
         )
     }
@@ -159,7 +191,13 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
                             },
                         )
                         if (connectionState == QingTransferConnectionState.CONNECTED) {
-                            QingPrimaryButton(onClick = { sendLauncher.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                            QingPrimaryButton(onClick = {
+                                pickerActive = true
+                                runCatching { sendLauncher.launch(arrayOf("*/*")) }.onFailure {
+                                    pickerActive = false
+                                    connection.reportTransferFailure()
+                                }
+                            }, modifier = Modifier.fillMaxWidth()) {
                                 Text(stringResource(R.string.qing_transfer_send_file))
                             }
                             transferProgress?.let { progress ->
