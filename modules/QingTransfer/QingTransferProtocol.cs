@@ -17,6 +17,13 @@ public static class QingTransferProtocol
     public sealed record HelloMessage(string Platform, string Name) : Message("hello");
     public sealed record AcceptMessage() : Message("accept");
     public sealed record RejectMessage() : Message("reject");
+    public sealed record FileOfferMessage(string Name, long Size) : Message("file_offer");
+    public sealed record FileAcceptMessage() : Message("file_accept");
+    public sealed record FileRejectMessage() : Message("file_reject");
+    public sealed record FileEndMessage(string Sha256) : Message("file_end");
+    public sealed record FileResultMessage(bool Ok) : Message("file_result");
+
+
 
     internal static byte[] EncodeFrame(Message message)
     {
@@ -25,6 +32,11 @@ public static class QingTransferProtocol
             HelloMessage hello => new { type = "hello", v = 1, pf = hello.Platform, name = hello.Name },
             AcceptMessage => new { type = "accept", v = 1 },
             RejectMessage => new { type = "reject", v = 1 },
+            FileOfferMessage offer => new { type = "file_offer", v = 1, name = offer.Name, size = offer.Size },
+            FileAcceptMessage => new { type = "file_accept", v = 1 },
+            FileRejectMessage => new { type = "file_reject", v = 1 },
+            FileEndMessage end => new { type = "file_end", v = 1, sha256 = end.Sha256 },
+            FileResultMessage result => new { type = "file_result", v = 1, ok = result.Ok },
             _ => throw new ArgumentOutOfRangeException(nameof(message)),
         };
         var payload = JsonSerializer.SerializeToUtf8Bytes(contract);
@@ -83,6 +95,11 @@ public static class QingTransferProtocol
             var type = typeElement.GetString();
             if (type == "accept" && root.EnumerateObject().Count() == 2) { message = new AcceptMessage(); return true; }
             if (type == "reject" && root.EnumerateObject().Count() == 2) { message = new RejectMessage(); return true; }
+            if (type == "file_accept" && root.EnumerateObject().Count() == 2) { message = new FileAcceptMessage(); return true; }
+            if (type == "file_reject" && root.EnumerateObject().Count() == 2) { message = new FileRejectMessage(); return true; }
+            if (type == "file_result" && root.EnumerateObject().Count() == 3 && root.TryGetProperty("ok", out var ok) && (ok.ValueKind is JsonValueKind.True or JsonValueKind.False)) { message = new FileResultMessage(ok.GetBoolean()); return true; }
+            if (type == "file_end" && root.EnumerateObject().Count() == 3 && root.TryGetProperty("sha256", out var sha) && sha.ValueKind == JsonValueKind.String && IsSha256(sha.GetString() ?? string.Empty)) { message = new FileEndMessage(sha.GetString()!); return true; }
+            if (type == "file_offer" && root.EnumerateObject().Count() == 4 && root.TryGetProperty("name", out var fileName) && root.TryGetProperty("size", out var fileSize) && fileName.ValueKind == JsonValueKind.String && fileSize.ValueKind == JsonValueKind.Number && fileSize.TryGetInt64(out var length) && length >= 0 && IsSafeFileName(fileName.GetString() ?? string.Empty)) { message = new FileOfferMessage(fileName.GetString()!, length); return true; }
             if (type != "hello" || !root.TryGetProperty("pf", out var platformElement) ||
                 !root.TryGetProperty("name", out var nameElement) || platformElement.ValueKind != JsonValueKind.String ||
                 nameElement.ValueKind != JsonValueKind.String) return false;
@@ -109,4 +126,7 @@ public static class QingTransferProtocol
             read += count;
         }
     }
+
+    private static bool IsSafeFileName(string value) => value.Length is > 0 and <= 255 && !value.Any(char.IsControl) && !value.Contains('/') && !value.Contains('\\') && value is not "." and not "..";
+    private static bool IsSha256(string value) => value.Length == 64 && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 }

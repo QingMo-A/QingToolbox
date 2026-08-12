@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
+using Microsoft.Win32;
 using QingToolbox.Abstractions.Localization;
 
 namespace QingToolbox.Modules.QingTransfer;
@@ -23,6 +24,7 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
         _session.StateChanged += OnSessionStateChanged;
         _session.IncomingRequest += OnIncomingRequest;
         _session.Error += OnSessionError;
+        _session.StateChanged += OnSessionTransferStateChanged;
         Unloaded += OnUnloaded;
         RefreshLocalization(); UpdatePeers(_discovery.Peers);
     }
@@ -34,6 +36,7 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
         TitleText.Text = T("view.title", "QingTransfer");
         SubtitleText.Text = T("view.subtitle", "Discover nearby QingToolbox devices on this local network.");
         RefreshButtonText.Text = T("actions.refresh", "Refresh");
+        SendFileButton.Content = T("actions.sendFile", "Send file");
         EmptyText.Text = T("view.empty", "No QingToolbox devices are online yet.");
         HintText.Text = T("view.hint", "Discovery uses local DNS-SD. No connection or transfer is started here.");
         FooterText.Text = T("view.footer", "Nearby devices");
@@ -60,6 +63,21 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
     }
 
     private async void OnDisconnect(object sender, RoutedEventArgs e) => await _session.DisconnectAsync();
+
+    private async void OnSendFile(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog { CheckFileExists = true, Multiselect = false };
+        if (dialog.ShowDialog() == true)
+            try { await _session.SendFileAsync(dialog.FileName); }
+            catch (Exception ex) { StatusText.Text = T("status.failed", "Transfer failed: ") + ex.Message; }
+    }
+
+    private void OnSessionTransferStateChanged(object? sender, QingTransferSessionState state) => Dispatcher.BeginInvoke(UpdateTransferUi);
+    private void UpdateTransferUi()
+    {
+        SendFileButton.Visibility = _session.State == QingTransferSessionState.Connected ? Visibility.Visible : Visibility.Collapsed;
+        UpdatePeers(_discovery.Peers);
+    }
 
     private async void OnIncomingRequest(object? sender, QingTransferProtocol.HelloMessage request)
     {
@@ -99,6 +117,7 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
     {
         _discovery.PeersChanged -= OnPeersChanged; _session.StateChanged -= OnSessionStateChanged;
         _session.IncomingRequest -= OnIncomingRequest; _session.Error -= OnSessionError;
+        _session.StateChanged -= OnSessionTransferStateChanged;
     }
 
     public ValueTask DisposeAsync()
@@ -106,6 +125,7 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
         if (_disposed) return ValueTask.CompletedTask;
         _disposed = true; _discovery.PeersChanged -= OnPeersChanged; _session.StateChanged -= OnSessionStateChanged;
         _session.IncomingRequest -= OnIncomingRequest; _session.Error -= OnSessionError; Unloaded -= OnUnloaded;
+        _session.StateChanged -= OnSessionTransferStateChanged;
         return ValueTask.CompletedTask;
     }
 
