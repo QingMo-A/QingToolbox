@@ -51,17 +51,98 @@ internal object QingTransferProtocol {
     }
 
     private fun parse(payload: ByteArray): QingTransferMessage? {
-        val json = String(payload, Charsets.UTF_8)
-        if (json == "{\"type\":\"accept\",\"v\":1}") return QingTransferMessage.Accept
-        if (json == "{\"type\":\"reject\",\"v\":1}") return QingTransferMessage.Reject
-        val match = Regex("^\\{\\\"type\\\":\\\"hello\\\",\\\"v\\\":1,\\\"pf\\\":\\\"(windows|android)\\\",\\\"name\\\":\\\"([^\\\"\\\\\\u0000-\\u001F]*)\\\"\\}$").matchEntire(json)
-            ?: return null
-        val platform = match.groupValues[1]
-        val name = match.groupValues[2]
-        return if (safe(platform) && safe(name)) QingTransferMessage.Hello(platform, name) else null
+        val fields = JsonObjectParser(String(payload, Charsets.UTF_8)).parse() ?: return null
+        val type = fields["type"]?.takeIf { it.isString }?.value ?: return null
+        if (fields["v"]?.let { it.isString || it.value != "1" } != false) return null
+        return when (type) {
+            "accept" -> if (fields.size == 2) QingTransferMessage.Accept else null
+            "reject" -> if (fields.size == 2) QingTransferMessage.Reject else null
+            "hello" -> {
+                if (fields.size != 4) return null
+                val platform = fields["pf"]?.takeIf { it.isString }?.value ?: return null
+                val name = fields["name"]?.takeIf { it.isString }?.value ?: return null
+                if (platform in setOf("windows", "android") && safe(platform) && safe(name)) QingTransferMessage.Hello(platform, name) else null
+            }
+            else -> null
+        }
     }
 
     private fun safe(value: String): Boolean = value.isNotEmpty() && value.length <= MAX_FIELD_LENGTH && value.none { it.isISOControl() || it == '"' || it == '\\' }
+
+    private data class JsonValue(val value: String, val isString: Boolean)
+
+    /** Bounded object parser: protocol tests stay pure JVM without a permissive JSON dependency. */
+    private class JsonObjectParser(private val text: String) {
+        private var index = 0
+
+        fun parse(): Map<String, JsonValue>? {
+            skipWhitespace()
+            if (!consume('{')) return null
+            val result = linkedMapOf<String, JsonValue>()
+            skipWhitespace()
+            if (consume('}')) return result.takeIf { atEnd() }
+            while (true) {
+                skipWhitespace()
+                val key = parseString() ?: return null
+                if (result.containsKey(key)) return null
+                skipWhitespace()
+                if (!consume(':')) return null
+                skipWhitespace()
+                result[key] = parseValue() ?: return null
+                skipWhitespace()
+                when {
+                    consume('}') -> return result.takeIf { atEnd() }
+                    consume(',') -> Unit
+                    else -> return null
+                }
+            }
+        }
+
+        private fun parseValue(): JsonValue? {
+            if (index >= text.length) return null
+            if (text[index] == '"') return parseString()?.let { JsonValue(it, true) }
+            val start = index
+            while (index < text.length && text[index] != ',' && text[index] != '}' && !text[index].isWhitespace()) index++
+            if (start == index) return null
+            return JsonValue(text.substring(start, index), false)
+        }
+
+        private fun parseString(): String? {
+            if (!consume('"')) return null
+            val result = StringBuilder()
+            while (index < text.length) {
+                val character = text[index++]
+                when {
+                    character == '"' -> return result.toString()
+                    character == '\\' -> {
+                        if (index >= text.length) return null
+                        when (val escaped = text[index++]) {
+                            '"', '\\', '/' -> result.append(escaped)
+                            'b' -> result.append('\b')
+                            'f' -> result.append('\u000C')
+                            'n' -> result.append('\n')
+                            'r' -> result.append('\r')
+                            't' -> result.append('\t')
+                            'u' -> {
+                                if (index + 4 > text.length) return null
+                                val hex = text.substring(index, index + 4)
+                                if (hex.any { it.digitToIntOrNull(16) == null }) return null
+                                result.append(hex.toInt(16).toChar()); index += 4
+                            }
+                            else -> return null
+                        }
+                    }
+                    character.isISOControl() -> return null
+                    else -> result.append(character)
+                }
+            }
+            return null
+        }
+
+        private fun skipWhitespace() { while (index < text.length && text[index].isWhitespace()) index++ }
+        private fun consume(expected: Char): Boolean = if (index < text.length && text[index] == expected) { index++; true } else false
+        private fun atEnd(): Boolean = index == text.length
+    }
 
     private fun readExactly(input: InputStream, buffer: ByteArray) {
         var offset = 0
