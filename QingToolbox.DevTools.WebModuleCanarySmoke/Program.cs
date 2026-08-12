@@ -40,6 +40,9 @@ try
     var echoed = await module.HandleWebRequestAsync("echo", JsonSerializer.SerializeToElement(new { value = "ok" }), CancellationToken.None);
     Require(echoed is { } echoValue && echoValue.GetProperty("value").GetString() == "ok", "Web canary echo must return payload.");
     Require(events.Any(value => value.Name == "stateChanged"), "Web canary must emit stateChanged.");
+    var background = await module.HandleWebRequestAsync("emitBackgroundEvent", null, CancellationToken.None);
+    Require(background is { } backgroundValue && backgroundValue.GetProperty("emitted").GetBoolean() &&
+            events.Any(value => value.Name == "backgroundEvent"), "Web canary must emit a background event.");
     await module.OnDeactivateAsync();
     await handle.DisposeAsync();
     var lifecycle = File.ReadAllLines(Path.Combine(dataRoot, discovered.Manifest.Id, "lifecycle.log"));

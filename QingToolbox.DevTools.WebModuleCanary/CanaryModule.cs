@@ -45,8 +45,16 @@ public sealed class CanaryModule : IWebToolModule
         {
             "getState" => Task.FromResult<JsonElement?>(StatePayload()),
             "echo" => Task.FromResult(payload),
+            "emitBackgroundEvent" => EmitBackgroundEventAsync(cancellationToken),
             _ => throw new InvalidOperationException("Unknown canary method.")
         };
+    }
+
+    private async Task<JsonElement?> EmitBackgroundEventAsync(CancellationToken cancellationToken)
+    {
+        await Task.Run(() => WebEvent?.Invoke(this,
+            new ModuleWebEventArgs("backgroundEvent", JsonSerializer.SerializeToElement(new { background = true }))), cancellationToken);
+        return JsonSerializer.SerializeToElement(new { emitted = true });
     }
 
     public Task OnUnloadAsync(CancellationToken cancellationToken = default)

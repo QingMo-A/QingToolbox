@@ -138,6 +138,12 @@ internal sealed class WebModuleWindow : Window
 
     public void PostEvent(ModuleWebEventArgs eventArgs)
     {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(new Action(() => PostEvent(eventArgs)));
+            return;
+        }
+        if (_closed) return;
         if (!_readySent || _browser.CoreWebView2 is null || _bridge is null) return;
         var message = _bridge.SerializeEvent(eventArgs);
         if (message is not null) _browser.CoreWebView2.PostWebMessageAsJson(message);
