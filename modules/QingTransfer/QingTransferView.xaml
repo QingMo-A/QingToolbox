@@ -41,7 +41,7 @@
         </Border>
         <Grid Grid.Row="1" Margin="0,15,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="#64748B" TextWrapping="Wrap"/>
-            <Button x:Name="SendFileButton" Grid.Column="1" Style="{StaticResource ActionButton}" Visibility="Collapsed" Click="OnSendFile"><TextBlock Text="Send file"/></Button>
+            <Button x:Name="SendFileButton" Grid.Column="1" Style="{StaticResource ActionButton}" Visibility="Collapsed" Click="OnSendFile"><TextBlock x:Name="SendFileButtonText"/></Button>
             <Button x:Name="RefreshButton" Grid.Column="2" Style="{StaticResource ActionButton}" Click="OnRefresh"><StackPanel Orientation="Horizontal"><TextBlock Margin="0,0,7,0" FontFamily="Segoe Fluent Icons" Text="&#xE72C;"/><TextBlock x:Name="RefreshButtonText"/></StackPanel></Button>
         </Grid>
         <Border Grid.Row="2" Background="White" BorderBrush="#D9E7FA" BorderThickness="1" CornerRadius="12" Padding="1">

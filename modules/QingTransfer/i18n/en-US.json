@@ -20,6 +20,7 @@
   "actions.disconnect": "Disconnect",
   "actions.accept": "Accept",
   "actions.reject": "Reject",
+  "actions.sendFile": "Send file",
   "columns.device": "Device",
   "columns.platform": "Platform",
   "columns.status": "Status",

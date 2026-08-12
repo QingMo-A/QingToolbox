@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
+using System.Windows.Threading;
 using QingToolbox.Abstractions.Localization;
 
 namespace QingToolbox.Modules.QingTransfer;
@@ -23,6 +24,7 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
         _discovery.PeersChanged += OnPeersChanged;
         _session.StateChanged += OnSessionStateChanged;
         _session.IncomingRequest += OnIncomingRequest;
+        _session.IncomingFileOffer += OnIncomingFileOffer;
         _session.Error += OnSessionError;
         _session.StateChanged += OnSessionTransferStateChanged;
         Unloaded += OnUnloaded;
@@ -36,7 +38,7 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
         TitleText.Text = T("view.title", "QingTransfer");
         SubtitleText.Text = T("view.subtitle", "Discover nearby QingToolbox devices on this local network.");
         RefreshButtonText.Text = T("actions.refresh", "Refresh");
-        SendFileButton.Content = T("actions.sendFile", "Send file");
+        SendFileButtonText.Text = T("actions.sendFile", "Send file");
         EmptyText.Text = T("view.empty", "No QingToolbox devices are online yet.");
         HintText.Text = T("view.hint", "Discovery uses local DNS-SD. No connection or transfer is started here.");
         FooterText.Text = T("view.footer", "Nearby devices");
@@ -70,6 +72,15 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
         if (dialog.ShowDialog() == true)
             try { await _session.SendFileAsync(dialog.FileName); }
             catch (Exception ex) { StatusText.Text = T("status.failed", "Transfer failed: ") + ex.Message; }
+    }
+
+    private async void OnIncomingFileOffer(object? sender, QingTransferFileOffer offer)
+    {
+        var dialog = new SaveFileDialog { FileName = offer.Name, AddExtension = false, OverwritePrompt = true };
+        var accepted = await Dispatcher.InvokeAsync(() => dialog.ShowDialog() == true);
+        if (!accepted) { _session.RejectIncomingFile(); return; }
+        try { await _session.AcceptIncomingFileAsync(dialog.FileName); }
+        catch (Exception ex) { StatusText.Text = T("status.failed", "Transfer failed: ") + ex.Message; }
     }
 
     private void OnSessionTransferStateChanged(object? sender, QingTransferSessionState state) => Dispatcher.BeginInvoke(UpdateTransferUi);
@@ -117,6 +128,7 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
     {
         _discovery.PeersChanged -= OnPeersChanged; _session.StateChanged -= OnSessionStateChanged;
         _session.IncomingRequest -= OnIncomingRequest; _session.Error -= OnSessionError;
+        _session.IncomingFileOffer -= OnIncomingFileOffer;
         _session.StateChanged -= OnSessionTransferStateChanged;
     }
 
@@ -125,6 +137,7 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
         if (_disposed) return ValueTask.CompletedTask;
         _disposed = true; _discovery.PeersChanged -= OnPeersChanged; _session.StateChanged -= OnSessionStateChanged;
         _session.IncomingRequest -= OnIncomingRequest; _session.Error -= OnSessionError; Unloaded -= OnUnloaded;
+        _session.IncomingFileOffer -= OnIncomingFileOffer;
         _session.StateChanged -= OnSessionTransferStateChanged;
         return ValueTask.CompletedTask;
     }
