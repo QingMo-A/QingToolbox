@@ -149,7 +149,12 @@ public sealed class QingTransferSession : IAsyncDisposable
         lock (_gate)
         {
             if (_pendingOffer is null || _incomingDecision is null) throw new InvalidOperationException("No incoming file offer.");
-            if (Path.GetFileName(destinationPath) != _pendingOffer.Name) throw new InvalidDataException("Destination filename does not match the offer.");
+            // The destination is chosen by the recipient's SaveFileDialog and may
+            // intentionally use a different local filename.  The offered name is
+            // still used as the dialog default, while the selected full path is
+            // the sole destination controlled by the recipient.
+            if (string.IsNullOrWhiteSpace(destinationPath) || string.IsNullOrWhiteSpace(Path.GetFileName(destinationPath)))
+                throw new InvalidDataException("A destination file is required.");
             _incomingCompletion ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
             _incomingDecision.TrySetResult(new FileDecision(true, destinationPath));
             return _incomingCompletion.Task.WaitAsync(cancellationToken);
