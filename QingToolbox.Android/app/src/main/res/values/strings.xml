@@ -47,6 +47,18 @@
     <string name="qing_transfer_offline">Offline</string>
     <string name="qing_transfer_windows">Windows</string>
     <string name="qing_transfer_android">Android</string>
+    <string name="qing_transfer_send_file">Send file</string>
+    <string name="qing_transfer_choose_file">Choose a file to send</string>
+    <string name="qing_transfer_incoming_file_title">Incoming file</string>
+    <string name="qing_transfer_incoming_file_body">%1$s wants to send %2$s (%3$d bytes).</string>
+    <string name="qing_transfer_save_file">Choose where to save</string>
+    <string name="qing_transfer_transfer_progress">%1$s: %2$d / %3$d bytes</string>
+    <string name="qing_transfer_cancel_transfer">Cancel transfer</string>
+    <string name="qing_transfer_error_unable_to_connect">Unable to connect to this device.</string>
+    <string name="qing_transfer_error_peer_rejected">The peer rejected this request.</string>
+    <string name="qing_transfer_error_invalid_protocol">The peer sent an invalid transfer message.</string>
+    <string name="qing_transfer_error_transfer_failed">The file transfer failed.</string>
+    <string name="qing_transfer_error_canceled">The file transfer was canceled.</string>
 
     <string name="settings_appearance">Appearance</string>
     <string name="settings_theme">Theme</string>

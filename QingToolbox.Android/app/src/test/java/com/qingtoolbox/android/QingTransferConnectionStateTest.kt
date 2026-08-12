@@ -1,6 +1,8 @@
 package com.qingtoolbox.android
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,5 +14,12 @@ class QingTransferConnectionStateTest {
         assertTrue(shouldShowIncomingDialog(QingTransferConnectionState.WAITING_APPROVAL, peer))
         assertFalse(shouldShowIncomingDialog(QingTransferConnectionState.CONNECTED, peer))
         assertFalse(shouldShowIncomingDialog(QingTransferConnectionState.IDLE, null))
+    }
+
+    @Test
+    fun transferErrorsHaveLocalizedResourceMappings() {
+        val resources = QingTransferErrorCode.entries.map { it.messageRes() }
+        assertEquals(QingTransferErrorCode.entries.size, resources.distinct().size)
+        resources.forEach { assertNotEquals(0, it) }
     }
 }

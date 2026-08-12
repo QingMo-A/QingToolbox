@@ -10,6 +10,11 @@ internal sealed interface QingTransferMessage {
     data class Hello(val platform: String, val name: String) : QingTransferMessage
     data object Accept : QingTransferMessage
     data object Reject : QingTransferMessage
+    data class FileOffer(val name: String, val size: Long) : QingTransferMessage
+    data object FileAccept : QingTransferMessage
+    data object FileReject : QingTransferMessage
+    data class FileEnd(val sha256: String) : QingTransferMessage
+    data class FileResult(val ok: Boolean) : QingTransferMessage
 }
 
 internal object QingTransferProtocol {
@@ -24,6 +29,17 @@ internal object QingTransferProtocol {
             }
             QingTransferMessage.Accept -> "{\"type\":\"accept\",\"v\":1}"
             QingTransferMessage.Reject -> "{\"type\":\"reject\",\"v\":1}"
+            is QingTransferMessage.FileOffer -> {
+                require(safeFileName(message.name) && message.size >= 0)
+                "{\"type\":\"file_offer\",\"v\":1,\"name\":\"${escape(message.name)}\",\"size\":${message.size}}"
+            }
+            QingTransferMessage.FileAccept -> "{\"type\":\"file_accept\",\"v\":1}"
+            QingTransferMessage.FileReject -> "{\"type\":\"file_reject\",\"v\":1}"
+            is QingTransferMessage.FileEnd -> {
+                require(message.sha256.matches(Regex("[0-9a-f]{64}")))
+                "{\"type\":\"file_end\",\"v\":1,\"sha256\":\"${message.sha256}\"}"
+            }
+            is QingTransferMessage.FileResult -> "{\"type\":\"file_result\",\"v\":1,\"ok\":${message.ok}}"
         }.toByteArray(Charsets.UTF_8)
         require(json.isNotEmpty() && json.size <= MAX_FRAME_BYTES) { "Protocol frame is too large." }
         return ByteBuffer.allocate(4 + json.size).order(ByteOrder.BIG_ENDIAN).putInt(json.size).put(json).array()
@@ -57,17 +73,41 @@ internal object QingTransferProtocol {
         return when (type) {
             "accept" -> if (fields.size == 2) QingTransferMessage.Accept else null
             "reject" -> if (fields.size == 2) QingTransferMessage.Reject else null
+            "file_accept" -> if (fields.size == 2) QingTransferMessage.FileAccept else null
+            "file_reject" -> if (fields.size == 2) QingTransferMessage.FileReject else null
             "hello" -> {
                 if (fields.size != 4) return null
                 val platform = fields["pf"]?.takeIf { it.isString }?.value ?: return null
                 val name = fields["name"]?.takeIf { it.isString }?.value ?: return null
                 if (platform in setOf("windows", "android") && safe(platform) && safe(name)) QingTransferMessage.Hello(platform, name) else null
             }
+            "file_offer" -> {
+                if (fields.size != 4) return null
+                val name = fields["name"]?.takeIf { it.isString }?.value ?: return null
+                val size = fields["size"]?.takeIf { !it.isString }?.value?.toLongOrNull() ?: return null
+                if (safeFileName(name) && size >= 0) QingTransferMessage.FileOffer(name, size) else null
+            }
+            "file_end" -> {
+                if (fields.size != 3) return null
+                val hash = fields["sha256"]?.takeIf { it.isString }?.value ?: return null
+                if (hash.matches(Regex("[0-9a-f]{64}"))) QingTransferMessage.FileEnd(hash) else null
+            }
+            "file_result" -> {
+                if (fields.size != 3) return null
+                val ok = fields["ok"]?.takeIf { !it.isString }?.value ?: return null
+                if (ok == "true" || ok == "false") QingTransferMessage.FileResult(ok == "true") else null
+            }
             else -> null
         }
     }
 
     private fun safe(value: String): Boolean = value.isNotEmpty() && value.length <= MAX_FIELD_LENGTH && value.none { it.isISOControl() || it == '"' || it == '\\' }
+
+    private fun safeFileName(value: String): Boolean =
+        value.isNotEmpty() && value.length <= 255 && value != "." && value != ".." &&
+            value.none { it.isISOControl() || it == '/' || it == '\\' || it == '"' }
+
+    private fun escape(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
 
     private data class JsonValue(val value: String, val isString: Boolean)
 

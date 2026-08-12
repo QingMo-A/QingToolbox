@@ -1,6 +1,5 @@
 package com.qingtoolbox.android
 
-import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -17,16 +16,18 @@ import androidx.compose.material.icons.outlined.DevicesOther
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -37,6 +38,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.provider.OpenableColumns
+import android.content.res.AssetFileDescriptor
 
 internal fun shouldShowIncomingDialog(
     state: QingTransferConnectionState,
@@ -52,13 +55,24 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
     val discovery = remember(context) {
         QingTransferDiscovery(context, { peers = it }, { state = it })
     }
-    val connection = remember(discovery) { QingTransferConnection(discovery, QingTransferMetadata.sanitizeName(android.os.Build.MODEL)) }
+    val connection = remember(discovery) { QingTransferConnection(context, discovery, QingTransferMetadata.sanitizeName(android.os.Build.MODEL)) }
     val connectionState by connection.state.collectAsStateWithLifecycle()
     val incomingPeer by connection.incomingPeer.collectAsStateWithLifecycle()
+    val incomingOffer by connection.incomingOffer.collectAsStateWithLifecycle()
+    val transferProgress by connection.progress.collectAsStateWithLifecycle()
     val connectionError by connection.error.collectAsStateWithLifecycle()
-
-    LaunchedEffect(connectionState, incomingPeer) {
-        Log.d("QingTransferUi", "incomingDialog visible=${shouldShowIncomingDialog(connectionState, incomingPeer)} state=$connectionState peer=${incomingPeer != null}")
+    var saveOffer by remember { mutableStateOf<QingTransferFileOffer?>(null) }
+    val sendLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val details = queryTransferFile(context, uri)
+            if (details == null || details.second < 0L) connection.reportTransferFailure()
+            else connection.sendFile(uri, details.first, details.second)
+        }
+    }
+    val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val offer = saveOffer
+        saveOffer = null
+        if (offer != null && uri != null) connection.acceptIncoming(uri) else if (offer != null) connection.rejectIncomingFile()
     }
 
     DisposableEffect(lifecycleOwner, discovery, connection) {
@@ -87,11 +101,20 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
             dismissButton = { TextButton(onClick = { connection.rejectIncoming() }) { Text(stringResource(R.string.qing_transfer_reject)) } },
         )
     }
-    connectionError?.let { message ->
+    incomingOffer?.let { offer ->
+        AlertDialog(
+            onDismissRequest = { connection.rejectIncomingFile() },
+            title = { Text(stringResource(R.string.qing_transfer_incoming_file_title)) },
+            text = { Text(stringResource(R.string.qing_transfer_incoming_file_body, incomingPeer?.displayName ?: "QingToolbox", offer.name, offer.size)) },
+            confirmButton = { TextButton(onClick = { saveOffer = offer; saveLauncher.launch(offer.name) }) { Text(stringResource(R.string.qing_transfer_accept)) } },
+            dismissButton = { TextButton(onClick = { connection.rejectIncomingFile() }) { Text(stringResource(R.string.qing_transfer_reject)) } },
+        )
+    }
+    connectionError?.let { error ->
         AlertDialog(
             onDismissRequest = { connection.clearError() },
             title = { Text(stringResource(R.string.qing_transfer_connection_failed)) },
-            text = { Text(message) },
+            text = { Text(stringResource(error.messageRes())) },
             confirmButton = { TextButton(onClick = { connection.clearError() }) { Text(stringResource(R.string.ok)) } },
         )
     }
@@ -136,6 +159,19 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
                             },
                         )
                         if (connectionState == QingTransferConnectionState.CONNECTED) {
+                            QingPrimaryButton(onClick = { sendLauncher.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                                Text(stringResource(R.string.qing_transfer_send_file))
+                            }
+                            transferProgress?.let { progress ->
+                                Text(stringResource(R.string.qing_transfer_transfer_progress, progress.name, progress.completed, progress.total))
+                                LinearProgressIndicator(
+                                    progress = { if (progress.total > 0) progress.completed.toFloat() / progress.total.toFloat() else 0f },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                QingSecondaryButton(onClick = connection::cancelTransfer, modifier = Modifier.fillMaxWidth()) {
+                                    Text(stringResource(R.string.qing_transfer_cancel_transfer))
+                                }
+                            }
                             QingSecondaryButton(onClick = connection::disconnect, modifier = Modifier.fillMaxWidth()) {
                                 Text(stringResource(R.string.qing_transfer_disconnect))
                             }
@@ -167,6 +203,21 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
             )
         }
     }
+}
+
+private fun queryTransferFile(context: android.content.Context, uri: android.net.Uri): Pair<String, Long>? {
+    val values = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+            val name = cursor.getString(0)?.takeIf { it.isNotBlank() } ?: return@use null
+            val size = if (cursor.isNull(1)) -1L else cursor.getLong(1)
+            name to size
+        } else null
+    } ?: return null
+    if (values.second >= 0L) return values
+    val descriptorLength = runCatching {
+        context.contentResolver.openAssetFileDescriptor(uri, "r")?.use(AssetFileDescriptor::getLength) ?: -1L
+    }.getOrDefault(-1L)
+    return values.first to descriptorLength
 }
 
 @Composable
