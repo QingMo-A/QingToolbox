@@ -26,18 +26,38 @@ $sidecar = "$qmod.sha256"
 try {
     dotnet build $project -c $Configuration "/p:QingToolboxHostRoot=$hostRoot" "/p:Version=$($manifest.version)" "/p:AssemblyVersion=$assemblyVersion" "/p:FileVersion=$assemblyVersion"
     if ($LASTEXITCODE -ne 0) { throw "$ModuleName build failed." }
+    $webUiSource = $null
+    if ($manifest.uiKind -eq "Web") {
+        $webRoot = Join-Path $moduleRoot "web"
+        if (-not (Test-Path -LiteralPath (Join-Path $webRoot "package.json"))) { throw "Web module package.json is missing: $webRoot" }
+        Push-Location $webRoot
+        try {
+            npm ci --ignore-scripts --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) { throw "Web module npm ci failed." }
+            npm run build
+            if ($LASTEXITCODE -ne 0) { throw "Web module npm build failed." }
+        } finally { Pop-Location }
+        $webUiSource = Join-Path $moduleRoot "ui"
+        if (-not (Test-Path -LiteralPath $webUiSource)) { throw "Web module UI build output is missing: $webUiSource" }
+        $entry = [string]$manifest.webEntry
+        if ([string]::IsNullOrWhiteSpace($entry) -or [IO.Path]::IsPathRooted($entry) -or $entry.Contains("..") -or -not $entry.EndsWith(".html", [StringComparison]::OrdinalIgnoreCase)) { throw "Invalid Web entry: $entry" }
+        $entryLeaf = $entry -replace '^ui/', ''
+        if (-not (Test-Path -LiteralPath (Join-Path $webUiSource $entryLeaf))) { throw "Web entry is missing from UI build: $entry" }
+    }
     $dllVersion = [Reflection.AssemblyName]::GetAssemblyName((Join-Path $build $assemblyName)).Version.ToString(3)
     if ($dllVersion -ne $manifest.version) { throw "DLL version $dllVersion does not match manifest $($manifest.version)." }
     New-Item -ItemType Directory -Force -Path (Join-Path $staging "i18n"),$output | Out-Null
     foreach ($name in @("module.json", "icon.svg", $assemblyName)) { Copy-Item -LiteralPath (Join-Path $build $name) -Destination (Join-Path $staging $name) }
     foreach ($culture in @("en-US", "zh-CN")) { Copy-Item -LiteralPath (Join-Path $build "i18n\$culture.json") -Destination (Join-Path $staging "i18n\$culture.json") }
+    if ($webUiSource) { New-Item -ItemType Directory -Force -Path (Join-Path $staging "ui") | Out-Null; Copy-Item -LiteralPath (Join-Path $webUiSource "index.html") -Destination (Join-Path $staging "ui\index.html"); Copy-Item -LiteralPath (Join-Path $webUiSource "assets") -Destination (Join-Path $staging "ui\assets") -Recurse }
     Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $temporaryPackage
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($temporaryPackage)
     try {
         $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\','/') })
         foreach ($required in @("module.json",$assemblyName,"icon.svg","i18n/en-US.json","i18n/zh-CN.json")) { if ($required -notin $entries) { throw "Missing package entry: $required" } }
-        if ($entries | Where-Object { $_ -match '(^|/)(QingToolbox\.(Abstractions|Shell|Core).*|bin|obj)(/|$)|\.pdb$|\.cs$|\.csproj$|settings\.json$|\.log$' }) { throw "Forbidden package content detected." }
+        if ($manifest.uiKind -eq "Web" -and "ui/index.html" -notin $entries) { throw "Missing package entry: ui/index.html" }
+        if ($entries | Where-Object { $_ -match '(^|/)(QingToolbox\.(Abstractions|Shell|Core).*|bin|obj|web/src|web/node_modules)(/|$)|\.pdb$|\.cs$|\.csproj$|package(-lock)?\.json$|settings\.json$|\.log$|\.map$' }) { throw "Forbidden package content detected." }
     } finally { $archive.Dispose() }
     Remove-Item -LiteralPath $qmod,$sidecar -Force -ErrorAction SilentlyContinue
     Move-Item -LiteralPath $temporaryPackage -Destination $qmod

@@ -59,12 +59,16 @@ using (var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(moduleRoo
 {
     Require(manifest.RootElement.GetProperty("id").GetString() == "qing.qingtransfer", "Module id changed.");
     Require(manifest.RootElement.GetProperty("loadMode").GetString() == "Manual", "Module must remain manually loaded.");
+    Require(manifest.RootElement.GetProperty("uiKind").GetString() == "Web" &&
+            manifest.RootElement.GetProperty("runtimeIsolation").GetString() == "OutOfProcess" &&
+            manifest.RootElement.GetProperty("webEntry").GetString() == "ui/index.html", "Web module manifest contract changed.");
 }
 foreach (var culture in new[] { "en-US", "zh-CN" })
 {
     using var resource = JsonDocument.Parse(File.ReadAllText(Path.Combine(moduleRoot, "i18n", culture + ".json")));
     Require(resource.RootElement.TryGetProperty("view.empty", out _) && resource.RootElement.TryGetProperty("actions.refresh", out _), $"{culture} resources are incomplete.");
 }
+Require(File.Exists(Path.Combine(moduleRoot, "ui", "index.html")), "Built Web UI entry is missing.");
 
 // Exercise idempotent cleanup. DNS-SD can be unavailable on a restricted Windows
 // image; in that case the service reports the platform error and still cleans up.

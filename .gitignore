@@ -6,6 +6,7 @@ obj/
 artifacts/
 *.qmod
 *.sha256
+**/node_modules/
 settings.json
 settings.corrupt-*.json
 events.jsonl
