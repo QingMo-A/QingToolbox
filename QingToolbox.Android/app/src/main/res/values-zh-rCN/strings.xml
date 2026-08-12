@@ -32,6 +32,15 @@
     <string name="qing_transfer_hint">通过本地 DNS-SD 发现，此处不会建立连接或传输。</string>
     <string name="qing_transfer_error">暂时无法使用本地发现。</string>
     <string name="qing_transfer_refresh">刷新</string>
+    <string name="qing_transfer_connect">连接</string>
+    <string name="qing_transfer_disconnect">断开</string>
+    <string name="qing_transfer_connecting">正在连接…</string>
+    <string name="qing_transfer_waiting_approval">等待对方确认…</string>
+    <string name="qing_transfer_connected">已连接</string>
+    <string name="qing_transfer_incoming_title">收到连接请求</string>
+    <string name="qing_transfer_incoming_body">%1$s 请求连接。</string>
+    <string name="qing_transfer_accept">接受</string>
+    <string name="qing_transfer_reject">拒绝</string>
     <string name="qing_transfer_online">在线</string>
     <string name="qing_transfer_offline">离线</string>
     <string name="qing_transfer_windows">Windows</string>

@@ -32,6 +32,15 @@
     <string name="qing_transfer_hint">Discovery uses local DNS-SD. No connection or transfer is started here.</string>
     <string name="qing_transfer_error">Local discovery is unavailable right now.</string>
     <string name="qing_transfer_refresh">Refresh</string>
+    <string name="qing_transfer_connect">Connect</string>
+    <string name="qing_transfer_disconnect">Disconnect</string>
+    <string name="qing_transfer_connecting">Connecting…</string>
+    <string name="qing_transfer_waiting_approval">Waiting for approval…</string>
+    <string name="qing_transfer_connected">Connected</string>
+    <string name="qing_transfer_incoming_title">Incoming connection</string>
+    <string name="qing_transfer_incoming_body">%1$s wants to connect.</string>
+    <string name="qing_transfer_accept">Accept</string>
+    <string name="qing_transfer_reject">Reject</string>
     <string name="qing_transfer_online">Online</string>
     <string name="qing_transfer_offline">Offline</string>
     <string name="qing_transfer_windows">Windows</string>

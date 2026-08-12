@@ -7,6 +7,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.ext.SdkExtensions
 import java.net.ServerSocket
+import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 
 data class QingTransferPeer(
@@ -57,6 +58,8 @@ class QingTransferDiscovery(
     private val onPeersChanged: (List<QingTransferPeer>) -> Unit,
     private val onStateChanged: (QingTransferDiscoveryState) -> Unit,
 ) {
+    @Volatile
+    var onIncomingSocket: ((Socket) -> Unit)? = null
     private val appContext = context.applicationContext
     private val nsd = appContext.getSystemService(NsdManager::class.java)
     private val peers = QingTransferPeerTable()
@@ -123,7 +126,9 @@ class QingTransferDiscovery(
             acceptThread = Thread {
                 while (active && !Thread.currentThread().isInterrupted) {
                     try {
-                        socket.accept().use { }
+                        val client = socket.accept()
+                        val handler = onIncomingSocket
+                        if (!active || handler == null) client.close() else handler(client)
                     } catch (_: Exception) {
                         if (active) continue
                         break
