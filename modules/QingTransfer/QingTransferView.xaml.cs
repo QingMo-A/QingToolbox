@@ -76,11 +76,28 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
 
     private async void OnIncomingFileOffer(object? sender, QingTransferFileOffer offer)
     {
-        var dialog = new SaveFileDialog { FileName = offer.Name, AddExtension = false, OverwritePrompt = true };
-        var accepted = await Dispatcher.InvokeAsync(() => dialog.ShowDialog() == true);
-        if (!accepted) { _session.RejectIncomingFile(); return; }
-        try { await _session.AcceptIncomingFileAsync(dialog.FileName); }
-        catch (Exception ex) { StatusText.Text = T("status.failed", "Transfer failed: ") + ex.Message; }
+        try
+        {
+            // CommonDialog instances are thread-affine: construct and show the
+            // dialog on the WPF dispatcher, then return only its plain path.
+            var destination = await Dispatcher.InvokeAsync(() =>
+            {
+                var dialog = new SaveFileDialog
+                {
+                    FileName = offer.Name,
+                    AddExtension = false,
+                    OverwritePrompt = true,
+                };
+                return dialog.ShowDialog() == true ? dialog.FileName : null;
+            });
+            if (string.IsNullOrWhiteSpace(destination)) { _session.RejectIncomingFile(); return; }
+            await _session.AcceptIncomingFileAsync(destination);
+        }
+        catch (Exception ex)
+        {
+            _session.RejectIncomingFile();
+            await Dispatcher.InvokeAsync(() => StatusText.Text = T("status.failed", "Transfer failed: ") + ex.Message);
+        }
     }
 
     private void OnSessionTransferStateChanged(object? sender, QingTransferSessionState state) => Dispatcher.BeginInvoke(UpdateTransferUi);
@@ -92,9 +109,20 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
 
     private async void OnIncomingRequest(object? sender, QingTransferProtocol.HelloMessage request)
     {
-        var message = string.Format(T("status.incoming", "Incoming request from {0}. Accept?"), request.Name);
-        var result = MessageBox.Show(message, T("view.title", "QingTransfer"), MessageBoxButton.YesNo, MessageBoxImage.Question);
-        if (result == MessageBoxResult.Yes) await _session.AcceptIncomingAsync(); else await _session.RejectIncomingAsync();
+        try
+        {
+            var accepted = await Dispatcher.InvokeAsync(() =>
+            {
+                var message = string.Format(T("status.incoming", "Incoming request from {0}. Accept?"), request.Name);
+                return MessageBox.Show(message, T("view.title", "QingTransfer"), MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+            });
+            if (accepted) await _session.AcceptIncomingAsync(); else await _session.RejectIncomingAsync();
+        }
+        catch (Exception ex)
+        {
+            await Dispatcher.InvokeAsync(() => StatusText.Text = T("status.failed", "Connection failed: ") + ex.Message);
+            await _session.RejectIncomingAsync();
+        }
     }
 
     private void OnSessionStateChanged(object? sender, QingTransferSessionState state) => Dispatcher.BeginInvoke(() => UpdatePeers(_discovery.Peers));
