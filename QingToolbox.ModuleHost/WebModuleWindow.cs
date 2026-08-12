@@ -18,10 +18,13 @@ internal sealed class WebModuleWindow : Window
     private readonly string _userDataFolder;
     private readonly WebView2 _browser = new();
     private readonly WebModuleBridgeDispatcher? _bridge;
+    private readonly Action? _onClosed;
     private bool _readySent;
+    private bool _closed;
 
     public WebModuleWindow(string moduleId, string version, string moduleRoot, string entry,
-        string dataRoot, string title, Window? owner, WebModuleBridgeDispatcher? bridge = null)
+        string dataRoot, string title, Window? owner, WebModuleBridgeDispatcher? bridge = null,
+        Action? onClosed = null)
     {
         _moduleId = moduleId;
         _version = version;
@@ -29,6 +32,7 @@ internal sealed class WebModuleWindow : Window
         _entry = entry.Replace('\\', '/').TrimStart('/');
         _userDataFolder = Path.Combine(Path.GetFullPath(dataRoot), moduleId, "webview2");
         _bridge = bridge;
+        _onClosed = onClosed;
         _host = "qing-module.local";
         Title = title;
         Width = 900;
@@ -98,6 +102,8 @@ internal sealed class WebModuleWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        if (_closed) return;
+        _closed = true;
         Loaded -= OnLoaded;
         Closed -= OnClosed;
         if (_browser.CoreWebView2 is { } core)
@@ -108,6 +114,7 @@ internal sealed class WebModuleWindow : Window
             core.WebMessageReceived -= OnWebMessageReceived;
         }
         _browser.Dispose();
+        _onClosed?.Invoke();
     }
 
     private async void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs args) =>

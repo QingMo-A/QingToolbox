@@ -160,7 +160,8 @@ internal static class Program
                     case "Deactivate": if (active) { await webModule.OnDeactivateAsync(); active = false; } break;
                     case "OpenWindow":
                         window ??= new WebModuleWindow(manifest.Id, manifest.Version, options.ModuleDirectory,
-                            manifest.WebEntry, options.DataRoot, manifest.Name, Application.Current.MainWindow, bridge);
+                            manifest.WebEntry, options.DataRoot, manifest.Name, Application.Current.MainWindow, bridge,
+                            () => window = null);
                         if (webEventHandler is null)
                         {
                             webEventHandler = (_, eventArgs) => window?.PostEvent(eventArgs);
