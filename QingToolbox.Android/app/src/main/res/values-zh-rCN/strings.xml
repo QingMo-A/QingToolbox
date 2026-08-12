@@ -41,6 +41,8 @@
     <string name="qing_transfer_incoming_body">%1$s 请求连接。</string>
     <string name="qing_transfer_accept">接受</string>
     <string name="qing_transfer_reject">拒绝</string>
+    <string name="qing_transfer_connection_failed">连接失败</string>
+    <string name="ok">确定</string>
     <string name="qing_transfer_online">在线</string>
     <string name="qing_transfer_offline">离线</string>
     <string name="qing_transfer_windows">Windows</string>

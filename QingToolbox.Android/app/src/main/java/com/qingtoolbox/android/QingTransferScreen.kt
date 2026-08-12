@@ -48,6 +48,7 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
     val connection = remember(discovery) { QingTransferConnection(discovery, QingTransferMetadata.sanitizeName(android.os.Build.MODEL)) }
     val connectionState by connection.state.collectAsStateWithLifecycle()
     val incomingPeer by connection.incomingPeer.collectAsStateWithLifecycle()
+    val connectionError by connection.error.collectAsStateWithLifecycle()
 
     DisposableEffect(lifecycleOwner, discovery, connection) {
         val observer = LifecycleEventObserver { _, event ->
@@ -73,6 +74,14 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
             text = { Text(stringResource(R.string.qing_transfer_incoming_body, peer.displayName)) },
             confirmButton = { TextButton(onClick = { connection.acceptIncoming() }) { Text(stringResource(R.string.qing_transfer_accept)) } },
             dismissButton = { TextButton(onClick = { connection.rejectIncoming() }) { Text(stringResource(R.string.qing_transfer_reject)) } },
+        )
+    }
+    connectionError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { connection.clearError() },
+            title = { Text(stringResource(R.string.qing_transfer_connection_failed)) },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { connection.clearError() }) { Text(stringResource(R.string.ok)) } },
         )
     }
 

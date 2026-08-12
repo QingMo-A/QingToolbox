@@ -25,6 +25,8 @@ internal class QingTransferConnection(
     val state: StateFlow<QingTransferConnectionState> = _state.asStateFlow()
     private val _incomingPeer = MutableStateFlow<QingTransferPeer?>(null)
     val incomingPeer: StateFlow<QingTransferPeer?> = _incomingPeer.asStateFlow()
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
     private var socket: Socket? = null
     private var ioJob: Job? = null
     private var incomingName: String? = null
@@ -34,6 +36,7 @@ internal class QingTransferConnection(
 
     fun connect(peer: QingTransferPeer) {
         if (_state.value != QingTransferConnectionState.IDLE) return
+        _error.value = null
         _state.value = QingTransferConnectionState.CONNECTING
         ioJob = scope.launch {
             try {
@@ -58,7 +61,7 @@ internal class QingTransferConnection(
                 }
                 receiveUntilClosed(client)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { closeToIdle(); }
+            catch (error: Exception) { _error.value = error.message ?: "Unable to connect to the device."; closeToIdle(); }
         }
     }
 
@@ -77,6 +80,7 @@ internal class QingTransferConnection(
     }
 
     fun disconnect() { closeToIdle() }
+    fun clearError() { _error.value = null }
 
     fun dispose() {
         discovery.onIncomingSocket = null
