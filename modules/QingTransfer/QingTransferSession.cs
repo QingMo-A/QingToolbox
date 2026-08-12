@@ -56,6 +56,7 @@ public sealed class QingTransferSession : IAsyncDisposable
     public event EventHandler<string>? Error;
     public event EventHandler<QingTransferFileOffer>? IncomingFileOffer;
     public event EventHandler<QingTransferProgress>? TransferProgress;
+    public event EventHandler? TransferEnded;
     public QingTransferSessionState State { get { lock (_gate) return _state; } }
     public QingTransferPeer? Peer { get; private set; }
 
@@ -312,7 +313,21 @@ public sealed class QingTransferSession : IAsyncDisposable
     private TaskCompletionSource<QingTransferProtocol.Message> NewMessageCompletion() { lock (_gate) { return _offerResponse = new(TaskCreationOptions.RunContinuationsAsynchronously); } }
     private TaskCompletionSource<bool> NewResultCompletion() { lock (_gate) { return _resultResponse = new(TaskCreationOptions.RunContinuationsAsynchronously); } }
     private void BeginTransfer() { lock (_gate) { if (_transferActive) throw new InvalidOperationException("A transfer is already active."); _transferActive = true; } }
-    private void EndTransfer() { lock (_gate) { _transferActive = false; _pendingOffer = null; _incomingDecision = null; _incomingCompletion = null; _offerResponse = null; _resultResponse = null; } }
+    private void EndTransfer()
+    {
+        var ended = false;
+        lock (_gate)
+        {
+            ended = _transferActive;
+            _transferActive = false;
+            _pendingOffer = null;
+            _incomingDecision = null;
+            _incomingCompletion = null;
+            _offerResponse = null;
+            _resultResponse = null;
+        }
+        if (ended) TransferEnded?.Invoke(this, EventArgs.Empty);
+    }
     private static async Task RejectAndCloseAsync(TcpClient client, CancellationToken cancellationToken) { try { await using var stream = client.GetStream(); await QingTransferProtocol.WriteMessageAsync(stream, new QingTransferProtocol.RejectMessage(), cancellationToken).ConfigureAwait(false); } catch { } client.Dispose(); }
     private void RaiseStateChanged() => StateChanged?.Invoke(this, State);
     private void WriteTransferDiagnostic(string correlation, string message)

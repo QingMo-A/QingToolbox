@@ -1,4 +1,4 @@
 {
-  "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler", "strict": true, "jsx": "preserve", "resolveJsonModule": true, "isolatedModules": true, "esModuleInterop": true, "lib": ["ES2022", "DOM"] },
+  "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler", "strict": true, "types": ["vite/client"], "jsx": "preserve", "resolveJsonModule": true, "isolatedModules": true, "esModuleInterop": true, "lib": ["ES2022", "DOM"] },
   "include": ["src/**/*.ts", "src/**/*.vue"]
 }

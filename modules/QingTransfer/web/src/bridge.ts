@@ -6,6 +6,31 @@ const pending = new Map<string, { resolve: (value: unknown) => void; reject: (er
 let sequence = 0
 let stateListener: ((state: State) => void) | undefined
 let presentationListener: ((presentation: Presentation) => void) | undefined
+let latestPresentation: Presentation | undefined
+let presentationReady: Promise<Presentation> | undefined
+let resolvePresentationReady: ((presentation: Presentation) => void) | undefined
+
+function normalizePresentation(value: Partial<Presentation> | undefined): Presentation {
+  const appearancePresetId = typeof value?.appearancePresetId === 'string' && value.appearancePresetId.trim()
+    ? value.appearancePresetId
+    : 'qing-default'
+  const languageCode = value?.languageCode === 'zh-CN' ? 'zh-CN' : 'en-US'
+  return { appearancePresetId, languageCode }
+}
+
+function applyDocumentPresentation(presentation: Presentation) {
+  if (typeof document === 'undefined') return
+  document.documentElement.dataset.appearancePreset = presentation.appearancePresetId
+  document.documentElement.lang = presentation.languageCode
+}
+
+function publishPresentation(value: Partial<Presentation> | undefined) {
+  latestPresentation = normalizePresentation(value)
+  applyDocumentPresentation(latestPresentation)
+  resolvePresentationReady?.(latestPresentation)
+  resolvePresentationReady = undefined
+  presentationListener?.(latestPresentation)
+}
 
 if (webView) webView.addEventListener('message', (event) => {
   const message = event.data
@@ -15,7 +40,7 @@ if (webView) webView.addEventListener('message', (event) => {
     pending.delete(message.id)
     message.ok === false ? request.reject(new Error(message.error || 'The request could not be completed.')) : request.resolve(message.payload)
   } else if (message.type === 'event' && message.name === 'stateChanged' && message.payload) stateListener?.(message.payload as State)
-  else if (message.type === 'presentationChanged') presentationListener?.(message as unknown as Presentation)
+  else if (message.type === 'hostReady' || message.type === 'presentationChanged') publishPresentation(message as unknown as Presentation)
 }
 )
 
@@ -25,4 +50,16 @@ export function invoke<T>(method: string, payload?: unknown): Promise<T> {
   return new Promise<T>((resolve, reject) => { pending.set(id, { resolve: resolve as (value: unknown) => void, reject }); webView.postMessage({ type: 'invoke', id, method, payload }) })
 }
 export function onStateChanged(listener: (state: State) => void) { stateListener = listener; return () => { if (stateListener === listener) stateListener = undefined } }
-export function onPresentationChanged(listener: (presentation: Presentation) => void) { presentationListener = listener; return () => { if (presentationListener === listener) presentationListener = undefined } }
+export function onPresentationChanged(listener: (presentation: Presentation) => void) {
+  presentationListener = listener
+  if (latestPresentation) {
+    applyDocumentPresentation(latestPresentation)
+    listener(latestPresentation)
+  }
+  return () => { if (presentationListener === listener) presentationListener = undefined }
+}
+export function waitForPresentation(): Promise<Presentation> {
+  if (latestPresentation) return Promise.resolve(latestPresentation)
+  presentationReady ??= new Promise(resolve => { resolvePresentationReady = resolve })
+  return presentationReady
+}

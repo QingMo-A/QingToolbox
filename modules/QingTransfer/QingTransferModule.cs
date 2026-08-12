@@ -16,11 +16,14 @@ public sealed class QingTransferModule : IWebToolModule
     private QingTransferDiscoveryService? _discovery;
     private QingTransferSession? _session;
     private QingTransferReceiveSettingsStore? _receiveSettings;
+    private QingTransferReceiveSettings _receiveSettingsSnapshot = new();
     private ModuleContext? _context;
     private QingTransferProtocol.HelloMessage? _incomingRequest;
     private QingTransferFileOffer? _incomingOffer;
     private QingTransferProgress? _progress;
     private string? _lastError;
+    private DateTimeOffset _lastProgressPublish = DateTimeOffset.MinValue;
+    private CancellationTokenSource? _progressThrottle;
     private bool _disposed;
 
     public string Id => "qing.qingtransfer";
@@ -33,6 +36,7 @@ public sealed class QingTransferModule : IWebToolModule
         if (_context is not null) return Task.CompletedTask;
         _context = context;
         _receiveSettings = new QingTransferReceiveSettingsStore(context.DataDirectory);
+        _receiveSettingsSnapshot = _receiveSettings.Load();
         _discovery = new QingTransferDiscoveryService(Environment.MachineName, context.DataDirectory);
         _session = new QingTransferSession(_discovery, Environment.MachineName, receiveSettings: _receiveSettings);
         _discovery.PeersChanged += OnPeersChanged;
@@ -40,6 +44,7 @@ public sealed class QingTransferModule : IWebToolModule
         _session.IncomingRequest += OnIncomingRequest;
         _session.IncomingFileOffer += OnIncomingFileOffer;
         _session.TransferProgress += OnTransferProgress;
+        _session.TransferEnded += OnTransferEnded;
         _session.Error += OnSessionError;
         return Task.CompletedTask;
     }
@@ -116,6 +121,10 @@ public sealed class QingTransferModule : IWebToolModule
                 lock (_gate) _incomingOffer = null;
                 PublishState();
                 return Snapshot();
+            case "dismissError":
+                lock (_gate) _lastError = null;
+                PublishState();
+                return Snapshot();
             default: throw new InvalidOperationException("Unknown QingTransfer method.");
         }
     }
@@ -130,10 +139,14 @@ public sealed class QingTransferModule : IWebToolModule
             _session.IncomingRequest -= OnIncomingRequest;
             _session.IncomingFileOffer -= OnIncomingFileOffer;
             _session.TransferProgress -= OnTransferProgress;
+            _session.TransferEnded -= OnTransferEnded;
             _session.Error -= OnSessionError;
             await _session.DisposeAsync().ConfigureAwait(false);
         }
         if (_discovery is not null) await _discovery.DisposeAsync().ConfigureAwait(false);
+        _progressThrottle?.Cancel();
+        _progressThrottle?.Dispose();
+        _progressThrottle = null;
         _session = null; _discovery = null; _receiveSettings = null; _context = null;
     }
 
@@ -183,11 +196,15 @@ public sealed class QingTransferModule : IWebToolModule
         PublishState();
     }
 
-    private QingTransferReceiveSettings CurrentSettings() => _receiveSettings?.Load() ?? new();
+    private QingTransferReceiveSettings CurrentSettings()
+    {
+        lock (_gate) return _receiveSettingsSnapshot;
+    }
 
     private void SaveReceiveSettings(QingTransferReceiveSettings value)
     {
         _receiveSettings?.Save(value);
+        lock (_gate) _receiveSettingsSnapshot = value;
         PublishState();
     }
 
@@ -200,7 +217,61 @@ public sealed class QingTransferModule : IWebToolModule
         }
         PublishState();
     }
-    private void OnTransferProgress(object? sender, QingTransferProgress progress) { lock (_gate) _progress = progress; PublishState(); }
+    private void OnTransferProgress(object? sender, QingTransferProgress progress)
+    {
+        var publishNow = false;
+        CancellationTokenSource? scheduled = null;
+        lock (_gate)
+        {
+            _progress = progress;
+            var now = DateTimeOffset.UtcNow;
+            if (now - _lastProgressPublish >= TimeSpan.FromMilliseconds(150))
+            {
+                _lastProgressPublish = now;
+                publishNow = true;
+            }
+            else if (_progressThrottle is null)
+            {
+                _progressThrottle = new CancellationTokenSource();
+                scheduled = _progressThrottle;
+            }
+        }
+        if (publishNow) PublishState();
+        if (scheduled is not null) _ = PublishProgressAfterDelayAsync(scheduled);
+    }
+
+    private async Task PublishProgressAfterDelayAsync(CancellationTokenSource scheduled)
+    {
+        try
+        {
+            await Task.Delay(150, scheduled.Token).ConfigureAwait(false);
+            lock (_gate) _lastProgressPublish = DateTimeOffset.UtcNow;
+            PublishState();
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            lock (_gate)
+            {
+                if (ReferenceEquals(_progressThrottle, scheduled))
+                {
+                    _progressThrottle.Dispose();
+                    _progressThrottle = null;
+                }
+            }
+        }
+    }
+
+    private void OnTransferEnded(object? sender, EventArgs e)
+    {
+        lock (_gate)
+        {
+            _progress = null;
+            _lastProgressPublish = DateTimeOffset.MinValue;
+        }
+        _progressThrottle?.Cancel();
+        PublishState();
+    }
     private void OnSessionError(object? sender, string error) { lock (_gate) _lastError = error; PublishState(); }
     private void OnIncomingRequest(object? sender, QingTransferProtocol.HelloMessage request) { lock (_gate) _incomingRequest = request; PublishState(); }
     private void OnIncomingFileOffer(object? sender, QingTransferFileOffer offer) { lock (_gate) _incomingOffer = offer; PublishState(); }
