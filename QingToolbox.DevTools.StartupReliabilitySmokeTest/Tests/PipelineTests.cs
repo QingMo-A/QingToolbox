@@ -56,10 +56,16 @@ internal static class PipelineTests
         AssertEx.True(!initializeDiscovery.Contains("startupRegistrationService.GetStateAsync", StringComparison.Ordinal) &&
             discovery.Contains("fingerprintService.MatchesAsync", StringComparison.Ordinal),
             "Discovery queried startup registration or moved fingerprint work back to UI application.");
-        var launcher = File.ReadAllText(Path.Combine(root, "run-latest.bat"));
+        var launcherBatch = File.ReadAllText(Path.Combine(root, "run-latest.bat"));
+        AssertEx.True(launcherBatch.Contains("scripts\\run-latest.ps1", StringComparison.OrdinalIgnoreCase),
+            "The double-click launcher no longer delegates to the repairable startup pipeline.");
+        var launcher = File.ReadAllText(Path.Combine(root, "scripts", "run-latest.ps1"));
         foreach (var argument in new[] { "--environment Development", "--profile Shell", "--repo-root" })
-            AssertEx.True(launcher.Contains(argument, StringComparison.OrdinalIgnoreCase),
+            AssertEx.True(argument.Split(' ').All(part => launcher.Contains($"'{part}'", StringComparison.OrdinalIgnoreCase)),
                 $"Development launcher lost {argument}.");
+        foreach (var contract in new[] { "Repair-WebAssets", "Stop-WorkspaceDevelopmentHost", "Start-Transcript" })
+            AssertEx.True(launcher.Contains(contract, StringComparison.Ordinal),
+                $"Development launcher lost automatic repair contract {contract}.");
     }
     internal static string FindRepo()
     {

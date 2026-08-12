@@ -320,7 +320,16 @@ internal static class Program
             "A valid Web entry was rejected.");
         foreach (var invalid in new[] { "missing.html", "../index.html", "C:\\outside.html", "index.txt" })
         {
-            var bad = webManifest with { WebEntry = invalid };
+            var bad = new ModuleManifest
+            {
+                Id = webManifest.Id,
+                Name = webManifest.Name,
+                Version = webManifest.Version,
+                Entry = webManifest.Entry,
+                WebEntry = invalid,
+                RuntimeIsolation = webManifest.RuntimeIsolation,
+                UiKind = webManifest.UiKind
+            };
             Require(validator.Validate(bad, root, Path.Combine(root, "module.json")).Count > 0,
                 $"Invalid Web entry '{invalid}' was accepted.");
         }
