@@ -60,6 +60,13 @@
     <string name="qing_transfer_error_transfer_failed">The file transfer failed.</string>
     <string name="qing_transfer_error_canceled">The file transfer was canceled.</string>
     <string name="qing_transfer_error_disconnected">Connection disconnected.</string>
+    <string name="qing_transfer_receive_settings">Receive settings</string>
+    <string name="qing_transfer_choose_directory">Choose default folder</string>
+    <string name="qing_transfer_no_default_directory">No default folder configured.</string>
+    <string name="qing_transfer_default_directory_configured">Default folder configured.</string>
+    <string name="qing_transfer_use_default_directory">Use default folder</string>
+    <string name="qing_transfer_auto_accept">Automatically accept files</string>
+    <string name="qing_transfer_auto_accept_hint">Automatic acceptance works only when the default folder is enabled, configured, and writable. Otherwise you will be asked each time.</string>
 
     <string name="settings_appearance">Appearance</string>
     <string name="settings_theme">Theme</string>

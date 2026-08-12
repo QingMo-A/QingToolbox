@@ -20,6 +20,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -63,6 +64,15 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
     val transferProgress by connection.progress.collectAsStateWithLifecycle()
     val connectionError by connection.error.collectAsStateWithLifecycle()
     var saveOffer by remember { mutableStateOf<QingTransferFileOffer?>(null) }
+    var showReceiveSettings by remember { mutableStateOf(false) }
+    var receivePreferences by remember { mutableStateOf(connection.receivePreferences()) }
+    val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+            receivePreferences = receivePreferences.copy(defaultTreeUri = uri.toString())
+            connection.updateReceivePreferences(receivePreferences)
+        }
+    }
     val sendLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val details = queryTransferFile(context, uri)
@@ -108,7 +118,11 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
         )
     }
     incomingOffer?.let { offer ->
-        AlertDialog(
+        val autoAccepting = connection.canAutomaticallyAccept()
+        if (autoAccepting) {
+            androidx.compose.runtime.LaunchedEffect(offer) { connection.acceptIncomingAutomatically() }
+        }
+        if (!autoAccepting) AlertDialog(
             onDismissRequest = { connection.rejectIncomingFile() },
             title = { Text(stringResource(R.string.qing_transfer_incoming_file_title)) },
             text = { Text(stringResource(R.string.qing_transfer_incoming_file_body, incomingPeer?.displayName ?: "QingToolbox", offer.name, offer.size)) },
@@ -188,12 +202,26 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
                                     Text(stringResource(R.string.qing_transfer_cancel_transfer))
                                 }
                             }
-                            QingSecondaryButton(onClick = connection::disconnect, modifier = Modifier.fillMaxWidth()) {
+                    QingSecondaryButton(onClick = connection::disconnect, modifier = Modifier.fillMaxWidth()) {
                                 Text(stringResource(R.string.qing_transfer_disconnect))
                             }
                         }
                     }
                 }
+            }
+        }
+        item {
+            QingClickableCard(onClick = { showReceiveSettings = true }, modifier = Modifier.fillMaxWidth()) {
+                QingListItem(
+                    leadingContent = { Icon(Icons.Outlined.Folder, contentDescription = null) },
+                    headlineContent = { Text(stringResource(R.string.qing_transfer_receive_settings)) },
+                    supportingContent = {
+                        Text(
+                            if (receivePreferences.defaultTreeUri.isNullOrBlank()) stringResource(R.string.qing_transfer_no_default_directory)
+                            else stringResource(R.string.qing_transfer_default_directory_configured),
+                        )
+                    },
+                )
             }
         }
         if (peers.isEmpty()) {
@@ -218,6 +246,48 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier.padding(top = 2.dp, bottom = 20.dp),
             )
         }
+    }
+    if (showReceiveSettings) {
+        AlertDialog(
+            onDismissRequest = { showReceiveSettings = false },
+            title = { Text(stringResource(R.string.qing_transfer_receive_settings)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    QingSecondaryButton(onClick = { treeLauncher.launch(null) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Outlined.Folder, contentDescription = null)
+                        Spacer(Modifier.size(8.dp))
+                        Text(stringResource(R.string.qing_transfer_choose_directory))
+                    }
+                    Text(
+                        if (receivePreferences.defaultTreeUri.isNullOrBlank()) stringResource(R.string.qing_transfer_no_default_directory)
+                        else stringResource(R.string.qing_transfer_default_directory_configured),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        QingSwitch(
+                            checked = receivePreferences.useDefaultDirectory,
+                            onCheckedChange = { checked ->
+                                receivePreferences = receivePreferences.copy(useDefaultDirectory = checked)
+                                connection.updateReceivePreferences(receivePreferences)
+                            },
+                        )
+                        Text(stringResource(R.string.qing_transfer_use_default_directory))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        QingSwitch(
+                            checked = receivePreferences.autoAccept,
+                            onCheckedChange = { checked ->
+                                receivePreferences = receivePreferences.copy(autoAccept = checked)
+                                connection.updateReceivePreferences(receivePreferences)
+                            },
+                        )
+                        Text(stringResource(R.string.qing_transfer_auto_accept))
+                    }
+                    Text(stringResource(R.string.qing_transfer_auto_accept_hint), style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = { TextButton(onClick = { showReceiveSettings = false }) { Text(stringResource(R.string.ok)) } },
+        )
     }
 }
 

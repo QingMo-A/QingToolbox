@@ -60,6 +60,13 @@
     <string name="qing_transfer_error_transfer_failed">文件传输失败。</string>
     <string name="qing_transfer_error_canceled">文件传输已取消。</string>
     <string name="qing_transfer_error_disconnected">连接已断开。</string>
+    <string name="qing_transfer_receive_settings">接收设置</string>
+    <string name="qing_transfer_choose_directory">选择默认文件夹</string>
+    <string name="qing_transfer_no_default_directory">尚未配置默认文件夹。</string>
+    <string name="qing_transfer_default_directory_configured">已配置默认文件夹。</string>
+    <string name="qing_transfer_use_default_directory">使用默认文件夹</string>
+    <string name="qing_transfer_auto_accept">自动接受文件</string>
+    <string name="qing_transfer_auto_accept_hint">仅当启用默认文件夹、已配置且可写时自动接受；否则每次都会请求确认。</string>
 
     <string name="settings_appearance">外观</string>
     <string name="settings_theme">主题</string>

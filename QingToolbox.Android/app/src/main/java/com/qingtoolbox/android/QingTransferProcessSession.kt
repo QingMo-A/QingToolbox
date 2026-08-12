@@ -22,6 +22,7 @@ internal class QingTransferProcessSession internal constructor(context: Context)
         context = context.applicationContext,
         discovery = discovery,
         friendlyName = QingTransferMetadata.sanitizeName(Build.MODEL),
+        receivePreferences = QingTransferReceivePreferencesStore(context.applicationContext),
     )
 }
 

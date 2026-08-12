@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -48,6 +49,7 @@ internal class QingTransferConnection(
     private val context: Context,
     private val discovery: QingTransferDiscovery,
     private val friendlyName: String,
+    private val receivePreferences: QingTransferReceivePreferencesStore? = null,
 ) {
     private fun stage(message: String) = Log.d("QingTransferStage", message)
     private val resolver: ContentResolver = context.applicationContext.contentResolver
@@ -166,6 +168,13 @@ internal class QingTransferConnection(
         incomingDecision?.complete(uri)
     }
 
+    fun acceptIncomingAutomatically(): Boolean {
+        val offer = _incomingOffer.value ?: return false
+        val destination = automaticDestination(offer) ?: return false
+        incomingDecision?.complete(destination)
+        return true
+    }
+
     fun rejectIncomingFile() { incomingDecision?.complete(null) }
 
     fun acceptIncoming() {
@@ -189,6 +198,30 @@ internal class QingTransferConnection(
     fun disconnect() { closeToIdle() }
     fun clearError() { _error.value = null }
     fun reportTransferFailure() { _error.value = QingTransferErrorCode.TRANSFER_FAILED }
+
+    fun receivePreferences(): QingTransferReceivePreferences = receivePreferences?.read() ?: QingTransferReceivePreferences()
+
+    fun updateReceivePreferences(value: QingTransferReceivePreferences) { receivePreferences?.write(value) }
+
+    fun defaultDirectoryStatus(): Boolean {
+        val uri = receivePreferences?.read()?.defaultTreeUri ?: return false
+        return runCatching { resolver.persistedUriPermissions.any { it.uri == Uri.parse(uri) && it.isReadPermission && it.isWritePermission } }.getOrDefault(false)
+    }
+
+    fun automaticDestination(offer: QingTransferFileOffer): Uri? {
+        val settings = receivePreferences?.read() ?: return null
+        if (!QingTransferReceivePolicy.automaticAcceptAllowed(settings, defaultDirectoryStatus())) return null
+        val tree = DocumentFile.fromTreeUri(context, Uri.parse(settings.defaultTreeUri!!)) ?: return null
+        if (!tree.canWrite()) return null
+        val existing = tree.listFiles().mapNotNull { it.name }.toSet()
+        return tree.createFile("application/octet-stream", QingTransferReceivePolicy.nextFileName(offer.name, existing))?.uri
+    }
+
+    fun canAutomaticallyAccept(): Boolean {
+        val settings = receivePreferences?.read() ?: return false
+        if (!QingTransferReceivePolicy.automaticAcceptAllowed(settings, defaultDirectoryStatus())) return false
+        return runCatching { DocumentFile.fromTreeUri(context, Uri.parse(settings.defaultTreeUri!!))?.canWrite() == true }.getOrDefault(false)
+    }
 
     fun dispose() {
         discovery.onIncomingSocket = null
@@ -244,6 +277,7 @@ internal class QingTransferConnection(
         val decision = CompletableDeferred<Uri?>()
         incomingDecision = decision
         _incomingOffer.value = QingTransferFileOffer(offer.name, offer.size)
+        automaticDestination(QingTransferFileOffer(offer.name, offer.size))?.let { decision.complete(it) }
         val destination = try { decision.await() } finally { incomingDecision = null; _incomingOffer.value = null }
         if (destination == null) {
             stage("incoming-decision accepted=false")
