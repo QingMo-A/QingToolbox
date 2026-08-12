@@ -22,6 +22,7 @@ import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.security.MessageDigest
+import android.util.Log
 
 internal enum class QingTransferConnectionState { IDLE, CONNECTING, WAITING_APPROVAL, CONNECTED }
 
@@ -48,6 +49,7 @@ internal class QingTransferConnection(
     private val discovery: QingTransferDiscovery,
     private val friendlyName: String,
 ) {
+    private fun stage(message: String) = Log.d("QingTransferStage", message)
     private val resolver: ContentResolver = context.applicationContext.contentResolver
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _state = MutableStateFlow(QingTransferConnectionState.IDLE)
@@ -113,33 +115,41 @@ internal class QingTransferConnection(
         if (transferJob?.isActive == true) return
         transferJob = scope.launch {
             try {
+                stage("offer-send nameLength=${name.length} size=$size")
                 val client = socket ?: throw TransferException()
                 val decision = CompletableDeferred<Boolean>()
                 outgoingDecision = decision
                 val rawComplete = CompletableDeferred<Unit>()
                 outgoingRawComplete = rawComplete
                 QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.FileOffer(name, size))
+                stage("offer-sent")
                 val accepted = runCatching { withTimeout(30_000) { decision.await() } }.getOrNull()
                 if (accepted == null) throw TransferException()
                 if (!accepted) {
+                    stage("offer-response accepted=false")
                     _error.value = QingTransferErrorCode.PEER_REJECTED
                     return@launch
                 }
+                stage("offer-response accepted=true")
                 val digest = MessageDigest.getInstance("SHA-256")
                 resolver.openInputStream(uri)?.use { input ->
+                    stage("raw-send-begin declared=$size")
                     streamToSocket(input, client.getOutputStream(), size, name, digest)
                 } ?: throw TransferException()
                 if (_progress.value?.completed != size) throw TransferException()
                 val result = CompletableDeferred<Boolean>()
                 resultDecision = result
                 QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.FileEnd(digest.digest().hexLower()))
+                stage("raw-send-end declared=$size; file-end-sent")
                 rawComplete.complete(Unit)
                 if (!withTimeoutOrFalse(result, 30_000)) throw TransferException()
                 if (!result.await()) throw TransferException()
+                stage("result-received ok=true")
                 _progress.value = null
             } catch (_: CancellationException) {
                 _error.value = QingTransferErrorCode.CANCELED
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                stage("send-exception type=${error.javaClass.simpleName}")
                 _error.value = QingTransferErrorCode.TRANSFER_FAILED
             } finally {
                 outgoingDecision = null; outgoingRawComplete?.cancel(); outgoingRawComplete = null; resultDecision = null
@@ -208,12 +218,13 @@ internal class QingTransferConnection(
             while (true) {
                 when (val message = QingTransferProtocol.read(client.getInputStream())) {
                     QingTransferMessage.FileAccept -> {
+                        stage("accept-received")
                         outgoingDecision?.complete(true)
                         outgoingRawComplete?.await()
                     }
-                    QingTransferMessage.FileReject -> outgoingDecision?.complete(false)
-                    is QingTransferMessage.FileResult -> resultDecision?.complete(message.ok)
-                    is QingTransferMessage.FileOffer -> handleIncomingFile(client, message)
+                    QingTransferMessage.FileReject -> { stage("reject-received"); outgoingDecision?.complete(false) }
+                    is QingTransferMessage.FileResult -> { stage("result-received ok=${message.ok}"); resultDecision?.complete(message.ok) }
+                    is QingTransferMessage.FileOffer -> { stage("offer-received nameLength=${message.name.length} size=${message.size}"); handleIncomingFile(client, message) }
                     else -> Unit
                 }
             }
@@ -235,22 +246,27 @@ internal class QingTransferConnection(
         _incomingOffer.value = QingTransferFileOffer(offer.name, offer.size)
         val destination = try { decision.await() } finally { incomingDecision = null; _incomingOffer.value = null }
         if (destination == null) {
+            stage("incoming-decision accepted=false")
             runCatching { QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.FileReject) }
             return
         }
         try {
+            stage("incoming-decision accepted=true")
             QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.FileAccept)
+            stage("accept-sent; raw-receive-begin declared=${offer.size}")
             val digest = MessageDigest.getInstance("SHA-256")
             resolver.openOutputStream(destination, "w")?.use { output ->
                 streamFromSocket(client.getInputStream(), output, offer.size, offer.name, digest)
             } ?: throw TransferException()
             val end = QingTransferProtocol.read(client.getInputStream())
             val ok = end is QingTransferMessage.FileEnd && end.sha256 == digest.digest().hexLower()
+            stage("raw-receive-end declared=${offer.size}; file-end-received hashMatch=$ok")
             runCatching { QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.FileResult(ok)) }
             if (!ok) runCatching { DocumentsContract.deleteDocument(resolver, destination) }
             if (!ok) throw TransferException()
             _progress.value = null
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            stage("receive-exception type=${error.javaClass.simpleName}")
             runCatching { DocumentsContract.deleteDocument(resolver, destination) }
             _error.value = QingTransferErrorCode.TRANSFER_FAILED
             runCatching { QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.FileResult(false)) }
