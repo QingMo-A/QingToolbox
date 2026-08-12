@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Pipes;
 using System.Text.Json;
 using QingToolbox.Core.Updates;
+using QingToolbox.Core.Settings;
 
 namespace QingToolbox.Shell.Services;
 
@@ -29,15 +30,23 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
     private const int ProtocolVersion = 1;
     private static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(8);
     private static readonly HashSet<string> AllowedCommands =
-        ["GetState", "Activate", "Deactivate", "OpenWindow", "CloseWindow", "SuspendWindow", "RestoreWindow", "Shutdown"];
+        ["GetState", "SetPresentation", "Activate", "Deactivate", "OpenWindow", "CloseWindow", "SuspendWindow", "RestoreWindow", "Shutdown"];
     private readonly ConcurrentDictionary<string, Session> _sessions = new(StringComparer.Ordinal);
     private long _generation;
+    private string _currentAppearancePresetId = AppearancePresetIds.QingDefault;
+    private string _currentLanguageCode = "en-US";
     public string? LastFailureCode { get; private set; }
     public event EventHandler<ModuleProcessExitedEventArgs>? ProcessExited;
     internal ModuleProcessBrokerTestHooks? TestHooks { get; set; }
 
     public ModuleProcessRuntimeState? GetState(string moduleId) =>
         _sessions.TryGetValue(moduleId, out var session) ? session.State : null;
+
+    public void SetCurrentPresentation(string appearancePresetId, string languageCode)
+    {
+        _currentAppearancePresetId = AppearancePresetIds.Normalize(appearancePresetId);
+        _currentLanguageCode = languageCode is "zh-CN" ? "zh-CN" : "en-US";
+    }
 
     public async Task<bool> RestoreAsync(ModuleUpdateRuntimeRestoreRequest request,
         string moduleDirectory, CancellationToken cancellationToken)
@@ -92,6 +101,12 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
             if (!await CommandAsync(request.ModuleId, "GetState", cancellationToken))
             {
                 LastFailureCode = "ModuleHost.ExitedDuringRestore";
+                await session.ObserveExitAsync(LastFailureCode);
+                return false;
+            }
+            if (!await SetPresentationAsync(request.ModuleId, _currentAppearancePresetId, _currentLanguageCode, cancellationToken))
+            {
+                LastFailureCode = "ModuleHost.PresentationSyncFailed";
                 await session.ObserveExitAsync(LastFailureCode);
                 return false;
             }
@@ -155,6 +170,13 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
                 "ModuleHost.ResponseIdentityMismatch");
             return false;
         }
+    }
+
+    public async Task<bool> SetPresentationAsync(string moduleId, string appearancePresetId, string languageCode,
+        CancellationToken token = default)
+    {
+        if (!_sessions.TryGetValue(moduleId, out var session)) return false;
+        return await session.CommandAsync("SetPresentation", token, appearancePresetId, languageCode);
     }
 
     public async Task<bool> SuspendWindowsAsync(CancellationToken token = default) =>
@@ -331,7 +353,11 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
             return session;
         }
 
-        public async Task<bool> CommandAsync(string command, CancellationToken token)
+        public Task<bool> CommandAsync(string command, CancellationToken token) =>
+            CommandAsync(command, token, null, null);
+
+        public async Task<bool> CommandAsync(string command, CancellationToken token,
+            string? appearancePresetId, string? languageCode)
         {
             if (!IsAllowedCommand(command)) throw new InvalidDataException("Unknown ModuleHost command.");
             await _commands.WaitAsync(token);
@@ -339,7 +365,8 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
             {
                 await _writer.WriteLineAsync(JsonSerializer.Serialize(new Message(ProtocolVersion, command, _nonce, ModuleId,
                     State.ManifestVersion, State.ModuleApiVersion, State.ProgramTreeIdentity, State.ProcessId ?? 0,
-                    State.IsActive, State.HasWindows, State.RuntimeVariant)));
+                    State.IsActive, State.HasWindows, State.RuntimeVariant, false,
+                    appearancePresetId, languageCode)));
                 var response = await ReadAsync(token);
                 if (response.Type != "State" || !IsValidIdentity(response))
                     throw new UnauthorizedAccessException("ModuleHost state response identity rejected.");
@@ -451,7 +478,8 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
 
     private sealed record Message(int ProtocolVersion, string Type, string Nonce, string ModuleId, string ManifestVersion,
         string ModuleApiVersion, string ProgramTreeIdentity, int ProcessId, bool IsActive, bool HasWindows,
-        string? RuntimeVariant, bool WindowVisible = false);
+        string? RuntimeVariant, bool WindowVisible = false, string? AppearancePresetId = null,
+        string? LanguageCode = null);
 }
 
 internal sealed class ModuleProcessBrokerTestHooks

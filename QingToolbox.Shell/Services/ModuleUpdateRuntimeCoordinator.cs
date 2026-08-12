@@ -446,7 +446,7 @@ public sealed class ModuleUpdateRuntimeCoordinator : IModuleUpdateRuntimeCoordin
             }
 
             var capabilities = ModuleRuntimeCapabilities.Resolve(prepared.Module.Manifest);
-            if (capabilities is { RuntimeIsolation: ModuleRuntimeIsolation.OutOfProcess, UiKind: ModuleUiKind.Wpf })
+            if (capabilities is { RuntimeIsolation: ModuleRuntimeIsolation.OutOfProcess, UiKind: ModuleUiKind.Wpf or ModuleUiKind.Web })
             {
                 if (_processBroker is null) return false;
                 return await _processBroker.RestoreAsync(request, prepared.Module.ModuleDirectory,

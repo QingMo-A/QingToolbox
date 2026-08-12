@@ -1,9 +1,14 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Web Module Canary</title></head>
 <body>
-  <main><h1>Web Module Canary</h1><p id="status">Waiting for hostReady…</p><pre id="state"></pre></main>
+  <main><h1>Web Module Canary</h1><p id="status">Waiting for hostReady…</p><p id="presentation"></p><pre id="state"></pre></main>
   <script>
-    const status = document.getElementById('status'), state = document.getElementById('state');
+    const status = document.getElementById('status'), state = document.getElementById('state'), presentation = document.getElementById('presentation');
+    function applyPresentation(message) {
+      document.documentElement.dataset.appearancePreset = message.appearancePresetId;
+      document.documentElement.lang = message.languageCode;
+      presentation.textContent = `Appearance: ${message.appearancePresetId}  Language: ${message.languageCode}`;
+    }
     let nextId = 1;
     function invoke(method, payload) {
       const id = `canary-${nextId++}`;
@@ -12,7 +17,9 @@
     window.chrome.webview.addEventListener('message', event => {
       const message = event.data;
       if (message.type === 'hostReady' && message.bridge === true) {
-        status.textContent = 'Bridge ready'; invoke('getState', {}); invoke('echo', {canary:true});
+        status.textContent = 'Bridge ready'; applyPresentation(message); invoke('getState', {}); invoke('echo', {canary:true});
+      } else if (message.type === 'presentationChanged') {
+        applyPresentation(message);
       } else if (message.type === 'result' && message.ok) {
         state.textContent = JSON.stringify(message.payload);
       } else if (message.type === 'event' && message.name === 'stateChanged') {

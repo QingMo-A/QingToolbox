@@ -288,6 +288,7 @@ public sealed partial class MainWindowViewModel(
     public void InitializeAppearanceSettings(string? presetId)
     {
         AppearancePresetId = AppearancePresetIds.Normalize(presetId);
+        moduleProcessBroker.SetCurrentPresentation(AppearancePresetId, localizationManager.CurrentLanguageCode);
         sessionLog.Information("Settings", $"Appearance preset initialized: {AppearancePresetId}.");
     }
 
@@ -473,7 +474,9 @@ public sealed partial class MainWindowViewModel(
             }
 
             AppearancePresetId = presetId;
+            moduleProcessBroker.SetCurrentPresentation(AppearancePresetId, localizationManager.CurrentLanguageCode);
             sessionLog.Information("Settings", $"Appearance preset changed by Web Settings: {presetId}.");
+            _ = BroadcastWebPresentationAsync();
             return WebSettingsMutationResult.Succeeded;
         }
         finally
@@ -509,6 +512,8 @@ public sealed partial class MainWindowViewModel(
             }
 
             ApplyLocalizedPresentation(languageCode);
+            moduleProcessBroker.SetCurrentPresentation(AppearancePresetId, localizationManager.CurrentLanguageCode);
+            _ = BroadcastWebPresentationAsync();
             return localizationManager.ConfiguredLanguageCode == languageCode &&
                    SelectedLanguageCode == languageCode
                 ? WebSettingsMutationResult.Succeeded
@@ -553,6 +558,18 @@ public sealed partial class MainWindowViewModel(
             "status.languageChanged",
             option?.DisplayText ?? languageCode);
         SetSelectedLanguageCode(languageCode);
+    }
+
+    private async Task BroadcastWebPresentationAsync()
+    {
+        var preset = AppearancePresetIds.Normalize(AppearancePresetId);
+        var language = localizationManager.CurrentLanguageCode is "zh-CN" ? "zh-CN" : "en-US";
+        foreach (var module in Modules.Where(item => ModuleRuntimeCapabilities.Resolve(item.Module.Manifest) is
+                     { RuntimeIsolation: ModuleRuntimeIsolation.OutOfProcess, UiKind: ModuleUiKind.Web }))
+        {
+            try { await moduleProcessBroker.SetPresentationAsync(module.Id, preset, language); }
+            catch (Exception exception) { sessionLog.Warning("ModulePresentation", $"Web presentation broadcast skipped; module={module.Id}; failure={exception.GetType().Name}."); }
+        }
     }
 
     partial void OnHostUpdateStateChanged(HostUpdateCheckState value)
@@ -1375,6 +1392,8 @@ public sealed partial class MainWindowViewModel(
             await using var executionLease = await executionGate.EnterExecutionAsync(moduleId);
             if (IsOutOfProcessWpf(moduleId))
             {
+                await moduleProcessBroker.SetPresentationAsync(moduleId, AppearancePresetIds.Normalize(AppearancePresetId),
+                    localizationManager.CurrentLanguageCode is "zh-CN" ? "zh-CN" : "en-US");
                 if (!await moduleProcessBroker.CommandAsync(moduleId, "OpenWindow", CancellationToken.None))
                     throw new ModuleRuntimeException("The module window could not be opened.");
                 moduleViewModel.UpdateOutOfProcessRuntimeState(moduleProcessBroker.GetState(moduleId));

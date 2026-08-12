@@ -4,6 +4,7 @@ using System.Windows;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using QingToolbox.Abstractions.Modules;
+using QingToolbox.Core.Settings;
 
 namespace QingToolbox.ModuleHost;
 
@@ -19,11 +20,14 @@ internal sealed class WebModuleWindow : Window
     private readonly WebView2 _browser = new();
     private readonly WebModuleBridgeDispatcher? _bridge;
     private readonly Action? _onClosed;
+    private string _appearancePresetId;
+    private string _languageCode;
     private bool _readySent;
     private bool _closed;
 
     public WebModuleWindow(string moduleId, string version, string moduleRoot, string entry,
         string dataRoot, string title, Window? owner, WebModuleBridgeDispatcher? bridge = null,
+        string appearancePresetId = AppearancePresetIds.QingDefault, string languageCode = "en-US",
         Action? onClosed = null)
     {
         _moduleId = moduleId;
@@ -33,6 +37,8 @@ internal sealed class WebModuleWindow : Window
         _userDataFolder = Path.Combine(Path.GetFullPath(dataRoot), moduleId, "webview2");
         _bridge = bridge;
         _onClosed = onClosed;
+        _appearancePresetId = AppearancePresetIds.Normalize(appearancePresetId);
+        _languageCode = languageCode is "en-US" or "zh-CN" ? languageCode : "en-US";
         _host = "qing-module.local";
         Title = title;
         Width = 900;
@@ -95,7 +101,9 @@ internal sealed class WebModuleWindow : Window
             protocolVersion = 1,
             moduleId = _moduleId,
             version = _version,
-            bridge = true
+            bridge = true,
+            appearancePresetId = _appearancePresetId,
+            languageCode = _languageCode
         });
         _browser.CoreWebView2.PostWebMessageAsJson(message);
     }
@@ -133,6 +141,19 @@ internal sealed class WebModuleWindow : Window
         if (!_readySent || _browser.CoreWebView2 is null || _bridge is null) return;
         var message = _bridge.SerializeEvent(eventArgs);
         if (message is not null) _browser.CoreWebView2.PostWebMessageAsJson(message);
+    }
+
+    public void ApplyPresentation(string appearancePresetId, string languageCode)
+    {
+        _appearancePresetId = AppearancePresetIds.Normalize(appearancePresetId);
+        _languageCode = languageCode is "en-US" or "zh-CN" ? languageCode : "en-US";
+        if (!_readySent || _browser.CoreWebView2 is null) return;
+        _browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
+        {
+            type = "presentationChanged",
+            appearancePresetId = _appearancePresetId,
+            languageCode = _languageCode
+        }));
     }
 
     private static string EncodeEntry(string entry) =>

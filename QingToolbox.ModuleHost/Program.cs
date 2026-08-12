@@ -7,6 +7,7 @@ using System.Windows;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Abstractions.Modules;
 using QingToolbox.Core.Updates;
+using QingToolbox.Core.Settings;
 using QingToolbox.ModuleLoader;
 
 namespace QingToolbox.ModuleHost;
@@ -83,6 +84,7 @@ internal static class Program
             switch (request.Type)
             {
                 case "GetState": break;
+                case "SetPresentation": break;
                 case "Activate": if (!active) { await handle.Module.OnActivateAsync(); active = true; } break;
                 case "Deactivate": if (active) { await handle.Module.OnDeactivateAsync(); active = false; } break;
                 case "OpenWindow":
@@ -142,6 +144,8 @@ internal static class Program
         WebModuleWindow? window = null;
         WindowSnapshot? suspended = null;
         var active = false;
+        var latestAppearancePresetId = AppearancePresetIds.QingDefault;
+        var latestLanguageCode = "en-US";
         EventHandler<ModuleWebEventArgs>? webEventHandler = null;
         try
         {
@@ -156,11 +160,17 @@ internal static class Program
                 switch (request.Type)
                 {
                     case "GetState": break;
+                    case "SetPresentation":
+                        latestAppearancePresetId = AppearancePresetIds.Normalize(request.AppearancePresetId);
+                        latestLanguageCode = request.LanguageCode is "en-US" or "zh-CN" ? request.LanguageCode : "en-US";
+                        window?.ApplyPresentation(latestAppearancePresetId, latestLanguageCode);
+                        break;
                     case "Activate": if (!active) { await webModule.OnActivateAsync(); active = true; } break;
                     case "Deactivate": if (active) { await webModule.OnDeactivateAsync(); active = false; } break;
                     case "OpenWindow":
                         window ??= new WebModuleWindow(manifest.Id, manifest.Version, options.ModuleDirectory,
                             manifest.WebEntry, options.DataRoot, manifest.Name, Application.Current.MainWindow, bridge,
+                            latestAppearancePresetId, latestLanguageCode,
                             () => window = null);
                         if (webEventHandler is null)
                         {
@@ -216,7 +226,8 @@ internal static class Program
     private sealed record WindowSnapshot(bool WasVisible, WindowState State, bool WasActive);
     private sealed record Message(int ProtocolVersion, string Type, string Nonce, string ModuleId, string ManifestVersion,
         string ModuleApiVersion, string ProgramTreeIdentity, int ProcessId, bool IsActive, bool HasWindows,
-        string? RuntimeVariant, string? Error, bool WindowVisible = false);
+        string? RuntimeVariant, string? Error, bool WindowVisible = false,
+        string? AppearancePresetId = null, string? LanguageCode = null);
     private sealed record Options(string PipeName, string Nonce, string ModuleId, string ManifestVersion,
         string ModuleApiVersion, string ProgramTreeIdentity, string ModuleDirectory, string DataRoot,
         bool TestExitAfterHello)
