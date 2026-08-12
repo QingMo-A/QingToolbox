@@ -26,14 +26,26 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
     private GCHandle _selfHandle;
     private IntPtr _selfContext;
     private IntPtr _registrationInstance;
+    private QingTransferNative.RegisterRequest _registrationRequest;
     private QingTransferNative.ServiceCancel _registrationCancel;
     private QingTransferNative.ServiceCancel _browseCancel;
-    private bool _hasRegistration;
     private bool _hasBrowse;
-    private bool _registrationCallbackPending;
+    private RegistrationPhase _registrationPhase;
     private bool _running;
     private bool _disposed;
     private string? _registeredServiceName;
+    private TaskCompletionSource<bool>? _registrationCompletion;
+    private bool _registrationNativeCallActive;
+    private IntPtr _deferredRegistrationInstance;
+
+    private enum RegistrationPhase
+    {
+        None,
+        Registering,
+        Registered,
+        Deregistering,
+        Canceling,
+    }
 
     public QingTransferDiscoveryService(string friendlyName)
     {
@@ -45,6 +57,8 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
     }
 
     public event EventHandler<IReadOnlyList<QingTransferPeer>>? PeersChanged;
+    /// <summary>Raised for an accepted TCP endpoint. The handler owns/disposes the client.</summary>
+    public Func<TcpClient, CancellationToken, Task>? IncomingClientHandler { get; set; }
 
     public bool IsRunning { get { lock (_gate) return _running; } }
 
@@ -64,6 +78,7 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
             _lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _selfHandle = GCHandle.Alloc(this, GCHandleType.Normal);
             _selfContext = GCHandle.ToIntPtr(_selfHandle);
+            _registrationPhase = RegistrationPhase.None;
         }
 
         try
@@ -103,8 +118,10 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
         Task? acceptTask;
         CancellationTokenSource? lifetime;
         QingTransferNative.ServiceCancel browseCancel;
-        bool hasRegistration;
+        RegistrationPhase registrationPhase;
         bool hasBrowse;
+        QingTransferNative.RegisterRequest registrationRequest;
+        QingTransferNative.ServiceCancel registrationCancel;
         IntPtr registrationInstance;
         lock (_gate)
         {
@@ -122,15 +139,18 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
             lifetime = _lifetime;
             _lifetime = null;
             browseCancel = _browseCancel;
-            hasRegistration = _hasRegistration;
+            registrationPhase = _registrationPhase;
             hasBrowse = _hasBrowse;
+            registrationRequest = _registrationRequest;
+            registrationCancel = _registrationCancel;
             registrationInstance = _registrationInstance;
-            _hasRegistration = false;
             _hasBrowse = false;
-            _registrationCancel = default;
             _browseCancel = default;
-            _registrationInstance = IntPtr.Zero;
             _registeredServiceName = null;
+            if (registrationPhase == RegistrationPhase.Registering)
+                _registrationPhase = RegistrationPhase.Canceling;
+            else if (registrationPhase == RegistrationPhase.Registered)
+                _registrationPhase = RegistrationPhase.Deregistering;
         }
 
         lifetime?.Cancel();
@@ -149,27 +169,67 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
             try { if (operation.HasCancel) QingTransferNative.DnsServiceResolveCancel(ref operation.Cancel); } catch { }
         }
         _resolves.Clear();
-        if (hasRegistration)
+        if (registrationPhase == RegistrationPhase.Registering)
         {
             try
             {
-                var deregisterRequest = UnsafeRegistrationRequest(registrationInstance);
-                // The Windows API requires a null cancel pointer for deregistration.
-                QingTransferNative.DnsServiceDeRegister(ref deregisterRequest, IntPtr.Zero);
+                lock (_gate) _registrationNativeCallActive = true;
+                QingTransferNative.DnsServiceRegisterCancel(ref registrationCancel);
             }
             catch { }
-            if (!_registrationCallbackPending && registrationInstance != IntPtr.Zero)
+            finally
             {
-                try { QingTransferNative.DnsServiceFreeInstance(registrationInstance); } catch { }
+                lock (_gate) _registrationNativeCallActive = false;
+                DrainDeferredRegistrationInstance();
             }
+            if (_registrationCompletion is not null)
+            {
+                try { await _registrationCompletion.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
+                catch { }
+            }
+            CompleteRegistrationState(IntPtr.Zero);
+        }
+        else if (registrationPhase == RegistrationPhase.Registered)
+        {
+            uint deregisterStatus = uint.MaxValue;
+            try
+            {
+                // The API requires the exact request used by DnsServiceRegister;
+                // all callback/context/instance fields remain valid until its callback.
+                lock (_gate) _registrationNativeCallActive = true;
+                deregisterStatus = QingTransferNative.DnsServiceDeRegister(ref registrationRequest, IntPtr.Zero);
+            }
+            catch { }
+            finally
+            {
+                lock (_gate) _registrationNativeCallActive = false;
+                DrainDeferredRegistrationInstance();
+            }
+            if (deregisterStatus != 0 && deregisterStatus != QingTransferNative.DnsRequestPending)
+                CompleteRegistrationState(registrationInstance);
+            else if (_registrationCompletion is not null)
+            {
+                try { await _registrationCompletion.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
+                catch { ScheduleRegistrationCleanup(registrationInstance); }
+                if (_registrationPhase == RegistrationPhase.None) CompleteRegistrationState(IntPtr.Zero);
+            }
+        }
+        else if (registrationInstance != IntPtr.Zero)
+        {
+            // A synchronous registration failure can leave the constructed
+            // instance owned by this service even though no cancel handle exists.
+            CompleteRegistrationState(registrationInstance);
         }
         lifetime?.Dispose();
 
         lock (_gate)
         {
             _peers.Clear();
-            if (_selfHandle.IsAllocated) _selfHandle.Free();
-            _selfContext = IntPtr.Zero;
+            if (_registrationPhase == RegistrationPhase.None && _selfHandle.IsAllocated)
+            {
+                _selfHandle.Free();
+                _selfContext = IntPtr.Zero;
+            }
         }
         RaisePeersChanged();
     }
@@ -206,11 +266,33 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
                 Credentials = IntPtr.Zero,
                 UnicastEnabled = 0,
             };
-            var status = QingTransferNative.DnsServiceRegister(ref request, out _registrationCancel);
+            lock (_gate)
+            {
+                _registrationRequest = request;
+                _registrationPhase = RegistrationPhase.Registering;
+                _registrationCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+            // Pass the field, not a stack-local copy: the async API retains the
+            // request address until registration/deregistration callback.
+            uint status;
+            lock (_gate) _registrationNativeCallActive = true;
+            try
+            {
+                status = QingTransferNative.DnsServiceRegister(ref _registrationRequest, out _registrationCancel);
+            }
+            finally
+            {
+                lock (_gate) _registrationNativeCallActive = false;
+                DrainDeferredRegistrationInstance();
+            }
             if (status != 0 && status != QingTransferNative.DnsRequestPending)
+            {
+                lock (_gate) _registrationPhase = RegistrationPhase.None;
                 throw new InvalidOperationException($"DnsServiceRegister failed with status {status}.");
-            _hasRegistration = true;
-            _registrationCallbackPending = status == QingTransferNative.DnsRequestPending;
+            }
+            lock (_gate)
+                if (_registrationPhase == RegistrationPhase.Registering)
+                    _registrationPhase = status == QingTransferNative.DnsRequestPending ? RegistrationPhase.Registering : RegistrationPhase.Registered;
         }
         finally
         {
@@ -242,7 +324,7 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
         }
     }
 
-    private static async Task AcceptUnexpectedConnectionsAsync(TcpListener listener, CancellationToken cancellationToken)
+    private async Task AcceptUnexpectedConnectionsAsync(TcpListener listener, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -250,7 +332,19 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
             try
             {
                 client = await listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
-                client.Close();
+                var handler = IncomingClientHandler;
+                if (handler is null)
+                {
+                    client.Dispose();
+                    continue;
+                }
+                var accepted = client;
+                client = null;
+                _ = Task.Run(async () =>
+                {
+                    try { await handler(accepted, cancellationToken).ConfigureAwait(false); }
+                    catch { accepted.Dispose(); }
+                }, CancellationToken.None);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
             catch (ObjectDisposedException) { break; }
@@ -261,20 +355,54 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
 
     private void OnRegisterComplete(uint status, IntPtr queryContext, IntPtr instance)
     {
+        RegistrationPhase phase;
+        bool deferFree;
         try
         {
+            lock (_gate)
+            {
+                phase = _registrationPhase;
+                deferFree = _registrationNativeCallActive;
+                if (deferFree && instance != IntPtr.Zero)
+                    _deferredRegistrationInstance = instance;
+            }
             if (instance != IntPtr.Zero)
             {
                 var native = Marshal.PtrToStructure<QingTransferNative.ServiceInstance>(instance);
                 var name = PtrToString(native.InstanceName);
                 if (!string.IsNullOrWhiteSpace(name)) _registeredServiceName = NormalizeServiceName(name);
-                QingTransferNative.DnsServiceFreeInstance(instance);
+                if (!deferFree)
+                    QingTransferNative.DnsServiceFreeInstance(instance);
             }
-            _registrationCallbackPending = false;
-            if (status != 0 && status != QingTransferNative.DnsRequestPending)
-                _registrationCallbackPending = false;
+            if (phase is RegistrationPhase.Deregistering or RegistrationPhase.Canceling)
+            {
+                _registrationCompletion?.TrySetResult(true);
+                lock (_gate) _registrationPhase = RegistrationPhase.None;
+                if (!deferFree) CompleteRegistrationState(IntPtr.Zero);
+                return;
+            }
+            lock (_gate)
+            if (_registrationPhase == RegistrationPhase.Registering && status == 0)
+                    _registrationPhase = RegistrationPhase.Registered;
+            _registrationCompletion?.TrySetResult(true);
+            if (instance == IntPtr.Zero && status != 0)
+                CompleteRegistrationState(IntPtr.Zero);
         }
-        catch { _registrationCallbackPending = false; }
+        catch { CompleteRegistrationState(IntPtr.Zero); }
+    }
+
+    private void DrainDeferredRegistrationInstance()
+    {
+        IntPtr instance;
+        lock (_gate)
+        {
+            instance = _deferredRegistrationInstance;
+            _deferredRegistrationInstance = IntPtr.Zero;
+        }
+        if (instance != IntPtr.Zero)
+        {
+            try { QingTransferNative.DnsServiceFreeInstance(instance); } catch { }
+        }
     }
 
     private void OnBrowseComplete(uint status, IntPtr queryContext, IntPtr records)
@@ -448,11 +576,45 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
         return addresses;
     }
 
-    private static QingTransferNative.RegisterRequest UnsafeRegistrationRequest(IntPtr instance) => new()
+    private void CompleteRegistrationState(IntPtr callbackInstance)
     {
-        Version = QingTransferNative.DnsQueryRequestVersion1,
-        ServiceInstance = instance,
-    };
+        if (callbackInstance != IntPtr.Zero)
+        {
+            try { QingTransferNative.DnsServiceFreeInstance(callbackInstance); } catch { }
+        }
+        lock (_gate)
+        {
+            // The originally constructed instance is owned by this service and is
+            // released exactly once after DNS has no more callbacks for the request.
+            if (_registrationInstance != IntPtr.Zero && _registrationInstance != callbackInstance)
+            {
+                try { QingTransferNative.DnsServiceFreeInstance(_registrationInstance); } catch { }
+            }
+            _registrationInstance = IntPtr.Zero;
+            _registrationRequest = default;
+            _registrationCancel = default;
+            _registrationPhase = RegistrationPhase.None;
+            _registrationCompletion?.TrySetResult(true);
+            _registrationCompletion = null;
+            if (_selfHandle.IsAllocated)
+            {
+                _selfHandle.Free();
+                _selfContext = IntPtr.Zero;
+            }
+        }
+    }
+
+    private void ScheduleRegistrationCleanup(IntPtr registrationInstance)
+    {
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            var shouldRelease = false;
+            lock (_gate)
+                shouldRelease = _registrationPhase is RegistrationPhase.Canceling or RegistrationPhase.Deregistering;
+            if (shouldRelease) CompleteRegistrationState(registrationInstance);
+        });
+    }
 
     private void ThrowIfDisposed()
     {

@@ -50,6 +50,7 @@ await using (var service = new QingTransferDiscoveryService("QingTransfer Smoke"
     }
     catch (PlatformNotSupportedException) { Console.WriteLine("DNS-SD unavailable; cleanup path verified."); }
 }
+await QingTransferProtocolTest.RunAsync();
 Console.WriteLine("QingTransfer smoke test passed.");
 
 static void Require(bool condition, string message)
