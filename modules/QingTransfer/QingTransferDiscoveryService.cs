@@ -120,23 +120,31 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
 
     public async Task StopAsync()
     {
-        TcpListener? listener;
-        Task? acceptTask;
-        CancellationTokenSource? lifetime;
-        QingTransferNative.ServiceCancel browseCancel;
-        RegistrationPhase registrationPhase;
-        bool hasBrowse;
-        QingTransferNative.RegisterRequest registrationRequest;
-        QingTransferNative.ServiceCancel registrationCancel;
-        IntPtr registrationInstance;
+        var clearedWhileStopped = false;
+        TcpListener? listener = null;
+        Task? acceptTask = null;
+        CancellationTokenSource? lifetime = null;
+        QingTransferNative.ServiceCancel browseCancel = default;
+        RegistrationPhase registrationPhase = RegistrationPhase.None;
+        bool hasBrowse = false;
+        QingTransferNative.RegisterRequest registrationRequest = default;
+        QingTransferNative.ServiceCancel registrationCancel = default;
+        IntPtr registrationInstance = IntPtr.Zero;
         lock (_gate)
         {
             if (!_running)
             {
                 _lifetime?.Dispose();
                 _lifetime = null;
-                return;
+                _peers.Clear();
+                clearedWhileStopped = true;
             }
+            if (clearedWhileStopped)
+            {
+                // Event delivery must happen outside the lock.
+            }
+            else
+            {
             _running = false;
             listener = _listener;
             _listener = null;
@@ -153,11 +161,15 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
             _hasBrowse = false;
             _browseCancel = default;
             _registeredServiceName = null;
+            _peers.Clear();
             if (registrationPhase == RegistrationPhase.Registering)
                 _registrationPhase = RegistrationPhase.Canceling;
             else if (registrationPhase == RegistrationPhase.Registered)
                 _registrationPhase = RegistrationPhase.Deregistering;
+            }
         }
+
+        if (clearedWhileStopped) { RaisePeersChanged(); return; }
 
         lifetime?.Cancel();
         try { listener?.Stop(); } catch { }
@@ -230,7 +242,6 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
 
         lock (_gate)
         {
-            _peers.Clear();
             if (_registrationPhase == RegistrationPhase.None && _selfHandle.IsAllocated)
             {
                 _selfHandle.Free();

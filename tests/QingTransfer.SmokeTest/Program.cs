@@ -26,6 +26,11 @@ var created = QingTransferMetadata.Create("android", "Phone");
 Require(created["v"] == "1" && created["pf"] == "android" && created["cap"] == "file", "TXT metadata changed.");
 Require(Marshal.OffsetOf<QingTransferNative.DnsRecord>(nameof(QingTransferNative.DnsRecord.Data)).ToInt32() == 32,
     "DNS_RECORD Data offset must include dwTtl and dwReserved before the union.");
+var uiPeer = new QingTransferPeer("Desk._qingtransfer._tcp.local", "Desk", "android", "1", ["file"], [], 43125, true);
+Require(QingTransferUiState.CanConnect(QingTransferSessionState.Idle, uiPeer), "Idle peers must expose Connect.");
+Require(!QingTransferUiState.CanDisconnect(QingTransferSessionState.Idle, uiPeer, null), "Idle peers must not expose Disconnect.");
+Require(QingTransferUiState.CanDisconnect(QingTransferSessionState.Connected, uiPeer, uiPeer), "Connected active peer must expose Disconnect.");
+Require(!QingTransferUiState.CanDisconnect(QingTransferSessionState.Connected, uiPeer, uiPeer with { ServiceName = "Other._qingtransfer._tcp.local" }), "Non-active peers must not expose Disconnect.");
 
 var root = FindRoot(AppContext.BaseDirectory);
 var moduleRoot = Path.Combine(root, "modules", "QingTransfer");

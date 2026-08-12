@@ -49,7 +49,7 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
     private async void OnRefresh(object sender, RoutedEventArgs e)
     {
         RefreshButton.IsEnabled = false;
-        try { await _discovery.RestartAsync(); }
+        try { await _session.DisconnectAsync(); await _discovery.RestartAsync(); }
         catch (Exception ex) { StatusText.Text = T("status.failed", "Discovery is unavailable: ") + ex.Message; }
         finally { RefreshButton.IsEnabled = true; }
     }
@@ -68,7 +68,7 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
         if (result == MessageBoxResult.Yes) await _session.AcceptIncomingAsync(); else await _session.RejectIncomingAsync();
     }
 
-    private void OnSessionStateChanged(object? sender, QingTransferSessionState state) => Dispatcher.BeginInvoke(UpdateSessionButtons);
+    private void OnSessionStateChanged(object? sender, QingTransferSessionState state) => Dispatcher.BeginInvoke(() => UpdatePeers(_discovery.Peers));
     private void OnSessionError(object? sender, string error) => Dispatcher.BeginInvoke(() => StatusText.Text = T("status.failed", "Connection failed: ") + error);
     private void UpdateSessionButtons() => PeersList.Items.Refresh();
 
@@ -87,7 +87,9 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
         var connect = T("actions.connect", "Connect");
         var disconnect = T("actions.disconnect", "Disconnect");
         var unknown = T("status.unknown", "—");
-        foreach (var peer in peers) _rows.Add(new PeerRow(peer, online, windows, android, connect, disconnect, unknown));
+        var sessionState = _session.State;
+        var activePeer = _session.Peer;
+        foreach (var peer in peers) _rows.Add(new PeerRow(peer, online, windows, android, connect, disconnect, unknown, sessionState, activePeer));
         EmptyPanel.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         PeersList.Visibility = _rows.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         StatusText.Text = _discovery.IsRunning ? T("status.searching", "Looking for nearby devices...") : T("status.paused", "Discovery paused.");
@@ -115,15 +117,23 @@ public partial class QingTransferView : UserControl, ILocalizedModuleView, IAsyn
         public string Endpoint { get; }
         public string ConnectText { get; }
         public string DisconnectText { get; }
+        public Visibility ConnectVisibility { get; }
+        public Visibility DisconnectVisibility { get; }
+        public bool ConnectEnabled { get; }
+        public bool DisconnectEnabled { get; }
         public QingTransferPeer Peer { get; }
 
-        public PeerRow(QingTransferPeer peer, string online, string windows, string android, string connect, string disconnect, string unknown)
+        public PeerRow(QingTransferPeer peer, string online, string windows, string android, string connect, string disconnect, string unknown, QingTransferSessionState state, QingTransferPeer? activePeer)
         {
             Peer = peer; DisplayName = peer.DisplayName;
             Platform = string.Equals(peer.Platform, "android", StringComparison.OrdinalIgnoreCase) ? android : windows;
             OnlineText = peer.Online ? online : unknown;
             Endpoint = peer.Port == 0 ? unknown : string.Join(", ", peer.Addresses.Select(address => address.ToString())) + $":{peer.Port}";
             ConnectText = connect; DisconnectText = disconnect;
+            ConnectEnabled = QingTransferUiState.CanConnect(state, peer);
+            DisconnectEnabled = QingTransferUiState.CanDisconnect(state, peer, activePeer);
+            ConnectVisibility = ConnectEnabled ? Visibility.Visible : Visibility.Collapsed;
+            DisconnectVisibility = DisconnectEnabled ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 }
