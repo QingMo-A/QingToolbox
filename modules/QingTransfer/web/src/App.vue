@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { invoke, onPresentationChanged, onStateChanged, waitForPresentation } from './bridge'
+import QingIcon from './QingIcon.vue'
 import type { Peer, Presentation, State } from './types'
 
 const fallback: State = {
@@ -30,6 +31,7 @@ const platform = (peer: Peer) => peer.platform.toLowerCase() === 'android' ? t('
 const endpoint = (peer: Peer) => `${peer.addresses.join(', ')}:${peer.port}`
 const isActivePeer = (peer: Peer) => state.session.peer?.serviceName === peer.serviceName
 const peerCanConnect = (peer: Peer) => state.session.state === 'Idle' && peer.online && peer.port > 0
+const progressPercent = computed(() => state.transfer && state.transfer.total > 0 ? Math.min(100, state.transfer.completed / state.transfer.total * 100) : 0)
 
 const apply = (next: State) => {
   Object.assign(state, next)
@@ -64,15 +66,8 @@ async function initialLoad() {
   if (next) apply(next)
 }
 
-function setPref(name: 'useDefaultDirectory' | 'autoAccept', value: boolean) {
-  void run('setReceivePreferences', { [name]: value })
-}
-
-function dismissNotice() {
-  notice.value = ''
-  void run('dismissError')
-}
-
+function setPref(name: 'useDefaultDirectory' | 'autoAccept', value: boolean) { void run('setReceivePreferences', { [name]: value }) }
+function dismissNotice() { notice.value = ''; void run('dismissError') }
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   const units = ['KB', 'MB', 'GB', 'TB']
@@ -91,28 +86,27 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="shell" :data-theme="presentation.appearancePresetId">
+  <main class="shell">
     <header class="hero">
-      <div><p class="eyebrow">QING TOOLBOX</p><h1>{{ t('view.title', 'QingTransfer') }}</h1><p>{{ t('view.subtitle', 'Discover nearby QingToolbox devices on this local network.') }}</p></div>
-      <button class="secondary" :disabled="busy" @click="run('refresh')">↻ {{ t('actions.refresh', 'Refresh') }}</button>
+      <div class="hero-copy"><p class="eyebrow">QING TOOLBOX</p><h1>{{ t('view.title', 'QingTransfer') }}</h1><p class="subtitle">{{ t('view.subtitle', 'Discover nearby QingToolbox devices on this local network.') }}</p></div>
+      <button class="secondary icon-button" :disabled="busy" :aria-label="t('actions.refresh', 'Refresh')" :title="t('actions.refresh', 'Refresh')" @click="run('refresh')"><QingIcon name="refresh" /></button>
     </header>
 
-    <section v-if="sessionActive" class="card connected active-session">
-      <div><span class="status-dot"></span><strong>{{ sessionStatus }}</strong><p>{{ state.session.peer?.displayName || t('status.incomingPeer', 'Incoming device') }}</p><small v-if="state.session.peer">{{ platform(state.session.peer) }}</small></div>
-      <div class="actions"><button v-if="state.session.state === 'Connected'" class="primary" :disabled="busy" @click="run('chooseAndSendFile')">{{ t('actions.sendFile', 'Send file') }}</button><button class="secondary" @click="run('disconnect')">{{ t('actions.disconnect', 'Disconnect') }}</button></div>
+    <section v-if="sessionActive" class="card session-card" :class="{ 'session-pending': state.session.state !== 'Connected' }">
+      <div class="session-info"><span class="status-dot" :class="{ pulse: state.session.state !== 'Connected' }"></span><div><span class="section-label">{{ t('view.session', 'Active session') }}</span><strong>{{ sessionStatus }}</strong><p>{{ state.session.peer?.displayName || t('status.incomingPeer', 'Incoming device') }}</p><small v-if="state.session.peer">{{ platform(state.session.peer) }}</small></div></div>
+      <div class="actions"><button v-if="state.session.state === 'Connected'" class="primary" :disabled="busy" @click="run('chooseAndSendFile')"><QingIcon name="send" />{{ t('actions.sendFile', 'Send file') }}</button><button class="secondary" @click="run('disconnect')"><QingIcon name="disconnect" />{{ t('actions.disconnect', 'Disconnect') }}</button></div>
     </section>
 
-    <section class="card">
-      <div class="card-heading"><div><h2>{{ t('view.footer', 'Nearby devices') }}</h2><p>{{ state.discovery.running ? t('status.searching', 'Looking for nearby devices...') : t('status.paused', 'Discovery paused.') }}</p></div></div>
-      <div v-if="!state.discovery.peers.length" class="empty"><div class="empty-icon">⌁</div><strong>{{ t('view.empty', 'No QingToolbox devices are online yet.') }}</strong><p>{{ t('view.hint', 'Discovery uses local DNS-SD. No connection or transfer is started here.') }}</p></div>
-      <div v-else class="peer-grid"><article v-for="peer in state.discovery.peers" :key="peer.serviceName" class="peer" :class="{ active: isActivePeer(peer), pending: isActivePeer(peer) && state.session.state !== 'Connected' }"><div class="peer-icon">{{ peer.platform.toLowerCase() === 'android' ? 'A' : 'W' }}</div><div class="peer-main"><h3>{{ peer.displayName }}</h3><span>{{ platform(peer) }} · {{ t('status.online', 'Online') }}</span><small>{{ endpoint(peer) }}</small></div><span v-if="isActivePeer(peer)" class="peer-state">{{ sessionStatus }}</span><button v-if="peerCanConnect(peer)" class="primary small" :disabled="busy" @click="run('connect', { serviceName: peer.serviceName })">{{ t('actions.connect', 'Connect') }}</button></article></div>
-    </section>
+    <section v-if="state.transfer" class="card progress-card"><div class="card-heading"><div><span class="section-label">{{ state.transfer.receiving ? t('status.receiving', 'Receiving') : t('status.sending', 'Sending') }}</span><h2>{{ state.transfer.name }}</h2></div><strong class="progress-value">{{ formatFileSize(state.transfer.completed) }} <span>/ {{ formatFileSize(state.transfer.total) }}</span></strong></div><div class="progress-track" role="progressbar" :aria-valuenow="state.transfer.completed" :aria-valuemax="state.transfer.total"><span :style="{ width: `${progressPercent}%` }"></span></div></section>
 
-    <section class="card settings"><div class="card-heading"><div><h2>{{ t('receive.title', 'Receiving files') }}</h2><p>{{ t('receive.autoAcceptHint', 'Automatic acceptance is used only when the default folder is enabled, configured, and writable.') }}</p></div></div><div class="setting-row"><div><strong>{{ t('receive.useDefault', 'Use default folder') }}</strong><small>{{ state.receive.defaultDirectory || t('receive.noDirectory', 'No default folder configured') }}</small></div><div class="row-actions"><button class="secondary small" @click="run('chooseReceiveDirectory')">{{ t('actions.choose', 'Choose') }}</button><button v-if="state.receive.defaultDirectory" class="ghost" @click="run('clearReceiveDirectory')">{{ t('actions.clear', 'Clear') }}</button><input type="checkbox" :checked="state.receive.useDefaultDirectory" @change="setPref('useDefaultDirectory', ($event.target as HTMLInputElement).checked)" /></div></div><div class="setting-row"><div><strong>{{ t('receive.autoAccept', 'Automatically accept files') }}</strong><small>{{ state.receive.useDefaultDirectory && state.receive.defaultDirectory ? t('receive.autoAcceptHint', 'Automatic acceptance is enabled when the folder is writable.') : t('receive.noDirectory', 'Configure a default folder first.') }}</small></div><input type="checkbox" :checked="state.receive.autoAccept" @change="setPref('autoAccept', ($event.target as HTMLInputElement).checked)" /></div></section>
+    <div class="content-grid">
+      <section class="card devices-card"><div class="card-heading"><div><span class="section-label">{{ t('view.footer', 'Nearby devices') }}</span><h2>{{ t('automation.peerList', 'Nearby QingTransfer devices') }}</h2></div><span class="live-status" :class="{ live: state.discovery.running }"><i></i>{{ state.discovery.running ? t('status.searching', 'Looking for nearby devices...') : t('status.paused', 'Discovery paused.') }}</span></div><div v-if="!state.discovery.peers.length" class="empty"><QingIcon name="nearby" /><strong>{{ t('view.empty', 'No QingToolbox devices are online yet.') }}</strong><p>{{ t('view.hint', 'Discovery uses local DNS-SD. No connection or transfer is started here.') }}</p></div><div v-else class="peer-grid"><article v-for="peer in state.discovery.peers" :key="peer.serviceName" class="peer" :class="{ active: isActivePeer(peer), pending: isActivePeer(peer) && state.session.state !== 'Connected' }"><div class="peer-icon"><QingIcon :name="peer.platform.toLowerCase() === 'android' ? 'phone' : 'desktop'" /></div><div class="peer-main"><h3>{{ peer.displayName }}</h3><span>{{ platform(peer) }} · {{ t('status.online', 'Online') }}</span><small class="technical">{{ endpoint(peer) }}</small></div><span v-if="isActivePeer(peer)" class="peer-state">{{ sessionStatus }}</span><button v-if="peerCanConnect(peer)" class="primary small" :disabled="busy" @click="run('connect', { serviceName: peer.serviceName })">{{ t('actions.connect', 'Connect') }}</button></article></div></section>
 
-    <section v-if="state.transfer" class="card progress"><div class="card-heading"><h2>{{ state.transfer.receiving ? t('status.receiving', 'Receiving') : t('status.sending', 'Sending') }}</h2><span>{{ formatFileSize(state.transfer.completed) }} / {{ formatFileSize(state.transfer.total) }}</span></div><progress :value="state.transfer.completed" :max="Math.max(state.transfer.total, 1)"></progress><p>{{ state.transfer.name }}</p></section>
-    <div v-if="state.incomingConnection" class="modal-backdrop"><div class="modal"><h2>{{ t('status.incoming', 'Incoming request from {0}').replace('{0}', state.incomingConnection.name) }}</h2><div class="actions"><button class="primary" :disabled="busy" @click="run('acceptIncomingConnection')">{{ t('actions.accept', 'Accept') }}</button><button class="secondary" :disabled="busy" @click="run('rejectIncomingConnection')">{{ t('actions.reject', 'Reject') }}</button></div></div></div>
-    <div v-if="state.incomingFile" class="modal-backdrop"><div class="modal"><h2>{{ t('receive.incoming', 'Incoming file') }}</h2><p>{{ state.incomingFile.name }} · {{ formatFileSize(state.incomingFile.size) }}</p><p>{{ t('receive.incomingHint', 'Choose where to save this file.') }}</p><div class="actions"><button class="primary" :disabled="fileDecisionBusy" @click="run('acceptIncomingFile')">{{ t('actions.choose', 'Choose') }}</button><button class="secondary" :disabled="fileDecisionBusy" @click="run('rejectIncomingFile')">{{ t('actions.reject', 'Reject') }}</button></div></div></div>
-    <div v-if="notice" class="notice" @click="dismissNotice">{{ notice }}</div>
+      <section class="card settings-card"><div class="card-heading"><div><span class="section-label">{{ t('receive.title', 'Receiving files') }}</span><h2>{{ t('receive.title', 'Receiving files') }}</h2></div><QingIcon name="folder" /></div><div class="setting-row"><div><strong>{{ t('receive.useDefault', 'Use default folder') }}</strong><small class="technical path" :title="state.receive.defaultDirectory || t('receive.noDirectory', 'No default folder configured')">{{ state.receive.defaultDirectory || t('receive.noDirectory', 'No default folder configured') }}</small></div><div class="row-actions"><button class="secondary small" @click="run('chooseReceiveDirectory')">{{ t('actions.choose', 'Choose') }}</button><button v-if="state.receive.defaultDirectory" class="ghost" @click="run('clearReceiveDirectory')">{{ t('actions.clear', 'Clear') }}</button><label class="q-toggle" :aria-label="t('receive.useDefault', 'Use default folder')"><input type="checkbox" :checked="state.receive.useDefaultDirectory" @change="setPref('useDefaultDirectory', ($event.target as HTMLInputElement).checked)" /><span class="q-toggle-track"><span class="q-toggle-knob"></span></span></label></div></div><div class="setting-row"><div><strong>{{ t('receive.autoAccept', 'Automatically accept files') }}</strong><small>{{ state.receive.useDefaultDirectory && state.receive.defaultDirectory ? t('receive.autoAcceptHint', 'Automatic acceptance is enabled when the folder is writable.') : t('receive.noDirectory', 'Configure a default folder first.') }}</small></div><label class="q-toggle" :aria-label="t('receive.autoAccept', 'Automatically accept files')"><input type="checkbox" :checked="state.receive.autoAccept" @change="setPref('autoAccept', ($event.target as HTMLInputElement).checked)" /><span class="q-toggle-track"><span class="q-toggle-knob"></span></span></label></div></section>
+    </div>
+
+    <div v-if="state.incomingConnection" class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="incoming-connection-title"><QingIcon name="phone" /><span class="section-label">{{ t('status.incoming', 'Incoming request') }}</span><h2 id="incoming-connection-title">{{ state.incomingConnection.name }}</h2><p>{{ t('status.incoming', 'Incoming request from {0}').replace('{0}', state.incomingConnection.name) }}</p><div class="actions"><button class="primary" :disabled="busy" @click="run('acceptIncomingConnection')">{{ t('actions.accept', 'Accept') }}</button><button class="secondary" :disabled="busy" @click="run('rejectIncomingConnection')">{{ t('actions.reject', 'Reject') }}</button></div></div></div>
+    <div v-if="state.incomingFile" class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="incoming-file-title"><QingIcon name="folder" /><span class="section-label">{{ t('receive.incoming', 'Incoming file') }}</span><h2 id="incoming-file-title">{{ state.incomingFile.name }}</h2><span class="file-badge">{{ formatFileSize(state.incomingFile.size) }}</span><p>{{ t('receive.incomingHint', 'Choose where to save this file.') }}</p><div class="actions"><button class="primary" :disabled="fileDecisionBusy" @click="run('acceptIncomingFile')">{{ t('actions.choose', 'Choose') }}</button><button class="secondary" :disabled="fileDecisionBusy" @click="run('rejectIncomingFile')">{{ t('actions.reject', 'Reject') }}</button></div></div></div>
+    <div v-if="notice" class="notice" role="status" :class="{ danger: state.lastError }"><span>{{ notice }}</span><button class="toast-close" :aria-label="t('actions.close', 'Close')" @click="dismissNotice"><QingIcon name="close" /></button></div>
   </main>
 </template>

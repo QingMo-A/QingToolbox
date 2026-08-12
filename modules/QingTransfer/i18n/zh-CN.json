@@ -6,6 +6,7 @@
   "view.empty": "暂时没有在线的 QingToolbox 设备。",
   "view.hint": "通过本地 DNS-SD 发现设备；此处不会自动建立连接或开始传输。",
   "view.footer": "附近设备",
+  "view.session": "当前会话",
   "status.searching": "正在查找附近设备…",
   "status.paused": "发现已暂停。",
   "status.failed": "发现不可用",
