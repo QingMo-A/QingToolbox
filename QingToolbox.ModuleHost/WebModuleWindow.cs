@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
+using QingToolbox.Abstractions.Modules;
 
 namespace QingToolbox.ModuleHost;
 
@@ -16,16 +17,18 @@ internal sealed class WebModuleWindow : Window
     private readonly string _entry;
     private readonly string _userDataFolder;
     private readonly WebView2 _browser = new();
+    private readonly WebModuleBridgeDispatcher? _bridge;
     private bool _readySent;
 
     public WebModuleWindow(string moduleId, string version, string moduleRoot, string entry,
-        string dataRoot, string title, Window? owner)
+        string dataRoot, string title, Window? owner, WebModuleBridgeDispatcher? bridge = null)
     {
         _moduleId = moduleId;
         _version = version;
         _moduleRoot = Path.GetFullPath(moduleRoot);
         _entry = entry.Replace('\\', '/').TrimStart('/');
-        _userDataFolder = Path.Combine(Path.GetFullPath(dataRoot), "webview2");
+        _userDataFolder = Path.Combine(Path.GetFullPath(dataRoot), moduleId, "webview2");
+        _bridge = bridge;
         _host = "qing-module.local";
         Title = title;
         Width = 900;
@@ -50,15 +53,18 @@ internal sealed class WebModuleWindow : Window
             core.NewWindowRequested += OnNewWindowRequested;
             core.NavigationStarting += OnNavigationStarting;
             core.NavigationCompleted += OnNavigationCompleted;
+            core.WebMessageReceived += OnWebMessageReceived;
             core.SetVirtualHostNameToFolderMapping(
                 _host,
                 _moduleRoot,
                 CoreWebView2HostResourceAccessKind.DenyCors);
             core.Navigate($"https://{_host}/{EncodeEntry(_entry)}");
         }
-        catch
+        catch (Exception exception)
         {
-            Close();
+            // Keep the host process alive and leave a clear, host-owned failure surface.
+            Title = $"{Title} - Web module failed to initialize";
+            System.Diagnostics.Debug.WriteLine($"Web module '{_moduleId}' failed to initialize: {exception.GetType().Name}");
         }
     }
 
@@ -84,7 +90,8 @@ internal sealed class WebModuleWindow : Window
             type = "hostReady",
             protocolVersion = 1,
             moduleId = _moduleId,
-            version = _version
+            version = _version,
+            bridge = true
         });
         _browser.CoreWebView2.PostWebMessageAsJson(message);
     }
@@ -98,8 +105,27 @@ internal sealed class WebModuleWindow : Window
             core.NewWindowRequested -= OnNewWindowRequested;
             core.NavigationStarting -= OnNavigationStarting;
             core.NavigationCompleted -= OnNavigationCompleted;
+            core.WebMessageReceived -= OnWebMessageReceived;
         }
         _browser.Dispose();
+    }
+
+    private async void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs args) =>
+        await HandleWebMessageAsync(args, _bridge);
+
+    private async Task HandleWebMessageAsync(CoreWebView2WebMessageReceivedEventArgs args,
+        WebModuleBridgeDispatcher? bridge)
+    {
+        if (bridge is null || _browser.CoreWebView2 is null) return;
+        var response = await bridge.DispatchAsync(args.WebMessageAsJson, CancellationToken.None);
+        if (response is not null) _browser.CoreWebView2.PostWebMessageAsJson(response);
+    }
+
+    public void PostEvent(ModuleWebEventArgs eventArgs)
+    {
+        if (!_readySent || _browser.CoreWebView2 is null || _bridge is null) return;
+        var message = _bridge.SerializeEvent(eventArgs);
+        if (message is not null) _browser.CoreWebView2.PostWebMessageAsJson(message);
     }
 
     private static string EncodeEntry(string entry) =>

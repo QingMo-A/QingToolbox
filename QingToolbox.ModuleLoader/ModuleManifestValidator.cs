@@ -19,12 +19,11 @@ public sealed class ModuleManifestValidator
         AddRequiredError(errors, manifest.Id, "Manifest.MissingId", "Id", manifestPath);
         AddRequiredError(errors, manifest.Name, "Manifest.MissingName", "Name", manifestPath);
         AddRequiredError(errors, manifest.Version, "Manifest.MissingVersion", "Version", manifestPath);
-        if (manifest.UiKind != ModuleUiKind.Web)
-            AddRequiredError(errors, manifest.Entry, "Manifest.MissingEntry", "Entry", manifestPath);
+        AddRequiredError(errors, manifest.Entry, "Manifest.MissingEntry", "Entry", manifestPath);
 
         ValidateRuntimeCapabilities(errors, manifest, manifestPath);
 
-        if (!string.IsNullOrWhiteSpace(manifest.Entry) && manifest.UiKind != ModuleUiKind.Web)
+        if (!string.IsNullOrWhiteSpace(manifest.Entry))
         {
             var entryPath = Path.Combine(moduleDirectory, manifest.Entry);
             if (!File.Exists(entryPath))

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\QingToolbox.Abstractions\QingToolbox.Abstractions.csproj" />
+    <None Update="module.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="ui\index.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

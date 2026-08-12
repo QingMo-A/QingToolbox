@@ -1,0 +1,14 @@
+{
+  "id": "qing.web.canary",
+  "name": "Web Module Canary",
+  "description": "A small Web backend/bridge lifecycle canary.",
+  "version": "0.1.0",
+  "author": "QingMo",
+  "entry": "QingToolbox.DevTools.WebModuleCanary.dll",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
+  "runtimeType": "InProcess",
+  "loadMode": "Manual",
+  "permissions": []
+}

@@ -20,7 +20,9 @@ public sealed class InProcessModuleLoader(ILocalizationService localization)
         }
 
         var manifest = discoveredModule.Manifest;
-        if (manifest.RuntimeType != ModuleRuntimeType.InProcess)
+        var webOutOfProcess = manifest.UiKind == ModuleUiKind.Web &&
+            manifest.RuntimeIsolation == ModuleRuntimeIsolation.OutOfProcess;
+        if (manifest.RuntimeType != ModuleRuntimeType.InProcess && !webOutOfProcess)
         {
             throw new ModuleLoadException(
                 $"Module '{manifest.Id}' is not an in-process module.");
@@ -78,6 +80,8 @@ public sealed class InProcessModuleLoader(ILocalizationService localization)
                 => typeof(IInProcessServiceModule),
             { RuntimeIsolation: ModuleRuntimeIsolation.OutOfProcess, UiKind: ModuleUiKind.Wpf }
                 => typeof(IToolModule),
+            { RuntimeIsolation: ModuleRuntimeIsolation.OutOfProcess, UiKind: ModuleUiKind.Web }
+                => typeof(IWebToolModule),
             { RuntimeIsolation: ModuleRuntimeIsolation.LegacyInProcess }
                 => typeof(IToolModule),
             _ => throw new ModuleLoadException(

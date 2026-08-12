@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Web Module Canary</title></head>
+<body>
+  <main><h1>Web Module Canary</h1><p id="status">Waiting for hostReady…</p><pre id="state"></pre></main>
+  <script>
+    const status = document.getElementById('status'), state = document.getElementById('state');
+    let nextId = 1;
+    function invoke(method, payload) {
+      const id = `canary-${nextId++}`;
+      window.chrome.webview.postMessage({type:'invoke', id, method, payload});
+    }
+    window.chrome.webview.addEventListener('message', event => {
+      const message = event.data;
+      if (message.type === 'hostReady' && message.bridge === true) {
+        status.textContent = 'Bridge ready'; invoke('getState', {}); invoke('echo', {canary:true});
+      } else if (message.type === 'result' && message.ok) {
+        state.textContent = JSON.stringify(message.payload);
+      } else if (message.type === 'event' && message.name === 'stateChanged') {
+        state.textContent = JSON.stringify(message.payload);
+      }
+    });
+  </script>
+</body></html>

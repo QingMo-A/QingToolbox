@@ -129,51 +129,72 @@ internal static class Program
         StreamReader reader, StreamWriter writer, string treeIdentity)
     {
         if (string.IsNullOrWhiteSpace(manifest.WebEntry)) throw new InvalidDataException("Web entry unavailable.");
-        var variant = "WebModuleCanary";
+        var discovered = new DiscoveredModule { Manifest = manifest, ModuleDirectory = options.ModuleDirectory,
+            ManifestPath = Path.Combine(options.ModuleDirectory, "module.json"), State = ModuleState.NotLoaded, Errors = [] };
+        await using var handle = await new InProcessModuleLoader(new PassthroughLocalization()).LoadAsync(discovered, options.DataRoot);
+        if (handle.Module is not IWebToolModule webModule) throw new InvalidDataException("The Web module backend contract is unavailable.");
+        var bridge = new WebModuleBridgeDispatcher(webModule);
+        var variant = handle.Module.GetType().Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(item => item.Key == "QingToolbox.TextToolsCanary.Variant")?.Value ?? "WebModuleCanary";
         await SendAsync(writer, new Message(ProtocolVersion, "Hello", options.Nonce, manifest.Id, manifest.Version,
             options.ModuleApiVersion, treeIdentity, Environment.ProcessId, false, false, variant, null, false));
         if (options.TestExitAfterHello) return;
         WebModuleWindow? window = null;
         WindowSnapshot? suspended = null;
         var active = false;
-        while (true)
+        EventHandler<ModuleWebEventArgs>? webEventHandler = null;
+        try
         {
-            var line = await reader.ReadLineAsync();
-            if (line is null) break;
-            if (line.Length > MaximumMessageCharacters) throw new InvalidDataException("IPC message too large.");
-            var request = JsonSerializer.Deserialize<Message>(line) ?? throw new InvalidDataException("Invalid IPC message.");
-            if (request.ProtocolVersion != ProtocolVersion || request.Nonce != options.Nonce || request.ModuleId != options.ModuleId)
-                throw new UnauthorizedAccessException("IPC identity rejected.");
-            switch (request.Type)
+            while (true)
             {
-                case "GetState": break;
-                case "Activate": active = true; break;
-                case "Deactivate": active = false; break;
-                case "OpenWindow":
-                    window ??= new WebModuleWindow(manifest.Id, manifest.Version, options.ModuleDirectory,
-                        manifest.WebEntry, options.DataRoot, manifest.Name, Application.Current.MainWindow);
-                    window.Show(); window.Activate(); break;
-                case "CloseWindow": window?.Close(); window = null; break;
-                case "SuspendWindow":
-                    if (window is not null && suspended is null)
-                    {
-                        suspended = new(window.IsVisible, window.WindowState, window.IsActive);
-                        if (window.IsVisible) window.Hide();
-                    }
-                    break;
-                case "RestoreWindow":
-                    if (window is not null && suspended is { } snapshot)
-                    {
-                        if (snapshot.WasVisible) { window.Show(); window.WindowState = snapshot.State; if (snapshot.WasActive) window.Activate(); }
-                        suspended = null;
-                    }
-                    break;
-                case "Shutdown": window?.Close(); return;
-                default: throw new InvalidDataException("Unknown IPC command.");
+                var line = await reader.ReadLineAsync();
+                if (line is null) break;
+                if (line.Length > MaximumMessageCharacters) throw new InvalidDataException("IPC message too large.");
+                var request = JsonSerializer.Deserialize<Message>(line) ?? throw new InvalidDataException("Invalid IPC message.");
+                if (request.ProtocolVersion != ProtocolVersion || request.Nonce != options.Nonce || request.ModuleId != options.ModuleId)
+                    throw new UnauthorizedAccessException("IPC identity rejected.");
+                switch (request.Type)
+                {
+                    case "GetState": break;
+                    case "Activate": if (!active) { await webModule.OnActivateAsync(); active = true; } break;
+                    case "Deactivate": if (active) { await webModule.OnDeactivateAsync(); active = false; } break;
+                    case "OpenWindow":
+                        window ??= new WebModuleWindow(manifest.Id, manifest.Version, options.ModuleDirectory,
+                            manifest.WebEntry, options.DataRoot, manifest.Name, Application.Current.MainWindow, bridge);
+                        if (webEventHandler is null)
+                        {
+                            webEventHandler = (_, eventArgs) => window?.PostEvent(eventArgs);
+                            webModule.WebEvent += webEventHandler;
+                        }
+                        window.Show(); window.Activate(); break;
+                    case "CloseWindow": window?.Close(); window = null; break;
+                    case "SuspendWindow":
+                        if (window is not null && suspended is null)
+                        {
+                            suspended = new(window.IsVisible, window.WindowState, window.IsActive);
+                            if (window.IsVisible) window.Hide();
+                        }
+                        break;
+                    case "RestoreWindow":
+                        if (window is not null && suspended is { } snapshot)
+                        {
+                            if (snapshot.WasVisible) { window.Show(); window.WindowState = snapshot.State; if (snapshot.WasActive) window.Activate(); }
+                            suspended = null;
+                        }
+                        break;
+                    case "Shutdown": window?.Close(); return;
+                    default: throw new InvalidDataException("Unknown IPC command.");
+                }
+                await SendAsync(writer, new Message(ProtocolVersion, "State", options.Nonce, manifest.Id, manifest.Version,
+                    options.ModuleApiVersion, treeIdentity, Environment.ProcessId, active, window is not null, variant, null,
+                    window?.IsVisible == true));
             }
-            await SendAsync(writer, new Message(ProtocolVersion, "State", options.Nonce, manifest.Id, manifest.Version,
-                options.ModuleApiVersion, treeIdentity, Environment.ProcessId, active, window is not null, variant, null,
-                window?.IsVisible == true));
+        }
+        finally
+        {
+            if (webEventHandler is not null) webModule.WebEvent -= webEventHandler;
+            window?.Close();
+            if (active) await webModule.OnDeactivateAsync();
         }
     }
 
