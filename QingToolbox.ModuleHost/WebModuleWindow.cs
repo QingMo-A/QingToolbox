@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -30,6 +31,8 @@ internal sealed class WebModuleWindow : Window
     private string _appearancePresetId;
     private string _languageCode;
     private bool _readySent;
+    private bool _presentationReady;
+    private bool _presentationFallbackSent;
     private bool _closed;
     private readonly string _presentationNonce = Guid.NewGuid().ToString("N");
 
@@ -99,7 +102,11 @@ internal sealed class WebModuleWindow : Window
             var environment = await CoreWebView2Environment.CreateAsync(null, _userDataFolder);
             await _browser.EnsureCoreWebView2Async(environment);
             var core = _browser.CoreWebView2;
-            await core.AddScriptToExecuteOnDocumentCreatedAsync($"(() => {{ const n='{_presentationNonce}'; const ready=()=>requestAnimationFrame(()=>requestAnimationFrame(()=>chrome.webview.postMessage({{type:'qing-internal-presentation-ready',nonce:n}}))); if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',ready,{{once:true}}); else ready(); }})();");
+            // Do not gate the host surface on requestAnimationFrame: WebView2 starts hidden while
+            // the native loading surface is shown, and a hidden controller is allowed to defer
+            // frame callbacks. A zero-delay task after DOMContentLoaded is a deterministic
+            // page-ready signal without changing the hostReady bridge contract.
+            await core.AddScriptToExecuteOnDocumentCreatedAsync($"(() => {{ const n={JsonSerializer.Serialize(_presentationNonce)}; const signal=()=>setTimeout(()=>chrome.webview.postMessage({{type:'qing-internal-presentation-ready',nonce:n}}),0); const ready=()=>Promise.resolve().then(signal); if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',ready,{{once:true}}); else ready(); }})();");
             core.Settings.AreDevToolsEnabled = false;
             core.NewWindowRequested += OnNewWindowRequested;
             core.NavigationStarting += OnNavigationStarting;
@@ -148,6 +155,27 @@ internal sealed class WebModuleWindow : Window
             languageCode = _languageCode
         });
         _browser.CoreWebView2.PostWebMessageAsJson(message);
+        // Keep a host-owned fallback for pages that replace the document or suppress the
+        // document-created callback. This is the same nonce- and origin-checked presentation
+        // signal, and is intentionally separate from the hostReady protocol message.
+        if (!_presentationFallbackSent)
+        {
+            _presentationFallbackSent = true;
+            _ = PostPresentationReadyFallbackAsync(_browser.CoreWebView2);
+        }
+    }
+
+    private async Task PostPresentationReadyFallbackAsync(CoreWebView2 core)
+    {
+        try
+        {
+            var nonce = JsonSerializer.Serialize(_presentationNonce);
+            await core.ExecuteScriptAsync($"(() => {{ const n={nonce}; Promise.resolve().then(() => setTimeout(() => chrome.webview.postMessage({{type:'qing-internal-presentation-ready',nonce:n}}),0)); }})();");
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or COMException)
+        {
+            System.Diagnostics.Debug.WriteLine($"Web module '{_moduleId}' presentation fallback unavailable: {exception.GetType().Name}");
+        }
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -192,7 +220,8 @@ internal sealed class WebModuleWindow : Window
                 root.GetProperty("nonce").GetString() != _presentationNonce) return false;
             Dispatcher.BeginInvoke(new Action(() =>
             {
-                if (_closed || _surface.Children.Count < 2) return;
+                if (_closed || _presentationReady || _surface.Children.Count < 2) return;
+                _presentationReady = true;
                 _browser.Visibility = Visibility.Visible;
                 _browser.IsHitTestVisible = true;
                 _surface.Children.RemoveAt(1);
