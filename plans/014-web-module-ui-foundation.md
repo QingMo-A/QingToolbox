@@ -11,3 +11,21 @@ Out-of-process Web modules use the existing ModuleHost lifecycle and window comm
 ## Stop rule
 
 Do not migrate a real module, add a general bridge/RPC system, or alter the frozen update/runtime protocol until 014A validation, navigation blocking, readiness, and suspend/restore/shutdown smoke tests pass.
+
+## Cross-module adaptation notes
+
+The following requirements apply to every Web module migration, not only the
+QingTransfer canary:
+
+- The host owns window chrome, the validated module SVG icon, the native loading
+  surface, and the transition from loading to painted Web content. A navigation
+  completion event must never be treated as rendered-page readiness.
+- A module owns its backend entry, relative Web entry, compiled Web assets,
+  localization, and handling of the host presentation context. It must not gain
+  arbitrary file-system or host-object access to reproduce native UI behavior.
+- A local or packaged installation is atomic at the payload level and lives at
+  `<UserModulesRoot>/<moduleId>`. Deploying under a display name, copying only an
+  assembly, or combining a stale manifest with new Web assets is invalid.
+- Migration acceptance includes icon projection, the host loading transition,
+  close/reopen behavior, appearance/language changes, reduced motion, narrow
+  layouts, and package-content auditing in addition to backend lifecycle tests.
