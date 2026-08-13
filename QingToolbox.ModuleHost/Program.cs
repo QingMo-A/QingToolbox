@@ -171,6 +171,7 @@ internal static class Program
                         window ??= new WebModuleWindow(manifest.Id, manifest.Version, options.ModuleDirectory,
                             manifest.WebEntry, options.DataRoot, manifest.Name, Application.Current.MainWindow, bridge,
                             latestAppearancePresetId, latestLanguageCode,
+                            ResolveIconPath(manifest, options.ModuleDirectory),
                             () => window = null);
                         if (webEventHandler is null)
                         {
@@ -220,6 +221,18 @@ internal static class Program
             files.Add(new(relative, stream.Length, Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream)).ToLowerInvariant()));
         }
         return files;
+    }
+
+    private static string? ResolveIconPath(ModuleManifest manifest, string moduleRoot)
+    {
+        if (string.IsNullOrWhiteSpace(manifest.Icon) ||
+            !string.Equals(Path.GetExtension(manifest.Icon), ".svg", StringComparison.OrdinalIgnoreCase)) return null;
+        var root = Path.GetFullPath(moduleRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var candidate = Path.GetFullPath(Path.Combine(moduleRoot, manifest.Icon));
+        if (!candidate.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(candidate)) return null;
+        try { if ((File.GetAttributes(candidate) & FileAttributes.ReparsePoint) != 0) return null; }
+        catch (IOException) { return null; }
+        return candidate;
     }
 
     private static Task SendAsync(StreamWriter writer, Message message) => writer.WriteLineAsync(JsonSerializer.Serialize(message));
