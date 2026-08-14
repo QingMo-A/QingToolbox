@@ -17,6 +17,8 @@ const view = ref<'main' | 'settings'>('main')
 const busy = ref(false)
 const recording = ref(false)
 const draggingId = ref<string | null>(null)
+const suppressClick = ref(false)
+let suppressClickTimer: number | undefined
 const notice = ref('')
 const locale = computed(() => presentation.languageCode === 'zh-CN' ? 'zh-CN' : 'en-US')
 const t = (key: string, fallbackText = key) => resources.value[key] ?? fallbackText
@@ -59,14 +61,35 @@ function iconFor(item: Item) { return icons[item.id] ?? '' }
 function switchSort(mode: 'custom' | 'alphabetical') { if (state.sortMode !== mode) void run('setSortMode', { mode }) }
 function remove(item: Item) { void run('removeItem', { id: item.id }) }
 function launch(item: Item) { void run('launchItem', { id: item.id }) }
+function markDragClickSuppressed() {
+  suppressClick.value = true
+  if (suppressClickTimer !== undefined) window.clearTimeout(suppressClickTimer)
+  suppressClickTimer = window.setTimeout(() => {
+    suppressClick.value = false
+    suppressClickTimer = undefined
+  }, 250)
+}
+function activate(item: Item) {
+  if (suppressClick.value) {
+    suppressClick.value = false
+    if (suppressClickTimer !== undefined) window.clearTimeout(suppressClickTimer)
+    suppressClickTimer = undefined
+    return
+  }
+  launch(item)
+}
 function beginDrag(item: Item) { if (state.sortMode === 'custom') draggingId.value = item.id }
 function moveDrag(over: Item) {
   if (state.sortMode !== 'custom' || !draggingId.value || draggingId.value === over.id) return
   const ids = reorderIds(state.items.map(item => item.id), draggingId.value, over.id)
   state.items = ids.map(id => state.items.find(item => item.id === id)!).filter(Boolean)
+  markDragClickSuppressed()
 }
 function finishDrag() {
-  if (draggingId.value) void run('setCustomOrder', { ids: state.items.map(item => item.id) })
+  if (draggingId.value) {
+    markDragClickSuppressed()
+    void run('setCustomOrder', { ids: state.items.map(item => item.id) })
+  }
   draggingId.value = null
 }
 
@@ -110,7 +133,7 @@ onMounted(() => {
       </header>
       <section class="drop-panel" :class="{ 'has-items': visibleItems.length }"><div class="section-heading"><div><span class="section-label">{{ t('view.title', 'Qing Launcher') }}</span><h2>{{ visibleItems.length ? `${visibleItems.length} ${t('view.apps', 'apps')}` : t('view.empty', 'Drop an .exe or .lnk here to add it.') }}</h2></div><span class="drop-hint">{{ t('view.dropHint', 'The whole window accepts Explorer drops.') }}</span></div>
         <div v-if="visibleItems.length" class="launcher-grid">
-          <article v-for="item in visibleItems" :key="item.id" class="app-tile" :class="{ dragging: draggingId === item.id }" :draggable="state.sortMode === 'custom'" tabindex="0" @dragstart="beginDrag(item)" @dragover.prevent="moveDrag(item)" @dragend="finishDrag" @dblclick="launch(item)" @keydown.enter="launch(item)">
+          <article v-for="item in visibleItems" :key="item.id" class="app-tile" :class="{ dragging: draggingId === item.id }" :draggable="state.sortMode === 'custom'" tabindex="0" @dragstart="beginDrag(item)" @dragover.prevent="moveDrag(item)" @dragend="finishDrag" @click="activate(item)" @keydown.enter="launch(item)">
             <div class="app-icon"><img v-if="iconFor(item)" :src="iconFor(item)" :alt="item.name" /><span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span></div><div class="app-name" :title="item.name">{{ item.name }}</div><button class="remove-button" :aria-label="`${t('actions.remove', 'Remove')} ${item.name}`" @click.stop="remove(item)">×</button>
           </article>
         </div>
