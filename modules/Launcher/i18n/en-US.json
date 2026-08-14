@@ -2,6 +2,8 @@
   "module.name": "Qing Launcher",
   "module.description": "Launch your favorite Windows applications and shortcuts.",
   "view.title": "Qing Launcher",
+  "view.overlayEmpty": "Drag an app or shortcut here",
+  "view.launcher": "Launcher",
   "view.apps": "apps",
   "view.subtitle": "A calm launchpad for the apps you choose.",
   "view.empty": "Drop an .exe or .lnk here to add it.",

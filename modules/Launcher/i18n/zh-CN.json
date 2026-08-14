@@ -2,6 +2,8 @@
   "module.name": "Qing Launcher",
   "module.description": "启动你选择的 Windows 应用和快捷方式。",
   "view.title": "Qing Launcher",
+  "view.overlayEmpty": "将应用或快捷方式拖到这里",
+  "view.launcher": "启动台",
   "view.apps": "个应用",
   "view.subtitle": "为常用应用准备的轻量启动台。",
   "view.empty": "将 .exe 或 .lnk 拖到这里即可添加。",

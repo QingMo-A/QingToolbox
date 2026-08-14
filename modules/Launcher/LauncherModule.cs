@@ -12,7 +12,7 @@ public interface ILauncherProcessStarter
     bool Start(LauncherItem item);
 }
 
-public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, IModuleHostWindowActionSource
+public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, IModuleHostWindowActionSource, IModuleHostWindowPresentationSource
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly object _gate = new();
@@ -39,6 +39,7 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
     public string Id => "qing.launcher";
     public string Name => "Qing Launcher";
     public string Description => "Launch user-selected Windows applications and shortcuts.";
+    public ModuleHostWindowPresentationMode HostWindowPresentationMode => ModuleHostWindowPresentationMode.Overlay;
     public event EventHandler<ModuleWebEventArgs>? WebEvent;
     public event EventHandler<ModuleHostWindowActionEventArgs>? HostWindowActionRequested;
 

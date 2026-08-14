@@ -50,6 +50,8 @@ try
     var fakeStarter = new FakeProcessStarter { Result = true };
     var fakeRegistration = new FakeHotkeyRegistration();
     await using var module = new LauncherModule(fakeStarter, fakeRegistration);
+    Require(module.HostWindowPresentationMode == ModuleHostWindowPresentationMode.Overlay,
+        "Launcher must request Overlay host window presentation.");
     var actions = new List<ModuleHostWindowAction>();
     module.HostWindowActionRequested += (_, args) => actions.Add(args.Action);
     await module.OnLoadAsync(new ModuleContext
