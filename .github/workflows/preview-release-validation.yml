@@ -132,6 +132,10 @@ jobs:
           -c Release
           --no-build
 
+      - name: Test installed Web Shell diagnostic
+        shell: powershell
+        run: ./scripts/test-installed-web-shell-diagnostic.ps1
+
       - name: Run Development Web Shell canary
         shell: pwsh
         run: >-

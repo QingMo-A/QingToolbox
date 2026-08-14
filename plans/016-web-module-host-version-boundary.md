@@ -75,3 +75,20 @@ A release candidate satisfying Plan 016 must prove:
 ## Stop rule
 
 Once version reporting, immediately-previous-release cleanup, and upgraded-Web-workspace activation are proven, stop. Do not reopen the frozen Web Shell or module runtime boundaries unless a new P0/P1 defect is reproduced.
+
+## 016C — Installed Web Shell diagnostics
+
+The `0.2.5-alpha -> 0.2.6-alpha` clean upgrade gate, Web Ready probe, and
+current-asset repair regression are passing. The repair fixture intentionally
+changes a shared current asset when there is no unique obsolete asset; it does
+not reproduce the reported installed-user failure where restart and repair
+continue to show the native WPF fallback.
+
+`scripts/diagnose-installed-web-shell.ps1` is the next read-only evidence path
+for that P1. It compares the real installed Host/WebUI payload, bounded
+production WebShell logs and the persistent WebView2 `Default` profile with a
+clean-profile probe made from the installed bytes. It does not repair, clear,
+rename, overwrite, or otherwise modify the production profile or installation.
+The P1 remains open until an installed diagnostic supplies a concrete failure
+code and determines whether the issue is specific to the production profile or
+also occurs in a clean probe.
