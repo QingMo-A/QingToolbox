@@ -61,7 +61,10 @@ using (var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(moduleRoo
     Require(manifest.RootElement.GetProperty("loadMode").GetString() == "Manual", "Module must remain manually loaded.");
     Require(manifest.RootElement.GetProperty("uiKind").GetString() == "Web" &&
             manifest.RootElement.GetProperty("runtimeIsolation").GetString() == "OutOfProcess" &&
-            manifest.RootElement.GetProperty("webEntry").GetString() == "ui/index.html", "Web module manifest contract changed.");
+            manifest.RootElement.GetProperty("webEntry").GetString() == "ui/index.html" &&
+            manifest.RootElement.GetProperty("version").GetString() == "0.2.0" &&
+            manifest.RootElement.GetProperty("minimumHostVersion").GetString() == "0.2.6-alpha",
+        "Web module compatibility manifest contract changed.");
 }
 foreach (var culture in new[] { "en-US", "zh-CN" })
 {
