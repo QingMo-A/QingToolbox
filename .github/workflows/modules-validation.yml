@@ -28,6 +28,16 @@ jobs:
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           dotnet-version: 10.0.x
+      - name: Setup Node 24 for compatible toolbox WebUI
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: toolbox-host/QingToolbox.WebUI/package-lock.json
+      - name: Build compatible toolbox WebUI assets
+        shell: pwsh
+        working-directory: toolbox-host
+        run: ./scripts/build-web-ui.ps1
       - name: Validate module update metadata
         shell: pwsh
         run: |
