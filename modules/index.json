@@ -2,6 +2,9 @@
   "schemaVersion": 1,
   "sourceId": "qingtoolbox-official",
   "modules": {
+    "qing.launcher": {
+      "updateManifest": "Launcher/update.json"
+    },
     "qing.powerguard": {
       "updateManifest": "PowerGuard/update.json"
     },

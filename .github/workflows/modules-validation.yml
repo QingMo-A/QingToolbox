@@ -38,6 +38,14 @@ jobs:
         shell: pwsh
         working-directory: toolbox-host
         run: ./scripts/build-web-ui.ps1
+      - name: Test Launcher Web UI
+        shell: pwsh
+        working-directory: modules-source/modules/Launcher/web
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run typecheck
+          npm run test
+          npm run build
       - name: Validate module update metadata
         shell: pwsh
         run: |
@@ -55,3 +63,6 @@ jobs:
       - name: Package and integration test PowerGuard
         shell: pwsh
         run: ./modules-source/scripts/package-powerguard.ps1 -QingToolboxHostRoot "$PWD/toolbox-host" -Configuration Release
+      - name: Package and integration test Launcher
+        shell: pwsh
+        run: ./modules-source/scripts/package-launcher.ps1 -QingToolboxHostRoot "$PWD/toolbox-host" -Configuration Release

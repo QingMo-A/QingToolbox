@@ -1,0 +1,24 @@
+{
+  "id": "qing.launcher",
+  "name": "Qing Launcher",
+  "description": "A lightweight launchpad for user-selected Windows applications and shortcuts.",
+  "version": "0.1.0",
+  "author": "QingMo-A",
+  "minimumHostVersion": "0.2.6-alpha",
+  "entry": "QingToolbox.Modules.Launcher.dll",
+  "runtimeType": "InProcess",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
+  "loadMode": "Manual",
+  "permissions": ["FileRead", "ProcessStart"],
+  "icon": "icon.svg",
+  "defaultLanguage": "en-US",
+  "localization": {
+    "basePath": "i18n",
+    "resources": {
+      "en-US": "i18n/en-US.json",
+      "zh-CN": "i18n/zh-CN.json"
+    }
+  }
+}
