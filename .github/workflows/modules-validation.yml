@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           repository: QingMo-A/QingToolbox
-          ref: b0be12daa5874dad13bb90d1e9a9e60e72f49ab6
+          ref: 4acfd6c373dc067276ed22fd81f0375cefd84149
           path: toolbox-host
       - name: Setup .NET 10
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
