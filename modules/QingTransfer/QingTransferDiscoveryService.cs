@@ -13,9 +13,12 @@ namespace QingToolbox.Modules.QingTransfer;
 /// </summary>
 public sealed class QingTransferDiscoveryService : IAsyncDisposable
 {
+    private static readonly TimeSpan EndpointProbeInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan EndpointProbeTimeout = TimeSpan.FromSeconds(1);
     private readonly object _gate = new();
     private readonly QingTransferPeerTable _peers = new();
     private readonly ConcurrentDictionary<IntPtr, ResolveOperation> _resolves = new();
+    private readonly Dictionary<string, ProbeAttempt> _probeAttempts = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _friendlyName;
     private readonly string _hostName;
     private readonly string? _diagnosticPath;
@@ -39,6 +42,8 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
     private TaskCompletionSource<bool>? _registrationCompletion;
     private bool _registrationNativeCallActive;
     private IntPtr _deferredRegistrationInstance;
+    private string? _connectedPeerServiceName;
+    private long _probeGeneration;
 
     private enum RegistrationPhase
     {
@@ -72,6 +77,12 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
 
     /// <summary>Evict one failed or stale DNS-SD identity without probing it.</summary>
     internal void ForgetPeer(string serviceName) => RemovePeer(serviceName);
+
+    /// <summary>Protects the currently connected outgoing identity from discovery probes.</summary>
+    internal void SetConnectedPeer(string? serviceName)
+    {
+        lock (_gate) _connectedPeerServiceName = serviceName is null ? null : NormalizeServiceName(serviceName);
+    }
 
     internal string? DiagnosticDirectory => _diagnosticPath is null ? null : Path.GetDirectoryName(_diagnosticPath);
 
@@ -188,7 +199,8 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
         {
             try { if (operation.HasCancel) QingTransferNative.DnsServiceResolveCancel(ref operation.Cancel); } catch { }
         }
-        _resolves.Clear();
+            _resolves.Clear();
+        lock (_gate) _probeAttempts.Clear();
         if (registrationPhase == RegistrationPhase.Registering)
         {
             try
@@ -505,7 +517,7 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
                 if (peer is not null && !IsSelf(peer.ServiceName))
                 {
                     WriteDiagnostic($"resolve-peer service={peer.ServiceName} platform={peer.Platform} nameLength={peer.DisplayName.Length} port={peer.Port}");
-                    UpsertPeer(peer);
+                    ScheduleEndpointProbe(peer);
                 }
                 else RemovePeer(operation.ServiceName);
             }
@@ -557,6 +569,77 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
         catch { }
     }
 
+    private void ScheduleEndpointProbe(QingTransferPeer peer)
+    {
+        var serviceName = NormalizeServiceName(peer.ServiceName);
+        var endpointKey = QingTransferEndpointProbe.EndpointKey(peer);
+        ProbeAttempt attempt;
+        CancellationToken cancellationToken;
+        lock (_gate)
+        {
+            if (!_running || IsConnectedPeerLocked(serviceName)) return;
+            var now = DateTimeOffset.UtcNow;
+            if (_probeAttempts.TryGetValue(endpointKey, out var existing))
+            {
+                if (existing.InFlight || now - existing.LastAttempt < EndpointProbeInterval) return;
+            }
+            attempt = new ProbeAttempt(endpointKey, now, ++_probeGeneration) { InFlight = true };
+            _probeAttempts[endpointKey] = attempt;
+            cancellationToken = _lifetime?.Token ?? CancellationToken.None;
+        }
+        _ = ConfirmEndpointAsync(peer, attempt, cancellationToken);
+    }
+
+    private async Task ConfirmEndpointAsync(QingTransferPeer peer, ProbeAttempt attempt, CancellationToken cancellationToken)
+    {
+        var reachable = false;
+        try
+        {
+            reachable = await QingTransferEndpointProbe.ConfirmAsync(peer, EndpointProbeTimeout, cancellationToken).ConfigureAwait(false);
+            if (reachable && IsRunning && IsCurrentEndpoint(peer) && !IsSelf(peer.ServiceName))
+            {
+                UpsertPeer(peer);
+                WriteDiagnostic($"probe-ack service={peer.ServiceName} port={peer.Port}");
+            }
+            else if (!reachable && !IsConnectedPeer(peer.ServiceName))
+            {
+                RemovePeerIfCurrentEndpoint(peer);
+                WriteDiagnostic($"probe-failed service={peer.ServiceName} port={peer.Port}");
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        finally
+        {
+            lock (_gate)
+            {
+                if (_probeAttempts.TryGetValue(attempt.EndpointKey, out var current) && current.Generation == attempt.Generation)
+                    current.InFlight = false;
+            }
+        }
+    }
+
+    private bool IsCurrentEndpoint(QingTransferPeer peer)
+    {
+        lock (_gate)
+        {
+            var existing = _peers.Snapshot().FirstOrDefault(item =>
+                string.Equals(NormalizeServiceName(item.ServiceName), NormalizeServiceName(peer.ServiceName), StringComparison.OrdinalIgnoreCase));
+            return existing is null || string.Equals(QingTransferEndpointProbe.EndpointKey(existing), QingTransferEndpointProbe.EndpointKey(peer), StringComparison.Ordinal);
+        }
+    }
+
+    private void RemovePeerIfCurrentEndpoint(QingTransferPeer peer)
+    {
+        lock (_gate)
+        {
+            var existing = _peers.Snapshot().FirstOrDefault(item =>
+                string.Equals(NormalizeServiceName(item.ServiceName), NormalizeServiceName(peer.ServiceName), StringComparison.OrdinalIgnoreCase));
+            if (existing is null || !string.Equals(QingTransferEndpointProbe.EndpointKey(existing), QingTransferEndpointProbe.EndpointKey(peer), StringComparison.Ordinal)) return;
+            if (!_peers.Remove(NormalizeServiceName(peer.ServiceName))) return;
+        }
+        RaisePeersChanged();
+    }
+
     private bool IsSelf(string serviceName)
     {
         var normalized = NormalizeServiceName(serviceName);
@@ -592,6 +675,15 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
         // DNS_RECORD.Data is the first member of the inline DNS_PTR_DATA
         // union, so the managed IntPtr already contains pNameHost.
         return PtrToString(data);
+    }
+
+    private bool IsConnectedPeerLocked(string serviceName) =>
+        !string.IsNullOrEmpty(_connectedPeerServiceName) &&
+        string.Equals(NormalizeServiceName(serviceName), _connectedPeerServiceName, StringComparison.OrdinalIgnoreCase);
+
+    private bool IsConnectedPeer(string serviceName)
+    {
+        lock (_gate) return IsConnectedPeerLocked(serviceName);
     }
 
     private static Dictionary<string, string?> ReadProperties(uint count, IntPtr keys, IntPtr values)
@@ -673,6 +765,14 @@ public sealed class QingTransferDiscoveryService : IAsyncDisposable
         public IntPtr Context;
         public QingTransferNative.ServiceCancel Cancel;
         public bool HasCancel;
+    }
+
+    private sealed class ProbeAttempt(string endpointKey, DateTimeOffset lastAttempt, long generation)
+    {
+        public string EndpointKey { get; } = endpointKey;
+        public DateTimeOffset LastAttempt { get; } = lastAttempt;
+        public long Generation { get; } = generation;
+        public bool InFlight { get; set; }
     }
 
     private sealed class NativePropertyArrays : IDisposable

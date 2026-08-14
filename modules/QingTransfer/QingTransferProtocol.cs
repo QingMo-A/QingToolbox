@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.IO;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -12,9 +13,12 @@ public static class QingTransferProtocol
     internal const int MaxFrameBytes = 4096;
     internal const int MaxFieldLength = 128;
     internal const int HandshakeTimeoutSeconds = 5;
+    internal const int ProbeNonceLength = 32;
 
     public abstract record Message(string Type);
     public sealed record HelloMessage(string Platform, string Name) : Message("hello");
+    public sealed record ProbeMessage(string Nonce) : Message("probe");
+    public sealed record ProbeAckMessage(string Nonce) : Message("probe_ack");
     public sealed record AcceptMessage() : Message("accept");
     public sealed record RejectMessage() : Message("reject");
     public sealed record FileOfferMessage(string Name, long Size) : Message("file_offer");
@@ -23,6 +27,12 @@ public static class QingTransferProtocol
     public sealed record FileEndMessage(string Sha256) : Message("file_end");
     public sealed record FileResultMessage(bool Ok) : Message("file_result");
 
+    internal static string CreateProbeNonce()
+    {
+        Span<byte> bytes = stackalloc byte[ProbeNonceLength / 2];
+        RandomNumberGenerator.Fill(bytes);
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
 
 
     internal static byte[] EncodeFrame(Message message)
@@ -30,6 +40,8 @@ public static class QingTransferProtocol
         object contract = message switch
         {
             HelloMessage hello => new { type = "hello", v = 1, pf = hello.Platform, name = hello.Name },
+            ProbeMessage probe => new { type = "probe", v = 1, nonce = probe.Nonce },
+            ProbeAckMessage ack => new { type = "probe_ack", v = 1, nonce = ack.Nonce },
             AcceptMessage => new { type = "accept", v = 1 },
             RejectMessage => new { type = "reject", v = 1 },
             FileOfferMessage offer => new { type = "file_offer", v = 1, name = offer.Name, size = offer.Size },
@@ -95,6 +107,13 @@ public static class QingTransferProtocol
             var type = typeElement.GetString();
             if (type == "accept" && root.EnumerateObject().Count() == 2) { message = new AcceptMessage(); return true; }
             if (type == "reject" && root.EnumerateObject().Count() == 2) { message = new RejectMessage(); return true; }
+            if (type is ("probe" or "probe_ack") && root.EnumerateObject().Count() == 3 &&
+                root.TryGetProperty("nonce", out var nonce) && nonce.ValueKind == JsonValueKind.String &&
+                IsProbeNonce(nonce.GetString() ?? string.Empty))
+            {
+                message = type == "probe" ? new ProbeMessage(nonce.GetString()!) : new ProbeAckMessage(nonce.GetString()!);
+                return true;
+            }
             if (type == "file_accept" && root.EnumerateObject().Count() == 2) { message = new FileAcceptMessage(); return true; }
             if (type == "file_reject" && root.EnumerateObject().Count() == 2) { message = new FileRejectMessage(); return true; }
             if (type == "file_result" && root.EnumerateObject().Count() == 3 && root.TryGetProperty("ok", out var ok) && (ok.ValueKind is JsonValueKind.True or JsonValueKind.False)) { message = new FileResultMessage(ok.GetBoolean()); return true; }
@@ -115,6 +134,9 @@ public static class QingTransferProtocol
 
     private static bool IsSafeField(string value) =>
         value.Length is > 0 and <= MaxFieldLength && !value.Any(char.IsControl);
+
+    private static bool IsProbeNonce(string value) =>
+        value.Length == ProbeNonceLength && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static async Task ReadExactlyAsync(Stream stream, Memory<byte> buffer, CancellationToken cancellationToken)
     {

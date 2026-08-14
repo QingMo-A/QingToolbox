@@ -190,6 +190,7 @@ public sealed class QingTransferSession : IAsyncDisposable
             Peer = null; _state = QingTransferSessionState.Idle; _pendingOffer = null;
             _incomingDecision?.TrySetCanceled(); _offerResponse?.TrySetCanceled(); _resultResponse?.TrySetCanceled(); _incomingCompletion?.TrySetCanceled();
         }
+        _discovery.SetConnectedPeer(null);
         try { client?.Close(); } catch { }
         if (receive is not null) try { await receive.ConfigureAwait(false); } catch { }
         RaiseStateChanged();
@@ -203,16 +204,39 @@ public sealed class QingTransferSession : IAsyncDisposable
 
     internal async Task HandleIncomingAsync(TcpClient client, CancellationToken cancellationToken)
     {
-        lock (_gate)
+        var handedOff = false;
+        try
         {
-            if (_state != QingTransferSessionState.Idle) { _ = RejectAndCloseAsync(client, cancellationToken); return; }
-            _client = client;
+            // Read the bounded first frame before touching session state. Discovery
+            // probes must be acknowledged silently even while a real session is active.
+            using var handshakeTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            handshakeTimeout.CancelAfter(TimeSpan.FromSeconds(QingTransferProtocol.HandshakeTimeoutSeconds));
+            var firstMessage = await QingTransferProtocol.ReadMessageAsync(client.GetStream(), handshakeTimeout.Token).ConfigureAwait(false);
+            if (firstMessage is QingTransferProtocol.ProbeMessage probe)
+            {
+                await QingTransferProtocol.WriteMessageAsync(client.GetStream(), new QingTransferProtocol.ProbeAckMessage(probe.Nonce), handshakeTimeout.Token).ConfigureAwait(false);
+                return;
+            }
+            lock (_gate)
+            {
+                if (_state != QingTransferSessionState.Idle)
+                {
+                    // The first frame was already consumed; reject this ordinary
+                    // connection and close it without surfacing an incoming dialog.
+                    _ = RejectAndCloseAsync(client, cancellationToken);
+                    handedOff = true;
+                    return;
+                }
+                _client = client;
+            }
+            await AttachAndHandshakeAsync(client, outgoing: false, cancellationToken, firstMessage).ConfigureAwait(false);
+            handedOff = true;
         }
-        try { await AttachAndHandshakeAsync(client, outgoing: false, cancellationToken).ConfigureAwait(false); }
         catch { await DisconnectAsync().ConfigureAwait(false); }
+        finally { if (!handedOff) try { client.Dispose(); } catch { } }
     }
 
-    private async Task AttachAndHandshakeAsync(TcpClient client, bool outgoing, CancellationToken cancellationToken)
+    private async Task AttachAndHandshakeAsync(TcpClient client, bool outgoing, CancellationToken cancellationToken, QingTransferProtocol.Message? firstMessage = null)
     {
         var stream = client.GetStream(); lock (_gate) { _client = client; _stream = stream; }
         if (outgoing)
@@ -221,11 +245,13 @@ public sealed class QingTransferSession : IAsyncDisposable
             var reply = await QingTransferProtocol.ReadMessageAsync(stream, cancellationToken).ConfigureAwait(false);
             if (reply is QingTransferProtocol.RejectMessage) throw new InvalidOperationException("The peer rejected this request.");
             if (reply is not QingTransferProtocol.AcceptMessage) throw new InvalidDataException("The peer sent an invalid response.");
-            lock (_gate) _state = QingTransferSessionState.Connected; RaiseStateChanged();
+            lock (_gate) _state = QingTransferSessionState.Connected;
+            _discovery.SetConnectedPeer(Peer?.ServiceName);
+            RaiseStateChanged();
         }
         else
         {
-            var hello = await QingTransferProtocol.ReadMessageAsync(stream, cancellationToken).ConfigureAwait(false);
+            var hello = firstMessage ?? await QingTransferProtocol.ReadMessageAsync(stream, cancellationToken).ConfigureAwait(false);
             if (hello is not QingTransferProtocol.HelloMessage incoming) throw new InvalidDataException("The peer sent an invalid request.");
             lock (_gate) { _state = QingTransferSessionState.WaitingApproval; Peer = new QingTransferPeer("incoming", incoming.Name, incoming.Platform, "1", ["file"], [], 0, true); }
             RaiseStateChanged(); IncomingRequest?.Invoke(this, incoming);
@@ -258,6 +284,7 @@ public sealed class QingTransferSession : IAsyncDisposable
         {
             if (_disposed) return;
             TcpClient? client; lock (_gate) { client = _client; _client = null; _stream = null; _receiveTask = null; Peer = null; _state = QingTransferSessionState.Idle; }
+            _discovery.SetConnectedPeer(null);
             try { client?.Dispose(); } catch { }
             RaiseStateChanged();
         }

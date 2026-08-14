@@ -30,9 +30,59 @@ public static class QingTransferProtocolTest
         Require(QingTransferProtocol.TryDecodeFrame(QingTransferProtocol.EncodeFrame(new QingTransferProtocol.FileEndMessage(new string('a', 64))), out var end) && end is QingTransferProtocol.FileEndMessage, "File end failed.");
         Require(QingTransferProtocol.TryDecodeFrame(QingTransferProtocol.EncodeFrame(new QingTransferProtocol.FileResultMessage(true)), out var result) && result is QingTransferProtocol.FileResultMessage { Ok: true }, "File result failed.");
         Require(!QingTransferProtocol.TryDecodeFrame(QingTransferProtocol.EncodeFrame(new QingTransferProtocol.FileOfferMessage("../unsafe", 1)), out _), "Unsafe offer name was accepted.");
+        var nonce = QingTransferProtocol.CreateProbeNonce();
+        Require(nonce.Length == QingTransferProtocol.ProbeNonceLength &&
+                QingTransferProtocol.TryDecodeFrame(QingTransferProtocol.EncodeFrame(new QingTransferProtocol.ProbeMessage(nonce)), out var probe) &&
+                probe is QingTransferProtocol.ProbeMessage { Nonce: var decodedNonce } && decodedNonce == nonce,
+            "Probe nonce frame roundtrip failed.");
+        Require(QingTransferProtocol.TryDecodeFrame(QingTransferProtocol.EncodeFrame(new QingTransferProtocol.ProbeAckMessage(nonce)), out var probeAck) &&
+                probeAck is QingTransferProtocol.ProbeAckMessage { Nonce: var decodedAck } && decodedAck == nonce,
+            "Probe acknowledgement frame roundtrip failed.");
+        await RunProbeWireAsync(validAck: false);
+        await RunProbeWireAsync(validAck: true);
+        await RunSilentProbeSessionAsync();
         await RunStreamingWireAsync(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23 });
         await RunStreamingWireAsync(Array.Empty<byte>());
         RunMoveAfterDisposeRegression();
+    }
+
+    private static async Task RunProbeWireAsync(bool validAck)
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var server = Task.Run(async () =>
+        {
+            using var accepted = await listener.AcceptTcpClientAsync();
+            var message = await QingTransferProtocol.ReadMessageAsync(accepted.GetStream(), CancellationToken.None);
+            Require(message is QingTransferProtocol.ProbeMessage, "Probe endpoint did not receive a probe frame.");
+            var nonce = ((QingTransferProtocol.ProbeMessage)message!).Nonce;
+            var responseNonce = validAck ? nonce : QingTransferProtocol.CreateProbeNonce();
+            await QingTransferProtocol.WriteMessageAsync(accepted.GetStream(), new QingTransferProtocol.ProbeAckMessage(responseNonce), CancellationToken.None);
+        });
+        var peer = new QingTransferPeer("probe._qingtransfer._tcp.local", "Probe", "windows", "1", ["file"], [IPAddress.Loopback], port, true);
+        Require(await QingTransferEndpointProbe.ConfirmAsync(peer, TimeSpan.FromSeconds(1)) == validAck,
+            validAck ? "Valid probe acknowledgement was rejected." : "Wrong probe nonce was accepted.");
+        await server;
+    }
+
+    private static async Task RunSilentProbeSessionAsync()
+    {
+        await using var discovery = new QingTransferDiscoveryService("ProbeSessionSmoke");
+        await using var session = new QingTransferSession(discovery, "ProbeSessionSmoke");
+        var incomingRaised = false;
+        session.IncomingRequest += (_, _) => incomingRaised = true;
+        using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
+        var acceptedTask = listener.AcceptTcpClientAsync();
+        using var probeClient = new TcpClient();
+        await probeClient.ConnectAsync(IPAddress.Loopback, ((IPEndPoint)listener.LocalEndpoint).Port);
+        var accepted = await acceptedTask;
+        var handle = session.HandleIncomingAsync(accepted, CancellationToken.None);
+        var nonce = QingTransferProtocol.CreateProbeNonce();
+        await QingTransferProtocol.WriteMessageAsync(probeClient.GetStream(), new QingTransferProtocol.ProbeMessage(nonce), CancellationToken.None);
+        Require(await QingTransferProtocol.ReadMessageAsync(probeClient.GetStream(), CancellationToken.None) is QingTransferProtocol.ProbeAckMessage { Nonce: var ack } && ack == nonce,
+            "Session did not silently acknowledge a discovery probe.");
+        await handle;
+        Require(!incomingRaised && session.State == QingTransferSessionState.Idle, "Discovery probe entered the user connection flow.");
     }
 
     private static async Task RunStreamingWireAsync(byte[] payload)
