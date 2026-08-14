@@ -117,6 +117,82 @@ function Wait-ForShellWindowReady {
             $Process.Responding
     } 15 $FailureMessage
 }
+function Assert-WebAssetTree([string]$InstallPath, [string]$Phase) {
+    $webRoot = Join-Path $InstallPath 'WebUI'
+    $manifestPath = Join-Path $webRoot 'qing-web-assets.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "$Phase WebUI asset manifest is missing."
+    }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($manifest.schemaVersion -ne 1 -or @($manifest.outputFiles).Count -eq 0) {
+        throw "$Phase WebUI asset manifest is invalid."
+    }
+    $expected = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in $manifest.outputFiles) {
+        $relative = ([string]$entry.path).Replace('/', '\')
+        if ([string]::IsNullOrWhiteSpace($relative) -or [IO.Path]::IsPathRooted($relative) -or
+            @($relative -split '\\' | Where-Object { $_ -eq '..' }).Count) { throw "$Phase WebUI manifest contains an unsafe path: $relative" }
+        [void]$expected.Add($relative)
+        $full = Join-Path $webRoot $relative
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw "$Phase WebUI manifest file is missing: $relative" }
+        $item = Get-Item -LiteralPath $full
+        if ([long]$item.Length -ne [long]$entry.size) { throw "$Phase WebUI file size mismatch: $relative" }
+        if ((Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant() -ne ([string]$entry.sha256).ToLowerInvariant()) {
+            throw "$Phase WebUI file hash mismatch: $relative"
+        }
+    }
+    $actual = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($file in Get-ChildItem -LiteralPath $webRoot -File -Recurse) {
+        if ($file.FullName.Equals($manifestPath, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $relative = $file.FullName.Substring($webRoot.Length).TrimStart('\')
+        [void]$actual.Add($relative)
+    }
+    if (-not $expected.SetEquals($actual)) {
+        $extra = @($actual | Where-Object { -not $expected.Contains($_) }) -join ', '
+        $missing = @($expected | Where-Object { -not $actual.Contains($_) }) -join ', '
+        throw "$Phase WebUI file set mismatch; extra=[$extra]; missing=[$missing]"
+    }
+    Write-Host "$Phase WebUI asset tree verified: $($expected.Count) files; buildId=$($manifest.assetBuildId)."
+    return $manifest
+}
+function Invoke-WebShellReadyProbe([string]$InstallPath, [string]$Phase) {
+    $probeId = [Guid]::NewGuid()
+    $profileName = "UpgradeProbe-$($probeId.ToString('N').Substring(0, 12))"
+    $probeRepo = Join-Path $TestRoot 'WebShellProbeSource'
+    foreach ($relative in @('QingToolbox.Shell\QingToolbox.Shell.csproj', 'scripts\start-dev-host.ps1', 'Directory.Build.props')) {
+        $marker = Join-Path $probeRepo $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $marker) -Force | Out-Null
+        if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) { Set-Content -LiteralPath $marker -Value '' -Encoding UTF8 }
+    }
+    $result = Join-Path $probeRepo ".qingtoolbox\development\$profileName\temp\web-shell-probe-$($probeId.ToString('D')).json"
+    $shell = Join-Path $InstallPath 'QingToolbox.Shell.exe'
+    $arguments = @('--environment', 'Development', '--profile', $profileName, '--repo-root', $probeRepo,
+        '--web-shell-probe', $probeId.ToString('D'))
+    $argumentLine = ($arguments | ForEach-Object { ConvertTo-WindowsCommandLineArgument $_ }) -join ' '
+    $process = Start-Process -FilePath $shell -ArgumentList $argumentLine -PassThru
+    try {
+        Wait-Until {
+            $process.Refresh()
+            (Test-Path -LiteralPath $result -PathType Leaf) -or $process.HasExited
+        } 45 "$Phase Web Shell probe did not produce a result before the timeout."
+        if (-not (Test-Path -LiteralPath $result -PathType Leaf)) {
+            throw "$Phase Web Shell probe process exited before producing a result (exit=$($process.ExitCode))."
+        }
+        $probe = Get-Content -LiteralPath $result -Raw -Encoding UTF8 | ConvertFrom-Json
+        $flags = @('navigationSucceeded', 'readyChallengeIssued', 'snapshotValidated',
+            'activationPingSucceeded', 'sessionTokenIssued', 'repeatedPingSucceeded', 'workspaceActivated')
+        $missing = @($flags | Where-Object { -not [bool]$probe.$_ })
+        if ($missing.Count -or $probe.failureCode) {
+            $failure = if ($probe.failureCode) { [string]$probe.failureCode } else { 'None' }
+            throw "$Phase Web Shell Ready probe failed; failureCode=$failure; missingFlags=$($missing -join ',')."
+        }
+        Write-Host "$Phase Web Shell Ready probe passed; probeId=$probeId; assetBuildId=$($probe.assetBuildId); workspaceActivated=$($probe.workspaceActivated); failureCode=$($probe.failureCode)."
+        return $probe
+    }
+    finally {
+        try { if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } } catch { }
+    }
+}
 function Get-ShellProcessesAtInstallPath([string]$InstallPath=$install) {
     $expected=[IO.Path]::GetFullPath((Join-Path $InstallPath 'QingToolbox.Shell.exe'))
     return @(Get-CimInstance Win32_Process -Filter "Name='QingToolbox.Shell.exe'" -ErrorAction SilentlyContinue |
@@ -174,6 +250,8 @@ try {
     Copy-Item -LiteralPath $PreviousHostManifestPath -Destination $previousManifestSnapshot
     $preview1Process = Start-Process -FilePath (Join-Path $install 'QingToolbox.Shell.exe') -PassThru
     Wait-ForShellWindowReady $preview1Process "$previousVersion Shell did not become responsive before the in-place upgrade."
+    Assert-WebAssetTree $install "$previousVersion baseline"
+    $previousProbe = Invoke-WebShellReadyProbe $install "$previousVersion baseline"
     $oldPid=$preview1Process.Id
     $oldPath=[IO.Path]::GetFullPath($preview1Process.Path)
     $settings=Join-Path $env:APPDATA 'QingToolbox\settings.json'; $module=Join-Path $env:LOCALAPPDATA 'QingToolbox\Modules\sentinel\module.json'
@@ -213,9 +291,27 @@ try {
         $relative = ([string]$owned.relativePath).Replace('/', '\')
         if (Test-Path -LiteralPath (Join-Path $install $relative)) { throw "Obsolete Preview 1 host file remained after upgrade: $relative" }
     }
+    Assert-WebAssetTree $install "$($metadata.Version) upgrade"
+    $upgradeProbe = Invoke-WebShellReadyProbe $install "$($metadata.Version) upgrade"
+    $staleAsset = @($previousManifest.entries | Where-Object {
+        ([string]$_.relativePath) -like 'WebUI/assets/*' -and
+        -not $currentOwned.Contains(([string]$_.relativePath).Replace('\','/'))
+    } | Select-Object -First 1)
+    if ($staleAsset.Count -ne 1) { throw 'The upgrade regression could not select an obsolete WebUI asset from the published baseline.' }
+    $staleRelative = ([string]$staleAsset[0].relativePath).Replace('/', '\')
+    $stalePath = Join-Path $install $staleRelative
+    New-Item -ItemType Directory -Path (Split-Path -Parent $stalePath) -Force | Out-Null
+    Set-Content -LiteralPath $stalePath -Value 'intentionally stale Preview WebUI asset' -Encoding ASCII
+    if (-not (Test-Path -LiteralPath $stalePath -PathType Leaf)) { throw "Unable to construct stale WebUI regression asset: $staleRelative" }
     Stop-Process -Id $newShell.ProcessId -ErrorAction Stop
     Wait-Until { -not(Get-Process -Id $newShell.ProcessId -ErrorAction SilentlyContinue) } 10 'Preview 2 Shell did not stop before repair validation.'
     if((Invoke-Setup $current (Join-Path $logDirectory 'repair.log') $false)-ne 0){throw 'Preview 2 repair installation without /DIR failed.'}
+    if (Test-Path -LiteralPath $stalePath) { throw "Repair left stale WebUI asset: $staleRelative" }
+    Assert-WebAssetTree $install "$($metadata.Version) repair"
+    # Let WebView2 finish releasing the just-closed upgrade probe profile before
+    # asserting the repaired install's first acknowledged Ready handshake.
+    Start-Sleep -Seconds 3
+    $repairProbe = Invoke-WebShellReadyProbe $install "$($metadata.Version) repair"
     foreach($item in $sentinels){if(-not(Test-Path $item)-or(Get-FileHash $item -Algorithm SHA256).Hash-ne$hashes[$item]){throw "Repair did not preserve sentinel: $item"}}
     $repairEntry = Get-ItemProperty $uninstallKey
     if ($repairEntry.DisplayVersion -ne $metadata.Version -or
