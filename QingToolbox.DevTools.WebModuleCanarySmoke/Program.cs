@@ -33,6 +33,10 @@ try
     var module = (IWebToolModule)handle.Module;
     var events = new List<ModuleWebEventArgs>();
     module.WebEvent += (_, value) => events.Add(value);
+    Require(module is IModuleHostWindowActionSource, "Web canary must expose the optional host window action contract.");
+    var actions = new List<ModuleHostWindowAction>();
+    var actionSource = (IModuleHostWindowActionSource)module;
+    actionSource.HostWindowActionRequested += (_, value) => actions.Add(value.Action);
     await module.OnActivateAsync();
     var state = await module.HandleWebRequestAsync("getState", null, CancellationToken.None);
     Require(state is { } stateValue && stateValue.GetProperty("loaded").GetBoolean() && stateValue.GetProperty("active").GetBoolean(),
@@ -43,11 +47,29 @@ try
     var background = await module.HandleWebRequestAsync("emitBackgroundEvent", null, CancellationToken.None);
     Require(background is { } backgroundValue && backgroundValue.GetProperty("emitted").GetBoolean() &&
             events.Any(value => value.Name == "backgroundEvent"), "Web canary must emit a background event.");
+    foreach (var method in new[] { "requestHide", "requestShow", "requestToggle" })
+    {
+        var action = await module.HandleWebRequestAsync(method, null, CancellationToken.None);
+        Require(action is { } actionValue && actionValue.GetProperty("requested").GetBoolean(),
+            $"Web canary {method} must acknowledge its host action request.");
+    }
+    Require(actions.SequenceEqual([ModuleHostWindowAction.Hide, ModuleHostWindowAction.Show, ModuleHostWindowAction.Toggle]),
+        "Web canary host actions must preserve request order.");
+    var dropDirectory = Path.Combine(Path.GetTempPath(), "QingToolbox-WebCanary-Drop-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dropDirectory);
+    var droppedFile = Path.Combine(dropDirectory, "app.exe");
+    await File.WriteAllTextAsync(droppedFile, "canary");
+    await ((IWebExternalFileDropSink)module).HandleExternalFilesDroppedAsync([droppedFile]);
+    var dropEvent = events.LastOrDefault(value => value.Name == "externalDrop");
+    Require(dropEvent?.Payload is { } dropPayload && dropPayload.GetProperty("count").GetInt32() == 1 &&
+            dropPayload.GetProperty("names")[0].GetString() == "app.exe",
+        "Web canary external drop must expose only the basename to WebEvent.");
+    Directory.Delete(dropDirectory, true);
     await module.OnDeactivateAsync();
     await handle.DisposeAsync();
     var lifecycle = File.ReadAllLines(Path.Combine(dataRoot, discovered.Manifest.Id, "lifecycle.log"));
     Console.WriteLine("Lifecycle: " + string.Join(",", lifecycle));
-    Require(lifecycle.SequenceEqual(["load", "activate", "deactivate", "unload", "dispose"]), "Web lifecycle must clean up in order.");
+    Require(lifecycle.SequenceEqual(["load", "activate", "drop:app.exe", "deactivate", "unload", "dispose"]), "Web lifecycle must clean up in order.");
     Console.WriteLine("Web module backend/bridge lifecycle canary passed.");
 }
 finally

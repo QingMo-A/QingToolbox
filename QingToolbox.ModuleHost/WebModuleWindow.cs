@@ -22,12 +22,17 @@ internal sealed class WebModuleWindow : Window
     private readonly string _moduleRoot;
     private readonly string _entry;
     private readonly string _userDataFolder;
-    private readonly WebView2 _browser = new();
+    // Composition hosting keeps the WPF visual in the routed input tree so the
+    // host can receive an OS FileDrop without inspecting a child HWND.
+    private readonly WebView2CompositionControl _browser = new();
     private readonly Grid _surface = new();
     private readonly TextBlock _status = new();
     private readonly string? _iconPath;
     private readonly WebModuleBridgeDispatcher? _bridge;
     private readonly Action? _onClosed;
+    private readonly Func<IReadOnlyList<string>, CancellationToken, Task>? _externalDropHandler;
+    private readonly DragEventHandler? _externalDragOverHandler = null;
+    private readonly DragEventHandler? _externalDropEventHandler = null;
     private string _appearancePresetId;
     private string _languageCode;
     private bool _readySent;
@@ -39,7 +44,8 @@ internal sealed class WebModuleWindow : Window
     public WebModuleWindow(string moduleId, string version, string moduleRoot, string entry,
         string dataRoot, string title, Window? owner, WebModuleBridgeDispatcher? bridge = null,
         string appearancePresetId = AppearancePresetIds.QingDefault, string languageCode = "en-US", string? iconPath = null,
-        Action? onClosed = null)
+        Action? onClosed = null,
+        Func<IReadOnlyList<string>, CancellationToken, Task>? externalDropHandler = null)
     {
         _moduleId = moduleId;
         _version = version;
@@ -48,6 +54,7 @@ internal sealed class WebModuleWindow : Window
         _userDataFolder = Path.Combine(Path.GetFullPath(dataRoot), moduleId, "webview2");
         _bridge = bridge;
         _onClosed = onClosed;
+        _externalDropHandler = externalDropHandler;
         _appearancePresetId = AppearancePresetIds.Normalize(appearancePresetId);
         _languageCode = languageCode is "en-US" or "zh-CN" ? languageCode : "en-US";
         _iconPath = iconPath;
@@ -60,6 +67,17 @@ internal sealed class WebModuleWindow : Window
         Owner = owner;
         _browser.Visibility = Visibility.Hidden;
         _browser.IsHitTestVisible = false;
+        // Keep WebView's own drop surface disabled; routed WPF events on the
+        // composition visual are the only path forwarded to the optional sink.
+        _browser.AllowExternalDrop = false;
+        if (_externalDropHandler is not null)
+        {
+            AllowDrop = true;
+            _externalDragOverHandler = OnExternalDragOver;
+            _externalDropEventHandler = OnExternalDrop;
+            AddHandler(DragDrop.DragOverEvent, _externalDragOverHandler, true);
+            AddHandler(DragDrop.DropEvent, _externalDropEventHandler, true);
+        }
         ApplySurfaceTheme();
         _surface.Children.Add(_browser);
         var stack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
@@ -116,7 +134,10 @@ internal sealed class WebModuleWindow : Window
                 _host,
                 _moduleRoot,
                 CoreWebView2HostResourceAccessKind.DenyCors);
-            core.Navigate($"https://{_host}/{EncodeEntry(_entry)}");
+            // Keep each window's local entry URL unique so a reused WebView2
+            // profile cannot replay a stale cached index.html after a module
+            // update. The query is host-only and never reaches the bridge.
+            core.Navigate($"https://{_host}/{EncodeEntry(_entry)}?qingHostSession={_presentationNonce}");
         }
         catch (Exception exception)
         {
@@ -184,6 +205,11 @@ internal sealed class WebModuleWindow : Window
         _closed = true;
         Loaded -= OnLoaded;
         Closed -= OnClosed;
+        if (_externalDropHandler is not null)
+        {
+            if (_externalDragOverHandler is not null) RemoveHandler(DragDrop.DragOverEvent, _externalDragOverHandler);
+            if (_externalDropEventHandler is not null) RemoveHandler(DragDrop.DropEvent, _externalDropEventHandler);
+        }
         if (_browser.CoreWebView2 is { } core)
         {
             core.NewWindowRequested -= OnNewWindowRequested;
@@ -193,6 +219,35 @@ internal sealed class WebModuleWindow : Window
         }
         _browser.Dispose();
         _onClosed?.Invoke();
+    }
+
+    private void OnExternalDragOver(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            e.Effects = DragDropEffects.Copy;
+            e.Handled = true;
+        }
+    }
+
+    private void OnExternalDrop(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        if (_closed || _externalDropHandler is null || !e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] paths || paths.Length == 0) return;
+        _ = ForwardExternalDropAsync(paths);
+    }
+
+    private async Task ForwardExternalDropAsync(IReadOnlyList<string> paths)
+    {
+        try
+        {
+            await _externalDropHandler!(paths, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine($"Web module '{_moduleId}' external drop failed: {exception.GetType().Name}");
+        }
     }
 
     private async void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs args) =>

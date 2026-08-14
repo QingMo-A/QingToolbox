@@ -313,7 +313,7 @@ internal static class Program
             "Out-of-process Web capability was rejected.");
         var webManifest = new ModuleManifest
         {
-            Id = "web.probe", Name = "Web Probe", Version = "1.0.0", Entry = string.Empty,
+            Id = "web.probe", Name = "Web Probe", Version = "1.0.0", Entry = Path.GetFileName(entry),
             WebEntry = "index.html", RuntimeIsolation = ModuleRuntimeIsolation.OutOfProcess, UiKind = ModuleUiKind.Web
         };
         Require(validator.Validate(webManifest, root, Path.Combine(root, "module.json")).Count == 0,

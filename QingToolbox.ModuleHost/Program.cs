@@ -136,6 +136,7 @@ internal static class Program
         await using var handle = await new InProcessModuleLoader(new PassthroughLocalization()).LoadAsync(discovered, options.DataRoot);
         if (handle.Module is not IWebToolModule webModule) throw new InvalidDataException("The Web module backend contract is unavailable.");
         var bridge = new WebModuleBridgeDispatcher(webModule);
+        var externalDropSink = webModule as IWebExternalFileDropSink;
         var variant = handle.Module.GetType().Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(item => item.Key == "QingToolbox.TextToolsCanary.Variant")?.Value ?? "WebModuleCanary";
         await SendAsync(writer, new Message(ProtocolVersion, "Hello", options.Nonce, manifest.Id, manifest.Version,
@@ -147,6 +148,77 @@ internal static class Program
         var latestAppearancePresetId = AppearancePresetIds.QingDefault;
         var latestLanguageCode = "en-US";
         EventHandler<ModuleWebEventArgs>? webEventHandler = null;
+        EventHandler<ModuleHostWindowActionEventArgs>? windowActionHandler = null;
+        var shuttingDown = false;
+
+        async Task ForwardExternalDropAsync(IReadOnlyList<string> paths, CancellationToken cancellationToken)
+        {
+            if (externalDropSink is null || shuttingDown) return;
+            var normalized = ExternalDropPathNormalizer.Normalize(paths);
+            if (normalized.Count == 0) return;
+            await Task.Run(async () =>
+                await externalDropSink.HandleExternalFilesDroppedAsync(normalized, cancellationToken), cancellationToken);
+        }
+
+        void EnsureWebEventSubscription()
+        {
+            if (webEventHandler is not null) return;
+            webEventHandler = (_, eventArgs) => window?.PostEvent(eventArgs);
+            webModule.WebEvent += webEventHandler;
+        }
+
+        WebModuleWindow EnsureWebWindow()
+        {
+            if (window is not null) return window;
+            window = new WebModuleWindow(manifest.Id, manifest.Version, options.ModuleDirectory,
+                manifest.WebEntry, options.DataRoot, manifest.Name, Application.Current.MainWindow, bridge,
+                latestAppearancePresetId, latestLanguageCode,
+                ResolveIconPath(manifest, options.ModuleDirectory),
+                () => { window = null; suspended = null; },
+                externalDropSink is null ? null : ForwardExternalDropAsync);
+            EnsureWebEventSubscription();
+            return window;
+        }
+
+        void ApplyWindowAction(ModuleHostWindowAction action)
+        {
+            if (shuttingDown || (suspended is not null && action is ModuleHostWindowAction.Show or ModuleHostWindowAction.Toggle)) return;
+            switch (action)
+            {
+                case ModuleHostWindowAction.Show:
+                    {
+                        var target = EnsureWebWindow();
+                        if (!target.IsVisible) target.Show();
+                        target.Activate();
+                        break;
+                    }
+                case ModuleHostWindowAction.Hide:
+                    window?.Hide();
+                    break;
+                case ModuleHostWindowAction.Toggle:
+                    if (window is null)
+                    {
+                        var target = EnsureWebWindow();
+                        target.Show();
+                        target.Activate();
+                    }
+                    else if (window.IsVisible) window.Hide();
+                    else { window.Show(); window.Activate(); }
+                    break;
+            }
+        }
+
+        if (webModule is IModuleHostWindowActionSource actionSource)
+        {
+            windowActionHandler = (_, eventArgs) =>
+            {
+                if (shuttingDown) return;
+                var dispatcher = Application.Current?.Dispatcher;
+                if (dispatcher is null) return;
+                _ = dispatcher.InvokeAsync(() => ApplyWindowAction(eventArgs.Action));
+            };
+            actionSource.HostWindowActionRequested += windowActionHandler;
+        }
         try
         {
             while (true)
@@ -168,18 +240,9 @@ internal static class Program
                     case "Activate": if (!active) { await webModule.OnActivateAsync(); active = true; } break;
                     case "Deactivate": if (active) { await webModule.OnDeactivateAsync(); active = false; } break;
                     case "OpenWindow":
-                        window ??= new WebModuleWindow(manifest.Id, manifest.Version, options.ModuleDirectory,
-                            manifest.WebEntry, options.DataRoot, manifest.Name, Application.Current.MainWindow, bridge,
-                            latestAppearancePresetId, latestLanguageCode,
-                            ResolveIconPath(manifest, options.ModuleDirectory),
-                            () => window = null);
-                        if (webEventHandler is null)
-                        {
-                            webEventHandler = (_, eventArgs) => window?.PostEvent(eventArgs);
-                            webModule.WebEvent += webEventHandler;
-                        }
-                        window.Show(); window.Activate(); break;
-                    case "CloseWindow": window?.Close(); window = null; break;
+                        var openedWindow = EnsureWebWindow();
+                        openedWindow.Show(); openedWindow.Activate(); break;
+                    case "CloseWindow": window?.Close(); window = null; suspended = null; break;
                     case "SuspendWindow":
                         if (window is not null && suspended is null)
                         {
@@ -204,6 +267,9 @@ internal static class Program
         }
         finally
         {
+            shuttingDown = true;
+            if (windowActionHandler is not null && webModule is IModuleHostWindowActionSource windowActionSource)
+                windowActionSource.HostWindowActionRequested -= windowActionHandler;
             if (webEventHandler is not null) webModule.WebEvent -= webEventHandler;
             window?.Close();
             if (active) await webModule.OnDeactivateAsync();

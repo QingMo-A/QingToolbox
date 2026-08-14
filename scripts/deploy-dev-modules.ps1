@@ -8,9 +8,10 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $solutionPath = Join-Path $repoRoot "QingToolbox.sln"
-$targetFramework = "net10.0-windows"
-$helloOutput = Join-Path $repoRoot "QingToolbox.Modules.Hello\bin\$Configuration\$targetFramework"
-$shellOutput = Join-Path $repoRoot "QingToolbox.Shell\bin\$Configuration\$targetFramework"
+$moduleTargetFramework = "net10.0-windows"
+$shellTargetFramework = "net10.0-windows10.0.17763.0"
+$helloOutput = Join-Path $repoRoot "QingToolbox.Modules.Hello\bin\$Configuration\$moduleTargetFramework"
+$shellOutput = Join-Path $repoRoot "QingToolbox.Shell\bin\$Configuration\$shellTargetFramework"
 $moduleTarget = Join-Path $shellOutput "Modules\Hello"
 $helloAssembly = Join-Path $helloOutput "QingToolbox.Modules.Hello.dll"
 $helloManifest = Join-Path $repoRoot "QingToolbox.Modules.Hello\module.json"

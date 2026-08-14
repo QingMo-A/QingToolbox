@@ -181,7 +181,8 @@ try {
         else { throw }
     }
 
-    $shell = Join-Path $profileInfo.RepoRoot "QingToolbox.Shell\bin\$Configuration\net10.0-windows\QingToolbox.Shell.exe"
+    $shellTargetFramework = 'net10.0-windows10.0.17763.0'
+    $shell = Join-Path $profileInfo.RepoRoot "QingToolbox.Shell\bin\$Configuration\$shellTargetFramework\QingToolbox.Shell.exe"
     if (-not (Test-Path -LiteralPath $shell -PathType Leaf)) {
         throw "Shell executable was not produced: $shell"
     }

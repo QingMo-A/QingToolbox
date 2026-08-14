@@ -3,7 +3,7 @@ using QingToolbox.Abstractions.Modules;
 
 namespace QingToolbox.DevTools.WebModuleCanary;
 
-public sealed class CanaryModule : IWebToolModule
+public sealed class CanaryModule : IWebToolModule, IModuleHostWindowActionSource, IWebExternalFileDropSink
 {
     private ModuleContext? _context;
     private string? _dataDirectory;
@@ -13,6 +13,7 @@ public sealed class CanaryModule : IWebToolModule
     public string Name => "Web Module Canary";
     public string Description => "A small Web backend/bridge lifecycle canary.";
     public event EventHandler<ModuleWebEventArgs>? WebEvent;
+    public event EventHandler<ModuleHostWindowActionEventArgs>? HostWindowActionRequested;
 
     public Task OnLoadAsync(ModuleContext context, CancellationToken cancellationToken = default)
     {
@@ -45,9 +46,42 @@ public sealed class CanaryModule : IWebToolModule
         {
             "getState" => Task.FromResult<JsonElement?>(StatePayload()),
             "echo" => Task.FromResult(payload),
+            "requestShow" => RequestWindowActionAsync(ModuleHostWindowAction.Show),
+            "requestHide" => RequestWindowActionAsync(ModuleHostWindowAction.Hide),
+            "requestToggle" => RequestWindowActionAsync(ModuleHostWindowAction.Toggle),
             "emitBackgroundEvent" => EmitBackgroundEventAsync(cancellationToken),
             _ => throw new InvalidOperationException("Unknown canary method.")
         };
+    }
+
+    /// <summary>Test and canary-only helper for exercising the optional host action contract.</summary>
+    public void RequestWindowAction(ModuleHostWindowAction action) =>
+        HostWindowActionRequested?.Invoke(this, new ModuleHostWindowActionEventArgs(action));
+
+    public Task HandleExternalFilesDroppedAsync(IReadOnlyList<string> paths,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var names = paths
+            .Select(path => Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(16)
+            .ToArray();
+        Record("drop:" + string.Join(",", names));
+        WebEvent?.Invoke(this, new ModuleWebEventArgs("externalDrop",
+            JsonSerializer.SerializeToElement(new { count = names.Length, names })));
+        return Task.CompletedTask;
+    }
+
+    private Task<JsonElement?> RequestWindowActionAsync(ModuleHostWindowAction action)
+    {
+        RequestWindowAction(action);
+        return Task.FromResult<JsonElement?>(JsonSerializer.SerializeToElement(new
+        {
+            requested = true,
+            action = action.ToString()
+        }));
     }
 
     private async Task<JsonElement?> EmitBackgroundEventAsync(CancellationToken cancellationToken)

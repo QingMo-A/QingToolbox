@@ -60,7 +60,7 @@ internal static class Program
             "QingToolbox.Shell",
             "bin",
             configuration,
-            "net10.0-windows");
+            "net10.0-windows10.0.17763.0");
 
         var modulesDirectory = Path.GetFullPath(
             options.ModulesDirectory ?? Path.Combine(shellOutput, "Modules"));

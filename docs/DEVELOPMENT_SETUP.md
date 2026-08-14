@@ -49,7 +49,7 @@ for other meaningful changes included in the same commit.
 The Shell scans runtime modules from:
 
 ```text
-QingToolbox.Shell/bin/Debug/net10.0-windows/Modules
+QingToolbox.Shell/bin/Debug/net10.0-windows10.0.17763.0/Modules
 ```
 
 To build the solution and deploy the Hello development module:
