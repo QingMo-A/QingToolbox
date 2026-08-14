@@ -135,6 +135,10 @@ internal static class Program
             ManifestPath = Path.Combine(options.ModuleDirectory, "module.json"), State = ModuleState.NotLoaded, Errors = [] };
         await using var handle = await new InProcessModuleLoader(new PassthroughLocalization()).LoadAsync(discovered, options.DataRoot);
         if (handle.Module is not IWebToolModule webModule) throw new InvalidDataException("The Web module backend contract is unavailable.");
+        var presentationMode = webModule is IModuleHostWindowPresentationSource presentationSource &&
+                               Enum.IsDefined(presentationSource.HostWindowPresentationMode)
+            ? presentationSource.HostWindowPresentationMode
+            : ModuleHostWindowPresentationMode.Standard;
         var bridge = new WebModuleBridgeDispatcher(webModule);
         var externalDropSink = webModule as IWebExternalFileDropSink;
         var variant = handle.Module.GetType().Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
@@ -175,7 +179,8 @@ internal static class Program
                 latestAppearancePresetId, latestLanguageCode,
                 ResolveIconPath(manifest, options.ModuleDirectory),
                 () => { window = null; suspended = null; },
-                externalDropSink is null ? null : ForwardExternalDropAsync);
+                externalDropSink is null ? null : ForwardExternalDropAsync,
+                presentationMode);
             EnsureWebEventSubscription();
             return window;
         }

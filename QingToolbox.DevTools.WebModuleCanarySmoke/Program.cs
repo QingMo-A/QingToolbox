@@ -3,6 +3,40 @@ using QingToolbox.Abstractions.Localization;
 using QingToolbox.Abstractions.Modules;
 using QingToolbox.DevTools.WebModuleCanary;
 using QingToolbox.ModuleLoader;
+using QingToolbox.ModuleHost;
+using System.Threading;
+using System.Windows;
+
+Require(!typeof(CanaryModule).IsAssignableTo(typeof(IModuleHostWindowPresentationSource)),
+    "The default Web canary must not opt into overlay presentation.");
+Require(!WebModuleWindowPresentation.IsOverlay(ModuleHostWindowPresentationMode.Standard),
+    "Standard presentation must remain the default.");
+Require(new OverlayPresentationProbe().HostWindowPresentationMode == ModuleHostWindowPresentationMode.Overlay,
+    "An opt-in presentation source must expose Overlay mode.");
+var presentationError = default(Exception);
+var presentationThread = new Thread(() =>
+{
+    try
+    {
+        var standard = new Window();
+        WebModuleWindowPresentation.Apply(standard, ModuleHostWindowPresentationMode.Standard);
+        Require(standard.WindowStyle == WindowStyle.SingleBorderWindow && standard.ResizeMode == ResizeMode.CanResize &&
+                standard.ShowInTaskbar && !standard.AllowsTransparency && standard.Width == 900 && standard.Height == 680,
+            "Standard WebModuleWindow presentation must retain its normal window shape.");
+
+        var overlay = new Window();
+        WebModuleWindowPresentation.Apply(overlay, ModuleHostWindowPresentationMode.Overlay);
+        Require(overlay.WindowStyle == WindowStyle.None && overlay.ResizeMode == ResizeMode.NoResize &&
+                !overlay.ShowInTaskbar && overlay.AllowsTransparency && overlay.Background == System.Windows.Media.Brushes.Transparent &&
+                overlay.WindowStartupLocation == WindowStartupLocation.CenterScreen && overlay.Width == 1000 && overlay.Height == 680,
+            "Overlay WebModuleWindow presentation must be frameless, transparent and centered.");
+    }
+    catch (Exception exception) { presentationError = exception; }
+});
+presentationThread.SetApartmentState(ApartmentState.STA);
+presentationThread.Start();
+presentationThread.Join();
+if (presentationError is not null) throw presentationError;
 
 var canaryOutput = Path.GetDirectoryName(typeof(CanaryModule).Assembly.Location)!;
 var canaryDirectory = Path.Combine(Path.GetTempPath(), "QingToolbox-WebCanary-Module-" + Guid.NewGuid().ToString("N"));
@@ -88,6 +122,11 @@ static void CopyDirectory(string source, string destination)
 {
     Directory.CreateDirectory(destination);
     foreach (var path in Directory.EnumerateFiles(source)) File.Copy(path, Path.Combine(destination, Path.GetFileName(path)));
+}
+
+sealed class OverlayPresentationProbe : IModuleHostWindowPresentationSource
+{
+    public ModuleHostWindowPresentationMode HostWindowPresentationMode => ModuleHostWindowPresentationMode.Overlay;
 }
 
 sealed class SmokeLocalization : ILocalizationService

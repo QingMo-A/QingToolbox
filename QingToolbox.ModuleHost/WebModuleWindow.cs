@@ -22,6 +22,7 @@ internal sealed class WebModuleWindow : Window
     private readonly string _moduleRoot;
     private readonly string _entry;
     private readonly string _userDataFolder;
+    private readonly ModuleHostWindowPresentationMode _presentationMode;
     // Composition hosting keeps the WPF visual in the routed input tree so the
     // host can receive an OS FileDrop without inspecting a child HWND.
     private readonly WebView2CompositionControl _browser = new();
@@ -45,13 +46,15 @@ internal sealed class WebModuleWindow : Window
         string dataRoot, string title, Window? owner, WebModuleBridgeDispatcher? bridge = null,
         string appearancePresetId = AppearancePresetIds.QingDefault, string languageCode = "en-US", string? iconPath = null,
         Action? onClosed = null,
-        Func<IReadOnlyList<string>, CancellationToken, Task>? externalDropHandler = null)
+        Func<IReadOnlyList<string>, CancellationToken, Task>? externalDropHandler = null,
+        ModuleHostWindowPresentationMode presentationMode = ModuleHostWindowPresentationMode.Standard)
     {
         _moduleId = moduleId;
         _version = version;
         _moduleRoot = Path.GetFullPath(moduleRoot);
         _entry = entry.Replace('\\', '/').TrimStart('/');
         _userDataFolder = Path.Combine(Path.GetFullPath(dataRoot), moduleId, "webview2");
+        _presentationMode = Enum.IsDefined(presentationMode) ? presentationMode : ModuleHostWindowPresentationMode.Standard;
         _bridge = bridge;
         _onClosed = onClosed;
         _externalDropHandler = externalDropHandler;
@@ -60,10 +63,7 @@ internal sealed class WebModuleWindow : Window
         _iconPath = iconPath;
         _host = "qing-module.local";
         Title = title;
-        Width = 900;
-        Height = 680;
-        MinWidth = 520;
-        MinHeight = 380;
+        WebModuleWindowPresentation.Apply(this, _presentationMode);
         Owner = owner;
         _browser.Visibility = Visibility.Hidden;
         _browser.IsHitTestVisible = false;
@@ -108,6 +108,11 @@ internal sealed class WebModuleWindow : Window
 
     private void ApplySurfaceTheme()
     {
+        if (_presentationMode == ModuleHostWindowPresentationMode.Overlay)
+        {
+            _surface.Background = Brushes.Transparent;
+            return;
+        }
         var dark = _appearancePresetId is not AppearancePresetIds.QingDefault;
         _surface.Background = new SolidColorBrush(dark ? Color.FromRgb(8, 15, 37) : Color.FromRgb(243, 247, 253));
     }
@@ -118,6 +123,11 @@ internal sealed class WebModuleWindow : Window
         {
             Directory.CreateDirectory(_userDataFolder);
             var environment = await CoreWebView2Environment.CreateAsync(null, _userDataFolder);
+            if (_presentationMode == ModuleHostWindowPresentationMode.Overlay)
+            {
+                _browser.Background = Brushes.Transparent;
+                _browser.DefaultBackgroundColor = System.Drawing.Color.Transparent;
+            }
             await _browser.EnsureCoreWebView2Async(environment);
             var core = _browser.CoreWebView2;
             // Do not gate the host surface on requestAnimationFrame: WebView2 starts hidden while
