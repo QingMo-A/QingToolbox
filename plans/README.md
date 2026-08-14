@@ -78,6 +78,14 @@ Read these plans in order unless the user says otherwise:
     - 014C: migrate QingTransfer Vue UI only after the hosting canary is proven; retain WPF legacy compatibility.
     - Stop rule: no module migration or bridge expansion until the bounded hosting contracts and smoke tests pass.
 
+15. [`015-qing-launcher-module.md`](015-qing-launcher-module.md)
+    - Deliver Qing Launcher as a first-class Vue `.qmod` with Android-launcher-like drag ordering, Recent items, icon caching, and module-owned global hotkeys.
+    - Add only the minimum ModuleHost self-window and Explorer/Desktop external-drop hooks that the module cannot safely own itself.
+
+16. [`016-web-module-host-version-boundary.md`](016-web-module-host-version-boundary.md)
+    - Establish the first truthful released host version for `ModuleUiKind.Web` and current QingTransfer compatibility.
+    - Validate the next Preview against the immediately previous public release, including obsolete hashed WebUI cleanup and post-upgrade Web workspace readiness rather than WPF fallback survival.
+
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 
 A plan marked `Draft — Pending User Approval` is review material only. Codex must not implement its slices until the user explicitly approves the plan and an execution prompt selects one bounded slice. An active plan still authorizes only the single slice selected by the current Codex prompt.
