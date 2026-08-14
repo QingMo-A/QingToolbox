@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$InstallRoot,
-    [string]$OutputPath
+    [string]$OutputPath,
+    [string]$ProductionLocalRoot
 )
 
 Set-StrictMode -Version Latest
@@ -124,6 +125,11 @@ function Get-ProductionLogSummary {
         FilesChecked = $checked
         LatestFailureCode = if ($latestFailure) { $latestFailure } else { '<none>' }
         HasReady = ($latestReadyAt -gt [DateTimeOffset]::MinValue)
+        LatestFailureAt = $latestFailureAt
+        LatestReadyAt = $latestReadyAt
+        CurrentOutcome = if ($latestFailureAt -gt $latestReadyAt) { 'Failed' }
+            elseif ($latestReadyAt -gt [DateTimeOffset]::MinValue) { 'Ready' }
+            else { 'Unknown' }
     }
 }
 
@@ -274,7 +280,13 @@ $shellExe = Join-Path $root 'QingToolbox.Shell.exe'
 if (-not (Test-Path -LiteralPath $shellExe -PathType Leaf)) { throw 'InstallRoot must contain QingToolbox.Shell.exe.' }
 $webUiRoot = Join-Path $root 'WebUI'
 $hostPayloadPath = Join-Path $root 'host-payload.manifest.json'
-$localRoot = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'QingToolbox'
+$defaultLocalRoot = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'QingToolbox'
+$localRoot = if ([string]::IsNullOrWhiteSpace($ProductionLocalRoot)) {
+    $defaultLocalRoot
+}
+else {
+    Resolve-AbsoluteLocalPath $ProductionLocalRoot
+}
 $resolvedOutputPath = $null
 if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
     $resolvedOutputPath = [IO.Path]::GetFullPath($OutputPath)
@@ -301,9 +313,9 @@ $productionProfile = Get-ProductionProfileSummary (Join-Path $localRoot 'webview
 $cleanProbe = Invoke-CleanProbe $root
 $hostAssetsValid = $assetBindingPassed -and $fileSet.Passed -and (Test-Path -LiteralPath $hostPayloadPath -PathType Leaf)
 if (-not $hostAssetsValid) { $category = 'HostAssetsInvalid' }
-elseif ($cleanProbe.Ready -and $productionLogs.LatestFailureCode -ne '<none>') { $category = 'ProductionOnlyFailure' }
 elseif (-not $cleanProbe.Ready) { $category = 'CleanProbeFailure' }
-elseif ($productionLogs.HasReady) { $category = 'Ready' }
+elseif ($productionLogs.CurrentOutcome -eq 'Failed') { $category = 'ProductionOnlyFailure' }
+elseif ($productionLogs.CurrentOutcome -eq 'Ready') { $category = 'Ready' }
 else { $category = 'NoRecordedFailure' }
 
 $report = [ordered]@{
@@ -324,6 +336,7 @@ $report = [ordered]@{
     ProductionLogFilesChecked = $productionLogs.FilesChecked
     LatestProductionFailureCode = $productionLogs.LatestFailureCode
     LatestProductionReady = $productionLogs.HasReady
+    LatestProductionOutcome = $productionLogs.CurrentOutcome
     CleanProbe = [ordered]@{
         navigationSucceeded = $cleanProbe.NavigationSucceeded
         readyChallengeIssued = $cleanProbe.ReadyChallengeIssued
@@ -354,6 +367,7 @@ Write-Host "ProductionWebViewProfileAccessible: $($report.ProductionWebViewProfi
 Write-Host "ProductionLogFilesChecked: $($report.ProductionLogFilesChecked)"
 Write-Host "LatestProductionFailureCode: $($report.LatestProductionFailureCode)"
 Write-Host "LatestProductionReady: $($report.LatestProductionReady)"
+Write-Host "LatestProductionOutcome: $($report.LatestProductionOutcome)"
 Write-Host 'CleanProbe:'
 foreach ($property in $report.CleanProbe.Keys) { Write-Host "  $property`: $($report.CleanProbe[$property])" }
 Write-Host "DiagnosisCategory: $($report.DiagnosisCategory)"
