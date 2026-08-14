@@ -190,7 +190,12 @@ function Invoke-WebShellReadyProbe([string]$InstallPath, [string]$Phase) {
         return $probe
     }
     finally {
-        try { if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } } catch { }
+        try {
+            if (-not $process.HasExited) {
+                $process.Kill($true)
+                [void]$process.WaitForExit(10000)
+            }
+        } catch { }
     }
 }
 function Get-ShellProcessesAtInstallPath([string]$InstallPath=$install) {
@@ -297,7 +302,17 @@ try {
         ([string]$_.relativePath) -like 'WebUI/assets/*' -and
         -not $currentOwned.Contains(([string]$_.relativePath).Replace('\','/'))
     } | Select-Object -First 1)
-    if ($staleAsset.Count -ne 1) { throw 'The upgrade regression could not select an obsolete WebUI asset from the published baseline.' }
+    $staleAssetMustBeRemoved = $staleAsset.Count -eq 1
+    if (-not $staleAssetMustBeRemoved) {
+        # A host-only Preview can legitimately rebuild to the same Web asset names.
+        # In that case, corrupt a published baseline asset and require repair to
+        # restore its exact current bytes instead of skipping the regression.
+        $staleAsset = @($previousManifest.entries | Where-Object {
+            ([string]$_.relativePath) -like 'WebUI/assets/*' -and
+            $currentOwned.Contains(([string]$_.relativePath).Replace('\','/'))
+        } | Select-Object -First 1)
+    }
+    if ($staleAsset.Count -ne 1) { throw 'The upgrade regression could not select a WebUI asset from the published baseline.' }
     $staleRelative = ([string]$staleAsset[0].relativePath).Replace('/', '\')
     $stalePath = Join-Path $install $staleRelative
     New-Item -ItemType Directory -Path (Split-Path -Parent $stalePath) -Force | Out-Null
@@ -306,7 +321,7 @@ try {
     Stop-Process -Id $newShell.ProcessId -ErrorAction Stop
     Wait-Until { -not(Get-Process -Id $newShell.ProcessId -ErrorAction SilentlyContinue) } 10 'Preview 2 Shell did not stop before repair validation.'
     if((Invoke-Setup $current (Join-Path $logDirectory 'repair.log') $false)-ne 0){throw 'Preview 2 repair installation without /DIR failed.'}
-    if (Test-Path -LiteralPath $stalePath) { throw "Repair left stale WebUI asset: $staleRelative" }
+    if ($staleAssetMustBeRemoved -and (Test-Path -LiteralPath $stalePath)) { throw "Repair left obsolete WebUI asset: $staleRelative" }
     Assert-WebAssetTree $install "$($metadata.Version) repair"
     # Let WebView2 finish releasing the just-closed upgrade probe profile before
     # asserting the repaired install's first acknowledged Ready handshake.

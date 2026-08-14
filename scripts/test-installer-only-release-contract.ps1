@@ -80,6 +80,8 @@ foreach ($upgradeSynchronizationGuard in @(
     'workspaceActivated',
     'failureCode',
     'Assert-WebAssetTree',
+    'staleAssetMustBeRemoved',
+    '$process.Kill($true)',
     'stale WebUI',
     'StartsWith($testRootPrefix')) {
     if ($upgradeTest -notmatch [regex]::Escape($upgradeSynchronizationGuard)) {
