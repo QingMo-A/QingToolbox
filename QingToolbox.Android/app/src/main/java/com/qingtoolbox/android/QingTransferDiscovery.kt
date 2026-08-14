@@ -6,6 +6,11 @@ import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.ext.SdkExtensions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
@@ -65,6 +70,10 @@ class QingTransferDiscovery(
     private val peers = QingTransferPeerTable()
     private val resolving = ConcurrentHashMap.newKeySet<String>()
     private val resolveListeners = ConcurrentHashMap<String, NsdManager.ResolveListener>()
+    private val probeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val probeJobs = ConcurrentHashMap<String, Job>()
+    private val probeLastAttempt = ConcurrentHashMap<String, Long>()
+    private val probeGate = Any()
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
     private var actualServiceName: String? = null
@@ -74,6 +83,8 @@ class QingTransferDiscovery(
     private var multicastLock: WifiManager.MulticastLock? = null
     private var active = false
     private var localPort = 0
+    @Volatile
+    private var connectedPeerServiceName: String? = null
 
     @Synchronized
     fun start() {
@@ -98,6 +109,9 @@ class QingTransferDiscovery(
         registrationListener?.let { runCatching { nsd?.unregisterService(it) } }
         discoveryListener?.let { runCatching { nsd?.stopServiceDiscovery(it) } }
         stopOutstandingResolutions()
+        probeJobs.values.forEach { it.cancel() }
+        probeJobs.clear()
+        probeLastAttempt.clear()
         registrationListener = null
         discoveryListener = null
         actualServiceName = null
@@ -125,6 +139,10 @@ class QingTransferDiscovery(
 
     /** Remove one failed/stale endpoint without probing or retrying it. */
     fun forgetPeer(serviceName: String) = removePeer(serviceName)
+
+    fun setConnectedPeer(serviceName: String?) {
+        connectedPeerServiceName = serviceName?.let(QingTransferMetadata::canonicalServiceName)
+    }
 
     private fun openEphemeralListener() {
         runCatching {
@@ -280,9 +298,32 @@ class QingTransferDiscovery(
     private fun upsertPeer(peer: QingTransferPeer) {
         val canonical = QingTransferMetadata.canonicalServiceName(peer.serviceName)
         if (isSelf(canonical)) return
-        peers.upsert(peer.copy(serviceName = canonical))
-        onPeersChanged(snapshot())
-        onStateChanged(QingTransferDiscoveryState.READY)
+        val normalized = peer.copy(serviceName = canonical)
+        if (connectedPeerServiceName == canonical) return
+        val endpointKey = QingTransferEndpointProbe.endpointKey(normalized)
+        val now = System.currentTimeMillis()
+        synchronized(probeGate) {
+            val last = probeLastAttempt[endpointKey]
+            if (last != null && now - last < PROBE_INTERVAL_MILLIS) return
+            if (probeJobs.containsKey(endpointKey)) return
+            probeLastAttempt[endpointKey] = now
+            val job = probeScope.launch {
+                try {
+                    val reachable = QingTransferEndpointProbe.confirm(normalized)
+                    if (!active || isSelf(canonical) || connectedPeerServiceName == canonical) return@launch
+                    if (reachable && isCurrentEndpoint(normalized)) {
+                        peers.upsert(normalized)
+                        onPeersChanged(snapshot())
+                        onStateChanged(QingTransferDiscoveryState.READY)
+                    } else if (!reachable) {
+                        removePeerIfCurrent(normalized)
+                    }
+                } finally {
+                    probeJobs.remove(endpointKey)
+                }
+            }
+            probeJobs[endpointKey] = job
+        }
     }
 
     private fun removePeer(serviceName: String) {
@@ -290,9 +331,28 @@ class QingTransferDiscovery(
         onPeersChanged(snapshot())
     }
 
+    private fun isCurrentEndpoint(peer: QingTransferPeer): Boolean {
+        val existing = peers.snapshot().firstOrNull {
+            QingTransferMetadata.canonicalServiceName(it.serviceName) == QingTransferMetadata.canonicalServiceName(peer.serviceName)
+        }
+        return existing == null || QingTransferEndpointProbe.endpointKey(existing) == QingTransferEndpointProbe.endpointKey(peer)
+    }
+
+    private fun removePeerIfCurrent(peer: QingTransferPeer) {
+        val existing = peers.snapshot().firstOrNull {
+            QingTransferMetadata.canonicalServiceName(it.serviceName) == QingTransferMetadata.canonicalServiceName(peer.serviceName)
+        } ?: return
+        if (QingTransferEndpointProbe.endpointKey(existing) != QingTransferEndpointProbe.endpointKey(peer)) return
+        if (peers.remove(QingTransferMetadata.canonicalServiceName(peer.serviceName))) onPeersChanged(snapshot())
+    }
+
     private fun isSelf(serviceName: String): Boolean =
         actualServiceName?.let { QingTransferMetadata.canonicalServiceName(it) == QingTransferMetadata.canonicalServiceName(serviceName) } == true ||
             expectedServiceName?.let { QingTransferMetadata.canonicalServiceName(it) == QingTransferMetadata.canonicalServiceName(serviceName) } == true
+
+    companion object {
+        private const val PROBE_INTERVAL_MILLIS = 10_000L
+    }
 
     @Suppress("NewApi")
     private fun stopOutstandingResolutions() {

@@ -33,6 +33,17 @@ class QingTransferProtocolTest {
     }
 
     @Test
+    fun roundTripsNonceBoundProbeAndRejectsWrongNonce() {
+        val nonce = QingTransferProtocol.createProbeNonce()
+        assertTrue(nonce.length == QingTransferProtocol.PROBE_NONCE_LENGTH)
+        assertTrue(QingTransferProtocol.decode(QingTransferProtocol.encode(QingTransferMessage.Probe(nonce))) == QingTransferMessage.Probe(nonce))
+        assertTrue(QingTransferProtocol.decode(QingTransferProtocol.encode(QingTransferMessage.ProbeAck(nonce))) == QingTransferMessage.ProbeAck(nonce))
+        val malformed = "{\"type\":\"probe_ack\",\"v\":1,\"nonce\":\"${"A".repeat(QingTransferProtocol.PROBE_NONCE_LENGTH)}\"}".toByteArray()
+        val frame = ByteBuffer.allocate(4 + malformed.size).order(ByteOrder.BIG_ENDIAN).putInt(malformed.size).put(malformed).array()
+        assertNull(QingTransferProtocol.decode(frame))
+    }
+
+    @Test
     fun roundTripsFileTransferMessagesAndRejectsUnsafeOffers() {
         val offer = QingTransferMessage.FileOffer("报告.txt", 42)
         assertTrue(QingTransferProtocol.decode(QingTransferProtocol.encode(offer)) == offer)

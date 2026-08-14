@@ -95,8 +95,11 @@ internal class QingTransferConnection(
                 socket = client
                 withTimeout(5_000) {
                     QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.Hello("android", friendlyName))
-                    when (QingTransferProtocol.read(client.getInputStream())) {
-                        QingTransferMessage.Accept -> _state.value = QingTransferConnectionState.CONNECTED
+                        when (QingTransferProtocol.read(client.getInputStream())) {
+                        QingTransferMessage.Accept -> {
+                            _state.value = QingTransferConnectionState.CONNECTED
+                            discovery.setConnectedPeer(peer.serviceName)
+                        }
                         QingTransferMessage.Reject -> throw PeerRejectedException()
                         else -> throw ProtocolException()
                     }
@@ -231,13 +234,24 @@ internal class QingTransferConnection(
     }
 
     private suspend fun handleIncoming(client: Socket) {
-        if (_state.value != QingTransferConnectionState.IDLE) {
-            runCatching { QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.Reject) }
-            client.close(); return
-        }
-        socket = client
         try {
-            val hello = withTimeout(5_000) { QingTransferProtocol.read(client.getInputStream()) }
+            // Read the bounded first frame before touching connection state. A
+            // discovery probe must be acknowledged silently, even when a real
+            // session is already connected or awaiting approval.
+            client.soTimeout = 5_000
+            val first = withTimeout(5_000) { QingTransferProtocol.read(client.getInputStream()) }
+            if (first is QingTransferMessage.Probe) {
+                QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.ProbeAck(first.nonce))
+                client.close()
+                return
+            }
+            if (_state.value != QingTransferConnectionState.IDLE) {
+                runCatching { QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.Reject) }
+                client.close(); return
+            }
+            socket = client
+            client.soTimeout = 0
+            val hello = first
             if (hello !is QingTransferMessage.Hello) throw ProtocolException()
             incomingName = hello.name
             _incomingPeer.value = QingTransferPeer("incoming", hello.name, hello.platform, "1", listOf("file"), emptyList(), 0)
@@ -340,6 +354,7 @@ internal class QingTransferConnection(
         outgoingDecision?.cancel(); outgoingDecision = null; resultDecision?.cancel(); resultDecision = null
         outgoingRawComplete?.cancel(); outgoingRawComplete = null
         _incomingOffer.value = null; _incomingPeer.value = null; _progress.value = null
+        discovery.setConnectedPeer(null)
         _state.value = QingTransferConnectionState.IDLE
     }
 

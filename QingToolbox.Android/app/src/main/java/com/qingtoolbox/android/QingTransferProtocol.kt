@@ -5,9 +5,12 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.security.SecureRandom
 
 internal sealed interface QingTransferMessage {
     data class Hello(val platform: String, val name: String) : QingTransferMessage
+    data class Probe(val nonce: String) : QingTransferMessage
+    data class ProbeAck(val nonce: String) : QingTransferMessage
     data object Accept : QingTransferMessage
     data object Reject : QingTransferMessage
     data class FileOffer(val name: String, val size: Long) : QingTransferMessage
@@ -19,6 +22,7 @@ internal sealed interface QingTransferMessage {
 
 internal object QingTransferProtocol {
     const val MAX_FRAME_BYTES = 4096
+    const val PROBE_NONCE_LENGTH = 32
     private const val MAX_FIELD_LENGTH = 128
 
     fun encode(message: QingTransferMessage): ByteArray {
@@ -26,6 +30,14 @@ internal object QingTransferProtocol {
             is QingTransferMessage.Hello -> {
                 require(message.platform in setOf("windows", "android") && safe(message.platform) && safe(message.name))
                 "{\"type\":\"hello\",\"v\":1,\"pf\":\"${message.platform}\",\"name\":\"${message.name}\"}"
+            }
+            is QingTransferMessage.Probe -> {
+                require(safeProbeNonce(message.nonce))
+                "{\"type\":\"probe\",\"v\":1,\"nonce\":\"${message.nonce}\"}"
+            }
+            is QingTransferMessage.ProbeAck -> {
+                require(safeProbeNonce(message.nonce))
+                "{\"type\":\"probe_ack\",\"v\":1,\"nonce\":\"${message.nonce}\"}"
             }
             QingTransferMessage.Accept -> "{\"type\":\"accept\",\"v\":1}"
             QingTransferMessage.Reject -> "{\"type\":\"reject\",\"v\":1}"
@@ -73,6 +85,12 @@ internal object QingTransferProtocol {
         return when (type) {
             "accept" -> if (fields.size == 2) QingTransferMessage.Accept else null
             "reject" -> if (fields.size == 2) QingTransferMessage.Reject else null
+            "probe", "probe_ack" -> {
+                if (fields.size != 3) return null
+                val nonce = fields["nonce"]?.takeIf { it.isString }?.value ?: return null
+                if (!safeProbeNonce(nonce)) return null
+                if (type == "probe") QingTransferMessage.Probe(nonce) else QingTransferMessage.ProbeAck(nonce)
+            }
             "file_accept" -> if (fields.size == 2) QingTransferMessage.FileAccept else null
             "file_reject" -> if (fields.size == 2) QingTransferMessage.FileReject else null
             "hello" -> {
@@ -102,6 +120,15 @@ internal object QingTransferProtocol {
     }
 
     private fun safe(value: String): Boolean = value.isNotEmpty() && value.length <= MAX_FIELD_LENGTH && value.none { it.isISOControl() || it == '"' || it == '\\' }
+
+    private fun safeProbeNonce(value: String): Boolean =
+        value.length == PROBE_NONCE_LENGTH && value.all { it in '0'..'9' || it in 'a'..'f' }
+
+    fun createProbeNonce(): String {
+        val bytes = ByteArray(PROBE_NONCE_LENGTH / 2)
+        SecureRandom().nextBytes(bytes)
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
 
     private fun safeFileName(value: String): Boolean =
         value.isNotEmpty() && value.length <= 255 && value != "." && value != ".." &&
