@@ -200,10 +200,10 @@ try {
             -Tag "v0.2.5-alpha" -InstallerPath $PreviousInstallerPath -OutputDirectory $previousDirectory
     }
     if ($null -eq $previous -or -not (Test-Path -LiteralPath $previous.InstallerPath -PathType Leaf)) {
-        throw "0.2.6-alpha RC is blocked: verified v0.2.5-alpha installer is unavailable."
+        throw "0.2.7-alpha RC is blocked: verified v0.2.5-alpha installer is unavailable."
     }
 
-    Write-Host "`n==> Test v0.2.5-alpha to 0.2.6-alpha upgrade"
+    Write-Host "`n==> Test v0.2.5-alpha to 0.2.7-alpha upgrade"
     Invoke-CheckedStage -StageName "Preview in-place upgrade" -Action {
         & (Join-Path $PSScriptRoot "test-preview-upgrade.ps1") `
             -PreviousInstallerPath $previous.InstallerPath `

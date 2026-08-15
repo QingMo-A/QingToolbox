@@ -12,9 +12,9 @@ if ($sourceAssertion -notmatch [regex]::Escape("`$branchOutput = @(Invoke-Source
     $sourceAssertion -notmatch [regex]::Escape("(`$branchOutput -join '')")) {
     throw 'Preview source validation must safely accept an allowed detached tag checkout.'
 }
-$expectedVersion = '0.2.6-alpha'
-if ($metadata.Version -ne $expectedVersion -or $metadata.FileVersion -ne '0.2.6.0') {
-    throw "Unexpected 0.2.6 candidate metadata: $($metadata.Version) / $($metadata.FileVersion)"
+$expectedVersion = '0.2.7-alpha'
+if ($metadata.Version -ne $expectedVersion -or $metadata.FileVersion -ne '0.2.7.0') {
+    throw "Unexpected 0.2.7 candidate metadata: $($metadata.Version) / $($metadata.FileVersion)"
 }
 $expectedInstaller = "QingToolbox-$($metadata.Version)-win-x64-setup.exe"
 if ($metadata.InstallerFileName -ne $expectedInstaller) {
@@ -144,7 +144,7 @@ foreach ($hostOnlyGuard in @(
     }
 }
 
-$releaseNotes = Get-Content -LiteralPath (Join-Path $repoRoot 'docs\releases\0.2.6-alpha.md') -Raw -Encoding UTF8
+$releaseNotes = Get-Content -LiteralPath (Join-Path $repoRoot 'docs\releases\0.2.7-alpha.md') -Raw -Encoding UTF8
 $chineseIndependentDelivery = [Text.Encoding]::UTF8.GetString(
     [Convert]::FromBase64String('5LiN6ZqP5a6/5Li75a6J6KOF5Zmo5oiW5a6/5Li7IFJlbGVhc2Ug5o2G57uR'))
 $chineseUnpublished = [Text.Encoding]::UTF8.GetString(
