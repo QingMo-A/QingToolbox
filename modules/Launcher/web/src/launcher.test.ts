@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LAUNCHER_MAX_ROWS, alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, recentColumnCapacity, recentItems, reorderIds, searchLauncherItems, shortcutFromKeyboard, targetPointerGesture, visibleRecentItems } from './launcher'
+import { LAUNCHER_MAX_ROWS, alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, reorderIds, reorderVisibleIds, searchLauncherItems, shortcutFromKeyboard, targetPointerGesture, visibleRecentItems } from './launcher'
 
 const item = (id: string, name: string, lastLaunchedAt: string | null = null) => ({ id, name, iconKey: null, lastLaunchedAt })
 
@@ -23,7 +23,10 @@ describe('pointer reorder gestures', () => {
   it('only starts after the movement threshold', () => {
     const gesture = beginPointerGesture(7, 'a', 10, 10, ['a', 'b', 'c'])
     expect(movePointerGesture(gesture, 14, 14).active).toBe(false)
-    expect(movePointerGesture(gesture, 18, 10).active).toBe(true)
+    const active = movePointerGesture(gesture, 18, 10)
+    expect(active.active).toBe(true)
+    expect(pointerPreview(gesture, 18, 10)).toBeNull()
+    expect(pointerPreview(active, 31, 42)).toEqual({ itemId: 'a', x: 31, y: 42 })
   })
   it('guards custom mode and controls', () => {
     expect(canStartPointerGesture('custom', 0, false)).toBe(true)
@@ -37,6 +40,10 @@ describe('pointer reorder gestures', () => {
     expect(moved.ids).toEqual(['b', 'a', 'c'])
     expect(targetPointerGesture(moved.gesture, moved.ids, 'c').ids).toEqual(moved.ids)
     expect(completePointerGesture(moved.gesture, moved.ids)).toMatchObject({ dragged: true, persist: true, ids: ['b', 'a', 'c'] })
+  })
+  it('reorders a filtered projection without moving hidden items', () => {
+    expect(reorderVisibleIds(['a', 'hidden', 'b', 'c'], ['a', 'b', 'c'], 'c', 'a')).toEqual(['c', 'hidden', 'a', 'b'])
+    expect(reorderVisibleIds(['a', 'hidden', 'b', 'c'], ['a', 'b', 'c'], 'b', 'b')).toEqual(['a', 'hidden', 'b', 'c'])
   })
   it('cancels back to the original order without persistence', () => {
     const started = movePointerGesture(beginPointerGesture(1, 'a', 0, 0, ['a', 'b', 'c']), 12, 0)

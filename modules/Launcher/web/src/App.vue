@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { invoke, onDropResult, onPresentationChanged, onStateChanged, waitForPresentation } from './bridge'
-import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, recentColumnCapacity, recentItems, searchLauncherItems, targetPointerGesture, shortcutFromKeyboard, visibleRecentItems } from './launcher'
+import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, searchLauncherItems, targetPointerGesture, shortcutFromKeyboard, visibleRecentItems } from './launcher'
 import type { PointerGesture } from './launcher'
 import type { DropResult, Item, Presentation, State } from './types'
 
@@ -18,6 +18,7 @@ const view = ref<'main' | 'settings'>('main')
 const busy = ref(false)
 const recording = ref(false)
 const draggingId = ref<string | null>(null)
+const dragPreview = ref<{ itemId: string; x: number; y: number } | null>(null)
 const pointerOverId = ref<string | null>(null)
 const pointerGesture = ref<PointerGesture | null>(null)
 let endingPointerId: number | undefined
@@ -33,6 +34,7 @@ const t = (key: string, fallbackText = key) => resources.value[key] ?? fallbackT
 const sortedItems = computed(() => state.sortMode === 'alphabetical' ? alphabeticalItems(state.items) : state.items)
 const visibleItems = computed(() => searchLauncherItems(sortedItems.value, searchQuery.value))
 const recent = computed(() => visibleRecentItems(recentItems(state.recent.length ? state.recent : state.items), recentCapacity.value, searchQuery.value))
+const dragPreviewItem = computed(() => dragPreview.value ? state.items.find(item => item.id === dragPreview.value?.itemId) ?? null : null)
 
 function apply(next: State) {
   state.sortMode = next.sortMode
@@ -114,7 +116,8 @@ function itemFromPoint(x: number, y: number) {
 function beginPointer(item: Item, event: PointerEvent) {
   if (!canStartPointerGesture(state.sortMode, event.button, Boolean((event.target as Element | null)?.closest('button,[data-no-drag]')))) return
   const tile = event.currentTarget as HTMLElement
-  pointerGesture.value = beginPointerGesture(event.pointerId, item.id, event.clientX, event.clientY, state.items.map(value => value.id))
+  pointerGesture.value = beginPointerGesture(event.pointerId, item.id, event.clientX, event.clientY, state.items.map(value => value.id), visibleItems.value.map(value => value.id))
+  dragPreview.value = null
   pointerOverId.value = null
   try { tile.setPointerCapture(event.pointerId) } catch { /* capture is best effort on older WebViews */ }
 }
@@ -130,8 +133,10 @@ function movePointer(event: PointerEvent) {
   if (!current.active) {
     event.preventDefault()
     draggingId.value = moved.movingId
+    dragPreview.value = pointerPreview(moved, event.clientX, event.clientY)
     markDragClickSuppressed()
   }
+  if (moved.active) dragPreview.value = pointerPreview(moved, event.clientX, event.clientY)
   const overId = itemFromPoint(event.clientX, event.clientY)
   const result = targetPointerGesture(moved, state.items.map(item => item.id), overId)
   pointerGesture.value = result.gesture
@@ -160,8 +165,21 @@ function endPointer(event: PointerEvent, canceled = false) {
   if (current.active || canceled) markDragClickSuppressed()
   pointerGesture.value = null
   draggingId.value = null
+  dragPreview.value = null
   pointerOverId.value = null
   endingPointerId = undefined
+}
+
+function cancelCurrentPointer() {
+  const current = pointerGesture.value
+  if (!current) return false
+  state.items = current.originIds.map(id => state.items.find(item => item.id === id)).filter((item): item is Item => Boolean(item))
+  pointerGesture.value = null
+  draggingId.value = null
+  dragPreview.value = null
+  pointerOverId.value = null
+  markDragClickSuppressed()
+  return true
 }
 
 function handleDropResult(result: DropResult) {
@@ -179,7 +197,10 @@ function onKeyDown(event: KeyboardEvent) {
     if (!hotkey) return
     event.preventDefault(); recording.value = false; void run('setHotkey', hotkey); return
   }
-  if (event.key === 'Escape') hideLauncher()
+  if (event.key === 'Escape') {
+    if (cancelCurrentPointer()) { event.preventDefault(); return }
+    hideLauncher()
+  }
 }
 
 onMounted(() => {
@@ -219,13 +240,13 @@ onMounted(() => {
           <button v-if="searchQuery" class="search-clear" type="button" :aria-label="t('search.clear', 'Clear search')" @click="clearSearch">&#215;</button>
         </div>
         <section class="drop-area">
-          <div v-if="visibleItems.length" class="launcher-grid">
+          <TransitionGroup v-if="visibleItems.length" name="launcher-grid" tag="div" class="launcher-grid">
             <article v-for="item in visibleItems" :key="item.id" class="app-tile" :class="{ dragging: draggingId === item.id, 'drag-over': pointerOverId === item.id && draggingId !== item.id }" :data-launcher-item-id="item.id" :draggable="false" tabindex="0" @pointerdown="beginPointer(item, $event)" @pointermove="movePointer($event)" @pointerup="endPointer($event)" @pointercancel="endPointer($event, true)" @lostpointercapture="endPointer($event, true)" @click="activate(item)" @keydown.enter="launch(item)">
               <div class="app-icon"><img v-if="iconFor(item)" :src="iconFor(item)" :alt="item.name" /><span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span></div>
               <div class="app-name" :title="item.name">{{ item.name }}</div>
               <button class="remove-button" data-no-drag :aria-label="`${t('actions.remove', 'Remove')} ${item.name}`" @pointerdown.stop @click.stop="remove(item)">&#215;</button>
             </article>
-          </div>
+          </TransitionGroup>
           <div v-else class="empty-drop"><div class="empty-grid">{{ searchQuery ? '?' : '+' }}</div><strong>{{ searchQuery ? t('search.noResults', 'No matching apps') : t('view.overlayEmpty', 'Drag an app or shortcut here') }}</strong></div>
         </section>
         <section ref="recentContainer" class="recent-section">
@@ -233,6 +254,10 @@ onMounted(() => {
           <div v-if="recent.length" class="recent-row"><button v-for="item in recent" :key="item.id" class="recent-tile" @click="launch(item)"><span class="recent-icon"><img v-if="iconFor(item)" :src="iconFor(item)" :alt="item.name" /><span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span></span><span class="recent-name">{{ item.name }}</span></button></div>
           <p v-else class="muted">{{ searchQuery ? t('search.noResults', 'No matching apps') : t('view.noRecent', 'Nothing launched yet.') }}</p>
         </section>
+        <div v-if="dragPreview && dragPreviewItem" class="drag-preview" :style="{ left: `${dragPreview.x}px`, top: `${dragPreview.y}px` }" aria-hidden="true">
+          <img v-if="iconFor(dragPreviewItem)" :src="iconFor(dragPreviewItem)" alt="" />
+          <span v-else>{{ dragPreviewItem.name.slice(0, 1).toUpperCase() }}</span>
+        </div>
         <div v-if="notice" class="notice" role="status"><span>{{ notice }}</span><button :aria-label="t('actions.close', 'Close')" @click="notice = ''">&#215;</button></div>
       </template>
       <template v-else>

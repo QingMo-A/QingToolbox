@@ -33,11 +33,14 @@ export type PointerGesture = {
   pointerId: number
   movingId: string
   originIds: string[]
+  scopeIds: string[]
   startX: number
   startY: number
   active: boolean
   overId: string | null
 }
+
+export type PointerPreview = { itemId: string; x: number; y: number }
 
 export function beginPointerGesture(
   pointerId: number,
@@ -45,11 +48,13 @@ export function beginPointerGesture(
   startX: number,
   startY: number,
   ids: readonly string[],
+  scopeIds: readonly string[] = ids,
 ): PointerGesture {
   return {
     pointerId,
     movingId,
     originIds: [...ids],
+    scopeIds: [...scopeIds],
     startX,
     startY,
     active: false,
@@ -69,6 +74,10 @@ export function movePointerGesture(
   return Math.hypot(dx, dy) >= threshold ? { ...gesture, active: true } : gesture
 }
 
+export function pointerPreview(gesture: PointerGesture, x: number, y: number): PointerPreview | null {
+  return gesture.active ? { itemId: gesture.movingId, x, y } : null
+}
+
 export function targetPointerGesture(
   gesture: PointerGesture,
   ids: readonly string[],
@@ -79,7 +88,7 @@ export function targetPointerGesture(
   }
   return {
     gesture: { ...gesture, overId },
-    ids: reorderIds(ids, gesture.movingId, overId),
+    ids: reorderVisibleIds(ids, gesture.scopeIds, gesture.movingId, overId),
   }
 }
 
@@ -98,6 +107,22 @@ export function reorderIds(ids: readonly string[], movingId: string, overId: str
   if (from < 0 || to < 0 || from === to) return next
   next.splice(from, 1)
   next.splice(from < to ? to - 1 : to, 0, movingId)
+  return next
+}
+
+/** Reorders only the currently visible projection while preserving filtered items in place. */
+export function reorderVisibleIds(
+  ids: readonly string[],
+  visibleIds: readonly string[],
+  movingId: string,
+  overId: string,
+): string[] {
+  const visible = visibleIds.filter(id => ids.includes(id))
+  const reordered = reorderIds(visible, movingId, overId)
+  if (reordered.join('\u0000') === visible.join('\u0000')) return [...ids]
+  const next = [...ids]
+  const positions = visible.map(id => next.indexOf(id)).filter(index => index >= 0)
+  positions.forEach((position, index) => { next[position] = reordered[index] })
   return next
 }
 
