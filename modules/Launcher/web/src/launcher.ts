@@ -1,6 +1,29 @@
 import type { Hotkey, Item } from './types'
 
 export const POINTER_DRAG_THRESHOLD = 8
+export const LAUNCHER_MAX_ROWS = 3
+export const LAUNCHER_TILE_MIN_WIDTH = 112
+export const RECENT_TILE_MIN_WIDTH = 140
+export const RECENT_TILE_GAP = 8
+
+export function normalizeSearchQuery(query: string) {
+  return query.trim().normalize('NFKC').toLocaleLowerCase()
+}
+
+export function searchLauncherItems(items: readonly Item[], query: string): Item[] {
+  const normalized = normalizeSearchQuery(query)
+  if (!normalized) return [...items]
+  return items.filter(item => normalizeSearchQuery(item.name).includes(normalized))
+}
+
+export function recentColumnCapacity(width: number, minWidth = RECENT_TILE_MIN_WIDTH, gap = RECENT_TILE_GAP) {
+  if (!Number.isFinite(width) || width <= 0) return 1
+  return Math.max(1, Math.floor((width + gap) / (minWidth + gap)))
+}
+
+export function visibleRecentItems(items: readonly Item[], capacity: number, query = '') {
+  return searchLauncherItems(items, query).slice(0, Math.max(0, Math.floor(capacity)))
+}
 
 export function canStartPointerGesture(sortMode: 'custom' | 'alphabetical', button: number, onControl: boolean) {
   return sortMode === 'custom' && button === 0 && !onControl

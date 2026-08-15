@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { invoke, onDropResult, onPresentationChanged, onStateChanged, waitForPresentation } from './bridge'
-import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, recentItems, targetPointerGesture, shortcutFromKeyboard } from './launcher'
+import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, recentColumnCapacity, recentItems, searchLauncherItems, targetPointerGesture, shortcutFromKeyboard, visibleRecentItems } from './launcher'
 import type { PointerGesture } from './launcher'
 import type { DropResult, Item, Presentation, State } from './types'
 
@@ -24,10 +24,15 @@ let endingPointerId: number | undefined
 const suppressClick = ref(false)
 let suppressClickTimer: number | undefined
 const notice = ref('')
+const searchQuery = ref('')
+const recentContainer = ref<HTMLElement | null>(null)
+const recentCapacity = ref(1)
+let recentResizeObserver: ResizeObserver | undefined
 const locale = computed(() => presentation.languageCode === 'zh-CN' ? 'zh-CN' : 'en-US')
 const t = (key: string, fallbackText = key) => resources.value[key] ?? fallbackText
-const visibleItems = computed(() => state.sortMode === 'alphabetical' ? alphabeticalItems(state.items) : state.items)
-const recent = computed(() => recentItems(state.recent.length ? state.recent : state.items))
+const sortedItems = computed(() => state.sortMode === 'alphabetical' ? alphabeticalItems(state.items) : state.items)
+const visibleItems = computed(() => searchLauncherItems(sortedItems.value, searchQuery.value))
+const recent = computed(() => visibleRecentItems(recentItems(state.recent.length ? state.recent : state.items), recentCapacity.value, searchQuery.value))
 
 function apply(next: State) {
   state.sortMode = next.sortMode
@@ -76,6 +81,10 @@ async function loadIcons(items: readonly Item[]) {
 function iconFor(item: Item) { return icons[item.id] ?? '' }
 function hideLauncher() { void run('hideWindow') }
 function switchSort(mode: 'custom' | 'alphabetical') { if (state.sortMode !== mode) void run('setSortMode', { mode }) }
+function clearSearch() { searchQuery.value = '' }
+function measureRecentCapacity() {
+  recentCapacity.value = recentColumnCapacity(recentContainer.value?.clientWidth ?? 0)
+}
 function remove(item: Item) { void run('removeItem', { id: item.id }) }
 function launch(item: Item) { void run('launchItem', { id: item.id }) }
 function markDragClickSuppressed() {
@@ -178,10 +187,14 @@ onMounted(() => {
   const offDrop = onDropResult(handleDropResult)
   const offPresentation = onPresentationChanged(next => { Object.assign(presentation, next); void loadResources() })
   window.addEventListener('keydown', onKeyDown)
+  recentResizeObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measureRecentCapacity)
+  if (recentContainer.value) recentResizeObserver?.observe(recentContainer.value)
+  measureRecentCapacity()
   void initialLoad()
   onUnmounted(() => {
     offState(); offDrop(); offPresentation(); window.removeEventListener('keydown', onKeyDown)
     if (suppressClickTimer !== undefined) window.clearTimeout(suppressClickTimer)
+    recentResizeObserver?.disconnect()
   })
 })
 </script>
@@ -200,6 +213,11 @@ onMounted(() => {
             <button class="icon-button" :aria-label="t('actions.settings', 'Settings')" :title="t('actions.settings', 'Settings')" @click="view = 'settings'">&#9881;</button>
           </div>
         </header>
+        <div class="search-row">
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input v-model="searchQuery" class="search-input" type="search" :placeholder="t('search.placeholder', 'Search apps')" :aria-label="t('search.placeholder', 'Search apps')" @keydown.escape.stop.prevent="clearSearch" />
+          <button v-if="searchQuery" class="search-clear" type="button" :aria-label="t('search.clear', 'Clear search')" @click="clearSearch">&#215;</button>
+        </div>
         <section class="drop-area">
           <div v-if="visibleItems.length" class="launcher-grid">
             <article v-for="item in visibleItems" :key="item.id" class="app-tile" :class="{ dragging: draggingId === item.id, 'drag-over': pointerOverId === item.id && draggingId !== item.id }" :data-launcher-item-id="item.id" :draggable="false" tabindex="0" @pointerdown="beginPointer(item, $event)" @pointermove="movePointer($event)" @pointerup="endPointer($event)" @pointercancel="endPointer($event, true)" @lostpointercapture="endPointer($event, true)" @click="activate(item)" @keydown.enter="launch(item)">
@@ -208,12 +226,12 @@ onMounted(() => {
               <button class="remove-button" data-no-drag :aria-label="`${t('actions.remove', 'Remove')} ${item.name}`" @pointerdown.stop @click.stop="remove(item)">&#215;</button>
             </article>
           </div>
-          <div v-else class="empty-drop"><div class="empty-grid">&#43;</div><strong>{{ t('view.overlayEmpty', 'Drag an app or shortcut here') }}</strong></div>
+          <div v-else class="empty-drop"><div class="empty-grid">{{ searchQuery ? '?' : '+' }}</div><strong>{{ searchQuery ? t('search.noResults', 'No matching apps') : t('view.overlayEmpty', 'Drag an app or shortcut here') }}</strong></div>
         </section>
-        <section class="recent-section">
+        <section ref="recentContainer" class="recent-section">
           <div class="section-heading"><span class="section-label">{{ t('view.recent', 'Recently used') }}</span></div>
-          <div v-if="recent.length" class="recent-row"><button v-for="item in recent" :key="item.id" class="recent-tile" @click="launch(item)"><span class="recent-icon"><img v-if="iconFor(item)" :src="iconFor(item)" :alt="item.name" /><span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span></span><span>{{ item.name }}</span></button></div>
-          <p v-else class="muted">{{ t('view.noRecent', 'Nothing launched yet.') }}</p>
+          <div v-if="recent.length" class="recent-row"><button v-for="item in recent" :key="item.id" class="recent-tile" @click="launch(item)"><span class="recent-icon"><img v-if="iconFor(item)" :src="iconFor(item)" :alt="item.name" /><span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span></span><span class="recent-name">{{ item.name }}</span></button></div>
+          <p v-else class="muted">{{ searchQuery ? t('search.noResults', 'No matching apps') : t('view.noRecent', 'Nothing launched yet.') }}</p>
         </section>
         <div v-if="notice" class="notice" role="status"><span>{{ notice }}</span><button :aria-label="t('actions.close', 'Close')" @click="notice = ''">&#215;</button></div>
       </template>

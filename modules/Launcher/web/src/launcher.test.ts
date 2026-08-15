@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, recentItems, reorderIds, shortcutFromKeyboard, targetPointerGesture } from './launcher'
+import { LAUNCHER_MAX_ROWS, alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, recentColumnCapacity, recentItems, reorderIds, searchLauncherItems, shortcutFromKeyboard, targetPointerGesture, visibleRecentItems } from './launcher'
 
 const item = (id: string, name: string, lastLaunchedAt: string | null = null) => ({ id, name, iconKey: null, lastLaunchedAt })
 
@@ -42,6 +42,23 @@ describe('pointer reorder gestures', () => {
     const started = movePointerGesture(beginPointerGesture(1, 'a', 0, 0, ['a', 'b', 'c']), 12, 0)
     const canceled = cancelPointerGesture(started)
     expect(canceled).toEqual({ dragged: true, ids: ['a', 'b', 'c'] })
+  })
+})
+
+describe('launcher search and layout projections', () => {
+  it('searches names case-insensitively without exposing targets', () => {
+    const values = [item('a', 'Visual Studio Code'), item('b', 'OBS Studio')]
+    expect(searchLauncherItems(values, '  visual studio  ').map(value => value.id)).toEqual(['a'])
+    expect(searchLauncherItems(values, '').map(value => value.id)).toEqual(['a', 'b'])
+  })
+  it('limits recent items to the measured one-line capacity', () => {
+    const values = [item('a', 'A', '2025-01-03T00:00:00Z'), item('b', 'B', '2025-01-02T00:00:00Z'), item('c', 'C', '2025-01-01T00:00:00Z')]
+    expect(recentColumnCapacity(452)).toBe(3)
+    expect(visibleRecentItems(values, 2).map(value => value.id)).toEqual(['a', 'b'])
+    expect(visibleRecentItems(values, 3, 'c').map(value => value.id)).toEqual(['c'])
+  })
+  it('uses a bounded three-row launcher grid contract', () => {
+    expect(LAUNCHER_MAX_ROWS).toBe(3)
   })
 })
 

@@ -9,6 +9,12 @@
   --accent: #1f83c9;
   --accent-strong: #0c5f9f;
   --shadow: 0 22px 58px rgba(29, 67, 111, .18);
+  --launcher-max-rows: 3;
+  --launcher-row-height: 132px;
+  --launcher-row-gap: 10px;
+  --launcher-grid-max-height: 416px;
+  --recent-tile-width: 140px;
+  --recent-tile-gap: 8px;
 }
 :root[data-appearance-preset="neon-circuit"] {
   color-scheme: dark;
@@ -64,7 +70,7 @@ button { border: 0; color: inherit; cursor: pointer; font: inherit; }
 button:focus-visible, [tabindex]:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 3px; }
 
 .launcher-viewport { align-items: center; background: transparent; display: flex; justify-content: center; min-height: 100vh; padding: 20px; position: relative; }
-.launcher-panel { animation: panel-in 170ms ease both; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 28px; box-shadow: var(--shadow); display: flex; flex-direction: column; max-height: calc(100vh - 40px); max-width: 940px; min-height: 520px; overflow: auto; padding: clamp(22px, 3vw, 30px); position: relative; width: min(940px, 100%); }
+.launcher-panel { animation: panel-in 170ms ease both; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 28px; box-shadow: var(--shadow); display: flex; flex-direction: column; max-height: calc(100vh - 40px); max-width: 940px; min-height: 520px; overflow: hidden; padding: clamp(22px, 3vw, 30px); position: relative; width: min(940px, 100%); }
 .panel-header, .settings-header { align-items: center; display: flex; gap: 18px; justify-content: space-between; }
 .brand { align-items: center; display: flex; gap: 11px; min-width: 0; }
 .brand-mark { align-items: center; background: var(--accent); border-radius: 11px; color: #fff; display: inline-flex; flex: 0 0 32px; font-size: 16px; font-weight: 800; height: 32px; justify-content: center; }
@@ -76,8 +82,14 @@ button:focus-visible, [tabindex]:focus-visible { outline: 3px solid color-mix(in
 .segmented button.active { background: var(--tile-hover); color: var(--text); font-weight: 650; }
 .icon-button { align-items: center; background: transparent; border: 1px solid var(--panel-border); border-radius: 10px; display: inline-flex; font-size: 18px; height: 36px; justify-content: center; width: 36px; }
 .icon-button:hover { background: var(--tile-hover); }
+.search-row { align-items: center; background: color-mix(in srgb, var(--tile) 85%, transparent); border: 1px solid var(--panel-border); border-radius: 13px; display: flex; gap: 8px; margin-top: 19px; min-height: 42px; padding: 0 10px; }
+.search-icon { color: var(--muted); font-size: 22px; line-height: 1; }
+.search-input { background: transparent; border: 0; color: var(--text); flex: 1; font: inherit; min-width: 0; outline: 0; padding: 10px 0; }
+.search-input::placeholder { color: var(--muted); }
+.search-clear { background: transparent; border-radius: 7px; color: var(--muted); font-size: 18px; height: 26px; line-height: 1; width: 26px; }
+.search-clear:hover { background: var(--tile-hover); color: var(--text); }
 
-.drop-area { display: flex; flex: 1; flex-direction: column; min-height: 270px; padding-top: 23px; }
+.drop-area { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; padding-top: 18px; }
 .launcher-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
 .app-tile { -webkit-user-drag: none; align-items: center; background: transparent; border: 1px solid transparent; border-radius: 17px; cursor: grab; display: flex; flex-direction: column; min-height: 132px; padding: 13px 9px 10px; position: relative; touch-action: none; user-select: none; transition: background .17s ease, border-color .17s ease, transform .17s ease; }
 .app-tile:hover { background: var(--tile-hover); border-color: var(--panel-border); transform: translateY(-2px); }
@@ -92,15 +104,17 @@ button:focus-visible, [tabindex]:focus-visible { outline: 3px solid color-mix(in
 .empty-drop { align-items: center; color: var(--muted); display: flex; flex: 1; flex-direction: column; gap: 9px; justify-content: center; min-height: 240px; text-align: center; }
 .empty-drop strong { color: var(--text); font-size: 16px; font-weight: 650; }
 .empty-grid { align-items: center; border: 1px dashed var(--accent); border-radius: 18px; color: var(--accent); display: flex; font-size: 36px; height: 68px; justify-content: center; width: 68px; }
+.launcher-grid { max-height: var(--launcher-grid-max-height); overflow-y: auto; overscroll-behavior: contain; padding: 0 4px 4px 0; scrollbar-color: color-mix(in srgb, var(--accent) 55%, transparent) transparent; scrollbar-width: thin; }
 
 .recent-section { border-top: 1px solid var(--panel-border); margin-top: 18px; padding-top: 18px; }
 .section-heading { align-items: baseline; display: flex; gap: 12px; justify-content: space-between; }
 .section-label { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
-.recent-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.recent-tile { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 10px; display: flex; gap: 8px; padding: 6px 9px 6px 6px; }
+.recent-row { display: flex; flex-wrap: nowrap; gap: var(--recent-tile-gap); margin-top: 10px; min-height: 38px; overflow: hidden; }
+.recent-tile { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 10px; display: flex; flex: 0 0 var(--recent-tile-width); gap: 8px; min-width: 0; overflow: hidden; padding: 6px 9px 6px 6px; }
 .recent-tile:hover { background: var(--tile-hover); border-color: var(--panel-border); }
 .recent-icon { align-items: center; background: var(--accent); border-radius: 7px; color: #fff; display: inline-flex; font-size: 12px; font-weight: 700; height: 24px; justify-content: center; overflow: hidden; width: 24px; }
 .recent-icon img { height: 100%; object-fit: contain; width: 100%; }
+.recent-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .muted { color: var(--muted); margin: 10px 0 0; }
 
 .settings-view { display: flex; flex: 1; flex-direction: column; min-height: 360px; }
