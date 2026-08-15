@@ -1,5 +1,73 @@
 import type { Hotkey, Item } from './types'
 
+export const POINTER_DRAG_THRESHOLD = 8
+
+export function canStartPointerGesture(sortMode: 'custom' | 'alphabetical', button: number, onControl: boolean) {
+  return sortMode === 'custom' && button === 0 && !onControl
+}
+
+export type PointerGesture = {
+  pointerId: number
+  movingId: string
+  originIds: string[]
+  startX: number
+  startY: number
+  active: boolean
+  overId: string | null
+}
+
+export function beginPointerGesture(
+  pointerId: number,
+  movingId: string,
+  startX: number,
+  startY: number,
+  ids: readonly string[],
+): PointerGesture {
+  return {
+    pointerId,
+    movingId,
+    originIds: [...ids],
+    startX,
+    startY,
+    active: false,
+    overId: null,
+  }
+}
+
+export function movePointerGesture(
+  gesture: PointerGesture,
+  x: number,
+  y: number,
+  threshold = POINTER_DRAG_THRESHOLD,
+): PointerGesture {
+  if (gesture.active) return gesture
+  const dx = x - gesture.startX
+  const dy = y - gesture.startY
+  return Math.hypot(dx, dy) >= threshold ? { ...gesture, active: true } : gesture
+}
+
+export function targetPointerGesture(
+  gesture: PointerGesture,
+  ids: readonly string[],
+  overId: string | null,
+): { gesture: PointerGesture; ids: string[] } {
+  if (!gesture.active || !overId || overId === gesture.movingId || overId === gesture.overId) {
+    return { gesture, ids: [...ids] }
+  }
+  return {
+    gesture: { ...gesture, overId },
+    ids: reorderIds(ids, gesture.movingId, overId),
+  }
+}
+
+export function completePointerGesture(gesture: PointerGesture, ids: readonly string[]) {
+  return { dragged: gesture.active, persist: gesture.active, ids: [...ids] }
+}
+
+export function cancelPointerGesture(gesture: PointerGesture) {
+  return { dragged: gesture.active, ids: [...gesture.originIds] }
+}
+
 export function reorderIds(ids: readonly string[], movingId: string, overId: string): string[] {
   const next = [...ids]
   const from = next.indexOf(movingId)

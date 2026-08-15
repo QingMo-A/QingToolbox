@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { invoke, onDropResult, onPresentationChanged, onStateChanged, waitForPresentation } from './bridge'
-import { alphabeticalItems, recentItems, reorderIds, shortcutFromKeyboard } from './launcher'
+import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, recentItems, targetPointerGesture, shortcutFromKeyboard } from './launcher'
+import type { PointerGesture } from './launcher'
 import type { DropResult, Item, Presentation, State } from './types'
 
 const fallback: State = {
@@ -17,6 +18,9 @@ const view = ref<'main' | 'settings'>('main')
 const busy = ref(false)
 const recording = ref(false)
 const draggingId = ref<string | null>(null)
+const pointerOverId = ref<string | null>(null)
+const pointerGesture = ref<PointerGesture | null>(null)
+let endingPointerId: number | undefined
 const suppressClick = ref(false)
 let suppressClickTimer: number | undefined
 const notice = ref('')
@@ -91,27 +95,64 @@ function activate(item: Item) {
   }
   launch(item)
 }
-function beginDrag(item: Item, event: DragEvent) {
-  if (state.sortMode !== 'custom') return
-  draggingId.value = item.id
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', item.id)
+
+function itemFromPoint(x: number, y: number) {
+  const element = document.elementFromPoint(x, y)
+  const itemId = element?.closest<HTMLElement>('[data-launcher-item-id]')?.dataset.launcherItemId
+  return itemId && state.items.some(item => item.id === itemId) ? itemId : null
+}
+
+function beginPointer(item: Item, event: PointerEvent) {
+  if (!canStartPointerGesture(state.sortMode, event.button, Boolean((event.target as Element | null)?.closest('button,[data-no-drag]')))) return
+  const tile = event.currentTarget as HTMLElement
+  pointerGesture.value = beginPointerGesture(event.pointerId, item.id, event.clientX, event.clientY, state.items.map(value => value.id))
+  pointerOverId.value = null
+  try { tile.setPointerCapture(event.pointerId) } catch { /* capture is best effort on older WebViews */ }
+}
+
+function movePointer(event: PointerEvent) {
+  const current = pointerGesture.value
+  if (!current || current.pointerId !== event.pointerId) return
+  const moved = movePointerGesture(current, event.clientX, event.clientY)
+  if (!moved.active) {
+    pointerGesture.value = moved
+    return
   }
-}
-function moveDrag(over: Item, event: DragEvent) {
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-  if (state.sortMode !== 'custom' || !draggingId.value || draggingId.value === over.id) return
-  const ids = reorderIds(state.items.map(item => item.id), draggingId.value, over.id)
-  state.items = ids.map(id => state.items.find(item => item.id === id)!).filter(Boolean)
-  markDragClickSuppressed()
-}
-function finishDrag() {
-  if (draggingId.value) {
+  if (!current.active) {
+    event.preventDefault()
+    draggingId.value = moved.movingId
     markDragClickSuppressed()
-    void run('setCustomOrder', { ids: state.items.map(item => item.id) })
   }
+  const overId = itemFromPoint(event.clientX, event.clientY)
+  const result = targetPointerGesture(moved, state.items.map(item => item.id), overId)
+  pointerGesture.value = result.gesture
+  if (result.ids.join('\u0000') !== state.items.map(item => item.id).join('\u0000')) {
+    state.items = result.ids.map(id => state.items.find(item => item.id === id)!).filter(Boolean)
+  }
+  pointerOverId.value = overId && overId !== moved.movingId ? overId : null
+}
+
+function endPointer(event: PointerEvent, canceled = false) {
+  const current = pointerGesture.value
+  if (!current || current.pointerId !== event.pointerId || endingPointerId === event.pointerId) return
+  endingPointerId = event.pointerId
+  const tile = event.currentTarget as HTMLElement
+  try { if (tile.hasPointerCapture(event.pointerId)) tile.releasePointerCapture(event.pointerId) } catch { /* already released */ }
+  if (canceled) {
+    const result = cancelPointerGesture(current)
+    if (result.dragged) state.items = result.ids.map(id => state.items.find(item => item.id === id)!).filter(Boolean)
+  } else {
+    const result = completePointerGesture(current, state.items.map(item => item.id))
+    if (result.persist) {
+      markDragClickSuppressed()
+      void run('setCustomOrder', { ids: result.ids })
+    }
+  }
+  if (current.active || canceled) markDragClickSuppressed()
+  pointerGesture.value = null
   draggingId.value = null
+  pointerOverId.value = null
+  endingPointerId = undefined
 }
 
 function handleDropResult(result: DropResult) {
@@ -161,10 +202,10 @@ onMounted(() => {
         </header>
         <section class="drop-area">
           <div v-if="visibleItems.length" class="launcher-grid">
-            <article v-for="item in visibleItems" :key="item.id" class="app-tile" :class="{ dragging: draggingId === item.id }" :draggable="state.sortMode === 'custom'" tabindex="0" @dragstart="beginDrag(item, $event)" @dragover.prevent="moveDrag(item, $event)" @drop.prevent="finishDrag" @dragend="finishDrag" @click="activate(item)" @keydown.enter="launch(item)">
+            <article v-for="item in visibleItems" :key="item.id" class="app-tile" :class="{ dragging: draggingId === item.id, 'drag-over': pointerOverId === item.id && draggingId !== item.id }" :data-launcher-item-id="item.id" :draggable="false" tabindex="0" @pointerdown="beginPointer(item, $event)" @pointermove="movePointer($event)" @pointerup="endPointer($event)" @pointercancel="endPointer($event, true)" @lostpointercapture="endPointer($event, true)" @click="activate(item)" @keydown.enter="launch(item)">
               <div class="app-icon"><img v-if="iconFor(item)" :src="iconFor(item)" :alt="item.name" /><span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span></div>
               <div class="app-name" :title="item.name">{{ item.name }}</div>
-              <button class="remove-button" :aria-label="`${t('actions.remove', 'Remove')} ${item.name}`" @click.stop="remove(item)">&#215;</button>
+              <button class="remove-button" data-no-drag :aria-label="`${t('actions.remove', 'Remove')} ${item.name}`" @pointerdown.stop @click.stop="remove(item)">&#215;</button>
             </article>
           </div>
           <div v-else class="empty-drop"><div class="empty-grid">&#43;</div><strong>{{ t('view.overlayEmpty', 'Drag an app or shortcut here') }}</strong></div>
