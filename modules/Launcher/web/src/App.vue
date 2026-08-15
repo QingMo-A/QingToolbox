@@ -204,7 +204,7 @@ onMounted(() => {
     <section class="launcher-panel" @pointerdown.stop>
       <template v-if="view === 'main'">
         <header class="panel-header">
-          <div class="brand"><span class="brand-mark">Q</span><h1>{{ t('view.launcher', 'Launcher') }}</h1></div>
+          <div class="brand"><span class="brand-mark" aria-hidden="true"><svg class="brand-mark-icon" viewBox="0 0 24 24" focusable="false"><path d="M5 5h5v5H5zM14 5h5v5h-5zM5 14h5v5H5zM14 14h5v5h-5z" /></svg></span><h1>{{ t('view.launcher', 'Launcher') }}</h1></div>
           <div class="top-actions">
             <div class="segmented" role="group" :aria-label="t('sort.custom', 'Sort')">
               <button :class="{ active: state.sortMode === 'custom' }" @click="switchSort('custom')">{{ t('sort.custom', 'Custom') }}</button>
@@ -214,7 +214,7 @@ onMounted(() => {
           </div>
         </header>
         <div class="search-row">
-          <span class="search-icon" aria-hidden="true">⌕</span>
+          <span class="search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4.2 4.2" /></svg></span>
           <input v-model="searchQuery" class="search-input" type="search" :placeholder="t('search.placeholder', 'Search apps')" :aria-label="t('search.placeholder', 'Search apps')" @keydown.escape.stop.prevent="clearSearch" />
           <button v-if="searchQuery" class="search-clear" type="button" :aria-label="t('search.clear', 'Clear search')" @click="clearSearch">&#215;</button>
         </div>
