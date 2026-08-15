@@ -80,7 +80,8 @@ public sealed class LauncherStore
                 resolved.Arguments ?? string.Empty,
                 NormalizePath(string.IsNullOrWhiteSpace(resolved.WorkingDirectory) ? Path.GetDirectoryName(target)! : resolved.WorkingDirectory),
                 iconKey,
-                null);
+                null,
+                NormalizePath(string.IsNullOrWhiteSpace(resolved.IconSourcePath) ? target : resolved.IconSourcePath));
             _items.Add(item);
             SaveLocked();
             return true;
@@ -196,6 +197,9 @@ public sealed class LauncherStore
                         WorkingDirectory = NormalizePath(string.IsNullOrWhiteSpace(item.WorkingDirectory)
                             ? Path.GetDirectoryName(item.Target) ?? string.Empty
                             : item.WorkingDirectory),
+                        IconSourcePath = string.IsNullOrWhiteSpace(item.IconSourcePath)
+                            ? null
+                            : NormalizePath(item.IconSourcePath),
                     })
                     .ToList();
             }

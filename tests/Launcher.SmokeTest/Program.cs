@@ -46,6 +46,38 @@ try
     File.WriteAllText(Path.Combine(corruptDirectory, "launcher.json"), "{not-json");
     Require(new LauncherStore(corruptDirectory).Items.Count == 0, "Corrupt JSON did not safely reset the store.");
 
+    var iconSource = Path.Combine(Environment.SystemDirectory, "notepad.exe");
+    if (File.Exists(iconSource))
+    {
+        var iconDirectory = Path.Combine(temp, "icons");
+        var iconKey = LauncherIconCache.TryCache(iconSource, iconDirectory, "dpi");
+        Require(iconKey == "dpi-v2.png", "High-resolution icon cache did not use the current versioned key.");
+        using var cachedIcon = System.Drawing.Image.FromFile(Path.Combine(iconDirectory, iconKey!));
+        Require(cachedIcon.Width >= 128 && cachedIcon.Height >= 128, "Icon cache did not retain a high-resolution frame.");
+
+        var legacyDirectory = Path.Combine(temp, "legacy-module");
+        Directory.CreateDirectory(Path.Combine(legacyDirectory, "icons"));
+        using (var legacyIcon = new System.Drawing.Bitmap(16, 16))
+            legacyIcon.Save(Path.Combine(legacyDirectory, "icons", "legacy.png"), System.Drawing.Imaging.ImageFormat.Png);
+        File.WriteAllText(Path.Combine(legacyDirectory, "launcher.json"), JsonSerializer.Serialize(new
+        {
+            sortMode = "custom",
+            items = new[] { new { id = "legacy", name = "Notepad", target = iconSource, arguments = "", workingDirectory = Environment.SystemDirectory, iconKey = "legacy.png", lastLaunchedAt = (DateTimeOffset?)null } }
+        }));
+        await using (var migrationModule = new LauncherModule(new FakeProcessStarter(), new FakeHotkeyRegistration()))
+        {
+            await migrationModule.OnLoadAsync(new ModuleContext
+            {
+                ModuleId = "qing.launcher",
+                ModuleDirectory = Path.Combine(root, "modules", "Launcher"),
+                DataDirectory = legacyDirectory,
+                Localization = new SmokeLocalization(),
+            });
+            var migrated = (await migrationModule.HandleWebRequestAsync("getState", null))!.Value.GetProperty("items")[0].GetProperty("iconKey").GetString();
+            Require(migrated == "legacy-v2.png", "Legacy icon cache was not migrated to the high-resolution key.");
+        }
+    }
+
     var dataDirectory = Path.Combine(temp, "module-data");
     var fakeStarter = new FakeProcessStarter { Result = true };
     var fakeRegistration = new FakeHotkeyRegistration();

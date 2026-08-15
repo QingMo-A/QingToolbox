@@ -91,8 +91,16 @@ function activate(item: Item) {
   }
   launch(item)
 }
-function beginDrag(item: Item) { if (state.sortMode === 'custom') draggingId.value = item.id }
-function moveDrag(over: Item) {
+function beginDrag(item: Item, event: DragEvent) {
+  if (state.sortMode !== 'custom') return
+  draggingId.value = item.id
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', item.id)
+  }
+}
+function moveDrag(over: Item, event: DragEvent) {
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
   if (state.sortMode !== 'custom' || !draggingId.value || draggingId.value === over.id) return
   const ids = reorderIds(state.items.map(item => item.id), draggingId.value, over.id)
   state.items = ids.map(id => state.items.find(item => item.id === id)!).filter(Boolean)
@@ -153,7 +161,7 @@ onMounted(() => {
         </header>
         <section class="drop-area">
           <div v-if="visibleItems.length" class="launcher-grid">
-            <article v-for="item in visibleItems" :key="item.id" class="app-tile" :class="{ dragging: draggingId === item.id }" :draggable="state.sortMode === 'custom'" tabindex="0" @dragstart="beginDrag(item)" @dragover.prevent="moveDrag(item)" @dragend="finishDrag" @click="activate(item)" @keydown.enter="launch(item)">
+            <article v-for="item in visibleItems" :key="item.id" class="app-tile" :class="{ dragging: draggingId === item.id }" :draggable="state.sortMode === 'custom'" tabindex="0" @dragstart="beginDrag(item, $event)" @dragover.prevent="moveDrag(item, $event)" @drop.prevent="finishDrag" @dragend="finishDrag" @click="activate(item)" @keydown.enter="launch(item)">
               <div class="app-icon"><img v-if="iconFor(item)" :src="iconFor(item)" :alt="item.name" /><span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span></div>
               <div class="app-name" :title="item.name">{{ item.name }}</div>
               <button class="remove-button" :aria-label="`${t('actions.remove', 'Remove')} ${item.name}`" @click.stop="remove(item)">&#215;</button>

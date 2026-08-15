@@ -141,28 +141,54 @@ public static class LauncherItemResolver
 
 internal static class LauncherIconCache
 {
+    private const int CacheSize = 256;
+
+    public static bool IsCurrentKey(string? iconKey) =>
+        !string.IsNullOrWhiteSpace(iconKey) && iconKey.EndsWith("-v2.png", StringComparison.OrdinalIgnoreCase);
+
     public static string? TryCache(string? sourcePath, string iconsDirectory, string itemId)
     {
         if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath)) return null;
-        var destination = Path.Combine(iconsDirectory, itemId + ".png");
+        var destination = Path.Combine(iconsDirectory, itemId + "-v2.png");
+        SafeIconHandle? handle = null;
         try
         {
             Directory.CreateDirectory(iconsDirectory);
-            using var icon = System.Drawing.Icon.ExtractAssociatedIcon(sourcePath!);
-            if (icon is null) return null;
+            var handles = new[] { IntPtr.Zero };
+            var iconIds = new uint[1];
+            if (PrivateExtractIcons(sourcePath!, 0, CacheSize, CacheSize, handles, iconIds, 1, 0) == 0 || handles[0] == IntPtr.Zero)
+                return null;
+            handle = new SafeIconHandle(handles[0]);
+            using var icon = System.Drawing.Icon.FromHandle(handle.DangerousGetHandle());
             using var bitmap = icon.ToBitmap();
             bitmap.Save(destination, System.Drawing.Imaging.ImageFormat.Png);
-            return itemId + ".png";
+            return itemId + "-v2.png";
         }
         catch (ArgumentException) { return null; }
         catch (ExternalException) { return null; }
         catch (IOException) { return null; }
         catch (UnauthorizedAccessException) { return null; }
+        finally { handle?.Dispose(); }
     }
 
     public static void DeleteBestEffort(string? iconKey, string iconsDirectory)
     {
         if (string.IsNullOrWhiteSpace(iconKey) || Path.GetFileName(iconKey) != iconKey) return;
         try { File.Delete(Path.Combine(iconsDirectory, iconKey)); } catch { }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    private static extern uint PrivateExtractIcons(string file, int index, int cxIcon, int cyIcon,
+        IntPtr[] icons, uint[] iconIds, uint count, uint flags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr handle);
+
+    private sealed class SafeIconHandle : Microsoft.Win32.SafeHandles.SafeHandleZeroOrMinusOneIsInvalid
+    {
+        public SafeIconHandle() : this(IntPtr.Zero) { }
+        public SafeIconHandle(IntPtr value) : this(value, true) { }
+        private SafeIconHandle(IntPtr value, bool ownsHandle) : base(ownsHandle) => SetHandle(value);
+        protected override bool ReleaseHandle() => DestroyIcon(handle);
     }
 }

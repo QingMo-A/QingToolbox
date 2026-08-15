@@ -50,6 +50,7 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
         _context = context;
         _store = new LauncherStore(context.DataDirectory);
         _iconsDirectory = Path.Combine(context.DataDirectory, "icons");
+        MigrateIconCache();
         return Task.CompletedTask;
     }
 
@@ -187,6 +188,21 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
         if (!store.Remove(id, out var removed) || removed is null) return;
         LauncherIconCache.DeleteBestEffort(removed.IconKey, _iconsDirectory!);
         PublishState();
+    }
+
+    private void MigrateIconCache()
+    {
+        if (_store is null || _iconsDirectory is null) return;
+        foreach (var item in _store.Items)
+        {
+            var existing = item.IconKey;
+            var path = string.IsNullOrWhiteSpace(existing) ? null : Path.Combine(_iconsDirectory, existing);
+            if (LauncherIconCache.IsCurrentKey(existing) && path is not null && File.Exists(path)) continue;
+            var key = LauncherIconCache.TryCache(item.IconSourcePath ?? item.Target, _iconsDirectory, item.Id);
+            if (key is null || string.Equals(existing, key, StringComparison.Ordinal)) continue;
+            _store.SetIconKey(item.Id, key);
+            LauncherIconCache.DeleteBestEffort(existing, _iconsDirectory);
+        }
     }
 
     private JsonElement SetHotkey(JsonElement? payload)

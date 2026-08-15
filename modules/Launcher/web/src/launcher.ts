@@ -6,7 +6,7 @@ export function reorderIds(ids: readonly string[], movingId: string, overId: str
   const to = next.indexOf(overId)
   if (from < 0 || to < 0 || from === to) return next
   next.splice(from, 1)
-  next.splice(to, 0, movingId)
+  next.splice(from < to ? to - 1 : to, 0, movingId)
   return next
 }
 

@@ -26,7 +26,8 @@ public sealed record LauncherItem(
     string Arguments,
     string WorkingDirectory,
     string? IconKey,
-    DateTimeOffset? LastLaunchedAt);
+    DateTimeOffset? LastLaunchedAt,
+    string? IconSourcePath = null);
 
 public sealed record ResolvedLauncherItem(
     string Name,

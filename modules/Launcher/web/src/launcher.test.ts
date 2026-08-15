@@ -5,6 +5,8 @@ const item = (id: string, name: string, lastLaunchedAt: string | null = null) =>
 
 describe('launcher projections', () => {
   it('moves a tile before the hovered tile', () => expect(reorderIds(['a', 'b', 'c', 'd'], 'd', 'b')).toEqual(['a', 'd', 'b', 'c']))
+  it('moves the first tile to the end without changing the other ids', () =>
+    expect(reorderIds(['a', 'b', 'c', 'd'], 'a', 'd')).toEqual(['b', 'c', 'a', 'd']))
   it('keeps custom order untouched by alphabetical projection', () => {
     const values = [item('a', 'Steam'), item('b', 'VS Code'), item('c', 'OBS'), item('d', 'IDEA')]
     expect(values.map(value => value.id)).toEqual(['a', 'b', 'c', 'd'])
