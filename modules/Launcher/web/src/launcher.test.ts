@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LAUNCHER_MAX_ROWS, alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridSlotFromPoint, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, reorderIds, reorderVisibleIds, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, targetPointerGesture, targetPointerInsertion, visibleRecentItems } from './launcher'
+import { LAUNCHER_MAX_ROWS, alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridInsertionCandidate, gridSlotFromPoint, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, reorderIds, reorderVisibleIds, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, targetPointerGesture, targetPointerInsertion, visibleRecentItems } from './launcher'
 
 const item = (id: string, name: string, lastLaunchedAt: string | null = null) => ({ id, name, iconKey: null, lastLaunchedAt })
 
@@ -59,6 +59,13 @@ describe('pointer reorder gestures', () => {
     expect(gridSlotFromPoint(340, 160, cell.width, cell.height, 3, 10, 10, 5)).toBe(5)
     expect(gridSlotFromPoint(10, 160, cell.width, cell.height, 3, 10, 10, 5)).toBe(3)
     expect(gridSlotFromPoint(1000, 1000, cell.width, cell.height, 3, 10, 10, 5)).toBe(5)
+  })
+  it('keeps compact tile centres settled and exposes only gap candidates', () => {
+    const metrics = { cellWidth: 100, cellHeight: 100, columns: 3, gapX: 10, gapY: 10 }
+    expect(gridInsertionCandidate(50, 50, metrics, 4)).toBeNull()
+    expect(gridInsertionCandidate(105, 50, metrics, 4)).toBe(1)
+    expect(gridInsertionCandidate(320, 160, metrics, 4)).toBe(4)
+    expect(gridInsertionCandidate(50, 50, metrics, 4, 1)).toBeNull()
   })
   it('cancels back to the original order without persistence', () => {
     const started = movePointerGesture(beginPointerGesture(1, 'a', 0, 0, ['a', 'b', 'c']), 12, 0)

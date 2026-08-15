@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { invoke, onDropResult, onPresentationChanged, onStateChanged, waitForPresentation } from './bridge'
-import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridSlotFromPoint, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, visibleRecentItems } from './launcher'
-import type { PointerGesture } from './launcher'
+import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridInsertionCandidate, movePointerGesture, recentColumnCapacity, recentItems, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, visibleRecentItems } from './launcher'
+import type { FrozenGridMetrics, PointerGesture } from './launcher'
 import type { DropResult, Item, Presentation, State } from './types'
 
 const fallback: State = {
@@ -18,16 +18,19 @@ const view = ref<'main' | 'settings'>('main')
 const busy = ref(false)
 const recording = ref(false)
 const draggingId = ref<string | null>(null)
-const dragPreview = ref<{ itemId: string; x: number; y: number } | null>(null)
+const dragPreview = ref<{ itemId: string; x: number; y: number; offsetX: number; offsetY: number } | null>(null)
 const pointerOverId = ref<string | null>(null)
 const pointerGesture = ref<PointerGesture | null>(null)
-const dragProjection = ref<{ sourceId: string; originIds: string[]; visibleIds: string[]; insertionIndex: number } | null>(null)
+type FrozenDragGrid = FrozenGridMetrics & { left: number; top: number; paddingLeft: number; paddingTop: number; scrollTop: number }
+type DragProjection = { sourceId: string; originIds: string[]; visibleIds: string[]; baseRemainingIds: string[]; sourceVisibleIndex: number; metrics: FrozenDragGrid | null; candidateSlot: number | null; grabOffsetX: number; grabOffsetY: number }
+const dragProjection = ref<DragProjection | null>(null)
 const gridRef = ref<HTMLElement | null>(null)
 let endingPointerId: number | undefined
 const suppressClick = ref(false)
 let suppressClickTimer: number | undefined
 let pointerCaptureTarget: HTMLElement | null = null
 let pointerSessionCleanup: (() => void) | undefined
+let pointerGrabOffset = { x: 32, y: 32 }
 const notice = ref('')
 const searchQuery = ref('')
 const recentContainer = ref<HTMLElement | null>(null)
@@ -42,13 +45,14 @@ const dragPreviewItem = computed(() => dragPreview.value ? state.items.find(item
 const gridEntries = computed(() => {
   const projection = dragProjection.value
   if (!projection) return visibleItems.value.map(item => ({ kind: 'item' as const, key: item.id, item }))
-  const items: Array<{ kind: 'item'; key: string; item: Item } | { kind: 'placeholder'; key: string }> = projection.visibleIds
-    .filter(id => id !== projection.sourceId)
+  const items: Array<{ kind: 'item'; key: string; item: Item } | { kind: 'placeholder'; key: string }> = projection.baseRemainingIds
     .map(id => state.items.find(item => item.id === id))
     .filter((item): item is Item => Boolean(item))
     .map(item => ({ kind: 'item' as const, key: item.id, item }))
-  const slot = Math.max(0, Math.min(projection.insertionIndex, items.length))
-  items.splice(slot, 0, { kind: 'placeholder' as const, key: 'drag-placeholder' })
+  if (projection.candidateSlot !== null) {
+    const slot = Math.max(0, Math.min(projection.candidateSlot, items.length))
+    items.splice(slot, 0, { kind: 'placeholder' as const, key: 'drag-placeholder' })
+  }
   return items
 })
 
@@ -123,14 +127,16 @@ function activate(item: Item) {
   launch(item)
 }
 
-function insertionIndexAtPoint(x: number, y: number, _movingId: string) {
-  const grid = gridRef.value
-  const projection = dragProjection.value
-  if (!grid || !projection) return 0
+function resolveGridElement(): HTMLElement | null {
+  const value = gridRef.value as unknown as (HTMLElement & { $el?: HTMLElement }) | null
+  if (!value) return null
+  return typeof value.querySelectorAll === 'function' ? value : value.$el ?? null
+}
+
+function captureFrozenGrid(): FrozenDragGrid | null {
+  const grid = resolveGridElement()
+  if (!grid) return null
   const tiles = Array.from(grid.querySelectorAll<HTMLElement>('[data-launcher-item-id]'))
-    .filter(tile => tile.dataset.launcherItemId !== _movingId)
-  const remainingCount = Math.max(0, projection.visibleIds.length - 1)
-  if (!tiles.length || !remainingCount) return 0
   const firstRect = tiles[0]?.getBoundingClientRect()
   const style = getComputedStyle(grid)
   const columns = Math.max(1, style.gridTemplateColumns.split(/\s+/).filter(Boolean).length)
@@ -141,9 +147,15 @@ function insertionIndexAtPoint(x: number, y: number, _movingId: string) {
   const width = firstRect?.width || Number.parseFloat(style.gridAutoColumns) || 112
   const height = firstRect?.height || Number.parseFloat(style.gridAutoRows) || 132
   const bounds = grid.getBoundingClientRect()
-  const localX = x - bounds.left - paddingLeft
-  const localY = y - bounds.top - paddingTop + grid.scrollTop
-  return gridSlotFromPoint(localX, localY, width, height, columns, gapX, gapY, remainingCount)
+  return { left: bounds.left, top: bounds.top, paddingLeft, paddingTop, scrollTop: grid.scrollTop, cellWidth: width, cellHeight: height, columns, gapX, gapY }
+}
+
+function candidateSlotAtPoint(x: number, y: number, projection: DragProjection) {
+  const metrics = projection.metrics
+  if (!metrics) return null
+  const localX = x - metrics.left - metrics.paddingLeft
+  const localY = y - metrics.top - metrics.paddingTop + metrics.scrollTop
+  return gridInsertionCandidate(localX, localY, metrics, projection.baseRemainingIds.length, projection.candidateSlot)
 }
 
 function stopPointerSession() {
@@ -172,6 +184,8 @@ function startPointerSession(pointerId: number) {
 function beginPointer(item: Item, event: PointerEvent) {
   if (!canStartPointerGesture(state.sortMode, event.button, Boolean((event.target as Element | null)?.closest('button,[data-no-drag]')))) return
   const tile = event.currentTarget as HTMLElement
+  const rect = tile.getBoundingClientRect()
+  pointerGrabOffset = { x: Math.max(0, Math.min(rect.width, event.clientX - rect.left)), y: Math.max(0, Math.min(rect.height, event.clientY - rect.top)) }
   pointerGesture.value = beginPointerGesture(event.pointerId, item.id, event.clientX, event.clientY, state.items.map(value => value.id), visibleItems.value.map(value => value.id))
   dragPreview.value = null
   pointerOverId.value = null
@@ -191,13 +205,25 @@ function movePointer(event: PointerEvent) {
   if (!current.active) {
     event.preventDefault()
     draggingId.value = moved.movingId
-    dragPreview.value = pointerPreview(moved, event.clientX, event.clientY)
-    dragProjection.value = { sourceId: moved.movingId, originIds: [...moved.originIds], visibleIds: [...moved.scopeIds], insertionIndex: 0 }
+    const visibleIds = [...moved.scopeIds]
+    dragProjection.value = {
+      sourceId: moved.movingId,
+      originIds: [...moved.originIds],
+      visibleIds,
+      baseRemainingIds: visibleIds.filter(id => id !== moved.movingId),
+      sourceVisibleIndex: visibleIds.indexOf(moved.movingId),
+      metrics: captureFrozenGrid(),
+      candidateSlot: null,
+      grabOffsetX: pointerGrabOffset.x,
+      grabOffsetY: pointerGrabOffset.y,
+    }
+    dragPreview.value = { itemId: moved.movingId, x: event.clientX, y: event.clientY, offsetX: pointerGrabOffset.x, offsetY: pointerGrabOffset.y }
     markDragClickSuppressed()
   }
-  if (moved.active) dragPreview.value = pointerPreview(moved, event.clientX, event.clientY)
-  const insertionIndex = insertionIndexAtPoint(event.clientX, event.clientY, moved.movingId)
-  if (dragProjection.value) dragProjection.value = { ...dragProjection.value, insertionIndex }
+  if (moved.active && dragPreview.value) dragPreview.value = { ...dragPreview.value, x: event.clientX, y: event.clientY }
+  if (dragProjection.value) {
+    dragProjection.value = { ...dragProjection.value, candidateSlot: candidateSlotAtPoint(event.clientX, event.clientY, dragProjection.value) }
+  }
   pointerGesture.value = moved
   pointerOverId.value = null
 }
@@ -213,8 +239,8 @@ function endPointer(event: PointerEvent, canceled = false) {
     cancelPointerGesture(current)
   } else {
     const result = completePointerGesture(current, current.originIds)
-    if (result.persist && projection) {
-      const ids = reorderVisibleToIndex(projection.originIds, projection.visibleIds, projection.sourceId, projection.insertionIndex)
+    if (result.persist && projection && projection.candidateSlot !== null) {
+      const ids = reorderVisibleToIndex(projection.originIds, projection.visibleIds, projection.sourceId, projection.candidateSlot)
       state.items = ids.map(id => state.items.find(item => item.id === id)!).filter(Boolean)
       markDragClickSuppressed()
       void run('setCustomOrder', { ids })
@@ -227,6 +253,7 @@ function endPointer(event: PointerEvent, canceled = false) {
   pointerOverId.value = null
   dragProjection.value = null
   pointerCaptureTarget = null
+  pointerGrabOffset = { x: 32, y: 32 }
   stopPointerSession()
   endingPointerId = undefined
 }
@@ -243,6 +270,7 @@ function cancelCurrentPointer() {
   pointerOverId.value = null
   dragProjection.value = null
   pointerCaptureTarget = null
+  pointerGrabOffset = { x: 32, y: 32 }
   stopPointerSession()
   markDragClickSuppressed()
   return true
@@ -325,7 +353,7 @@ onMounted(() => {
           <div v-if="recent.length" class="recent-row"><button v-for="item in recent" :key="item.id" class="recent-tile" @click="launch(item)"><span class="recent-icon"><img v-if="iconFor(item)" :src="iconFor(item)" :alt="item.name" /><span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span></span><span class="recent-name">{{ item.name }}</span></button></div>
           <p v-else class="muted">{{ searchQuery ? t('search.noResults', 'No matching apps') : t('view.noRecent', 'Nothing launched yet.') }}</p>
         </section>
-        <div v-if="dragPreview && dragPreviewItem" class="drag-preview" :style="{ left: `${dragPreview.x}px`, top: `${dragPreview.y}px` }" aria-hidden="true">
+        <div v-if="dragPreview && dragPreviewItem" class="drag-preview" :style="{ left: `${dragPreview.x - dragPreview.offsetX}px`, top: `${dragPreview.y - dragPreview.offsetY}px` }" aria-hidden="true">
           <img v-if="iconFor(dragPreviewItem)" :src="iconFor(dragPreviewItem)" alt="" />
           <span v-else class="fallback-icon">{{ dragPreviewItem.name.slice(0, 1).toUpperCase() }}</span>
         </div>

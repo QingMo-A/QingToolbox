@@ -196,6 +196,45 @@ export function gridSlotFromPoint(
   return Math.max(0, Math.min(count, row * columnCount + column))
 }
 
+export type FrozenGridMetrics = {
+  cellWidth: number
+  cellHeight: number
+  columns: number
+  gapX: number
+  gapY: number
+}
+
+/**
+ * Returns a candidate gap only while the pointer is in a boundary corridor.
+ * Tile centres deliberately return null so the compact grid stays settled
+ * until the pointer actually enters an insertion zone.
+ */
+export function gridInsertionCandidate(
+  localX: number,
+  localY: number,
+  metrics: FrozenGridMetrics,
+  remainingCount: number,
+  previousSlot: number | null = null,
+): number | null {
+  const count = Math.max(0, Math.floor(remainingCount))
+  if (count === 0) return 0
+  if (localX < 0 || localY < 0) return 0
+  const slot = gridSlotFromPoint(localX, localY, metrics.cellWidth, metrics.cellHeight, metrics.columns, metrics.gapX, metrics.gapY, count)
+  if (slot >= count) return count
+  const width = Math.max(1, metrics.cellWidth)
+  const height = Math.max(1, metrics.cellHeight)
+  const strideX = width + Math.max(0, metrics.gapX)
+  const strideY = height + Math.max(0, metrics.gapY)
+  const column = Math.floor(localX / strideX)
+  const row = Math.floor(localY / strideY)
+  const withinX = localX - column * strideX
+  const withinY = localY - row * strideY
+  const corridor = Math.max(14, Math.min(width, height) * 0.18) + (previousSlot === null ? 0 : 6)
+  const inGap = withinX > width || withinY > height
+  const nearBoundary = withinX <= corridor || withinX >= width - corridor || withinY <= corridor || withinY >= height - corridor
+  return inGap || nearBoundary ? slot : null
+}
+
 export function alphabeticalItems(items: readonly Item[]): Item[] {
   return items.map((item, index) => ({ item, index }))
     .sort((left, right) => left.item.name.localeCompare(right.item.name, undefined, { sensitivity: 'base' }) || left.index - right.index)
