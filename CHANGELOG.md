@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 0.2.6-alpha candidate (not published)
+
+- Established the Web module host boundary after the published `v0.2.5-alpha` host; the host installer remains installer-only and does not bundle concrete modules.
+- Candidate source `9249d4e654ee733d03ba538c979b5aaa3f87cb03` produced `QingToolbox-0.2.6-alpha-win-x64-setup.exe` (58,290,141 bytes; SHA256 `5BDB040E61F14CC44BC310F47B296947026BB7EA108E9A6AA1A0A5E35BAA2B0E`) with a verified installer-only manifest.
+- Local non-Mock Development Web Shell canary, Release solution build, host smoke suites, Launcher/QingTransfer module smoke tests, and WebUI tests passed. The exact-HEAD Preview validation run `31857711680` also passed its CI gates, including installer roundtrip and `v0.2.5-alpha` to `0.2.6-alpha` upgrade checks.
+- Real-user installation, upgrade, Repair, uninstall, signature/SmartScreen, and representative-environment acceptance remain unrecorded or CI-only until the acceptance checklist is completed.
+
 ## 0.2.5-alpha - 2026-08-11
 
 - Added five composable appearance presets with distinct shared-control states across light and dark modes.

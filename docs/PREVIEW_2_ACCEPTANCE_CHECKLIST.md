@@ -1,4 +1,4 @@
-# QingToolbox Preview 2 Acceptance Checklist
+# QingToolbox 0.2.6-alpha Acceptance Checklist
 
 This checklist records release evidence without embedding private machine paths, usernames, registry exports, or Task Scheduler XML.
 
@@ -16,42 +16,42 @@ Complete this metadata for each candidate. Do not reuse evidence from a differen
 
 | Field | Value |
 |---|---|
-| Candidate commit | Not Run |
-| Workflow run ID and URL | Not Run |
-| Workflow conclusion | Not Run |
-| Test date | Not Run |
-| Windows version | Not Run |
-| Installer SHA256 | Not Run |
-| Tester | Not Run |
-| Evidence or log location | Not Run |
-| Notes | Not Run |
+| Candidate commit | `9249d4e654ee733d03ba538c979b5aaa3f87cb03` |
+| Workflow run ID and URL | `31857711680` — https://github.com/QingMo-A/QingToolbox/actions/runs/31857711680 |
+| Workflow conclusion | Automated Pass (exact HEAD) |
+| Test date | 2026-08-15 |
+| Windows version | GitHub Actions `windows-latest` (image revision not recorded) |
+| Installer SHA256 | `5BDB040E61F14CC44BC310F47B296947026BB7EA108E9A6AA1A0A5E35BAA2B0E` (local candidate) |
+| Tester | CI plus local release-gate run |
+| Evidence or log location | CI run above; local `artifacts/installer/output/` and temporary Web Shell probe logs |
+| Notes | Candidate is installer-only and not published. CI publish/tag jobs were skipped. Local roundtrip/upgrade scripts correctly remained blocked outside GitHub Actions. |
 
-Historical automated evidence is informative only: workflow run `29621740800` passed for commit `7b563202dfcc34b3042d8641439c84c175fbb6fe`. A later release candidate must obtain its own exact-HEAD run.
+Historical automated evidence is informative only: workflow run `29621740800` passed for commit `7b563202dfcc34b3042d8641439c84c175fbb6fe`. The candidate above has its own exact-HEAD run.
 
-The project owner manually exercised several common A020 functions without finding a remaining blocker. This is a supplemental common-function smoke result only. By explicit owner decision, the remaining Preview 2 in-place upgrade, login/re-login, Repair, uninstall, and representative-environment acceptance is deferred while post-Preview development begins; every unexecuted row below remains **Not Run**.
+The local and CI evidence above is supplementary release-gate evidence only. Real-user installation, login/re-login, Repair, uninstall, and representative-environment acceptance remains **Blocked** or **Not Run** as recorded below; no unexecuted row is promoted to Manual Pass.
 
-## A. Preview 1 in-place upgrade
+## A. v0.2.5-alpha → 0.2.6-alpha in-place upgrade
 
 | Check | Status | Evidence / notes |
 |---|---|---|
-| Use the official GitHub `v0.1.0-alpha` installer | Not Run | |
+| Use the official GitHub `v0.2.5-alpha` installer | Automated Pass | CI run `31857711680`; local execution blocked by fixed AppId safety guard |
 | Verify its official SHA256 sidecar | Not Run | |
 | Install to the standard user-writable location | Not Run | |
-| Start Preview 1 | Not Run | |
+| Start v0.2.5-alpha | Automated Pass | CI installer roundtrip gate |
 | Create real settings | Not Run | |
 | Add a test user module | Not Run | |
 | Create module data and cache | Not Run | |
 | Enable login startup | Not Run | |
 | Add an unknown file under the install directory | Not Run | |
-| Run Preview 2 without uninstalling Preview 1 | Not Run | |
+| Run 0.2.6-alpha without uninstalling v0.2.5-alpha | Automated Pass | CI in-place upgrade gate; no local production profile used |
 | Confirm the same install directory and safe old-process shutdown | Not Run | |
-| Confirm Preview 2 version and display name | Not Run | |
+| Confirm 0.2.6-alpha version and display name | Automated Pass | CI upgrade gate |
 | Confirm settings, module, data, cache, and startup authorization are retained | Not Run | |
 | Confirm the unknown install file is retained | Not Run | |
 | Confirm current-user shortcuts are not duplicated and no public shortcuts appear | Not Run | |
 | Confirm exactly one uninstall entry remains | Not Run | |
 
-Automated coverage installs Preview 1 into a custom path containing spaces, then runs Preview 2 and Repair without `/DIR`. It verifies automatic directory discovery, old/new PID replacement, single-instance restart, and absence of a second default-directory installation. These automated checks do not change the manual statuses above.
+Automated coverage installs v0.2.5-alpha into a custom path containing spaces, then runs 0.2.6-alpha and Repair without `/DIR`. It verifies automatic directory discovery, old/new PID replacement, single-instance restart, and absence of a second default-directory installation. These automated checks do not change the manual statuses above.
 
 The isolated installer gate also constructs two conflicting valid discovery records. It verifies that no `/DIR` fails closed without changing either candidate, a legal explicit `/DIR` selects and restarts only the Shell at the final target, and empty or protected-root explicit values fail without falling back. These automated checks do not change any manual status.
 
@@ -71,7 +71,7 @@ Using an INF generated by the real installer's `/SAVEINF`, the gate also changes
 
 | Check | Status | Evidence / notes |
 |---|---|---|
-| Run the same Preview 2 installer again | Not Run | |
+| Run the same 0.2.6-alpha installer again | Not Run | Local repair was not run; CI coverage is recorded above |
 | Confirm the same directory and retained user state | Not Run | |
 | Confirm the unknown install file remains | Not Run | |
 | Confirm current-user and public shortcut topology is unchanged | Not Run | |

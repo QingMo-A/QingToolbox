@@ -1,8 +1,8 @@
 # Preview Release Candidate Process
 
-本文说明 QingToolbox `0.2.5-alpha` 的安装器唯一 Release Candidate 构建与人工发布交接流程。
+本文说明 QingToolbox `0.2.6-alpha` 的安装器唯一 Release Candidate 构建与人工发布交接流程。
 
-0.2.5-alpha RC 必须使用经过官方 SHA256 sidecar 验证的 `v0.2.4-alpha` 安装器，
+0.2.6-alpha RC 必须使用经过官方 SHA256 sidecar 验证的 `v0.2.5-alpha` 安装器，
 完成原地覆盖、同版本修复、降级拒绝、用户状态保留和单一卸载身份验证。
 该流程只验证候选产物，不创建 GitHub Release、tag，也不上传正式发布资产。
 
@@ -47,6 +47,13 @@ RC 总控会对每个原生命令和 PowerShell 子阶段立即检查 PowerShell
 - **Pass — tested manually by project owner：**安装程序已由项目所有者在真实 Windows 环境中完成基本人工测试；安装和安装后的基本运行未发现阻塞问题。
 - 此结果不代表所有 Windows 版本、所有 DPI 与多显示器组合、Explorer 重启、注销与关机路径，或所有机器上的 SmartScreen 均已通过。
 
+本候选（2026-08-15）的证据分层如下：
+
+- Local Pass：Release solution build、非 Mock Development Web Shell canary、Host smoke、Launcher/QingTransfer smoke、WebUI typecheck/Vitest（432 tests）、installer-only manifest/hash verification。
+- CI Pass：精确 HEAD `9249d4e654ee733d03ba538c979b5aaa3f87cb03` 的 Preview validation run `31857711680`（包含 installer roundtrip 和 `v0.2.5-alpha → 0.2.6-alpha` upgrade gate）。
+- Blocked locally：真实 installer roundtrip/upgrade 会写固定 AppId 的当前用户卸载注册，脚本在非 GitHub Actions 环境安全拒绝；未设置 `GITHUB_ACTIONS` 伪造条件。
+- Not Run：真实用户多环境安装、登录/重登录、Repair、卸载、签名/SmartScreen 和代表性硬件/DPI 验收。
+
 - [ ] 候选脚本完整通过，终端摘要中的 clean 和 origin sync 均为 `True`。
 - [ ] 对应 `toolbox` commit 的 Preview validation GitHub Actions 成功。
 - [ ] 显式退出在模块窗口或模块运行时清理失败时仍能完成，且通知区图标被移除。
@@ -72,8 +79,8 @@ RC 总控会对每个原生命令和 PowerShell 子阶段立即检查 PowerShell
 RC 脚本和 CI 都不会替发布者创建 Release/tag，不会推送代码，不会提交
 `artifacts/`，也不会更改版本或签名状态。
 
-`0.2.0-alpha` 是未发布的 Preview 2 内部开发目标，不是可下载的官方升级来源。真实
-`v0.2.4-alpha → 0.2.5-alpha` 升级测试会启动 Production 模式的旧宿主。Windows Known Folder 不能通过修改
+`0.2.6-alpha` 是当前未发布候选，不是可下载的官方升级来源。真实
+`v0.2.5-alpha → 0.2.6-alpha` 升级测试会启动 Production 模式的旧宿主。Windows Known Folder 不能通过修改
 `APPDATA`/`LOCALAPPDATA` 环境变量安全重定向，因此该自动化只允许在一次性 GitHub Actions
 Windows 账户中运行。普通本机 RC 应将这一阶段报告为 **Blocked**，不得强制关闭用户 Shell 或
 以真实用户配置换取测试通过。
