@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using SharpVectors.Converters;
@@ -33,13 +34,18 @@ internal sealed class WebModuleWindow : Window
     private readonly Action? _onClosed;
     private readonly Func<IReadOnlyList<string>, CancellationToken, Task>? _externalDropHandler;
     private readonly DragEventHandler? _externalDragOverHandler = null;
+    private readonly DragEventHandler? _externalDragEnterHandler = null;
+    private readonly DragEventHandler? _externalDragLeaveHandler = null;
     private readonly DragEventHandler? _externalDropEventHandler = null;
+    private readonly DispatcherTimer? _deferredDismissTimer;
     private string _appearancePresetId;
     private string _languageCode;
     private bool _readySent;
     private bool _presentationReady;
     private bool _presentationFallbackSent;
     private bool _closed;
+    private bool _externalFileDragActive;
+    private long _lastExternalDropTick = long.MinValue;
     private readonly string _presentationNonce = Guid.NewGuid().ToString("N");
 
     public WebModuleWindow(string moduleId, string version, string moduleRoot, string entry,
@@ -73,10 +79,24 @@ internal sealed class WebModuleWindow : Window
         if (_externalDropHandler is not null)
         {
             AllowDrop = true;
+            _externalDragEnterHandler = OnExternalDragEnter;
             _externalDragOverHandler = OnExternalDragOver;
+            _externalDragLeaveHandler = OnExternalDragLeave;
             _externalDropEventHandler = OnExternalDrop;
+            AddHandler(DragDrop.DragEnterEvent, _externalDragEnterHandler, true);
             AddHandler(DragDrop.DragOverEvent, _externalDragOverHandler, true);
+            AddHandler(DragDrop.DragLeaveEvent, _externalDragLeaveHandler, true);
             AddHandler(DragDrop.DropEvent, _externalDropEventHandler, true);
+        }
+        if (WebModuleWindowPresentation.IsOverlay(_presentationMode))
+        {
+            _deferredDismissTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+            {
+                Interval = TimeSpan.FromMilliseconds(40),
+            };
+            _deferredDismissTimer.Tick += OnDeferredDismissTick;
+            Deactivated += OnOverlayDeactivated;
+            IsVisibleChanged += OnVisibilityChanged;
         }
         ApplySurfaceTheme();
         _surface.Children.Add(_browser);
@@ -215,9 +235,15 @@ internal sealed class WebModuleWindow : Window
         _closed = true;
         Loaded -= OnLoaded;
         Closed -= OnClosed;
+        Deactivated -= OnOverlayDeactivated;
+        IsVisibleChanged -= OnVisibilityChanged;
+        StopDeferredDismiss();
+        if (_deferredDismissTimer is not null) _deferredDismissTimer.Tick -= OnDeferredDismissTick;
         if (_externalDropHandler is not null)
         {
+            if (_externalDragEnterHandler is not null) RemoveHandler(DragDrop.DragEnterEvent, _externalDragEnterHandler);
             if (_externalDragOverHandler is not null) RemoveHandler(DragDrop.DragOverEvent, _externalDragOverHandler);
+            if (_externalDragLeaveHandler is not null) RemoveHandler(DragDrop.DragLeaveEvent, _externalDragLeaveHandler);
             if (_externalDropEventHandler is not null) RemoveHandler(DragDrop.DropEvent, _externalDropEventHandler);
         }
         if (_browser.CoreWebView2 is { } core)
@@ -231,20 +257,62 @@ internal sealed class WebModuleWindow : Window
         _onClosed?.Invoke();
     }
 
+    private void OnOverlayDeactivated(object? sender, EventArgs e)
+    {
+        var decision = OverlayDismissPolicy.OnDeactivated(
+            _presentationMode, _closed, IsVisible, _externalFileDragActive, IsLeftMouseButtonDown());
+        if (decision == OverlayDismissDecision.Hide) Hide();
+        else if (decision == OverlayDismissDecision.Defer) _deferredDismissTimer?.Start();
+    }
+
+    private void OnDeferredDismissTick(object? sender, EventArgs e)
+    {
+        var elapsed = _lastExternalDropTick == long.MinValue
+            ? long.MaxValue
+            : Math.Max(0, Environment.TickCount64 - _lastExternalDropTick);
+        var decision = OverlayDismissPolicy.OnDeferredTick(
+            _closed, IsVisible, IsActive, _externalFileDragActive, IsLeftMouseButtonDown(), elapsed);
+        if (decision == OverlayDismissDecision.Defer) return;
+        StopDeferredDismiss();
+        if (decision == OverlayDismissDecision.Hide) Hide();
+    }
+
+    private void OnVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (!IsVisible) StopDeferredDismiss();
+    }
+
+    private void StopDeferredDismiss() => _deferredDismissTimer?.Stop();
+
+    private static bool IsLeftMouseButtonDown() => (GetAsyncKeyState(0x01) & 0x8000) != 0;
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
+
+    private void OnExternalDragEnter(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop)) _externalFileDragActive = true;
+    }
+
     private void OnExternalDragOver(object sender, DragEventArgs e)
     {
         if (e.Data.GetDataPresent(DataFormats.FileDrop))
         {
+            _externalFileDragActive = true;
             e.Effects = DragDropEffects.Copy;
             e.Handled = true;
         }
     }
 
+    private void OnExternalDragLeave(object sender, DragEventArgs e) => _externalFileDragActive = false;
+
     private void OnExternalDrop(object sender, DragEventArgs e)
     {
         e.Handled = true;
+        _externalFileDragActive = false;
         if (_closed || _externalDropHandler is null || !e.Data.GetDataPresent(DataFormats.FileDrop)) return;
         if (e.Data.GetData(DataFormats.FileDrop) is not string[] paths || paths.Length == 0) return;
+        _lastExternalDropTick = Environment.TickCount64;
         _ = ForwardExternalDropAsync(paths);
     }
 

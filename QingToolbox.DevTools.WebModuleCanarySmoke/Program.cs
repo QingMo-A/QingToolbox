@@ -13,6 +13,22 @@ Require(!WebModuleWindowPresentation.IsOverlay(ModuleHostWindowPresentationMode.
     "Standard presentation must remain the default.");
 Require(new OverlayPresentationProbe().HostWindowPresentationMode == ModuleHostWindowPresentationMode.Overlay,
     "An opt-in presentation source must expose Overlay mode.");
+Require(OverlayDismissPolicy.OnDeactivated(ModuleHostWindowPresentationMode.Overlay, false, true, false, false) == OverlayDismissDecision.Hide,
+    "Inactive Overlay without a pressed mouse button must hide immediately.");
+Require(OverlayDismissPolicy.OnDeactivated(ModuleHostWindowPresentationMode.Overlay, false, true, false, true) == OverlayDismissDecision.Defer,
+    "Inactive Overlay with a pressed mouse button must defer dismissal.");
+Require(OverlayDismissPolicy.OnDeferredTick(false, true, false, false, false, long.MaxValue) == OverlayDismissDecision.Hide,
+    "Deferred Overlay release outside the window must hide.");
+Require(OverlayDismissPolicy.OnDeferredTick(false, true, true, false, false, long.MaxValue) == OverlayDismissDecision.Keep,
+    "Reactivated Overlay must remain visible.");
+Require(OverlayDismissPolicy.OnDeferredTick(false, true, false, true, false, long.MaxValue) == OverlayDismissDecision.Keep,
+    "Active external file drag must keep Overlay visible.");
+Require(OverlayDismissPolicy.OnDeferredTick(false, true, false, false, false, 100) == OverlayDismissDecision.Keep,
+    "A recent OS FileDrop must keep Overlay visible through mouse release ordering.");
+Require(OverlayDismissPolicy.OnDeferredTick(false, true, false, false, false, OverlayDismissPolicy.DropGraceMilliseconds) == OverlayDismissDecision.Hide,
+    "A drag that left without dropping must hide after release.");
+Require(OverlayDismissPolicy.OnDeactivated(ModuleHostWindowPresentationMode.Standard, false, true, false, false) == OverlayDismissDecision.Keep,
+    "Standard Web module windows must not enable click-away dismissal.");
 var presentationError = default(Exception);
 var presentationThread = new Thread(() =>
 {
