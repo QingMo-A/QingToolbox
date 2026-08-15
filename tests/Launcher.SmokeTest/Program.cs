@@ -50,6 +50,29 @@ try
     var desktopReloaded = new LauncherStore(Path.Combine(temp, "store"));
     Require(desktopReloaded.SortMode == "desktop" && desktopReloaded.Snapshot().Items.Select(item => item.Id).SequenceEqual(desktopIds.Reverse()), "Desktop mode/order was not persisted.");
     Require(desktopReloaded.SetSortMode("custom") && desktopReloaded.Items.Select(item => item.Id).SequenceEqual([itemB.Id, itemA.Id]), "Desktop ordering changed custom order.");
+
+    var identityStore = new LauncherStore(Path.Combine(temp, "identity-store"));
+    var workA = Path.Combine(temp, "work-a");
+    var workB = Path.Combine(temp, "work-b");
+    Directory.CreateDirectory(workA);
+    Directory.CreateDirectory(workB);
+    var profileA = new ResolvedLauncherItem("Profile A", exeA, " --profile=A ", workA, exeA, Path.Combine(temp, "Profile A.lnk"));
+    var sameProfileA = profileA with { Arguments = "--profile=A", OriginPath = Path.Combine(temp, "Profile A Copy.lnk") };
+    var profileB = profileA with { Name = "Profile B", Arguments = "--profile=B", OriginPath = Path.Combine(temp, "Profile B.lnk") };
+    var profileAOtherDirectory = profileA with { Name = "Profile A Other", WorkingDirectory = workB, OriginPath = Path.Combine(temp, "Profile A Other.lnk") };
+    Require(identityStore.Add(profileA, null, out var profileAItem), "Profile A was not added.");
+    Require(!identityStore.Add(sameProfileA, null, out _), "Identical launch behavior was not deduplicated.");
+    Require(identityStore.Add(profileB, null, out var profileBItem), "Different arguments were incorrectly deduplicated.");
+    Require(identityStore.Add(profileAOtherDirectory, null, out _), "Different working directory was incorrectly deduplicated.");
+    Require(identityStore.MarkLaunched(profileAItem.Id, DateTimeOffset.UtcNow.AddSeconds(-1)) &&
+            identityStore.MarkLaunched(profileBItem.Id, DateTimeOffset.UtcNow), "Profile launch timestamps were not recorded.");
+    Require(identityStore.Snapshot().Recent.Select(item => item.Id).Contains(profileAItem.Id) &&
+            identityStore.Snapshot().Recent.Select(item => item.Id).Contains(profileBItem.Id), "Recent merged argument variants.");
+    identityStore.SynchronizeDesktopItems([sameProfileA]);
+    var matchingDesktopId = identityStore.DesktopItems.Single().Id;
+    Require(identityStore.MarkLaunched(matchingDesktopId, DateTimeOffset.UtcNow.AddSeconds(1)), "Desktop launch timestamp was not recorded.");
+    Require(identityStore.Snapshot().Recent.Count(item => item.Name.Contains("Profile A", StringComparison.Ordinal)) == 1,
+        "Recent did not merge Custom and Desktop entries with identical launch behavior.");
     var corruptDirectory = Path.Combine(temp, "corrupt");
     Directory.CreateDirectory(corruptDirectory);
     File.WriteAllText(Path.Combine(corruptDirectory, "launcher.json"), "{not-json");
@@ -104,11 +127,21 @@ try
     });
     await module.OnActivateAsync();
     Require(fakeRegistration.Registered.Count == 1, "Default hotkey was not registered on activate.");
+    await module.HandleWebRequestAsync("setSortMode", JsonSerializer.SerializeToElement(new { mode = "desktop" }));
+    var unsupported = Path.Combine(temp, "readme.txt");
+    File.WriteAllText(unsupported, "unsupported");
+    await module.HandleExternalFilesDroppedAsync([unsupported]);
+    Require(module.GetStateForTest().SortMode == "desktop", "Failed Desktop drop changed the active view.");
     await module.HandleExternalFilesDroppedAsync([exeA, exeB]);
+    Require(module.GetStateForTest().SortMode == "custom", "Successful Desktop drop did not switch to Custom.");
     var state = await module.HandleWebRequestAsync("getState", null);
     var stateRoot = state!.Value;
     var ids = stateRoot.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("id").GetString()!).ToArray();
     Require(ids.Length == 2, "Drop did not add both temporary executables.");
+    await module.HandleWebRequestAsync("setSortMode", JsonSerializer.SerializeToElement(new { mode = "desktop" }));
+    await module.HandleExternalFilesDroppedAsync([exeA]);
+    Require(module.GetStateForTest().SortMode == "desktop", "Duplicate Desktop drop changed the active view.");
+    await module.HandleWebRequestAsync("setSortMode", JsonSerializer.SerializeToElement(new { mode = "custom" }));
     await module.HandleWebRequestAsync("launchItem", JsonSerializer.SerializeToElement(new { id = ids[0] }));
     Require(fakeStarter.Started.Count == 1, "Launch seam was not invoked.");
     Require(actions.Contains(ModuleHostWindowAction.Hide), "Successful launch did not request Hide.");

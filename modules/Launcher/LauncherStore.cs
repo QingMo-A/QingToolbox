@@ -40,7 +40,7 @@ public sealed class LauncherStore
             var recent = _items.Concat(_desktopItems).Where(item => item.LastLaunchedAt is not null)
                 .OrderByDescending(item => item.LastLaunchedAt)
                 .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
-                .GroupBy(item => NormalizePath(item.Target), StringComparer.OrdinalIgnoreCase)
+                .GroupBy(CreateLaunchIdentity, LaunchIdentityComparer.Instance)
                 .Select(group => group.First())
                 .Take(10)
                 .Select(item => ToView(item, _desktopItems.Any(value => value.Id == item.Id) ? "desktop" : "custom"))
@@ -69,8 +69,9 @@ public sealed class LauncherStore
         lock (_gate)
         {
             var target = NormalizePath(resolved.Target);
+            var identity = CreateLaunchIdentity(resolved);
             var existing = _items.FirstOrDefault(value =>
-                string.Equals(NormalizePath(value.Target), target, StringComparison.OrdinalIgnoreCase));
+                LaunchIdentityComparer.Instance.Equals(CreateLaunchIdentity(value), identity));
             if (existing is not null)
             {
                 item = existing;
@@ -298,6 +299,39 @@ public sealed class LauncherStore
 
     private static string DesktopIdentity(ResolvedLauncherItem item) => NormalizePath(item.OriginPath ?? item.Target);
     private static string DesktopIdentity(LauncherItem item) => NormalizePath(item.OriginPath ?? item.Target);
+
+    private static LaunchIdentity CreateLaunchIdentity(ResolvedLauncherItem item)
+    {
+        var target = NormalizePath(item.Target);
+        var workingDirectory = NormalizePath(string.IsNullOrWhiteSpace(item.WorkingDirectory)
+            ? Path.GetDirectoryName(target) ?? string.Empty
+            : item.WorkingDirectory);
+        return new(target, (item.Arguments ?? string.Empty).Trim(), workingDirectory);
+    }
+
+    private static LaunchIdentity CreateLaunchIdentity(LauncherItem item) =>
+        new(NormalizePath(item.Target), (item.Arguments ?? string.Empty).Trim(), NormalizePath(item.WorkingDirectory));
+
+    private readonly record struct LaunchIdentity(string Target, string Arguments, string WorkingDirectory);
+
+    private sealed class LaunchIdentityComparer : IEqualityComparer<LaunchIdentity>
+    {
+        public static LaunchIdentityComparer Instance { get; } = new();
+
+        public bool Equals(LaunchIdentity left, LaunchIdentity right) =>
+            StringComparer.OrdinalIgnoreCase.Equals(left.Target, right.Target) &&
+            StringComparer.Ordinal.Equals(left.Arguments, right.Arguments) &&
+            StringComparer.OrdinalIgnoreCase.Equals(left.WorkingDirectory, right.WorkingDirectory);
+
+        public int GetHashCode(LaunchIdentity value)
+        {
+            var hash = new HashCode();
+            hash.Add(value.Target, StringComparer.OrdinalIgnoreCase);
+            hash.Add(value.Arguments, StringComparer.Ordinal);
+            hash.Add(value.WorkingDirectory, StringComparer.OrdinalIgnoreCase);
+            return hash.ToHashCode();
+        }
+    }
 
     private static LauncherItem RefreshDesktopItem(LauncherItem existing, ResolvedLauncherItem resolved)
     {

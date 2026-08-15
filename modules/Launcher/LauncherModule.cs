@@ -138,6 +138,7 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
             if (iconKey is not null) store.SetIconKey(item.Id, iconKey);
             added.Add(item.Name);
         }
+        if (added.Count > 0 && store.SortMode == "desktop") store.SetSortMode("custom");
         PublishState();
         PublishEvent("dropResult", new { added = added.ToArray(), skipped = skipped.ToArray() });
         return Task.CompletedTask;
