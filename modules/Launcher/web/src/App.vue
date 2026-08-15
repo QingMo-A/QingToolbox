@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { invoke, onDropResult, onPresentationChanged, onStateChanged, waitForPresentation } from './bridge'
-import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, searchLauncherItems, targetPointerInsertion, shortcutFromKeyboard, visibleRecentItems } from './launcher'
+import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridSlotFromPoint, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, visibleRecentItems } from './launcher'
 import type { PointerGesture } from './launcher'
 import type { DropResult, Item, Presentation, State } from './types'
 
@@ -21,6 +21,7 @@ const draggingId = ref<string | null>(null)
 const dragPreview = ref<{ itemId: string; x: number; y: number } | null>(null)
 const pointerOverId = ref<string | null>(null)
 const pointerGesture = ref<PointerGesture | null>(null)
+const dragProjection = ref<{ sourceId: string; originIds: string[]; visibleIds: string[]; insertionIndex: number } | null>(null)
 const gridRef = ref<HTMLElement | null>(null)
 let endingPointerId: number | undefined
 const suppressClick = ref(false)
@@ -38,6 +39,18 @@ const sortedItems = computed(() => state.sortMode === 'alphabetical' ? alphabeti
 const visibleItems = computed(() => searchLauncherItems(sortedItems.value, searchQuery.value))
 const recent = computed(() => visibleRecentItems(recentItems(state.recent.length ? state.recent : state.items), recentCapacity.value, searchQuery.value))
 const dragPreviewItem = computed(() => dragPreview.value ? state.items.find(item => item.id === dragPreview.value?.itemId) ?? null : null)
+const gridEntries = computed(() => {
+  const projection = dragProjection.value
+  if (!projection) return visibleItems.value.map(item => ({ kind: 'item' as const, key: item.id, item }))
+  const items: Array<{ kind: 'item'; key: string; item: Item } | { kind: 'placeholder'; key: string }> = projection.visibleIds
+    .filter(id => id !== projection.sourceId)
+    .map(id => state.items.find(item => item.id === id))
+    .filter((item): item is Item => Boolean(item))
+    .map(item => ({ kind: 'item' as const, key: item.id, item }))
+  const slot = Math.max(0, Math.min(projection.insertionIndex, items.length))
+  items.splice(slot, 0, { kind: 'placeholder' as const, key: 'drag-placeholder' })
+  return items
+})
 
 function apply(next: State) {
   state.sortMode = next.sortMode
@@ -110,24 +123,27 @@ function activate(item: Item) {
   launch(item)
 }
 
-function itemFromPoint(x: number, y: number) {
-  const element = document.elementFromPoint(x, y)
-  const itemId = element?.closest<HTMLElement>('[data-launcher-item-id]')?.dataset.launcherItemId
-  return itemId && state.items.some(item => item.id === itemId) ? itemId : null
-}
-
-function insertionIndexAtPoint(x: number, y: number, movingId: string) {
+function insertionIndexAtPoint(x: number, y: number, _movingId: string) {
   const grid = gridRef.value
-  if (!grid) return 0
+  const projection = dragProjection.value
+  if (!grid || !projection) return 0
   const tiles = Array.from(grid.querySelectorAll<HTMLElement>('[data-launcher-item-id]'))
-    .filter(tile => tile.dataset.launcherItemId !== movingId)
-  for (let index = 0; index < tiles.length; index += 1) {
-    const rect = tiles[index].getBoundingClientRect()
-    const midpointY = rect.top + rect.height / 2
-    const midpointX = rect.left + rect.width / 2
-    if (y < midpointY || (y <= rect.bottom && x < midpointX)) return index
-  }
-  return tiles.length
+    .filter(tile => tile.dataset.launcherItemId !== _movingId)
+  const remainingCount = Math.max(0, projection.visibleIds.length - 1)
+  if (!tiles.length || !remainingCount) return 0
+  const firstRect = tiles[0]?.getBoundingClientRect()
+  const style = getComputedStyle(grid)
+  const columns = Math.max(1, style.gridTemplateColumns.split(/\s+/).filter(Boolean).length)
+  const gapX = Number.parseFloat(style.columnGap) || 0
+  const gapY = Number.parseFloat(style.rowGap) || gapX
+  const paddingLeft = Number.parseFloat(style.paddingLeft) || 0
+  const paddingTop = Number.parseFloat(style.paddingTop) || 0
+  const width = firstRect?.width || Number.parseFloat(style.gridAutoColumns) || 112
+  const height = firstRect?.height || Number.parseFloat(style.gridAutoRows) || 132
+  const bounds = grid.getBoundingClientRect()
+  const localX = x - bounds.left - paddingLeft
+  const localY = y - bounds.top - paddingTop + grid.scrollTop
+  return gridSlotFromPoint(localX, localY, width, height, columns, gapX, gapY, remainingCount)
 }
 
 function stopPointerSession() {
@@ -176,17 +192,14 @@ function movePointer(event: PointerEvent) {
     event.preventDefault()
     draggingId.value = moved.movingId
     dragPreview.value = pointerPreview(moved, event.clientX, event.clientY)
+    dragProjection.value = { sourceId: moved.movingId, originIds: [...moved.originIds], visibleIds: [...moved.scopeIds], insertionIndex: 0 }
     markDragClickSuppressed()
   }
   if (moved.active) dragPreview.value = pointerPreview(moved, event.clientX, event.clientY)
-  const overId = itemFromPoint(event.clientX, event.clientY)
   const insertionIndex = insertionIndexAtPoint(event.clientX, event.clientY, moved.movingId)
-  const result = targetPointerInsertion(moved, state.items.map(item => item.id), insertionIndex)
-  pointerGesture.value = result.gesture
-  if (result.ids.join('\u0000') !== state.items.map(item => item.id).join('\u0000')) {
-    state.items = result.ids.map(id => state.items.find(item => item.id === id)!).filter(Boolean)
-  }
-  pointerOverId.value = overId && overId !== moved.movingId ? overId : null
+  if (dragProjection.value) dragProjection.value = { ...dragProjection.value, insertionIndex }
+  pointerGesture.value = moved
+  pointerOverId.value = null
 }
 
 function endPointer(event: PointerEvent, canceled = false) {
@@ -195,14 +208,16 @@ function endPointer(event: PointerEvent, canceled = false) {
   endingPointerId = event.pointerId
   const tile = pointerCaptureTarget
   try { if (tile?.hasPointerCapture(event.pointerId)) tile.releasePointerCapture(event.pointerId) } catch { /* already released */ }
+  const projection = dragProjection.value
   if (canceled) {
-    const result = cancelPointerGesture(current)
-    if (result.dragged) state.items = result.ids.map(id => state.items.find(item => item.id === id)!).filter(Boolean)
+    cancelPointerGesture(current)
   } else {
-    const result = completePointerGesture(current, state.items.map(item => item.id))
-    if (result.persist) {
+    const result = completePointerGesture(current, current.originIds)
+    if (result.persist && projection) {
+      const ids = reorderVisibleToIndex(projection.originIds, projection.visibleIds, projection.sourceId, projection.insertionIndex)
+      state.items = ids.map(id => state.items.find(item => item.id === id)!).filter(Boolean)
       markDragClickSuppressed()
-      void run('setCustomOrder', { ids: result.ids })
+      void run('setCustomOrder', { ids })
     }
   }
   if (current.active || canceled) markDragClickSuppressed()
@@ -210,6 +225,7 @@ function endPointer(event: PointerEvent, canceled = false) {
   draggingId.value = null
   dragPreview.value = null
   pointerOverId.value = null
+  dragProjection.value = null
   pointerCaptureTarget = null
   stopPointerSession()
   endingPointerId = undefined
@@ -225,6 +241,7 @@ function cancelCurrentPointer() {
   draggingId.value = null
   dragPreview.value = null
   pointerOverId.value = null
+  dragProjection.value = null
   pointerCaptureTarget = null
   stopPointerSession()
   markDragClickSuppressed()
@@ -291,12 +308,15 @@ onMounted(() => {
           <button v-if="searchQuery" class="search-clear" type="button" :aria-label="t('search.clear', 'Clear search')" @click="clearSearch">&#215;</button>
         </div>
         <section class="drop-area">
-          <TransitionGroup v-if="visibleItems.length" ref="gridRef" name="launcher-grid" tag="div" class="launcher-grid">
-            <article v-for="item in visibleItems" :key="item.id" class="app-tile" :class="{ dragging: draggingId === item.id, 'drag-over': pointerOverId === item.id && draggingId !== item.id }" :data-launcher-item-id="item.id" :draggable="false" tabindex="0" @pointerdown="beginPointer(item, $event)" @click="activate(item)" @keydown.enter="launch(item)">
-              <div class="app-icon"><img v-if="iconFor(item)" :src="iconFor(item)" :alt="item.name" /><span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span></div>
-              <div class="app-name" :title="item.name">{{ item.name }}</div>
-              <button class="remove-button" data-no-drag :aria-label="`${t('actions.remove', 'Remove')} ${item.name}`" @pointerdown.stop.prevent @click.stop.prevent="remove(item)">&#215;</button>
-            </article>
+          <TransitionGroup v-if="gridEntries.length" ref="gridRef" name="launcher-grid" tag="div" class="launcher-grid">
+            <template v-for="entry in gridEntries" :key="entry.key">
+              <article v-if="entry.kind === 'item'" class="app-tile" :class="{ dragging: draggingId === entry.item.id, 'drag-over': pointerOverId === entry.item.id && draggingId !== entry.item.id }" :data-launcher-item-id="entry.item.id" :draggable="false" tabindex="0" @pointerdown="beginPointer(entry.item, $event)" @click="activate(entry.item)" @keydown.enter="launch(entry.item)">
+                <div class="app-icon"><img v-if="iconFor(entry.item)" :src="iconFor(entry.item)" :alt="entry.item.name" /><span v-else class="fallback-icon">{{ entry.item.name.slice(0, 1).toUpperCase() }}</span></div>
+                <div class="app-name" :title="entry.item.name">{{ entry.item.name }}</div>
+                <button class="remove-button" data-no-drag :aria-label="`${t('actions.remove', 'Remove')} ${entry.item.name}`" @pointerdown.stop.prevent @click.stop.prevent="remove(entry.item)">&#215;</button>
+              </article>
+              <div v-else class="drag-placeholder" aria-hidden="true"></div>
+            </template>
           </TransitionGroup>
           <div v-else class="empty-drop"><div class="empty-grid">{{ searchQuery ? '?' : '+' }}</div><strong>{{ searchQuery ? t('search.noResults', 'No matching apps') : t('view.overlayEmpty', 'Drag an app or shortcut here') }}</strong></div>
         </section>
@@ -307,7 +327,7 @@ onMounted(() => {
         </section>
         <div v-if="dragPreview && dragPreviewItem" class="drag-preview" :style="{ left: `${dragPreview.x}px`, top: `${dragPreview.y}px` }" aria-hidden="true">
           <img v-if="iconFor(dragPreviewItem)" :src="iconFor(dragPreviewItem)" alt="" />
-          <span v-else>{{ dragPreviewItem.name.slice(0, 1).toUpperCase() }}</span>
+          <span v-else class="fallback-icon">{{ dragPreviewItem.name.slice(0, 1).toUpperCase() }}</span>
         </div>
         <div v-if="notice" class="notice" role="status"><span>{{ notice }}</span><button :aria-label="t('actions.close', 'Close')" @click="notice = ''">&#215;</button></div>
       </template>

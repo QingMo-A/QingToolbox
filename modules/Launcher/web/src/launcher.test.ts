@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LAUNCHER_MAX_ROWS, alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, reorderIds, reorderVisibleIds, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, targetPointerGesture, targetPointerInsertion, visibleRecentItems } from './launcher'
+import { LAUNCHER_MAX_ROWS, alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridSlotFromPoint, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, reorderIds, reorderVisibleIds, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, targetPointerGesture, targetPointerInsertion, visibleRecentItems } from './launcher'
 
 const item = (id: string, name: string, lastLaunchedAt: string | null = null) => ({ id, name, iconKey: null, lastLaunchedAt })
 
@@ -51,6 +51,14 @@ describe('pointer reorder gestures', () => {
     expect(reorderVisibleToIndex(['a', 'b', 'c'], ['a', 'b', 'c'], 'b', 1)).toEqual(['a', 'b', 'c'])
     const active = movePointerGesture(beginPointerGesture(1, 'a', 0, 0, ['a', 'b', 'c']), 12, 0)
     expect(targetPointerInsertion(active, ['a', 'b', 'c'], 2).ids).toEqual(['b', 'c', 'a'])
+  })
+  it('projects stable grid gaps across rows and the blank area after the last tile', () => {
+    const cell = { width: 100, height: 100 }
+    expect(gridSlotFromPoint(10, 10, cell.width, cell.height, 3, 10, 10, 5)).toBe(0)
+    expect(gridSlotFromPoint(270, 160, cell.width, cell.height, 3, 10, 10, 5)).toBe(5)
+    expect(gridSlotFromPoint(340, 160, cell.width, cell.height, 3, 10, 10, 5)).toBe(5)
+    expect(gridSlotFromPoint(10, 160, cell.width, cell.height, 3, 10, 10, 5)).toBe(3)
+    expect(gridSlotFromPoint(1000, 1000, cell.width, cell.height, 3, 10, 10, 5)).toBe(5)
   })
   it('cancels back to the original order without persistence', () => {
     const started = movePointerGesture(beginPointerGesture(1, 'a', 0, 0, ['a', 'b', 'c']), 12, 0)

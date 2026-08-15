@@ -158,6 +158,44 @@ export function reorderVisibleToIndex(
   return next
 }
 
+/**
+ * Maps a pointer location in a stable row-major grid to an insertion slot.
+ * The returned value is a gap index (0..remainingCount), not an item index.
+ * Keeping this calculation independent of the rendered tile DOM means Vue
+ * transitions/reordering cannot change the projection while a pointer is down.
+ */
+export function gridSlotFromPoint(
+  localX: number,
+  localY: number,
+  cellWidth: number,
+  cellHeight: number,
+  columns: number,
+  gapX: number,
+  gapY: number,
+  remainingCount: number,
+): number {
+  const count = Math.max(0, Math.floor(remainingCount))
+  if (count === 0) return 0
+  const width = Math.max(1, cellWidth)
+  const height = Math.max(1, cellHeight)
+  const columnCount = Math.max(1, Math.floor(columns))
+  const strideX = width + Math.max(0, gapX)
+  const strideY = height + Math.max(0, gapY)
+  const safeX = Math.max(0, Number.isFinite(localX) ? localX : 0)
+  const safeY = Math.max(0, Number.isFinite(localY) ? localY : 0)
+  let column = Math.floor(safeX / strideX)
+  let row = Math.floor(safeY / strideY)
+  const withinX = safeX - column * strideX
+  const withinY = safeY - row * strideY
+  if (withinX > width / 2) column += 1
+  if (withinY > height / 2) row += 1
+  if (column >= columnCount) {
+    row += Math.floor(column / columnCount)
+    column %= columnCount
+  }
+  return Math.max(0, Math.min(count, row * columnCount + column))
+}
+
 export function alphabeticalItems(items: readonly Item[]): Item[] {
   return items.map((item, index) => ({ item, index }))
     .sort((left, right) => left.item.name.localeCompare(right.item.name, undefined, { sensitivity: 'base' }) || left.index - right.index)

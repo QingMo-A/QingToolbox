@@ -14,12 +14,19 @@ describe('launcher pointer and clear affordance contracts', () => {
 
   it('keeps remove controls out of launch and drag gestures', () => {
     expect(appSource).toContain('@pointerdown.stop.prevent')
-    expect(appSource).toContain('@click.stop.prevent="remove(item)"')
+    expect(appSource).toContain('@click.stop.prevent="remove(entry.item)"')
     expect(stylesSource).toContain('.app-tile:hover .remove-button, .app-tile:focus-within .remove-button')
     expect(stylesSource).toContain('.app-tile.dragging .app-name, .app-tile.dragging .remove-button')
   })
 
   it('pads the scroll viewport so the first-row hover border is visible', () => {
     expect(stylesSource).toContain('padding: 4px; scrollbar-color:')
+  })
+
+  it('keeps real icons unbacked and the drag slot visually transparent', () => {
+    expect(stylesSource).toContain('.app-icon { align-items: center; background: transparent; border: 0;')
+    expect(stylesSource).toContain('.fallback-icon {')
+    expect(stylesSource).toContain('.drag-placeholder { background: transparent !important; border: 0 !important; box-shadow: none !important;')
+    expect(stylesSource).toContain('pointer-events: none; visibility: hidden;')
   })
 })
