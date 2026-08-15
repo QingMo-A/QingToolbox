@@ -23,13 +23,19 @@ var presentationThread = new Thread(() =>
         Require(standard.WindowStyle == WindowStyle.SingleBorderWindow && standard.ResizeMode == ResizeMode.CanResize &&
                 standard.ShowInTaskbar && !standard.AllowsTransparency && standard.Width == 900 && standard.Height == 680,
             "Standard WebModuleWindow presentation must retain its normal window shape.");
+        standard.Topmost = true;
+        WebModuleWindowPresentation.EnsureTopmost(standard, ModuleHostWindowPresentationMode.Standard);
+        Require(standard.Topmost, "Standard presentation must not rewrite an existing Topmost value.");
 
         var overlay = new Window();
         WebModuleWindowPresentation.Apply(overlay, ModuleHostWindowPresentationMode.Overlay);
         Require(overlay.WindowStyle == WindowStyle.None && overlay.ResizeMode == ResizeMode.NoResize &&
                 !overlay.ShowInTaskbar && overlay.AllowsTransparency && overlay.Background == System.Windows.Media.Brushes.Transparent &&
-                overlay.WindowStartupLocation == WindowStartupLocation.CenterScreen && overlay.Width == 1000 && overlay.Height == 680,
-            "Overlay WebModuleWindow presentation must be frameless, transparent and centered.");
+                overlay.WindowStartupLocation == WindowStartupLocation.CenterScreen && overlay.Width == 1000 && overlay.Height == 680 && overlay.Topmost,
+            "Overlay WebModuleWindow presentation must be frameless, transparent, centered and topmost.");
+        overlay.Topmost = false;
+        WebModuleWindowPresentation.EnsureTopmost(overlay, ModuleHostWindowPresentationMode.Overlay);
+        Require(overlay.Topmost, "Overlay presentation must reassert Topmost after hide/show or toggle.");
     }
     catch (Exception exception) { presentationError = exception; }
 });

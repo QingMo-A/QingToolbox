@@ -195,6 +195,7 @@ internal static class Program
                         var target = EnsureWebWindow();
                         if (!target.IsVisible) target.Show();
                         target.Activate();
+                        WebModuleWindowPresentation.EnsureTopmost(target, presentationMode);
                         break;
                     }
                 case ModuleHostWindowAction.Hide:
@@ -206,9 +207,10 @@ internal static class Program
                         var target = EnsureWebWindow();
                         target.Show();
                         target.Activate();
+                        WebModuleWindowPresentation.EnsureTopmost(target, presentationMode);
                     }
                     else if (window.IsVisible) window.Hide();
-                    else { window.Show(); window.Activate(); }
+                    else { window.Show(); window.Activate(); WebModuleWindowPresentation.EnsureTopmost(window, presentationMode); }
                     break;
             }
         }
@@ -246,7 +248,9 @@ internal static class Program
                     case "Deactivate": if (active) { await webModule.OnDeactivateAsync(); active = false; } break;
                     case "OpenWindow":
                         var openedWindow = EnsureWebWindow();
-                        openedWindow.Show(); openedWindow.Activate(); break;
+                        openedWindow.Show(); openedWindow.Activate();
+                        WebModuleWindowPresentation.EnsureTopmost(openedWindow, presentationMode);
+                        break;
                     case "CloseWindow": window?.Close(); window = null; suspended = null; break;
                     case "SuspendWindow":
                         if (window is not null && suspended is null)
@@ -258,7 +262,7 @@ internal static class Program
                     case "RestoreWindow":
                         if (window is not null && suspended is { } snapshot)
                         {
-                            if (snapshot.WasVisible) { window.Show(); window.WindowState = snapshot.State; if (snapshot.WasActive) window.Activate(); }
+                            if (snapshot.WasVisible) { window.Show(); window.WindowState = snapshot.State; if (snapshot.WasActive) window.Activate(); WebModuleWindowPresentation.EnsureTopmost(window, presentationMode); }
                             suspended = null;
                         }
                         break;

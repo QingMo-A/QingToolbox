@@ -24,5 +24,14 @@ internal static class WebModuleWindowPresentation
         window.AllowsTransparency = true;
         window.Background = Brushes.Transparent;
         window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        // Overlay windows are explicitly above normal application windows. Keep
+        // this scoped to the opt-in presentation mode; standard module windows
+        // retain WPF's default Topmost behavior.
+        window.Topmost = true;
+    }
+
+    public static void EnsureTopmost(Window window, ModuleHostWindowPresentationMode mode)
+    {
+        if (IsOverlay(mode)) window.Topmost = true;
     }
 }
