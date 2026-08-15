@@ -30,6 +30,7 @@ describe('pointer reorder gestures', () => {
   })
   it('guards custom mode and controls', () => {
     expect(canStartPointerGesture('custom', 0, false)).toBe(true)
+    expect(canStartPointerGesture('desktop', 0, false)).toBe(true)
     expect(canStartPointerGesture('alphabetical', 0, false)).toBe(false)
     expect(canStartPointerGesture('custom', 0, true)).toBe(false)
     expect(canStartPointerGesture('custom', 2, false)).toBe(false)

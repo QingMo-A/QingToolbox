@@ -16,6 +16,8 @@
   "search.noResults": "No matching apps.",
   "sort.custom": "Custom",
   "sort.alphabetical": "A-Z",
+  "sort.desktop": "Desktop",
+  "view.desktopEmpty": "No desktop applications found",
   "actions.settings": "Settings",
   "actions.back": "Back",
   "actions.remove": "Remove",

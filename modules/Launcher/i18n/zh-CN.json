@@ -16,6 +16,8 @@
   "search.noResults": "没有匹配的应用。",
   "sort.custom": "自定义",
   "sort.alphabetical": "首字母",
+  "sort.desktop": "桌面",
+  "view.desktopEmpty": "未发现桌面应用",
   "actions.settings": "设置",
   "actions.back": "返回",
   "actions.remove": "移除",

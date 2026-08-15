@@ -63,7 +63,7 @@ function apply(next: State) {
   state.hotkey = next.hotkey
   state.hotkeyStatus = next.hotkeyStatus
   state.active = next.active
-  void loadIcons(next.items)
+  void loadIcons([...next.items, ...next.recent])
 }
 
 async function run(method: string, payload?: unknown) {
@@ -102,7 +102,7 @@ async function loadIcons(items: readonly Item[]) {
 
 function iconFor(item: Item) { return icons[item.id] ?? '' }
 function hideLauncher() { void run('hideWindow') }
-function switchSort(mode: 'custom' | 'alphabetical') { if (state.sortMode !== mode) void run('setSortMode', { mode }) }
+function switchSort(mode: 'custom' | 'alphabetical' | 'desktop') { if (state.sortMode !== mode) void run('setSortMode', { mode }) }
 function clearSearch() { searchQuery.value = '' }
 function measureRecentCapacity() {
   recentCapacity.value = recentColumnCapacity(recentContainer.value?.clientWidth ?? 0)
@@ -326,6 +326,7 @@ onMounted(() => {
             <div class="segmented" role="group" :aria-label="t('sort.custom', 'Sort')">
               <button :class="{ active: state.sortMode === 'custom' }" @click="switchSort('custom')">{{ t('sort.custom', 'Custom') }}</button>
               <button :class="{ active: state.sortMode === 'alphabetical' }" @click="switchSort('alphabetical')">{{ t('sort.alphabetical', 'A-Z') }}</button>
+              <button :class="{ active: state.sortMode === 'desktop' }" @click="switchSort('desktop')">{{ t('sort.desktop', 'Desktop') }}</button>
             </div>
             <button class="icon-button" :aria-label="t('actions.settings', 'Settings')" :title="t('actions.settings', 'Settings')" @click="view = 'settings'">&#9881;</button>
           </div>
@@ -341,12 +342,12 @@ onMounted(() => {
               <article v-if="entry.kind === 'item'" class="app-tile" :class="{ dragging: draggingId === entry.item.id, 'drag-over': pointerOverId === entry.item.id && draggingId !== entry.item.id }" :data-launcher-item-id="entry.item.id" :draggable="false" tabindex="0" @pointerdown="beginPointer(entry.item, $event)" @click="activate(entry.item)" @keydown.enter="launch(entry.item)">
                 <div class="app-icon"><img v-if="iconFor(entry.item)" :src="iconFor(entry.item)" :alt="entry.item.name" /><span v-else class="fallback-icon">{{ entry.item.name.slice(0, 1).toUpperCase() }}</span></div>
                 <div class="app-name" :title="entry.item.name">{{ entry.item.name }}</div>
-                <button class="remove-button" data-no-drag :aria-label="`${t('actions.remove', 'Remove')} ${entry.item.name}`" @pointerdown.stop.prevent @click.stop.prevent="remove(entry.item)">&#215;</button>
+                <button v-if="entry.item.source !== 'desktop'" class="remove-button" data-no-drag :aria-label="`${t('actions.remove', 'Remove')} ${entry.item.name}`" @pointerdown.stop.prevent @click.stop.prevent="remove(entry.item)">&#215;</button>
               </article>
               <div v-else class="drag-placeholder" aria-hidden="true"></div>
             </template>
           </TransitionGroup>
-          <div v-else class="empty-drop"><div class="empty-grid">{{ searchQuery ? '?' : '+' }}</div><strong>{{ searchQuery ? t('search.noResults', 'No matching apps') : t('view.overlayEmpty', 'Drag an app or shortcut here') }}</strong></div>
+          <div v-else class="empty-drop"><div class="empty-grid">{{ searchQuery ? '?' : state.sortMode === 'desktop' ? '⌂' : '+' }}</div><strong>{{ searchQuery ? t('search.noResults', 'No matching apps') : state.sortMode === 'desktop' ? t('view.desktopEmpty', 'No desktop applications found') : t('view.overlayEmpty', 'Drag an app or shortcut here') }}</strong></div>
         </section>
         <section ref="recentContainer" class="recent-section">
           <div class="section-heading"><span class="section-label">{{ t('view.recent', 'Recently used') }}</span></div>

@@ -17,6 +17,7 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly object _gate = new();
     private readonly ILauncherProcessStarter _processStarter;
+    private readonly ILauncherDesktopSource _desktopSource;
     private readonly LauncherHotkeyService _hotkey;
     private LauncherStore? _store;
     private ModuleContext? _context;
@@ -25,11 +26,12 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
     private bool _disposed;
 
     public LauncherModule()
-        : this(null, null) { }
+        : this(null, null, null) { }
 
-    internal LauncherModule(ILauncherProcessStarter? processStarter, ILauncherHotkeyRegistration? hotkeyRegistration)
+    internal LauncherModule(ILauncherProcessStarter? processStarter, ILauncherHotkeyRegistration? hotkeyRegistration, ILauncherDesktopSource? desktopSource = null)
     {
         _processStarter = processStarter ?? new WindowsLauncherProcessStarter();
+        _desktopSource = desktopSource ?? new WindowsLauncherDesktopSource();
         _hotkey = hotkeyRegistration is null
             ? new LauncherHotkeyService()
             : new LauncherHotkeyService(hotkeyRegistration);
@@ -50,6 +52,7 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
         _context = context;
         _store = new LauncherStore(context.DataDirectory);
         _iconsDirectory = Path.Combine(context.DataDirectory, "icons");
+        RefreshDesktopItems();
         MigrateIconCache();
         return Task.CompletedTask;
     }
@@ -85,11 +88,13 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
             case "getState":
                 return Snapshot();
             case "setSortMode":
-                if (!store.SetSortMode(RequiredString(payload, "mode"))) throw new ArgumentException("Sort mode must be custom or alphabetical.");
+                var mode = RequiredString(payload, "mode");
+                if (mode == "desktop") { RefreshDesktopItems(); MigrateIconCache(); }
+                if (!store.SetSortMode(mode)) throw new ArgumentException("View mode must be custom, alphabetical, or desktop.");
                 PublishState();
                 return Snapshot();
             case "setCustomOrder":
-                if (!store.SetCustomOrder(RequiredStringArray(payload, "ids"))) throw new ArgumentException("Custom order must contain every item exactly once.");
+                if (!store.SetCustomOrder(RequiredStringArray(payload, "ids"))) throw new ArgumentException("The active view order must contain every item exactly once.");
                 PublishState();
                 return Snapshot();
             case "launchItem":
@@ -193,7 +198,7 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
     private void MigrateIconCache()
     {
         if (_store is null || _iconsDirectory is null) return;
-        foreach (var item in _store.Items)
+        foreach (var item in _store.Items.Concat(_store.DesktopItems))
         {
             var existing = item.IconKey;
             var path = string.IsNullOrWhiteSpace(existing) ? null : Path.Combine(_iconsDirectory, existing);
@@ -203,6 +208,12 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
             _store.SetIconKey(item.Id, key);
             LauncherIconCache.DeleteBestEffort(existing, _iconsDirectory);
         }
+    }
+
+    private void RefreshDesktopItems()
+    {
+        if (_store is null) return;
+        _store.SynchronizeDesktopItems(_desktopSource.Scan());
     }
 
     private JsonElement SetHotkey(JsonElement? payload)

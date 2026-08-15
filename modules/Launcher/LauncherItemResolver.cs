@@ -20,8 +20,14 @@ public static class LauncherItemResolver
         var extension = Path.GetExtension(fullPath);
         if (extension.Equals(".exe", StringComparison.OrdinalIgnoreCase))
         {
-            item = CreateExecutable(fullPath, null, null, null);
+            item = CreateExecutable(fullPath, null, null, null, null, fullPath);
             return item is not null;
+        }
+        if (extension.Equals(".url", StringComparison.OrdinalIgnoreCase))
+        {
+            item = new(Path.GetFileNameWithoutExtension(fullPath), fullPath, string.Empty,
+                Path.GetDirectoryName(fullPath) ?? string.Empty, fullPath, fullPath);
+            return true;
         }
         if (!extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase)) return false;
         return TryResolveShortcut(fullPath, out item);
@@ -43,7 +49,8 @@ public static class LauncherItemResolver
         string? displayName,
         string? arguments,
         string? workingDirectory,
-        string? iconSourcePath = null)
+        string? iconSourcePath = null,
+        string? originPath = null)
     {
         if (!File.Exists(target) || !Path.GetExtension(target).Equals(".exe", StringComparison.OrdinalIgnoreCase)) return null;
         var directory = string.IsNullOrWhiteSpace(workingDirectory)
@@ -51,7 +58,7 @@ public static class LauncherItemResolver
             : NormalizeWorkingDirectory(workingDirectory!, Path.GetDirectoryName(target));
         var name = string.IsNullOrWhiteSpace(displayName) ? ReadDisplayName(target) : displayName.Trim();
         if (string.IsNullOrWhiteSpace(name)) name = Path.GetFileNameWithoutExtension(target);
-        return new(name, target, arguments ?? string.Empty, directory, iconSourcePath ?? target);
+        return new(name, target, arguments ?? string.Empty, directory, iconSourcePath ?? target, originPath ?? target);
     }
 
     private static bool TryResolveShortcut(string shortcutPath, out ResolvedLauncherItem? item)
@@ -80,7 +87,7 @@ public static class LauncherItemResolver
             var displayName = Path.GetFileNameWithoutExtension(shortcutPath);
             item = CreateExecutable(targetPath, displayName, arguments,
                 string.IsNullOrWhiteSpace(workingDirectory) ? shortcutDirectory : workingDirectory,
-                iconPath);
+                iconPath, shortcutPath);
             return item is not null;
         }
         catch (COMException) { return false; }

@@ -25,8 +25,8 @@ export function visibleRecentItems(items: readonly Item[], capacity: number, que
   return searchLauncherItems(items, query).slice(0, Math.max(0, Math.floor(capacity)))
 }
 
-export function canStartPointerGesture(sortMode: 'custom' | 'alphabetical', button: number, onControl: boolean) {
-  return sortMode === 'custom' && button === 0 && !onControl
+export function canStartPointerGesture(sortMode: 'custom' | 'alphabetical' | 'desktop', button: number, onControl: boolean) {
+  return sortMode !== 'alphabetical' && button === 0 && !onControl
 }
 
 export type PointerGesture = {

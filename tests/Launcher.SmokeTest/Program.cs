@@ -41,6 +41,15 @@ try
     var reloaded = new LauncherStore(Path.Combine(temp, "store"));
     Require(reloaded.Items.Select(item => item.Id).SequenceEqual([itemB.Id, itemA.Id]), "Store reload lost custom order.");
     Require(reloaded.Snapshot().Recent.Count == 1 && reloaded.Snapshot().Recent[0].Id == itemA.Id, "Recent ordering was not restored.");
+    reloaded.SynchronizeDesktopItems([resolvedA!, resolvedB!]);
+    Require(reloaded.SetSortMode("desktop"), "Desktop mode was rejected.");
+    var desktopIds = reloaded.Snapshot().Items.Select(item => item.Id).ToArray();
+    Require(desktopIds.Length == 2 && reloaded.SetCustomOrder(desktopIds.Reverse().ToArray()), "Desktop order was rejected.");
+    reloaded.SynchronizeDesktopItems([resolvedA!, resolvedB!]);
+    Require(reloaded.Snapshot().Items.Select(item => item.Id).SequenceEqual(desktopIds.Reverse()), "Desktop refresh lost its saved order.");
+    var desktopReloaded = new LauncherStore(Path.Combine(temp, "store"));
+    Require(desktopReloaded.SortMode == "desktop" && desktopReloaded.Snapshot().Items.Select(item => item.Id).SequenceEqual(desktopIds.Reverse()), "Desktop mode/order was not persisted.");
+    Require(desktopReloaded.SetSortMode("custom") && desktopReloaded.Items.Select(item => item.Id).SequenceEqual([itemB.Id, itemA.Id]), "Desktop ordering changed custom order.");
     var corruptDirectory = Path.Combine(temp, "corrupt");
     Directory.CreateDirectory(corruptDirectory);
     File.WriteAllText(Path.Combine(corruptDirectory, "launcher.json"), "{not-json");
@@ -64,7 +73,7 @@ try
             sortMode = "custom",
             items = new[] { new { id = "legacy", name = "Notepad", target = iconSource, arguments = "", workingDirectory = Environment.SystemDirectory, iconKey = "legacy.png", lastLaunchedAt = (DateTimeOffset?)null } }
         }));
-        await using (var migrationModule = new LauncherModule(new FakeProcessStarter(), new FakeHotkeyRegistration()))
+        await using (var migrationModule = new LauncherModule(new FakeProcessStarter(), new FakeHotkeyRegistration(), new FakeDesktopSource()))
         {
             await migrationModule.OnLoadAsync(new ModuleContext
             {
@@ -81,7 +90,7 @@ try
     var dataDirectory = Path.Combine(temp, "module-data");
     var fakeStarter = new FakeProcessStarter { Result = true };
     var fakeRegistration = new FakeHotkeyRegistration();
-    await using var module = new LauncherModule(fakeStarter, fakeRegistration);
+    await using var module = new LauncherModule(fakeStarter, fakeRegistration, new FakeDesktopSource());
     Require(module.HostWindowPresentationMode == ModuleHostWindowPresentationMode.Overlay,
         "Launcher must request Overlay host window presentation.");
     var actions = new List<ModuleHostWindowAction>();
@@ -197,6 +206,12 @@ sealed class FakeProcessStarter : ILauncherProcessStarter
     public bool Result { get; set; }
     public List<LauncherItem> Started { get; } = [];
     public bool Start(LauncherItem item) { if (Result) Started.Add(item); return Result; }
+}
+
+sealed class FakeDesktopSource : ILauncherDesktopSource
+{
+    public IReadOnlyList<ResolvedLauncherItem> Items { get; init; } = [];
+    public IReadOnlyList<ResolvedLauncherItem> Scan() => Items;
 }
 
 sealed class FakeHotkeyRegistration : ILauncherHotkeyRegistration

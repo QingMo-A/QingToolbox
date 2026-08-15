@@ -6,6 +6,13 @@ const appSource = readFileSync(resolve(__dirname, 'App.vue'), 'utf8')
 const stylesSource = readFileSync(resolve(__dirname, 'styles.css'), 'utf8')
 
 describe('launcher pointer and clear affordance contracts', () => {
+  it('exposes independent custom, alphabetical, and desktop views', () => {
+    expect(appSource).toContain("switchSort('custom')")
+    expect(appSource).toContain("switchSort('alphabetical')")
+    expect(appSource).toContain("switchSort('desktop')")
+    expect(appSource).toContain("entry.item.source !== 'desktop'")
+  })
+
   it('keeps one custom clear affordance and hides native search cancellation', () => {
     expect((appSource.match(/class="search-clear"/g) ?? []).length).toBe(1)
     expect(stylesSource).toContain('.search-input::-webkit-search-cancel-button')

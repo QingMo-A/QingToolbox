@@ -27,20 +27,23 @@ public sealed record LauncherItem(
     string WorkingDirectory,
     string? IconKey,
     DateTimeOffset? LastLaunchedAt,
-    string? IconSourcePath = null);
+    string? IconSourcePath = null,
+    string? OriginPath = null);
 
 public sealed record ResolvedLauncherItem(
     string Name,
     string Target,
     string Arguments,
     string WorkingDirectory,
-    string? IconSourcePath);
+    string? IconSourcePath,
+    string? OriginPath = null);
 
 public sealed record LauncherItemView(
     string Id,
     string Name,
     string? IconKey,
-    DateTimeOffset? LastLaunchedAt);
+    DateTimeOffset? LastLaunchedAt,
+    string Source);
 
 public sealed record LauncherHotkeyView(
     bool Ctrl,
@@ -63,4 +66,5 @@ internal sealed class LauncherStoreDocument
     public string? SortMode { get; set; }
     public LauncherHotkeySpec? Hotkey { get; set; }
     public List<LauncherItem>? Items { get; set; }
+    public List<LauncherItem>? DesktopItems { get; set; }
 }
