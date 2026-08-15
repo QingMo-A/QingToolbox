@@ -83,6 +83,13 @@ Name: "desktopicon"; Description: "{cm:DesktopShortcut}"; GroupDescription: "{cm
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; WebUI/assets is immutable host-owned payload. Clear the whole hashed asset
+; directory before copying the new payload so assets from an older candidate
+; cannot make the installed WebUI file set fail closed. User data, modules,
+; settings, and WebView2 profile data live outside this path and are untouched.
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\WebUI\assets"
+
 [Icons]
 Name: "{group}\QingToolbox"; Filename: "{app}\QingToolbox.Shell.exe"; WorkingDir: "{app}"
 Name: "{group}\{cm:UninstallQingToolbox}"; Filename: "{uninstallexe}"

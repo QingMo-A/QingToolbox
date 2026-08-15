@@ -102,6 +102,12 @@ if ($installerScript -notmatch [regex]::Escape('installer\baselines\0.2.5-alpha-
     $installerScript -match [regex]::Escape('installer\baselines\0.2.4-alpha-obsolete-host-payload.json')) {
     throw 'The installer must clean obsolete host files against the published v0.2.5-alpha payload baseline.'
 }
+if ($innoScript -notmatch '(?m)Type:\s*filesandordirs;\s*Name:\s*"\{app\}\\WebUI\\assets"') {
+    throw 'Installer must clear the host-owned WebUI/assets tree before copying a new payload.'
+}
+if ($innoScript -match '(?m)Name:\s*"\{app\}\\WebUI\\\*"') {
+    throw 'Installer WebUI cleanup must not use a broad WebUI wildcard.'
+}
 $previousCleanupBaseline = Get-Content -LiteralPath (
     Join-Path $repoRoot 'installer\baselines\0.2.5-alpha-host-payload.json') -Raw
 foreach ($obsoletePath in @(
