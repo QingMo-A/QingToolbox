@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LAUNCHER_MAX_ROWS, alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, reorderIds, reorderVisibleIds, searchLauncherItems, shortcutFromKeyboard, targetPointerGesture, visibleRecentItems } from './launcher'
+import { LAUNCHER_MAX_ROWS, alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, reorderIds, reorderVisibleIds, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, targetPointerGesture, targetPointerInsertion, visibleRecentItems } from './launcher'
 
 const item = (id: string, name: string, lastLaunchedAt: string | null = null) => ({ id, name, iconKey: null, lastLaunchedAt })
 
@@ -44,6 +44,13 @@ describe('pointer reorder gestures', () => {
   it('reorders a filtered projection without moving hidden items', () => {
     expect(reorderVisibleIds(['a', 'hidden', 'b', 'c'], ['a', 'b', 'c'], 'c', 'a')).toEqual(['c', 'hidden', 'a', 'b'])
     expect(reorderVisibleIds(['a', 'hidden', 'b', 'c'], ['a', 'b', 'c'], 'b', 'b')).toEqual(['a', 'hidden', 'b', 'c'])
+  })
+  it('supports insertion slots before first, after last and same slot', () => {
+    expect(reorderVisibleToIndex(['a', 'b', 'c'], ['a', 'b', 'c'], 'c', 0)).toEqual(['c', 'a', 'b'])
+    expect(reorderVisibleToIndex(['a', 'b', 'c'], ['a', 'b', 'c'], 'a', 2)).toEqual(['b', 'c', 'a'])
+    expect(reorderVisibleToIndex(['a', 'b', 'c'], ['a', 'b', 'c'], 'b', 1)).toEqual(['a', 'b', 'c'])
+    const active = movePointerGesture(beginPointerGesture(1, 'a', 0, 0, ['a', 'b', 'c']), 12, 0)
+    expect(targetPointerInsertion(active, ['a', 'b', 'c'], 2).ids).toEqual(['b', 'c', 'a'])
   })
   it('cancels back to the original order without persistence', () => {
     const started = movePointerGesture(beginPointerGesture(1, 'a', 0, 0, ['a', 'b', 'c']), 12, 0)

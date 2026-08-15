@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { invoke, onDropResult, onPresentationChanged, onStateChanged, waitForPresentation } from './bridge'
-import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, searchLauncherItems, targetPointerGesture, shortcutFromKeyboard, visibleRecentItems } from './launcher'
+import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, searchLauncherItems, targetPointerInsertion, shortcutFromKeyboard, visibleRecentItems } from './launcher'
 import type { PointerGesture } from './launcher'
 import type { DropResult, Item, Presentation, State } from './types'
 
@@ -21,9 +21,12 @@ const draggingId = ref<string | null>(null)
 const dragPreview = ref<{ itemId: string; x: number; y: number } | null>(null)
 const pointerOverId = ref<string | null>(null)
 const pointerGesture = ref<PointerGesture | null>(null)
+const gridRef = ref<HTMLElement | null>(null)
 let endingPointerId: number | undefined
 const suppressClick = ref(false)
 let suppressClickTimer: number | undefined
+let pointerCaptureTarget: HTMLElement | null = null
+let pointerSessionCleanup: (() => void) | undefined
 const notice = ref('')
 const searchQuery = ref('')
 const recentContainer = ref<HTMLElement | null>(null)
@@ -113,12 +116,51 @@ function itemFromPoint(x: number, y: number) {
   return itemId && state.items.some(item => item.id === itemId) ? itemId : null
 }
 
+function insertionIndexAtPoint(x: number, y: number, movingId: string) {
+  const grid = gridRef.value
+  if (!grid) return 0
+  const tiles = Array.from(grid.querySelectorAll<HTMLElement>('[data-launcher-item-id]'))
+    .filter(tile => tile.dataset.launcherItemId !== movingId)
+  for (let index = 0; index < tiles.length; index += 1) {
+    const rect = tiles[index].getBoundingClientRect()
+    const midpointY = rect.top + rect.height / 2
+    const midpointX = rect.left + rect.width / 2
+    if (y < midpointY || (y <= rect.bottom && x < midpointX)) return index
+  }
+  return tiles.length
+}
+
+function stopPointerSession() {
+  pointerSessionCleanup?.()
+  pointerSessionCleanup = undefined
+}
+
+function startPointerSession(pointerId: number) {
+  stopPointerSession()
+  const onMove = (event: PointerEvent) => { if (event.pointerId === pointerId) movePointer(event) }
+  const onUp = (event: PointerEvent) => { if (event.pointerId === pointerId) endPointer(event) }
+  const onCancel = (event: PointerEvent) => { if (event.pointerId === pointerId) endPointer(event, true) }
+  const onBlur = () => { cancelCurrentPointer() }
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onCancel)
+  window.addEventListener('blur', onBlur)
+  pointerSessionCleanup = () => {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onCancel)
+    window.removeEventListener('blur', onBlur)
+  }
+}
+
 function beginPointer(item: Item, event: PointerEvent) {
   if (!canStartPointerGesture(state.sortMode, event.button, Boolean((event.target as Element | null)?.closest('button,[data-no-drag]')))) return
   const tile = event.currentTarget as HTMLElement
   pointerGesture.value = beginPointerGesture(event.pointerId, item.id, event.clientX, event.clientY, state.items.map(value => value.id), visibleItems.value.map(value => value.id))
   dragPreview.value = null
   pointerOverId.value = null
+  pointerCaptureTarget = tile
+  startPointerSession(event.pointerId)
   try { tile.setPointerCapture(event.pointerId) } catch { /* capture is best effort on older WebViews */ }
 }
 
@@ -138,7 +180,8 @@ function movePointer(event: PointerEvent) {
   }
   if (moved.active) dragPreview.value = pointerPreview(moved, event.clientX, event.clientY)
   const overId = itemFromPoint(event.clientX, event.clientY)
-  const result = targetPointerGesture(moved, state.items.map(item => item.id), overId)
+  const insertionIndex = insertionIndexAtPoint(event.clientX, event.clientY, moved.movingId)
+  const result = targetPointerInsertion(moved, state.items.map(item => item.id), insertionIndex)
   pointerGesture.value = result.gesture
   if (result.ids.join('\u0000') !== state.items.map(item => item.id).join('\u0000')) {
     state.items = result.ids.map(id => state.items.find(item => item.id === id)!).filter(Boolean)
@@ -150,8 +193,8 @@ function endPointer(event: PointerEvent, canceled = false) {
   const current = pointerGesture.value
   if (!current || current.pointerId !== event.pointerId || endingPointerId === event.pointerId) return
   endingPointerId = event.pointerId
-  const tile = event.currentTarget as HTMLElement
-  try { if (tile.hasPointerCapture(event.pointerId)) tile.releasePointerCapture(event.pointerId) } catch { /* already released */ }
+  const tile = pointerCaptureTarget
+  try { if (tile?.hasPointerCapture(event.pointerId)) tile.releasePointerCapture(event.pointerId) } catch { /* already released */ }
   if (canceled) {
     const result = cancelPointerGesture(current)
     if (result.dragged) state.items = result.ids.map(id => state.items.find(item => item.id === id)!).filter(Boolean)
@@ -167,6 +210,8 @@ function endPointer(event: PointerEvent, canceled = false) {
   draggingId.value = null
   dragPreview.value = null
   pointerOverId.value = null
+  pointerCaptureTarget = null
+  stopPointerSession()
   endingPointerId = undefined
 }
 
@@ -175,9 +220,13 @@ function cancelCurrentPointer() {
   if (!current) return false
   state.items = current.originIds.map(id => state.items.find(item => item.id === id)).filter((item): item is Item => Boolean(item))
   pointerGesture.value = null
+  const tile = pointerCaptureTarget
+  try { if (tile?.hasPointerCapture(current.pointerId)) tile.releasePointerCapture(current.pointerId) } catch { /* already released */ }
   draggingId.value = null
   dragPreview.value = null
   pointerOverId.value = null
+  pointerCaptureTarget = null
+  stopPointerSession()
   markDragClickSuppressed()
   return true
 }
@@ -215,6 +264,8 @@ onMounted(() => {
   onUnmounted(() => {
     offState(); offDrop(); offPresentation(); window.removeEventListener('keydown', onKeyDown)
     if (suppressClickTimer !== undefined) window.clearTimeout(suppressClickTimer)
+    stopPointerSession()
+    pointerCaptureTarget = null
     recentResizeObserver?.disconnect()
   })
 })
@@ -240,8 +291,8 @@ onMounted(() => {
           <button v-if="searchQuery" class="search-clear" type="button" :aria-label="t('search.clear', 'Clear search')" @click="clearSearch">&#215;</button>
         </div>
         <section class="drop-area">
-          <TransitionGroup v-if="visibleItems.length" name="launcher-grid" tag="div" class="launcher-grid">
-            <article v-for="item in visibleItems" :key="item.id" class="app-tile" :class="{ dragging: draggingId === item.id, 'drag-over': pointerOverId === item.id && draggingId !== item.id }" :data-launcher-item-id="item.id" :draggable="false" tabindex="0" @pointerdown="beginPointer(item, $event)" @pointermove="movePointer($event)" @pointerup="endPointer($event)" @pointercancel="endPointer($event, true)" @lostpointercapture="endPointer($event, true)" @click="activate(item)" @keydown.enter="launch(item)">
+          <TransitionGroup v-if="visibleItems.length" ref="gridRef" name="launcher-grid" tag="div" class="launcher-grid">
+            <article v-for="item in visibleItems" :key="item.id" class="app-tile" :class="{ dragging: draggingId === item.id, 'drag-over': pointerOverId === item.id && draggingId !== item.id }" :data-launcher-item-id="item.id" :draggable="false" tabindex="0" @pointerdown="beginPointer(item, $event)" @click="activate(item)" @keydown.enter="launch(item)">
               <div class="app-icon"><img v-if="iconFor(item)" :src="iconFor(item)" :alt="item.name" /><span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span></div>
               <div class="app-name" :title="item.name">{{ item.name }}</div>
               <button class="remove-button" data-no-drag :aria-label="`${t('actions.remove', 'Remove')} ${item.name}`" @pointerdown.stop @click.stop="remove(item)">&#215;</button>

@@ -92,6 +92,20 @@ export function targetPointerGesture(
   }
 }
 
+export function targetPointerInsertion(
+  gesture: PointerGesture,
+  ids: readonly string[],
+  insertionIndex: number,
+): { gesture: PointerGesture; ids: string[] } {
+  if (!gesture.active) return { gesture, ids: [...ids] }
+  const visible = gesture.scopeIds.filter(id => ids.includes(id))
+  const withoutMoving = visible.filter(id => id !== gesture.movingId)
+  const bounded = Math.max(0, Math.min(Math.floor(insertionIndex), withoutMoving.length))
+  const next = reorderVisibleToIndex(ids, visible, gesture.movingId, bounded)
+  const overId = withoutMoving[bounded] ?? null
+  return { gesture: { ...gesture, overId }, ids: next }
+}
+
 export function completePointerGesture(gesture: PointerGesture, ids: readonly string[]) {
   return { dragged: gesture.active, persist: gesture.active, ids: [...ids] }
 }
@@ -120,6 +134,24 @@ export function reorderVisibleIds(
   const visible = visibleIds.filter(id => ids.includes(id))
   const reordered = reorderIds(visible, movingId, overId)
   if (reordered.join('\u0000') === visible.join('\u0000')) return [...ids]
+  const next = [...ids]
+  const positions = visible.map(id => next.indexOf(id)).filter(index => index >= 0)
+  positions.forEach((position, index) => { next[position] = reordered[index] })
+  return next
+}
+
+export function reorderVisibleToIndex(
+  ids: readonly string[],
+  visibleIds: readonly string[],
+  movingId: string,
+  insertionIndex: number,
+): string[] {
+  const visible = visibleIds.filter(id => ids.includes(id))
+  if (!visible.includes(movingId)) return [...ids]
+  const withoutMoving = visible.filter(id => id !== movingId)
+  const bounded = Math.max(0, Math.min(Math.floor(insertionIndex), withoutMoving.length))
+  const reordered = [...withoutMoving]
+  reordered.splice(bounded, 0, movingId)
   const next = [...ids]
   const positions = visible.map(id => next.indexOf(id)).filter(index => index >= 0)
   positions.forEach((position, index) => { next[position] = reordered[index] })
