@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace QingToolbox.Modules.Launcher;
@@ -25,6 +27,9 @@ internal sealed class EverythingRuntime : IEverythingSearchService
 {
     internal const string RuntimeVersion = "1.4.1.1032";
     internal const string CliVersion = "1.1.0.37";
+    private const string ServiceInstance = "QingToolboxLauncher";
+    private const string ServicePipe = @"\\.\PIPE\QingToolbox Launcher Everything Service";
+    private const string EverythingExecutableSha256 = "F191F756996A14A11E5445FA7103D302EFD510CF2FBF920E6C0C8ED51D512E36";
     private readonly string _runtimeDirectory;
     private readonly string _dataDirectory;
     private readonly IReadOnlyList<string>? _indexRoots;
@@ -112,23 +117,25 @@ internal sealed class EverythingRuntime : IEverythingSearchService
         if (_ownedProcess is null || _ownedProcess.HasExited)
         {
             Directory.CreateDirectory(_dataDirectory);
+            var useService = _indexRoots is null;
+            if (useService) await EnsureServiceAsync(cancellationToken).ConfigureAwait(false);
             var config = Path.Combine(_dataDirectory, "Everything.ini");
-            var roots = (_indexRoots ?? DriveInfo.GetDrives()
-                    .Where(drive => drive.DriveType == DriveType.Fixed && drive.IsReady)
-                    .Select(drive => drive.RootDirectory.FullName))
+            var roots = (_indexRoots ?? [])
                 .Select(Path.GetFullPath)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            if (roots.Length == 0) throw new InvalidOperationException("The built-in Everything runtime has no fixed drives to index.");
+            if (!useService && roots.Length == 0) throw new InvalidOperationException("The built-in Everything runtime has no folders to index.");
             var values = string.Join(',', roots);
             var perRoot = string.Join(',', Enumerable.Repeat("1", roots.Length));
             var zeroPerRoot = string.Join(',', Enumerable.Repeat("0", roots.Length));
             var buffers = string.Join(',', Enumerable.Repeat("65536", roots.Length));
             await File.WriteAllTextAsync(config,
                 "[Everything]\r\n" +
-                "app_data=0\r\nrun_as_admin=0\r\nservice=0\r\nindex_as_admin=0\r\n" +
+                $"app_data=0\r\nrun_as_admin=0\r\nservice={(useService ? 1 : 0)}\r\nindex_as_admin=0\r\n" +
                 "show_tray_icon=0\r\nrun_in_background=1\r\nshow_window_on_startup=0\r\n" +
                 "check_for_updates=0\r\ncheck_for_beta_updates=0\r\n" +
+                $"service_pipe_name={(useService ? ServicePipe : string.Empty)}\r\n" +
+                $"auto_include_fixed_volumes={(useService ? 1 : 0)}\r\nauto_include_removable_volumes=0\r\n" +
                 $"db_location={_dataDirectory}\r\n" +
                 $"folders={values}\r\nfolder_monitor_changes={perRoot}\r\nfolder_buffer_size_list={buffers}\r\n" +
                 $"folder_rescan_if_full_list={perRoot}\r\nfolder_update_types={zeroPerRoot}\r\n" +
@@ -139,6 +146,10 @@ internal sealed class EverythingRuntime : IEverythingSearchService
             start.ArgumentList.Add("-instance"); start.ArgumentList.Add(_instanceName);
             start.ArgumentList.Add("-startup");
             start.ArgumentList.Add("-config"); start.ArgumentList.Add(config);
+            if (useService)
+            {
+                start.ArgumentList.Add("-service-pipe-name"); start.ArgumentList.Add(ServicePipe);
+            }
             _ownedProcess = Process.Start(start) ?? throw new InvalidOperationException("The built-in Everything runtime could not start.");
         }
 
@@ -158,6 +169,44 @@ internal sealed class EverythingRuntime : IEverythingSearchService
             }
         }
         throw new InvalidOperationException("The built-in Everything index did not become ready.");
+    }
+
+    private async Task EnsureServiceAsync(CancellationToken cancellationToken)
+    {
+        var marker = Path.Combine(_dataDirectory, "service-installed-1.4.1.1032");
+        if (File.Exists(marker)) return;
+
+        var serviceDirectory = Path.Combine(_dataDirectory, "service");
+        Directory.CreateDirectory(serviceDirectory);
+        var source = Path.Combine(_runtimeDirectory, "Everything.exe");
+        var serviceExecutable = Path.Combine(serviceDirectory, "Everything.exe");
+        if (!File.Exists(serviceExecutable) ||
+            !Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(serviceExecutable, cancellationToken).ConfigureAwait(false)))
+                .Equals(EverythingExecutableSha256, StringComparison.Ordinal))
+            File.Copy(source, serviceExecutable, overwrite: true);
+
+        var install = new ProcessStartInfo
+        {
+            FileName = serviceExecutable,
+            WorkingDirectory = serviceDirectory,
+            UseShellExecute = true,
+            Verb = "runas",
+            WindowStyle = ProcessWindowStyle.Hidden,
+        };
+        install.ArgumentList.Add("-instance"); install.ArgumentList.Add(ServiceInstance);
+        install.ArgumentList.Add("-install-service");
+        install.ArgumentList.Add("-install-service-pipe-name"); install.ArgumentList.Add(ServicePipe);
+        try
+        {
+            using var process = Process.Start(install) ?? throw new InvalidOperationException("The Everything service authorization could not start.");
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            if (process.ExitCode != 0) throw new InvalidOperationException("The Everything service could not be installed.");
+        }
+        catch (Win32Exception exception) when (exception.NativeErrorCode == 1223)
+        {
+            throw new InvalidOperationException("The Everything service authorization was cancelled.", exception);
+        }
+        await File.WriteAllTextAsync(marker, RuntimeVersion, new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<string> RunCliAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
