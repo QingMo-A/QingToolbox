@@ -26,6 +26,12 @@ describe('launcher pointer and clear affordance contracts', () => {
     expect(stylesSource).toContain('.app-tile.dragging .app-name, .app-tile.dragging .remove-button')
   })
 
+  it('hides the dragged source immediately while remaining tiles use a spring move', () => {
+    expect(appSource).toContain("'pointer-reordering': Boolean(dragProjection)")
+    expect(stylesSource).toContain('.launcher-grid.pointer-reordering .launcher-grid-leave-active { opacity: 0; transition: none; }')
+    expect(stylesSource).toContain('.launcher-grid-move { transition: transform .32s cubic-bezier(.22,1.18,.32,1); }')
+  })
+
   it('pads the scroll viewport so the first-row hover border is visible', () => {
     expect(stylesSource).toContain('padding: 4px; scrollbar-color:')
   })

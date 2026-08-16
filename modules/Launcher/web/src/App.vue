@@ -337,7 +337,7 @@ onMounted(() => {
           <button v-if="searchQuery" class="search-clear" type="button" :aria-label="t('search.clear', 'Clear search')" @click="clearSearch">&#215;</button>
         </div>
         <section class="drop-area">
-          <TransitionGroup v-if="gridEntries.length" ref="gridRef" name="launcher-grid" tag="div" class="launcher-grid">
+          <TransitionGroup v-if="gridEntries.length" ref="gridRef" name="launcher-grid" tag="div" class="launcher-grid" :class="{ 'pointer-reordering': Boolean(dragProjection) }">
             <template v-for="entry in gridEntries" :key="entry.key">
               <article v-if="entry.kind === 'item'" class="app-tile" :class="{ dragging: draggingId === entry.item.id, 'drag-over': pointerOverId === entry.item.id && draggingId !== entry.item.id }" :data-launcher-item-id="entry.item.id" :draggable="false" tabindex="0" @pointerdown="beginPointer(entry.item, $event)" @click="activate(entry.item)" @keydown.enter="launch(entry.item)">
                 <div class="app-icon"><img v-if="iconFor(entry.item)" :src="iconFor(entry.item)" :alt="entry.item.name" /><span v-else class="fallback-icon">{{ entry.item.name.slice(0, 1).toUpperCase() }}</span></div>

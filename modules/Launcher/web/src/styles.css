@@ -112,10 +112,11 @@ button:focus-visible, [tabindex]:focus-visible { outline: 3px solid color-mix(in
 .empty-drop strong { color: var(--text); font-size: 16px; font-weight: 650; }
 .empty-grid { align-items: center; border: 1px dashed var(--accent); border-radius: 18px; color: var(--accent); display: flex; font-size: 36px; height: 68px; justify-content: center; width: 68px; }
 .launcher-grid { max-height: var(--launcher-grid-max-height); overflow-y: auto; overscroll-behavior: contain; padding: 4px; scrollbar-color: color-mix(in srgb, var(--accent) 55%, transparent) transparent; scrollbar-width: thin; }
-.launcher-grid-move { transition: transform .19s cubic-bezier(.2,.72,.2,1); }
+.launcher-grid-move { transition: transform .32s cubic-bezier(.22,1.18,.32,1); }
 .launcher-grid-enter-active, .launcher-grid-leave-active { transition: opacity .16s ease, transform .19s cubic-bezier(.2,.72,.2,1); }
 .launcher-grid-enter-from, .launcher-grid-leave-to { opacity: 0; transform: scale(.96); }
 .launcher-grid-leave-active { position: absolute; }
+.launcher-grid.pointer-reordering .launcher-grid-leave-active { opacity: 0; transition: none; }
 .drag-placeholder { background: transparent !important; border: 0 !important; box-shadow: none !important; min-height: 132px; opacity: 0; pointer-events: none; visibility: hidden; }
 
 .recent-section { border-top: 1px solid var(--panel-border); margin-top: 18px; padding-top: 18px; }
