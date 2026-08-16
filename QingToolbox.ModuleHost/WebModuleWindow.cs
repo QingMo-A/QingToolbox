@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Interop;
+using System.Windows.Input;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
@@ -100,6 +101,8 @@ internal sealed class WebModuleWindow : Window
             Deactivated += OnOverlayDeactivated;
             IsVisibleChanged += OnVisibilityChanged;
             SourceInitialized += OnOverlaySourceInitialized;
+            KeyDown += OnOverlayKeyDown;
+            KeyUp += OnOverlayKeyUp;
         }
         ApplySurfaceTheme();
         _surface.Children.Add(_browser);
@@ -241,6 +244,8 @@ internal sealed class WebModuleWindow : Window
         Deactivated -= OnOverlayDeactivated;
         IsVisibleChanged -= OnVisibilityChanged;
         SourceInitialized -= OnOverlaySourceInitialized;
+        KeyDown -= OnOverlayKeyDown;
+        KeyUp -= OnOverlayKeyUp;
         _windowSource?.RemoveHook(OnOverlayWindowMessage);
         _windowSource = null;
         StopDeferredDismiss();
@@ -281,6 +286,29 @@ internal sealed class WebModuleWindow : Window
         const long ScKeyMenu = 0xF100;
         return WebModuleWindowPresentation.IsOverlay(mode) && message == WmSysCommand && (wParam & 0xFFF0) == ScKeyMenu;
     }
+
+    private void OnOverlayKeyDown(object sender, KeyEventArgs e) => ForwardOverlayAltSpace(e, "keydown");
+
+    private void OnOverlayKeyUp(object sender, KeyEventArgs e) => ForwardOverlayAltSpace(e, "keyup");
+
+    private async void ForwardOverlayAltSpace(KeyEventArgs e, string eventType)
+    {
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (!ShouldForwardAltSpace(_presentationMode, key == Key.Space ? 0x20u : 0u, Keyboard.Modifiers.HasFlag(ModifierKeys.Alt))) return;
+        e.Handled = true;
+        try
+        {
+            await _browser.CoreWebView2.ExecuteScriptAsync(
+                $"window.dispatchEvent(new KeyboardEvent('{eventType}',{{key:' ',code:'Space',altKey:true,bubbles:true,cancelable:true}}));");
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or COMException)
+        {
+            System.Diagnostics.Debug.WriteLine($"Web module '{_moduleId}' Alt+Space forwarding unavailable: {exception.GetType().Name}");
+        }
+    }
+
+    internal static bool ShouldForwardAltSpace(ModuleHostWindowPresentationMode mode, uint virtualKey, bool menuKeyDown) =>
+        WebModuleWindowPresentation.IsOverlay(mode) && virtualKey == 0x20 && menuKeyDown;
 
     private void OnOverlayDeactivated(object? sender, EventArgs e)
     {

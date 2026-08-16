@@ -35,6 +35,12 @@ Require(!WebModuleWindow.ShouldSuppressSystemMenu(ModuleHostWindowPresentationMo
     "Standard Web module windows must retain their native system menu.");
 Require(!WebModuleWindow.ShouldSuppressSystemMenu(ModuleHostWindowPresentationMode.Overlay, 0x0100, 0xF100),
     "Overlay system-menu suppression must not consume ordinary keyboard messages.");
+Require(WebModuleWindow.ShouldForwardAltSpace(ModuleHostWindowPresentationMode.Overlay, 0x20, true),
+    "Overlay WebView accelerators must forward Alt+Space to Web content.");
+Require(!WebModuleWindow.ShouldForwardAltSpace(ModuleHostWindowPresentationMode.Standard, 0x20, true) &&
+        !WebModuleWindow.ShouldForwardAltSpace(ModuleHostWindowPresentationMode.Overlay, 0x20, false) &&
+        !WebModuleWindow.ShouldForwardAltSpace(ModuleHostWindowPresentationMode.Overlay, 0x41, true),
+    "Alt+Space forwarding must remain isolated from Standard windows and unrelated keys.");
 
 var dragCancelSequence = new[]
 {
