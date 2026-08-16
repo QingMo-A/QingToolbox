@@ -68,6 +68,15 @@ describe('pointer reorder gestures', () => {
     expect(gridInsertionCandidate(320, 160, metrics, 4)).toBe(4)
     expect(gridInsertionCandidate(50, 50, metrics, 4, 1)).toBeNull()
   })
+  it('keeps an opened insertion vacancy sticky across its full rendered cell', () => {
+    const metrics = { cellWidth: 100, cellHeight: 100, columns: 3, gapX: 10, gapY: 10 }
+    expect(gridInsertionCandidate(160, 50, metrics, 4)).toBeNull()
+    expect(gridInsertionCandidate(160, 50, metrics, 4, 1)).toBe(1)
+    expect(gridInsertionCandidate(106, 50, metrics, 4, 1)).toBe(1)
+    expect(gridInsertionCandidate(214, 50, metrics, 4, 1)).toBe(1)
+    expect(gridInsertionCandidate(270, 50, metrics, 4, 1)).toBeNull()
+    expect(gridInsertionCandidate(160, 160, metrics, 4, 1)).toBe(4)
+  })
   it('cancels back to the original order without persistence', () => {
     const started = movePointerGesture(beginPointerGesture(1, 'a', 0, 0, ['a', 'b', 'c']), 12, 0)
     const canceled = cancelPointerGesture(started)

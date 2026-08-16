@@ -219,17 +219,39 @@ export function gridInsertionCandidate(
   const count = Math.max(0, Math.floor(remainingCount))
   if (count === 0) return 0
   if (localX < 0 || localY < 0) return 0
-  const slot = gridSlotFromPoint(localX, localY, metrics.cellWidth, metrics.cellHeight, metrics.columns, metrics.gapX, metrics.gapY, count)
-  if (slot >= count) return count
   const width = Math.max(1, metrics.cellWidth)
   const height = Math.max(1, metrics.cellHeight)
-  const strideX = width + Math.max(0, metrics.gapX)
-  const strideY = height + Math.max(0, metrics.gapY)
+  const gapX = Math.max(0, metrics.gapX)
+  const gapY = Math.max(0, metrics.gapY)
+  const columns = Math.max(1, Math.floor(metrics.columns))
+  const strideX = width + gapX
+  const strideY = height + gapY
+
+  // Once a full-cell placeholder has opened, treat that rendered vacancy as
+  // a sticky drop target. Without this retention zone the compact-grid
+  // boundary calculation returns null in the vacancy centre and makes the
+  // following tiles snap back underneath the pointer.
+  if (previousSlot !== null) {
+    const retainedSlot = Math.max(0, Math.min(count, Math.floor(previousSlot)))
+    const retainedColumn = retainedSlot % columns
+    const retainedRow = Math.floor(retainedSlot / columns)
+    const retentionX = Math.max(8, gapX / 2)
+    const retentionY = Math.max(8, gapY / 2)
+    const retainedLeft = retainedColumn * strideX - retentionX
+    const retainedTop = retainedRow * strideY - retentionY
+    if (localX >= retainedLeft && localX <= retainedLeft + width + retentionX * 2 &&
+        localY >= retainedTop && localY <= retainedTop + height + retentionY * 2) {
+      return retainedSlot
+    }
+  }
+
+  const slot = gridSlotFromPoint(localX, localY, width, height, columns, gapX, gapY, count)
+  if (slot >= count) return count
   const column = Math.floor(localX / strideX)
   const row = Math.floor(localY / strideY)
   const withinX = localX - column * strideX
   const withinY = localY - row * strideY
-  const corridor = Math.max(14, Math.min(width, height) * 0.18) + (previousSlot === null ? 0 : 6)
+  const corridor = Math.max(14, Math.min(width, height) * 0.18)
   const inGap = withinX > width || withinY > height
   const nearBoundary = withinX <= corridor || withinX >= width - corridor || withinY <= corridor || withinY >= height - corridor
   return inGap || nearBoundary ? slot : null
