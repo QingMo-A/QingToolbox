@@ -11,6 +11,12 @@ Require(!typeof(CanaryModule).IsAssignableTo(typeof(IModuleHostWindowPresentatio
     "The default Web canary must not opt into overlay presentation.");
 Require(!WebModuleWindowPresentation.IsOverlay(ModuleHostWindowPresentationMode.Standard),
     "Standard presentation must remain the default.");
+Require(WebModuleWindowPresentation.CanResumeFromSuspension(ModuleHostWindowPresentationMode.Overlay, ModuleHostWindowAction.Show) &&
+        WebModuleWindowPresentation.CanResumeFromSuspension(ModuleHostWindowPresentationMode.Overlay, ModuleHostWindowAction.Toggle),
+    "Overlay Show/Toggle actions must resume from Shell window suspension.");
+Require(!WebModuleWindowPresentation.CanResumeFromSuspension(ModuleHostWindowPresentationMode.Standard, ModuleHostWindowAction.Show) &&
+        !WebModuleWindowPresentation.CanResumeFromSuspension(ModuleHostWindowPresentationMode.Overlay, ModuleHostWindowAction.Hide),
+    "Standard windows and non-opening actions must preserve suspension.");
 Require(new OverlayPresentationProbe().HostWindowPresentationMode == ModuleHostWindowPresentationMode.Overlay,
     "An opt-in presentation source must expose Overlay mode.");
 Require(OverlayDismissPolicy.OnDeactivated(ModuleHostWindowPresentationMode.Overlay, false, true, false, false) == OverlayDismissDecision.Hide,

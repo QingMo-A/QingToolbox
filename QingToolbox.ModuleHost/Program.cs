@@ -187,7 +187,16 @@ internal static class Program
 
         void ApplyWindowAction(ModuleHostWindowAction action)
         {
-            if (shuttingDown || (suspended is not null && action is ModuleHostWindowAction.Show or ModuleHostWindowAction.Toggle)) return;
+            if (shuttingDown) return;
+            if (suspended is not null && action is ModuleHostWindowAction.Show or ModuleHostWindowAction.Toggle)
+            {
+                // An overlay hotkey is an explicit user request and must remain
+                // usable while the main Shell is represented by its badge or
+                // notification-area icon. Standard module windows remain
+                // suspended until the Shell restores them.
+                if (!WebModuleWindowPresentation.CanResumeFromSuspension(presentationMode, action)) return;
+                suspended = null;
+            }
             switch (action)
             {
                 case ModuleHostWindowAction.Show:

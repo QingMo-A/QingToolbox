@@ -34,4 +34,9 @@ internal static class WebModuleWindowPresentation
     {
         if (IsOverlay(mode)) window.Topmost = true;
     }
+
+    public static bool CanResumeFromSuspension(
+        ModuleHostWindowPresentationMode mode,
+        ModuleHostWindowAction action) =>
+        IsOverlay(mode) && action is ModuleHostWindowAction.Show or ModuleHostWindowAction.Toggle;
 }
