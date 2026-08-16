@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LAUNCHER_MAX_ROWS, alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridInsertionCandidate, gridSlotFromPoint, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, reorderIds, reorderVisibleIds, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, targetPointerGesture, targetPointerInsertion, visibleRecentItems } from './launcher'
+import { LAUNCHER_MAX_ROWS, alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridInsertionCandidate, gridSlotFromPoint, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, reorderIds, reorderVisibleIds, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, stabilizeInsertionCandidate, targetPointerGesture, targetPointerInsertion, visibleRecentItems } from './launcher'
 
 const item = (id: string, name: string, lastLaunchedAt: string | null = null) => ({ id, name, iconKey: null, lastLaunchedAt })
 
@@ -20,6 +20,27 @@ describe('launcher projections', () => {
 })
 
 describe('pointer reorder gestures', () => {
+  it('ignores insertion corridors crossed too quickly', () => {
+    let state = { slot: null as number | null, pendingSlot: null as number | null, pendingSince: 0 }
+    state = stabilizeInsertionCandidate(state, 2, 10)
+    expect(state.slot).toBeNull()
+    state = stabilizeInsertionCandidate(state, null, 35)
+    state = stabilizeInsertionCandidate(state, 2, 50)
+    expect(state.slot).toBeNull()
+  })
+
+  it('commits only a stable insertion and exits it more slowly', () => {
+    let state = { slot: null as number | null, pendingSlot: null as number | null, pendingSince: 0 }
+    state = stabilizeInsertionCandidate(state, 2, 10)
+    state = stabilizeInsertionCandidate(state, 2, 83)
+    expect(state.slot).toBe(2)
+    state = stabilizeInsertionCandidate(state, null, 100)
+    state = stabilizeInsertionCandidate(state, null, 180)
+    expect(state.slot).toBe(2)
+    state = stabilizeInsertionCandidate(state, null, 197)
+    expect(state.slot).toBeNull()
+  })
+
   it('only starts after the movement threshold', () => {
     const gesture = beginPointerGesture(7, 'a', 10, 10, ['a', 'b', 'c'])
     expect(movePointerGesture(gesture, 14, 14).active).toBe(false)

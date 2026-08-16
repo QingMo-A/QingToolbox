@@ -204,6 +204,32 @@ export type FrozenGridMetrics = {
   gapY: number
 }
 
+export type StableInsertionCandidate = {
+  slot: number | null
+  pendingSlot: number | null
+  pendingSince: number
+}
+
+/** Keeps brief insertion-corridor crossings from restarting a FLIP animation. */
+export function stabilizeInsertionCandidate(
+  state: StableInsertionCandidate,
+  detectedSlot: number | null,
+  now: number,
+  enterDelay = 72,
+  exitDelay = 96,
+): StableInsertionCandidate {
+  const timestamp = Number.isFinite(now) ? now : state.pendingSince
+  if (detectedSlot === state.slot) {
+    return { slot: state.slot, pendingSlot: detectedSlot, pendingSince: timestamp }
+  }
+  if (detectedSlot !== state.pendingSlot) {
+    return { slot: state.slot, pendingSlot: detectedSlot, pendingSince: timestamp }
+  }
+  const delay = detectedSlot === null ? exitDelay : enterDelay
+  if (timestamp - state.pendingSince < Math.max(0, delay)) return state
+  return { slot: detectedSlot, pendingSlot: detectedSlot, pendingSince: timestamp }
+}
+
 /**
  * Returns a candidate gap only while the pointer is in a boundary corridor.
  * Tile centres deliberately return null so the compact grid stays settled

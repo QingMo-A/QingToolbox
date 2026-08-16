@@ -34,13 +34,14 @@ const bridge = vi.hoisted(() => {
 vi.mock('./bridge', () => bridge)
 import App from './App.vue'
 
-function pointerEvent(type: string, values: { pointerId: number; clientX: number; clientY: number; button?: number }) {
+function pointerEvent(type: string, values: { pointerId: number; clientX: number; clientY: number; button?: number; timeStamp?: number }) {
   const event = new Event(type, { bubbles: true, cancelable: true }) as PointerEvent
   Object.defineProperties(event, {
     pointerId: { value: values.pointerId },
     clientX: { value: values.clientX },
     clientY: { value: values.clientY },
     button: { value: values.button ?? 0 },
+    ...(values.timeStamp === undefined ? {} : { timeStamp: { value: values.timeStamp } }),
   })
   return event
 }
@@ -74,8 +75,8 @@ describe('Launcher pointer drag projection', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     await nextTick()
     const tile = () => wrapper.find('[data-launcher-item-id="c"]').element as HTMLElement
-    tile().dispatchEvent(pointerEvent('pointerdown', { pointerId: 9, clientX: 250, clientY: 50 }))
-    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 258, clientY: 50 }))
+    tile().dispatchEvent(pointerEvent('pointerdown', { pointerId: 9, clientX: 250, clientY: 50, timeStamp: 0 }))
+    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 258, clientY: 50, timeStamp: 10 }))
     await nextTick()
 
     expect(wrapper.findAll('[data-launcher-item-id]').map(node => node.attributes('data-launcher-item-id'))).toEqual(['a', 'b', 'c', 'd', 'e'])
@@ -86,25 +87,30 @@ describe('Launcher pointer drag projection', () => {
     expect(wrapper.find('[data-launcher-item-id="c"] .app-name').text()).toBe('C')
     expect(wrapper.find('.drag-preview').attributes('style')).toContain('left: 228px')
 
-    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 150, clientY: 50 }))
+    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 150, clientY: 50, timeStamp: 20 }))
     await nextTick()
     expect(wrapper.find('.drag-placeholder').exists()).toBe(false)
 
-    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 105, clientY: 50 }))
+    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 105, clientY: 50, timeStamp: 30 }))
     await nextTick()
     expect(wrapper.find('.drag-placeholder').exists()).toBe(false)
+    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 105, clientY: 50, timeStamp: 103 }))
+    await nextTick()
     expect(wrapper.find('[data-launcher-item-id="b"]').attributes('style')).toContain('translate: 110px 0px')
     expect(wrapper.find('[data-launcher-item-id="d"]').attributes('style') ?? '').not.toContain('translate:')
 
-    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 270, clientY: 50 }))
+    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 270, clientY: 50, timeStamp: 120 }))
+    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 270, clientY: 50, timeStamp: 217 }))
     await nextTick()
     expect(wrapper.find('[data-launcher-item-id="b"]').attributes('style') ?? '').not.toContain('translate:')
 
-    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 105, clientY: 50 }))
+    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 105, clientY: 50, timeStamp: 230 }))
+    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 105, clientY: 50, timeStamp: 303 }))
     await nextTick()
     expect(wrapper.find('[data-launcher-item-id="b"]').attributes('style')).toContain('translate: 110px 0px')
 
-    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 320, clientY: 160 }))
+    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 320, clientY: 160, timeStamp: 320 }))
+    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 320, clientY: 160, timeStamp: 393 }))
     await nextTick()
     expect(wrapper.find('.drag-placeholder').exists()).toBe(false)
     expect(wrapper.find('[data-launcher-item-id="d"]').attributes('style')).toContain('translate: 220px -110px')

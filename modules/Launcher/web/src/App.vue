@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { invoke, onDropResult, onPresentationChanged, onStateChanged, waitForPresentation } from './bridge'
-import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridInsertionCandidate, movePointerGesture, recentColumnCapacity, recentItems, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, visibleRecentItems } from './launcher'
+import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridInsertionCandidate, movePointerGesture, recentColumnCapacity, recentItems, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, stabilizeInsertionCandidate, visibleRecentItems } from './launcher'
 import type { FrozenGridMetrics, PointerGesture } from './launcher'
 import type { DropResult, Item, Presentation, State } from './types'
 
@@ -22,7 +22,7 @@ const dragPreview = ref<{ itemId: string; x: number; y: number; offsetX: number;
 const pointerOverId = ref<string | null>(null)
 const pointerGesture = ref<PointerGesture | null>(null)
 type FrozenDragGrid = FrozenGridMetrics & { left: number; top: number; paddingLeft: number; paddingTop: number; scrollTop: number }
-type DragProjection = { sourceId: string; originIds: string[]; visibleIds: string[]; baseRemainingIds: string[]; sourceVisibleIndex: number; metrics: FrozenDragGrid | null; candidateSlot: number | null; grabOffsetX: number; grabOffsetY: number }
+type DragProjection = { sourceId: string; originIds: string[]; visibleIds: string[]; baseRemainingIds: string[]; sourceVisibleIndex: number; metrics: FrozenDragGrid | null; candidateSlot: number | null; pendingSlot: number | null; pendingSince: number; grabOffsetX: number; grabOffsetY: number }
 const dragProjection = ref<DragProjection | null>(null)
 const committingReorder = ref(false)
 const gridRef = ref<HTMLElement | null>(null)
@@ -229,6 +229,8 @@ function movePointer(event: PointerEvent) {
       sourceVisibleIndex: visibleIds.indexOf(moved.movingId),
       metrics: captureFrozenGrid(),
       candidateSlot: null,
+      pendingSlot: null,
+      pendingSince: event.timeStamp,
       grabOffsetX: pointerGrabOffset.x,
       grabOffsetY: pointerGrabOffset.y,
     }
@@ -237,7 +239,14 @@ function movePointer(event: PointerEvent) {
   }
   if (moved.active && dragPreview.value) dragPreview.value = { ...dragPreview.value, x: event.clientX, y: event.clientY }
   if (dragProjection.value) {
-    dragProjection.value = { ...dragProjection.value, candidateSlot: candidateSlotAtPoint(event.clientX, event.clientY, dragProjection.value) }
+    const projection = dragProjection.value
+    const detectedSlot = candidateSlotAtPoint(event.clientX, event.clientY, projection)
+    const stable = stabilizeInsertionCandidate(
+      { slot: projection.candidateSlot, pendingSlot: projection.pendingSlot, pendingSince: projection.pendingSince },
+      detectedSlot,
+      event.timeStamp,
+    )
+    dragProjection.value = { ...projection, candidateSlot: stable.slot, pendingSlot: stable.pendingSlot, pendingSince: stable.pendingSince }
   }
   pointerGesture.value = moved
   pointerOverId.value = null
