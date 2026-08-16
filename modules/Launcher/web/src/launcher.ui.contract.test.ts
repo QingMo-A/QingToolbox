@@ -55,4 +55,12 @@ describe('launcher pointer and clear affordance contracts', () => {
     expect(appSource).not.toContain('class="drag-placeholder"')
     expect(stylesSource).not.toContain('.drag-placeholder {')
   })
+
+  it('allows recording to stop manually and captures Alt accelerators before the host menu', () => {
+    expect(appSource).toContain('@click="toggleRecording"')
+    expect(appSource).toContain(':disabled="busy"')
+    expect(appSource).toContain("window.addEventListener('keydown', onKeyDown, true)")
+    expect(appSource).toContain("window.addEventListener('keyup', onKeyUp, true)")
+    expect(appSource).toContain('event.stopPropagation()')
+  })
 })

@@ -23,6 +23,7 @@
   "actions.remove": "移除",
   "actions.launch": "启动",
   "actions.record": "录入新快捷键",
+  "actions.stopRecording": "停止录入",
   "actions.close": "关闭",
   "status.registered": "已注册",
   "status.conflict": "快捷键冲突",

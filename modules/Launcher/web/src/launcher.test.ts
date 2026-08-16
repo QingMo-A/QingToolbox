@@ -109,4 +109,8 @@ describe('shortcut recorder', () => {
   it('ignores modifier-only key presses', () => {
     expect(shortcutFromKeyboard({ key: 'Control', keyCode: 17, ctrlKey: true, altKey: false, shiftKey: false, metaKey: false } as KeyboardEvent)).toBeNull()
   })
+  it('accepts Alt plus Space as a global shortcut', () => {
+    const event = { key: ' ', keyCode: 32, ctrlKey: false, altKey: true, shiftKey: false, metaKey: false } as KeyboardEvent
+    expect(shortcutFromKeyboard(event)).toEqual({ ctrl: false, alt: true, shift: false, win: false, virtualKey: 32, keyLabel: 'Space' })
+  })
 })

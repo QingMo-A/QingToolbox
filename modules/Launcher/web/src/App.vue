@@ -308,31 +308,44 @@ function handleDropResult(result: DropResult) {
   notice.value = parts.join(' · ')
 }
 
-function startRecording() { recording.value = true; notice.value = t('status.waiting', 'Waiting for shortcut...') }
+function stopRecording() { recording.value = false; notice.value = '' }
+function toggleRecording() {
+  if (recording.value) { stopRecording(); return }
+  recording.value = true
+  notice.value = t('status.waiting', 'Waiting for shortcut...')
+}
 function onKeyDown(event: KeyboardEvent) {
   if (recording.value) {
-    if (event.key === 'Escape') { recording.value = false; notice.value = ''; return }
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.key === 'Escape') { stopRecording(); return }
     const hotkey = shortcutFromKeyboard(event)
     if (!hotkey) return
-    event.preventDefault(); recording.value = false; void run('setHotkey', hotkey); return
+    recording.value = false; void run('setHotkey', hotkey); return
   }
   if (event.key === 'Escape') {
     if (cancelCurrentPointer()) { event.preventDefault(); return }
     hideLauncher()
   }
 }
+function onKeyUp(event: KeyboardEvent) {
+  if (!recording.value) return
+  event.preventDefault()
+  event.stopPropagation()
+}
 
 onMounted(() => {
   const offState = onStateChanged(apply)
   const offDrop = onDropResult(handleDropResult)
   const offPresentation = onPresentationChanged(next => { Object.assign(presentation, next); void loadResources() })
-  window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('keydown', onKeyDown, true)
+  window.addEventListener('keyup', onKeyUp, true)
   recentResizeObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measureRecentCapacity)
   if (recentContainer.value) recentResizeObserver?.observe(recentContainer.value)
   measureRecentCapacity()
   void initialLoad()
 onUnmounted(() => {
-    offState(); offDrop(); offPresentation(); window.removeEventListener('keydown', onKeyDown)
+    offState(); offDrop(); offPresentation(); window.removeEventListener('keydown', onKeyDown, true); window.removeEventListener('keyup', onKeyUp, true)
     if (commitStartFrame !== undefined) window.cancelAnimationFrame(commitStartFrame)
     if (commitReleaseFrame !== undefined) window.cancelAnimationFrame(commitReleaseFrame)
     if (suppressClickTimer !== undefined) window.clearTimeout(suppressClickTimer)
@@ -389,7 +402,7 @@ onUnmounted(() => {
       <template v-else>
         <section class="settings-view">
           <header class="settings-header"><button class="back-button" @click="view = 'main'">&#8592; {{ t('actions.back', 'Back') }}</button><h1>{{ t('view.settings', 'Launcher settings') }}</h1></header>
-          <article class="settings-card"><span class="section-label">{{ t('settings.hotkey', 'Global shortcut') }}</span><p>{{ t('settings.hotkeyHint', 'Toggle the Launcher window from anywhere.') }}</p><div class="hotkey-row"><kbd>{{ [state.hotkey.ctrl && 'Ctrl', state.hotkey.alt && 'Alt', state.hotkey.shift && 'Shift', state.hotkey.win && 'Meta', state.hotkey.keyLabel].filter(Boolean).join(' + ') }}</kbd><button class="primary" :disabled="recording || busy" @click="startRecording">{{ recording ? t('status.waiting', 'Waiting for shortcut...') : t('actions.record', 'Record new shortcut') }}</button></div><small>{{ state.hotkeyStatus === 'Registered' ? t('status.registered', 'Registered') : state.hotkeyStatus === 'Conflict' ? t('status.conflict', 'Conflict') : t('status.inactive', 'Inactive') }} · {{ t('settings.hotkeyHelp', 'Ctrl, Alt, Shift, or Meta plus one key.') }}</small></article>
+          <article class="settings-card"><span class="section-label">{{ t('settings.hotkey', 'Global shortcut') }}</span><p>{{ t('settings.hotkeyHint', 'Toggle the Launcher window from anywhere.') }}</p><div class="hotkey-row"><kbd>{{ [state.hotkey.ctrl && 'Ctrl', state.hotkey.alt && 'Alt', state.hotkey.shift && 'Shift', state.hotkey.win && 'Meta', state.hotkey.keyLabel].filter(Boolean).join(' + ') }}</kbd><button class="primary" :disabled="busy" @click="toggleRecording">{{ recording ? t('actions.stopRecording', 'Stop recording') : t('actions.record', 'Record new shortcut') }}</button></div><small>{{ state.hotkeyStatus === 'Registered' ? t('status.registered', 'Registered') : state.hotkeyStatus === 'Conflict' ? t('status.conflict', 'Conflict') : t('status.inactive', 'Inactive') }} · {{ t('settings.hotkeyHelp', 'Ctrl, Alt, Shift, or Meta plus one key.') }}</small></article>
           <div v-if="notice" class="notice" role="status">{{ notice }}</div>
         </section>
       </template>

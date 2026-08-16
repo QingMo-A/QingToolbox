@@ -23,6 +23,7 @@
   "actions.remove": "Remove",
   "actions.launch": "Launch",
   "actions.record": "Record new shortcut",
+  "actions.stopRecording": "Stop recording",
   "actions.close": "Close",
   "status.registered": "Registered",
   "status.conflict": "Conflict",

@@ -272,5 +272,5 @@ export function recentItems(items: readonly Item[], limit = 10): Item[] {
 export function shortcutFromKeyboard(event: KeyboardEvent): Hotkey | null {
   const key = event.key.toUpperCase()
   if (!(event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) || key === 'CONTROL' || key === 'ALT' || key === 'SHIFT' || key === 'META') return null
-  return { ctrl: event.ctrlKey, alt: event.altKey, shift: event.shiftKey, win: event.metaKey, virtualKey: event.keyCode, keyLabel: key }
+  return { ctrl: event.ctrlKey, alt: event.altKey, shift: event.shiftKey, win: event.metaKey, virtualKey: event.keyCode, keyLabel: key === ' ' ? 'Space' : key }
 }
