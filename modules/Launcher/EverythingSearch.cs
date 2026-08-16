@@ -131,7 +131,7 @@ internal sealed class EverythingRuntime : IEverythingSearchService
             var buffers = string.Join(',', Enumerable.Repeat("65536", roots.Length));
             await File.WriteAllTextAsync(config,
                 "[Everything]\r\n" +
-                $"app_data=0\r\nrun_as_admin=0\r\nservice={(useService ? 1 : 0)}\r\nindex_as_admin=0\r\n" +
+                "app_data=0\r\nrun_as_admin=0\r\nservice=0\r\nindex_as_admin=0\r\n" +
                 "show_tray_icon=0\r\nrun_in_background=1\r\nshow_window_on_startup=0\r\n" +
                 "check_for_updates=0\r\ncheck_for_beta_updates=0\r\n" +
                 $"service_pipe_name={(useService ? ServicePipe : string.Empty)}\r\n" +
