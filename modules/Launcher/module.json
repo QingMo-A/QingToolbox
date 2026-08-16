@@ -2,7 +2,7 @@
   "id": "qing.launcher",
   "name": "Qing Launcher",
   "description": "A lightweight launchpad for user-selected Windows applications and shortcuts.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "QingMo-A",
   "minimumHostVersion": "0.2.6-alpha",
   "entry": "QingToolbox.Modules.Launcher.dll",

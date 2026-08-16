@@ -171,7 +171,7 @@ try
     {
         var value = manifest.RootElement;
         Require(value.GetProperty("id").GetString() == "qing.launcher", "Launcher module id changed.");
-        Require(value.GetProperty("version").GetString() == "0.1.0" && value.GetProperty("minimumHostVersion").GetString() == "0.2.6-alpha", "Launcher version contract changed.");
+        Require(value.GetProperty("version").GetString() == "0.2.0" && value.GetProperty("minimumHostVersion").GetString() == "0.2.6-alpha", "Launcher version contract changed.");
         Require(value.GetProperty("uiKind").GetString() == "Web" && value.GetProperty("runtimeIsolation").GetString() == "OutOfProcess" && value.GetProperty("webEntry").GetString() == "ui/index.html", "Launcher Web manifest contract changed.");
         Require(value.GetProperty("loadMode").GetString() == "Manual", "Launcher must remain manually loaded.");
     }
