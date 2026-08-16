@@ -39,6 +39,12 @@ describe('launcher pointer and clear affordance contracts', () => {
     expect(stylesSource).toContain('will-change: transform, translate')
   })
 
+  it('hands a dropped insertion to final layout without replaying translate', () => {
+    expect(appSource).toContain("'committing-reorder': committingReorder")
+    expect(appSource).toContain('committingReorder.value = true')
+    expect(stylesSource).toContain('.launcher-grid.committing-reorder .app-tile { transition: background .17s ease, border-color .17s ease, transform .17s ease !important; }')
+  })
+
   it('pads the scroll viewport so the first-row hover border is visible', () => {
     expect(stylesSource).toContain('padding: 4px; scrollbar-color:')
   })

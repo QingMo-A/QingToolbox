@@ -108,6 +108,7 @@ describe('Launcher pointer drag projection', () => {
 
     window.dispatchEvent(pointerEvent('pointerup', { pointerId: 9, clientX: 320, clientY: 160 }))
     await nextTick()
+    expect(wrapper.find('.launcher-grid').classes()).toContain('committing-reorder')
     await nextTick()
     const reorder = bridge.invoke.mock.calls.find(([method]) => method === 'setCustomOrder')
     expect(reorder?.[1]).toEqual({ ids: ['a', 'b', 'd', 'e', 'c'] })

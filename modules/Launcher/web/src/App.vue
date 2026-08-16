@@ -24,7 +24,10 @@ const pointerGesture = ref<PointerGesture | null>(null)
 type FrozenDragGrid = FrozenGridMetrics & { left: number; top: number; paddingLeft: number; paddingTop: number; scrollTop: number }
 type DragProjection = { sourceId: string; originIds: string[]; visibleIds: string[]; baseRemainingIds: string[]; sourceVisibleIndex: number; metrics: FrozenDragGrid | null; candidateSlot: number | null; grabOffsetX: number; grabOffsetY: number }
 const dragProjection = ref<DragProjection | null>(null)
+const committingReorder = ref(false)
 const gridRef = ref<HTMLElement | null>(null)
+let commitStartFrame: number | undefined
+let commitReleaseFrame: number | undefined
 let endingPointerId: number | undefined
 const suppressClick = ref(false)
 let suppressClickTimer: number | undefined
@@ -250,9 +253,19 @@ function endPointer(event: PointerEvent, canceled = false) {
     const result = completePointerGesture(current, current.originIds)
     if (result.persist && projection && projection.candidateSlot !== null) {
       const ids = reorderVisibleToIndex(projection.originIds, projection.visibleIds, projection.sourceId, projection.candidateSlot)
+      committingReorder.value = true
       state.items = ids.map(id => state.items.find(item => item.id === id)!).filter(Boolean)
       markDragClickSuppressed()
       void run('setCustomOrder', { ids })
+      if (commitStartFrame !== undefined) window.cancelAnimationFrame(commitStartFrame)
+      if (commitReleaseFrame !== undefined) window.cancelAnimationFrame(commitReleaseFrame)
+      commitStartFrame = window.requestAnimationFrame(() => {
+        commitStartFrame = undefined
+        commitReleaseFrame = window.requestAnimationFrame(() => {
+          committingReorder.value = false
+          commitReleaseFrame = undefined
+        })
+      })
     }
   }
   if (current.active || canceled) markDragClickSuppressed()
@@ -315,8 +328,10 @@ onMounted(() => {
   if (recentContainer.value) recentResizeObserver?.observe(recentContainer.value)
   measureRecentCapacity()
   void initialLoad()
-  onUnmounted(() => {
+onUnmounted(() => {
     offState(); offDrop(); offPresentation(); window.removeEventListener('keydown', onKeyDown)
+    if (commitStartFrame !== undefined) window.cancelAnimationFrame(commitStartFrame)
+    if (commitReleaseFrame !== undefined) window.cancelAnimationFrame(commitReleaseFrame)
     if (suppressClickTimer !== undefined) window.clearTimeout(suppressClickTimer)
     stopPointerSession()
     pointerCaptureTarget = null
@@ -346,7 +361,7 @@ onMounted(() => {
           <button v-if="searchQuery" class="search-clear" type="button" :aria-label="t('search.clear', 'Clear search')" @click="clearSearch">&#215;</button>
         </div>
         <section class="drop-area">
-          <TransitionGroup v-if="gridEntries.length" ref="gridRef" name="launcher-grid" tag="div" class="launcher-grid" :class="{ 'pointer-reordering': Boolean(dragProjection) }">
+          <TransitionGroup v-if="gridEntries.length" ref="gridRef" name="launcher-grid" tag="div" class="launcher-grid" :class="{ 'pointer-reordering': Boolean(dragProjection), 'committing-reorder': committingReorder }">
             <template v-for="(entry, index) in gridEntries" :key="entry.key">
               <article class="app-tile" :class="{ dragging: draggingId === entry.item.id, 'drag-over': pointerOverId === entry.item.id && draggingId !== entry.item.id }" :style="gridEntryShift(index)" :data-launcher-item-id="entry.item.id" :draggable="false" tabindex="0" @pointerdown="beginPointer(entry.item, $event)" @click="activate(entry.item)" @keydown.enter="launch(entry.item)">
                 <div class="app-icon"><img v-if="iconFor(entry.item)" :src="iconFor(entry.item)" :alt="entry.item.name" /><span v-else class="fallback-icon">{{ entry.item.name.slice(0, 1).toUpperCase() }}</span></div>

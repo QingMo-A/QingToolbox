@@ -117,6 +117,7 @@ button:focus-visible, [tabindex]:focus-visible { outline: 3px solid color-mix(in
 .launcher-grid-enter-from, .launcher-grid-leave-to { opacity: 0; transform: scale(.96); }
 .launcher-grid-leave-active { position: absolute; }
 .launcher-grid.pointer-reordering .launcher-grid-leave-active { opacity: 0; transition: none; }
+.launcher-grid.committing-reorder .app-tile { transition: background .17s ease, border-color .17s ease, transform .17s ease !important; }
 
 .recent-section { border-top: 1px solid var(--panel-border); margin-top: 18px; padding-top: 18px; }
 .section-heading { align-items: baseline; display: flex; gap: 12px; justify-content: space-between; }
