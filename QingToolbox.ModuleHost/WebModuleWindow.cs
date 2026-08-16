@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
@@ -38,6 +39,7 @@ internal sealed class WebModuleWindow : Window
     private readonly DragEventHandler? _externalDragLeaveHandler = null;
     private readonly DragEventHandler? _externalDropEventHandler = null;
     private readonly DispatcherTimer? _deferredDismissTimer;
+    private HwndSource? _windowSource;
     private string _appearancePresetId;
     private string _languageCode;
     private bool _readySent;
@@ -97,6 +99,7 @@ internal sealed class WebModuleWindow : Window
             _deferredDismissTimer.Tick += OnDeferredDismissTick;
             Deactivated += OnOverlayDeactivated;
             IsVisibleChanged += OnVisibilityChanged;
+            SourceInitialized += OnOverlaySourceInitialized;
         }
         ApplySurfaceTheme();
         _surface.Children.Add(_browser);
@@ -237,6 +240,9 @@ internal sealed class WebModuleWindow : Window
         Closed -= OnClosed;
         Deactivated -= OnOverlayDeactivated;
         IsVisibleChanged -= OnVisibilityChanged;
+        SourceInitialized -= OnOverlaySourceInitialized;
+        _windowSource?.RemoveHook(OnOverlayWindowMessage);
+        _windowSource = null;
         StopDeferredDismiss();
         if (_deferredDismissTimer is not null) _deferredDismissTimer.Tick -= OnDeferredDismissTick;
         if (_externalDropHandler is not null)
@@ -255,6 +261,25 @@ internal sealed class WebModuleWindow : Window
         }
         _browser.Dispose();
         _onClosed?.Invoke();
+    }
+
+    private void OnOverlaySourceInitialized(object? sender, EventArgs e)
+    {
+        _windowSource = PresentationSource.FromVisual(this) as HwndSource;
+        _windowSource?.AddHook(OnOverlayWindowMessage);
+    }
+
+    private IntPtr OnOverlayWindowMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (ShouldSuppressSystemMenu(_presentationMode, message, wParam.ToInt64())) handled = true;
+        return IntPtr.Zero;
+    }
+
+    internal static bool ShouldSuppressSystemMenu(ModuleHostWindowPresentationMode mode, int message, long wParam)
+    {
+        const int WmSysCommand = 0x0112;
+        const long ScKeyMenu = 0xF100;
+        return WebModuleWindowPresentation.IsOverlay(mode) && message == WmSysCommand && (wParam & 0xFFF0) == ScKeyMenu;
     }
 
     private void OnOverlayDeactivated(object? sender, EventArgs e)

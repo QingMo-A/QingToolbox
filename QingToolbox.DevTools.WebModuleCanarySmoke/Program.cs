@@ -29,6 +29,12 @@ Require(OverlayDismissPolicy.OnDeferredTick(false, true, false, false, false, Ov
     "A drag that left without dropping must hide after release.");
 Require(OverlayDismissPolicy.OnDeactivated(ModuleHostWindowPresentationMode.Standard, false, true, false, false) == OverlayDismissDecision.Keep,
     "Standard Web module windows must not enable click-away dismissal.");
+Require(WebModuleWindow.ShouldSuppressSystemMenu(ModuleHostWindowPresentationMode.Overlay, 0x0112, 0xF100),
+    "Overlay windows must suppress the Alt system menu so Web content can record Alt+Space.");
+Require(!WebModuleWindow.ShouldSuppressSystemMenu(ModuleHostWindowPresentationMode.Standard, 0x0112, 0xF100),
+    "Standard Web module windows must retain their native system menu.");
+Require(!WebModuleWindow.ShouldSuppressSystemMenu(ModuleHostWindowPresentationMode.Overlay, 0x0100, 0xF100),
+    "Overlay system-menu suppression must not consume ordinary keyboard messages.");
 
 var dragCancelSequence = new[]
 {
