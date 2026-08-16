@@ -2,5 +2,24 @@
   "schemaVersion": 1,
   "moduleId": "qing.launcher",
   "publisher": "QingMo-A",
-  "releases": []
+  "releases": [
+    {
+      "version": "0.2.0",
+      "channel": "stable",
+      "moduleApiVersion": "experimental-0.1",
+      "minimumHostVersion": "0.2.6-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-08-16T03:34:40Z",
+      "package": {
+        "fileName": "qing.launcher-0.2.0.qmod",
+        "url": "https://github.com/QingMo-A/QingToolbox/releases/download/modules-launcher-v0.2.0/qing.launcher-0.2.0.qmod",
+        "size": 62825,
+        "sha256": "2F08B610109869ED3E7AC33F905E6C333954DB79DB501B5543BBC92E22E62C24"
+      },
+      "releaseNotes": {
+        "zh-CN": "新增透明置顶启动台、自定义/首字母/桌面视图、搜索与最近启动，并完善高分辨率图标和动画拖拽排序。",
+        "en-US": "Adds the transparent launcher overlay, custom/alphabetical/desktop views, search and recent apps, high-resolution icons, and animated drag ordering."
+      }
+    }
+  ]
 }
