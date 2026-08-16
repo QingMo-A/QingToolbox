@@ -33,10 +33,11 @@ internal sealed class EverythingRuntime : IEverythingSearchService
     private const string EverythingExecutableSha256 = "F191F756996A14A11E5445FA7103D302EFD510CF2FBF920E6C0C8ED51D512E36";
     private readonly string _runtimeDirectory;
     private readonly string _dataDirectory;
+    private readonly string _clientRuntimeDirectory;
     private readonly IReadOnlyList<string>? _indexRoots;
     // Everything 1.4 named IPC identifiers are intentionally short. Long
     // names can be truncated differently by the client and ES.
-    private readonly string _instanceName = $"QL{Guid.NewGuid():N}"[..10];
+    private readonly string _instanceName;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Process? _ownedProcess;
     private bool _disposed;
@@ -45,6 +46,9 @@ internal sealed class EverythingRuntime : IEverythingSearchService
     {
         _runtimeDirectory = Path.Combine(moduleDirectory, "third-party", "Everything");
         _dataDirectory = Path.Combine(dataDirectory, "everything-runtime");
+        _clientRuntimeDirectory = Path.Combine(_dataDirectory, "client");
+        _instanceName = "QL" + Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(Path.GetFullPath(_dataDirectory).ToUpperInvariant())))[..8];
         _indexRoots = indexRoots;
     }
 
@@ -120,7 +124,17 @@ internal sealed class EverythingRuntime : IEverythingSearchService
             Directory.CreateDirectory(_dataDirectory);
             var useService = _indexRoots is null;
             if (useService) await EnsureServiceAsync(cancellationToken).ConfigureAwait(false);
-            var config = Path.Combine(_dataDirectory, "Everything.ini");
+            if (useService)
+            {
+                Directory.CreateDirectory(_clientRuntimeDirectory);
+                foreach (var fileName in new[] { "Everything.exe", "es.exe", "Everything64.dll", "LICENSE.txt", "NOTICE.md" })
+                    File.Copy(Path.Combine(_runtimeDirectory, fileName), Path.Combine(_clientRuntimeDirectory, fileName), overwrite: true);
+                everything = Path.Combine(_clientRuntimeDirectory, "Everything.exe");
+                es = Path.Combine(_clientRuntimeDirectory, "es.exe");
+            }
+            var config = useService
+                ? Path.Combine(_clientRuntimeDirectory, $"Everything-{_instanceName}.ini")
+                : Path.Combine(_dataDirectory, $"Everything-{_instanceName}.ini");
             var roots = (_indexRoots ?? [])
                 .Select(Path.GetFullPath)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -132,7 +146,7 @@ internal sealed class EverythingRuntime : IEverythingSearchService
             var buffers = string.Join(',', Enumerable.Repeat("65536", roots.Length));
             await File.WriteAllTextAsync(config,
                 "[Everything]\r\n" +
-                "app_data=0\r\nrun_as_admin=0\r\nservice=0\r\nindex_as_admin=0\r\n" +
+                $"app_data=0\r\nrun_as_admin=0\r\nservice={(useService ? 1 : 0)}\r\nindex_as_admin=0\r\n" +
                 "show_tray_icon=0\r\nrun_in_background=1\r\nshow_window_on_startup=0\r\n" +
                 "check_for_updates=0\r\ncheck_for_beta_updates=0\r\n" +
                 $"service_pipe_name={(useService ? ServicePipe : string.Empty)}\r\n" +

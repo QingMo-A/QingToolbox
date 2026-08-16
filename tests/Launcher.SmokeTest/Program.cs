@@ -112,7 +112,11 @@ try
             sortMode = "custom",
             items = new[] { new { id = "legacy", name = "Notepad", target = iconSource, arguments = "", workingDirectory = Environment.SystemDirectory, iconKey = "legacy.png", lastLaunchedAt = (DateTimeOffset?)null } }
         }));
-        await using (var migrationModule = new LauncherModule(new FakeProcessStarter(), new FakeHotkeyRegistration(), new FakeDesktopSource()))
+        await using (var migrationModule = new LauncherModule(
+            new FakeProcessStarter(),
+            new FakeHotkeyRegistration(),
+            new FakeDesktopSource(),
+            new FakeEverythingSearchService()))
         {
             await migrationModule.OnLoadAsync(new ModuleContext
             {
