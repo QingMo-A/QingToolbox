@@ -4,6 +4,24 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.2.1",
+      "channel": "stable",
+      "moduleApiVersion": "experimental-0.1",
+      "minimumHostVersion": "0.2.6-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-08-16T13:05:12Z",
+      "package": {
+        "fileName": "qing.launcher-0.2.1.qmod",
+        "url": "https://github.com/QingMo-A/QingToolbox/releases/download/modules-launcher-v0.2.1/qing.launcher-0.2.1.qmod",
+        "size": 1138688,
+        "sha256": "4F27E3A174B2341A9284D33D8BC8F9DF5946B00A42801C3714FB46469259E770"
+      },
+      "releaseNotes": {
+        "zh-CN": "新增内置 Everything 快捷搜索、独立运行时生命周期与结果右键操作，并修复 Unicode 路径、后台快捷键及 WebView 原生菜单问题。",
+        "en-US": "Adds built-in Everything quick search, isolated runtime lifecycle, and result context actions, with fixes for Unicode paths, background hotkeys, and the native WebView menu."
+      }
+    },
+    {
       "version": "0.2.0",
       "channel": "stable",
       "moduleApiVersion": "experimental-0.1",
