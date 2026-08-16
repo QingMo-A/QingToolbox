@@ -21,14 +21,44 @@ Require(OverlayDismissPolicy.OnDeferredTick(false, true, false, false, false, lo
     "Deferred Overlay release outside the window must hide.");
 Require(OverlayDismissPolicy.OnDeferredTick(false, true, true, false, false, long.MaxValue) == OverlayDismissDecision.Keep,
     "Reactivated Overlay must remain visible.");
-Require(OverlayDismissPolicy.OnDeferredTick(false, true, false, true, false, long.MaxValue) == OverlayDismissDecision.Keep,
-    "Active external file drag must keep Overlay visible.");
+Require(OverlayDismissPolicy.OnDeferredTick(false, true, false, true, false, long.MaxValue) == OverlayDismissDecision.Defer,
+    "Active external file drag must keep deferred dismissal monitoring alive.");
 Require(OverlayDismissPolicy.OnDeferredTick(false, true, false, false, false, 100) == OverlayDismissDecision.Keep,
     "A recent OS FileDrop must keep Overlay visible through mouse release ordering.");
 Require(OverlayDismissPolicy.OnDeferredTick(false, true, false, false, false, OverlayDismissPolicy.DropGraceMilliseconds) == OverlayDismissDecision.Hide,
     "A drag that left without dropping must hide after release.");
 Require(OverlayDismissPolicy.OnDeactivated(ModuleHostWindowPresentationMode.Standard, false, true, false, false) == OverlayDismissDecision.Keep,
     "Standard Web module windows must not enable click-away dismissal.");
+
+var dragCancelSequence = new[]
+{
+    OverlayDismissPolicy.OnDeactivated(ModuleHostWindowPresentationMode.Overlay, false, true, false, true),
+    OverlayDismissPolicy.OnDeferredTick(false, true, false, true, true, long.MaxValue),
+    OverlayDismissPolicy.OnDeferredTick(false, true, false, false, true, long.MaxValue),
+    OverlayDismissPolicy.OnDeferredTick(false, true, false, false, false, long.MaxValue),
+};
+Require(dragCancelSequence.SequenceEqual(new[]
+    {
+        OverlayDismissDecision.Defer,
+        OverlayDismissDecision.Defer,
+        OverlayDismissDecision.Defer,
+        OverlayDismissDecision.Hide,
+    }),
+    "Explorer drag enter, leave and outside release must keep monitoring until Overlay hides.");
+
+var successfulDropSequence = new[]
+{
+    OverlayDismissPolicy.OnDeactivated(ModuleHostWindowPresentationMode.Overlay, false, true, false, true),
+    OverlayDismissPolicy.OnDeferredTick(false, true, false, true, true, long.MaxValue),
+    OverlayDismissPolicy.OnDeferredTick(false, true, false, false, false, 100),
+};
+Require(successfulDropSequence.SequenceEqual(new[]
+    {
+        OverlayDismissDecision.Defer,
+        OverlayDismissDecision.Defer,
+        OverlayDismissDecision.Keep,
+    }),
+    "A successful Explorer drop must end deferred monitoring while preserving Overlay visibility.");
 var presentationError = default(Exception);
 var presentationThread = new Thread(() =>
 {

@@ -33,9 +33,10 @@ internal static class OverlayDismissPolicy
         bool leftButtonDown,
         long elapsedSinceExternalDropMilliseconds)
     {
-        if (closed || !visible || active || externalFileDragActive)
+        if (closed || !visible || active)
             return OverlayDismissDecision.Keep;
         if (leftButtonDown) return OverlayDismissDecision.Defer;
+        if (externalFileDragActive) return OverlayDismissDecision.Defer;
         return elapsedSinceExternalDropMilliseconds is >= 0 and < DropGraceMilliseconds
             ? OverlayDismissDecision.Keep
             : OverlayDismissDecision.Hide;
