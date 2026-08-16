@@ -47,6 +47,11 @@
   "everything.noResults": "没有 Everything 搜索结果。",
   "everything.unavailable": "Everything 搜索暂不可用。",
   "everything.openFailed": "无法打开所选结果。",
+  "everything.openFolder": "打开所在文件夹",
+  "everything.copyPath": "复制文件路径",
+  "everything.pathCopied": "路径已复制。",
+  "everything.folderFailed": "无法打开所在文件夹。",
+  "everything.copyFailed": "无法复制文件路径。",
   "everything.typeFile": "文件",
   "everything.typeDirectory": "文件夹"
 }

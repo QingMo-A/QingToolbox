@@ -63,4 +63,12 @@ describe('launcher pointer and clear affordance contracts', () => {
     expect(appSource).toContain("window.addEventListener('keyup', onKeyUp, true)")
     expect(appSource).toContain('event.stopPropagation()')
   })
+
+  it('replaces the native WebView menu with resultId-scoped Everything actions', () => {
+    expect(appSource).toContain("window.addEventListener('contextmenu', suppressNativeContextMenu)")
+    expect(appSource).toContain('@contextmenu="showEverythingContextMenu($event, result, index)"')
+    expect(appSource).toContain("invoke('openEverythingResultFolder', { resultId: result.id })")
+    expect(appSource).toContain("invoke('copyEverythingResultPath', { resultId: result.id })")
+    expect(stylesSource).toContain('.everything-context-menu {')
+  })
 })

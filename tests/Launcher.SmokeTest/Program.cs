@@ -184,6 +184,15 @@ try
         throw new InvalidOperationException("A raw path was accepted as an Everything resultId.");
     }
     catch (InvalidOperationException exception) when (exception.Message.Contains("no longer available", StringComparison.OrdinalIgnoreCase)) { }
+    foreach (var method in new[] { "openEverythingResultFolder", "copyEverythingResultPath" })
+    {
+        try
+        {
+            await module.HandleWebRequestAsync(method, JsonSerializer.SerializeToElement(new { resultId = exeB }));
+            throw new InvalidOperationException($"A raw path was accepted by {method}.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message.Contains("no longer available", StringComparison.OrdinalIgnoreCase)) { }
+    }
     await module.HandleWebRequestAsync("setSortMode", JsonSerializer.SerializeToElement(new { mode = "desktop" }));
     var unsupported = Path.Combine(temp, "readme.txt");
     File.WriteAllText(unsupported, "unsupported");

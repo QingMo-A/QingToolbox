@@ -119,6 +119,10 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
                 return await SearchEverythingAsync(payload, cancellationToken).ConfigureAwait(false);
             case "openEverythingResult":
                 return OpenEverythingResult(RequiredString(payload, "resultId"));
+            case "openEverythingResultFolder":
+                return OpenEverythingResultFolder(RequiredString(payload, "resultId"));
+            case "copyEverythingResultPath":
+                return CopyEverythingResultPath(RequiredString(payload, "resultId"));
             case "hideWindow":
                 RequestWindowAction(ModuleHostWindowAction.Hide);
                 return Snapshot();
@@ -321,6 +325,43 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
 
     private JsonElement OpenEverythingResult(string resultId)
     {
+        var result = RequireEverythingResult(resultId);
+        var item = new LauncherItem(resultId, Path.GetFileName(result.Path), result.Path, string.Empty,
+            Path.GetDirectoryName(result.Path) ?? string.Empty, null, null, result.Path, result.Path);
+        if (!_processStarter.Start(item)) throw new InvalidOperationException("The Everything result could not be opened.");
+        RequestWindowAction(ModuleHostWindowAction.Hide);
+        return Snapshot();
+    }
+
+    private JsonElement OpenEverythingResultFolder(string resultId)
+    {
+        var result = RequireEverythingResult(resultId);
+        var target = result.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var parent = Path.GetDirectoryName(target);
+        var arguments = parent is null ? $"\"{result.Path}\"" : $"/select,\"{result.Path}\"";
+        var process = Process.Start(new ProcessStartInfo("explorer.exe", arguments) { UseShellExecute = true });
+        if (process is null) throw new InvalidOperationException("The Everything result folder could not be opened.");
+        return Snapshot();
+    }
+
+    private JsonElement CopyEverythingResultPath(string resultId)
+    {
+        var result = RequireEverythingResult(resultId);
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try { System.Windows.Clipboard.SetText(result.Path); }
+            catch (Exception exception) { failure = exception; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (failure is not null) throw new InvalidOperationException("The Everything result path could not be copied.", failure);
+        return Snapshot();
+    }
+
+    private EverythingPathResult RequireEverythingResult(string resultId)
+    {
         EverythingPathResult result;
         lock (_gate)
         {
@@ -329,11 +370,7 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
         }
         if (result.IsDirectory ? !Directory.Exists(result.Path) : !File.Exists(result.Path))
             throw new InvalidOperationException("The Everything result is no longer available.");
-        var item = new LauncherItem(resultId, Path.GetFileName(result.Path), result.Path, string.Empty,
-            Path.GetDirectoryName(result.Path) ?? string.Empty, null, null, result.Path, result.Path);
-        if (!_processStarter.Start(item)) throw new InvalidOperationException("The Everything result could not be opened.");
-        RequestWindowAction(ModuleHostWindowAction.Hide);
-        return Snapshot();
+        return result;
     }
 
     private void OnHotkeyTriggered(object? sender, EventArgs e)

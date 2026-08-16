@@ -42,6 +42,7 @@ const everythingStatus = ref<'Idle' | 'Loading' | 'Ready' | 'Error'>('Idle')
 const everythingError = ref('')
 const everythingResults = ref<EverythingResult[]>([])
 const everythingSelection = ref(0)
+const everythingContextMenu = ref<{ result: EverythingResult; x: number; y: number } | null>(null)
 let everythingRequestId = 0
 let everythingDebounceTimer: number | undefined
 const recentContainer = ref<HTMLElement | null>(null)
@@ -174,9 +175,37 @@ async function openEverythingResult(result: EverythingResult) {
   catch { everythingError.value = t('everything.openFailed', 'The selected result could not be opened.'); everythingStatus.value = 'Error' }
 }
 
+async function openEverythingResultFolder(result: EverythingResult) {
+  everythingContextMenu.value = null
+  try { await invoke('openEverythingResultFolder', { resultId: result.id }) }
+  catch { everythingError.value = t('everything.folderFailed', 'The containing folder could not be opened.'); everythingStatus.value = 'Error' }
+}
+
+async function copyEverythingResultPath(result: EverythingResult) {
+  everythingContextMenu.value = null
+  try { await invoke('copyEverythingResultPath', { resultId: result.id }); notice.value = t('everything.pathCopied', 'Path copied.') }
+  catch { everythingError.value = t('everything.copyFailed', 'The file path could not be copied.'); everythingStatus.value = 'Error' }
+}
+
+function showEverythingContextMenu(event: MouseEvent, result: EverythingResult, index: number) {
+  event.preventDefault()
+  everythingSelection.value = index
+  const width = 210
+  const height = 88
+  everythingContextMenu.value = {
+    result,
+    x: Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8)),
+    y: Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8)),
+  }
+}
+
+function dismissEverythingContextMenu() { everythingContextMenu.value = null }
+function suppressNativeContextMenu(event: MouseEvent) { event.preventDefault() }
+
 function handleSearchKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     event.preventDefault(); event.stopPropagation()
+    if (everythingContextMenu.value) { dismissEverythingContextMenu(); return }
     if (everythingMode.value && parsedSearch.value.query) clearSearch()
     else if (!everythingMode.value && searchQuery.value) clearSearch()
     else hideLauncher()
@@ -417,6 +446,8 @@ onMounted(() => {
   const offPresentation = onPresentationChanged(next => { Object.assign(presentation, next); void loadResources() })
   window.addEventListener('keydown', onKeyDown, true)
   window.addEventListener('keyup', onKeyUp, true)
+  window.addEventListener('contextmenu', suppressNativeContextMenu)
+  window.addEventListener('pointerdown', dismissEverythingContextMenu)
   recentResizeObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measureRecentCapacity)
   if (recentContainer.value) recentResizeObserver?.observe(recentContainer.value)
   measureRecentCapacity()
@@ -424,6 +455,8 @@ onMounted(() => {
   void initialLoad()
 onUnmounted(() => {
     offState(); offDrop(); offPresentation(); window.removeEventListener('keydown', onKeyDown, true); window.removeEventListener('keyup', onKeyUp, true)
+    window.removeEventListener('contextmenu', suppressNativeContextMenu)
+    window.removeEventListener('pointerdown', dismissEverythingContextMenu)
     if (commitStartFrame !== undefined) window.cancelAnimationFrame(commitStartFrame)
     if (commitReleaseFrame !== undefined) window.cancelAnimationFrame(commitReleaseFrame)
     if (suppressClickTimer !== undefined) window.clearTimeout(suppressClickTimer)
@@ -461,7 +494,7 @@ onUnmounted(() => {
           <div v-if="everythingStatus === 'Loading'" class="everything-state"><span class="everything-spinner" />{{ t('everything.searching', 'Searching Everything…') }}</div>
           <div v-else-if="everythingStatus === 'Error'" class="everything-state error-state">{{ everythingError || t('everything.unavailable', 'Everything search is unavailable.') }}</div>
           <div v-else-if="everythingResults.length" class="everything-results" role="listbox" :aria-label="everythingBadge()">
-            <button v-for="(result, index) in everythingResults" :key="result.id" class="everything-result" :class="{ selected: index === everythingSelection }" role="option" :aria-selected="index === everythingSelection" @mouseenter="everythingSelection = index" @click="openEverythingResult(result)">
+            <button v-for="(result, index) in everythingResults" :key="result.id" class="everything-result" :class="{ selected: index === everythingSelection }" role="option" :aria-selected="index === everythingSelection" @mouseenter="everythingSelection = index" @click="openEverythingResult(result)" @contextmenu="showEverythingContextMenu($event, result, index)">
               <span class="everything-result-icon" :class="result.type" aria-hidden="true">
                 <svg v-if="result.type === 'directory'" viewBox="0 0 24 24"><path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" /></svg>
                 <svg v-else viewBox="0 0 24 24"><path d="M6 3.5h8l4 4V20H6z" /><path d="M14 3.5V8h4" /></svg>
@@ -491,6 +524,10 @@ onUnmounted(() => {
           <p v-else class="muted">{{ searchQuery ? t('search.noResults', 'No matching apps') : t('view.noRecent', 'Nothing launched yet.') }}</p>
         </section>
         </template>
+        <div v-if="everythingContextMenu" class="everything-context-menu" role="menu" :style="{ left: `${everythingContextMenu.x}px`, top: `${everythingContextMenu.y}px` }" @pointerdown.stop>
+          <button type="button" role="menuitem" @click.stop="openEverythingResultFolder(everythingContextMenu.result)">{{ t('everything.openFolder', 'Open containing folder') }}</button>
+          <button type="button" role="menuitem" @click.stop="copyEverythingResultPath(everythingContextMenu.result)">{{ t('everything.copyPath', 'Copy file path') }}</button>
+        </div>
         <div v-if="dragPreview && dragPreviewItem" class="drag-preview" :style="{ left: `${dragPreview.x - dragPreview.offsetX}px`, top: `${dragPreview.y - dragPreview.offsetY}px` }" aria-hidden="true">
           <img v-if="iconFor(dragPreviewItem)" :src="iconFor(dragPreviewItem)" alt="" />
           <span v-else class="fallback-icon">{{ dragPreviewItem.name.slice(0, 1).toUpperCase() }}</span>

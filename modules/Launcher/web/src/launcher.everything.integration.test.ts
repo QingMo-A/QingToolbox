@@ -62,6 +62,13 @@ describe('Launcher Everything search isolation', () => {
     expect(wrapper.text()).toContain('new.exe')
     expect(wrapper.text()).not.toContain('old.exe')
 
+    await wrapper.find('.everything-result').trigger('contextmenu', { clientX: 120, clientY: 140 })
+    expect(wrapper.find('.everything-context-menu').exists()).toBe(true)
+    const menuItems = wrapper.findAll('.everything-context-menu button')
+    expect(menuItems).toHaveLength(2)
+    await menuItems[1].trigger('click')
+    expect(bridge.invoke).toHaveBeenCalledWith('copyEverythingResultPath', { resultId: 'new-id' })
+
     await input.setValue('minecraft')
     await nextTick()
     expect(wrapper.find('[data-launcher-item-id="launcher-minecraft"]').exists()).toBe(true)

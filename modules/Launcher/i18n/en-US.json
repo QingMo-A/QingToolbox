@@ -47,6 +47,11 @@
   "everything.noResults": "No Everything results.",
   "everything.unavailable": "Everything search is unavailable.",
   "everything.openFailed": "The selected result could not be opened.",
+  "everything.openFolder": "Open containing folder",
+  "everything.copyPath": "Copy file path",
+  "everything.pathCopied": "Path copied.",
+  "everything.folderFailed": "The containing folder could not be opened.",
+  "everything.copyFailed": "The file path could not be copied.",
   "everything.typeFile": "File",
   "everything.typeDirectory": "Folder"
 }
