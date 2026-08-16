@@ -28,7 +28,8 @@ internal sealed class EverythingRuntime : IEverythingSearchService
     internal const string RuntimeVersion = "1.4.1.1032";
     internal const string CliVersion = "1.1.0.37";
     private const string ServiceInstance = "QingToolboxLauncher";
-    private const string ServicePipe = @"\\.\PIPE\QingToolbox Launcher Everything Service";
+    private const string ServicePipe = @"\\.\PIPE\QingToolboxLauncherEverythingService";
+    private const string ServiceSecurityDescriptor = "D:(A;OICI;GRGW;;;AU)";
     private const string EverythingExecutableSha256 = "F191F756996A14A11E5445FA7103D302EFD510CF2FBF920E6C0C8ED51D512E36";
     private readonly string _runtimeDirectory;
     private readonly string _dataDirectory;
@@ -146,11 +147,20 @@ internal sealed class EverythingRuntime : IEverythingSearchService
             start.ArgumentList.Add("-instance"); start.ArgumentList.Add(_instanceName);
             start.ArgumentList.Add("-startup");
             start.ArgumentList.Add("-config"); start.ArgumentList.Add(config);
+            _ownedProcess = Process.Start(start) ?? throw new InvalidOperationException("The built-in Everything runtime could not start.");
             if (useService)
             {
-                start.ArgumentList.Add("-service-pipe-name"); start.ArgumentList.Add(ServicePipe);
+                // Everything 1.4 exits immediately when a named client is first
+                // created with -service-pipe-name. Create the client first, then
+                // send the service connection option to that running instance.
+                await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+                var connect = HiddenProcess(everything);
+                connect.ArgumentList.Add("-instance"); connect.ArgumentList.Add(_instanceName);
+                connect.ArgumentList.Add("-service-pipe-name"); connect.ArgumentList.Add(ServicePipe);
+                using var request = Process.Start(connect) ?? throw new InvalidOperationException("The Everything service connection could not start.");
+                await request.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                if (request.ExitCode != 0) throw new InvalidOperationException("The Everything service connection failed.");
             }
-            _ownedProcess = Process.Start(start) ?? throw new InvalidOperationException("The built-in Everything runtime could not start.");
         }
 
         var deadline = DateTimeOffset.UtcNow.AddSeconds(20);
@@ -174,8 +184,6 @@ internal sealed class EverythingRuntime : IEverythingSearchService
     private async Task EnsureServiceAsync(CancellationToken cancellationToken)
     {
         var marker = Path.Combine(_dataDirectory, "service-installed-1.4.1.1032");
-        if (File.Exists(marker)) return;
-
         var serviceDirectory = Path.Combine(_dataDirectory, "service");
         Directory.CreateDirectory(serviceDirectory);
         var source = Path.Combine(_runtimeDirectory, "Everything.exe");
@@ -184,6 +192,12 @@ internal sealed class EverythingRuntime : IEverythingSearchService
             !Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(serviceExecutable, cancellationToken).ConfigureAwait(false)))
                 .Equals(EverythingExecutableSha256, StringComparison.Ordinal))
             File.Copy(source, serviceExecutable, overwrite: true);
+
+        var expectedMarker = $"{RuntimeVersion}\n{Path.GetFullPath(serviceExecutable)}\n{ServicePipe}\n{ServiceSecurityDescriptor}";
+        if (File.Exists(marker) &&
+            (await File.ReadAllTextAsync(marker, cancellationToken).ConfigureAwait(false))
+                .Equals(expectedMarker, StringComparison.OrdinalIgnoreCase))
+            return;
 
         var install = new ProcessStartInfo
         {
@@ -196,6 +210,7 @@ internal sealed class EverythingRuntime : IEverythingSearchService
         install.ArgumentList.Add("-instance"); install.ArgumentList.Add(ServiceInstance);
         install.ArgumentList.Add("-install-service");
         install.ArgumentList.Add("-install-service-pipe-name"); install.ArgumentList.Add(ServicePipe);
+        install.ArgumentList.Add("-install-service-security-descriptor"); install.ArgumentList.Add(ServiceSecurityDescriptor);
         try
         {
             using var process = Process.Start(install) ?? throw new InvalidOperationException("The Everything service authorization could not start.");
@@ -206,7 +221,7 @@ internal sealed class EverythingRuntime : IEverythingSearchService
         {
             throw new InvalidOperationException("The Everything service authorization was cancelled.", exception);
         }
-        await File.WriteAllTextAsync(marker, RuntimeVersion, new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
+        await File.WriteAllTextAsync(marker, expectedMarker, new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<string> RunCliAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
