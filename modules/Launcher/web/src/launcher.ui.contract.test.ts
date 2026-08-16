@@ -33,7 +33,7 @@ describe('launcher pointer and clear affordance contracts', () => {
   })
 
   it('keeps insertion motion on the independent translate property', () => {
-    expect(appSource).toContain(':style="gridEntryShift(index)"')
+    expect(appSource).toContain(':style="gridEntryShift(index, entry.item.id)"')
     expect(appSource).not.toContain('class="drag-placeholder"')
     expect(stylesSource).toContain('translate .32s cubic-bezier(.22,1.18,.32,1)')
     expect(stylesSource).toContain('will-change: transform, translate')
