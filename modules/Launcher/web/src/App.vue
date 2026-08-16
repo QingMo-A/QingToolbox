@@ -143,7 +143,9 @@ async function executeEverythingSearch(requestId: number, mode: 'everything-all'
     everythingResults.value = response.results
     everythingSelection.value = Math.min(everythingSelection.value, Math.max(0, response.results.length - 1))
     everythingStatus.value = response.status
-    everythingError.value = response.error ?? ''
+    everythingError.value = response.error === 'indexing'
+      ? t('everything.indexing', 'Everything is building its first index. Try again shortly.')
+      : response.error ?? ''
   } catch {
     if (requestId !== everythingRequestId || !everythingMode.value) return
     everythingResults.value = []

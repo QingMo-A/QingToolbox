@@ -78,6 +78,15 @@ internal sealed class EverythingRuntime : IEverythingSearchService
         finally { _gate.Release(); }
     }
 
+    internal async Task WarmUpAsync()
+    {
+        if (_disposed) return;
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try { await EnsureReadyAsync(CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or UnauthorizedAccessException) { }
+        finally { _gate.Release(); }
+    }
+
     private async Task<string> RunQueryWithRetryAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(25);
@@ -175,6 +184,8 @@ internal sealed class EverythingRuntime : IEverythingSearchService
             try { process.Kill(entireProcessTree: true); } catch { }
             throw;
         }
+        if (process.ExitCode == 8)
+            throw new InvalidOperationException("indexing");
         if (process.ExitCode != 0)
             throw new InvalidOperationException(string.IsNullOrWhiteSpace(error)
                 ? $"Everything IPC is unavailable (code {process.ExitCode})."

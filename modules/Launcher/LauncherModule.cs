@@ -59,6 +59,7 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
         _store = new LauncherStore(context.DataDirectory);
         _iconsDirectory = Path.Combine(context.DataDirectory, "icons");
         _everything ??= new EverythingRuntime(context.ModuleDirectory, context.DataDirectory);
+        if (_everything is EverythingRuntime runtime) _ = runtime.WarmUpAsync();
         RefreshDesktopItems();
         MigrateIconCache();
         return Task.CompletedTask;
@@ -312,7 +313,7 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
         {
             if (generation == Volatile.Read(ref _everythingSearchGeneration)) lock (_gate) _everythingResults.Clear();
             return JsonSerializer.SerializeToElement(new EverythingSearchView(requestId, "Error",
-                exception.Message.Contains("runtime", StringComparison.OrdinalIgnoreCase)
+                exception.Message == "indexing" ? "indexing" : exception.Message.Contains("runtime", StringComparison.OrdinalIgnoreCase)
                     ? "The built-in Everything runtime is unavailable."
                     : "Everything search is unavailable.", false, []), JsonOptions);
         }
