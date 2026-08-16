@@ -94,7 +94,7 @@ button:focus-visible, [tabindex]:focus-visible { outline: 3px solid color-mix(in
 
 .drop-area { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; padding-top: 18px; }
 .launcher-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
-.app-tile { -webkit-user-drag: none; align-items: center; background: transparent; border: 1px solid transparent; border-radius: 17px; cursor: grab; display: flex; flex-direction: column; min-height: 132px; padding: 13px 9px 10px; position: relative; touch-action: none; user-select: none; transition: background .17s ease, border-color .17s ease, transform .17s ease; will-change: transform; }
+.app-tile { -webkit-user-drag: none; align-items: center; background: transparent; border: 1px solid transparent; border-radius: 17px; cursor: grab; display: flex; flex-direction: column; min-height: 132px; padding: 13px 9px 10px; position: relative; touch-action: none; translate: 0 0; user-select: none; transition: background .17s ease, border-color .17s ease, transform .17s ease, translate .32s cubic-bezier(.22,1.18,.32,1); will-change: transform, translate; }
 .app-tile:hover { background: var(--tile-hover); border-color: var(--panel-border); transform: translateY(-2px); }
 .app-tile.dragging { cursor: grabbing; opacity: 0; transform: scale(.96); }
 .app-tile.dragging .app-name, .app-tile.dragging .remove-button { visibility: hidden; }
@@ -117,7 +117,6 @@ button:focus-visible, [tabindex]:focus-visible { outline: 3px solid color-mix(in
 .launcher-grid-enter-from, .launcher-grid-leave-to { opacity: 0; transform: scale(.96); }
 .launcher-grid-leave-active { position: absolute; }
 .launcher-grid.pointer-reordering .launcher-grid-leave-active { opacity: 0; transition: none; }
-.drag-placeholder { background: transparent !important; border: 0 !important; box-shadow: none !important; min-height: 132px; opacity: 0; pointer-events: none; visibility: hidden; }
 
 .recent-section { border-top: 1px solid var(--panel-border); margin-top: 18px; padding-top: 18px; }
 .section-heading { align-items: baseline; display: flex; gap: 12px; justify-content: space-between; }

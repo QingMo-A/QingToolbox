@@ -32,14 +32,21 @@ describe('launcher pointer and clear affordance contracts', () => {
     expect(stylesSource).toContain('.launcher-grid-move { transition: transform .32s cubic-bezier(.22,1.18,.32,1); }')
   })
 
+  it('keeps insertion motion on the independent translate property', () => {
+    expect(appSource).toContain(':style="gridEntryShift(index)"')
+    expect(appSource).not.toContain('class="drag-placeholder"')
+    expect(stylesSource).toContain('translate .32s cubic-bezier(.22,1.18,.32,1)')
+    expect(stylesSource).toContain('will-change: transform, translate')
+  })
+
   it('pads the scroll viewport so the first-row hover border is visible', () => {
     expect(stylesSource).toContain('padding: 4px; scrollbar-color:')
   })
 
-  it('keeps real icons unbacked and the drag slot visually transparent', () => {
+  it('keeps real icons unbacked without rendering a placeholder surface', () => {
     expect(stylesSource).toContain('.app-icon { align-items: center; background: transparent; border: 0;')
     expect(stylesSource).toContain('.fallback-icon {')
-    expect(stylesSource).toContain('.drag-placeholder { background: transparent !important; border: 0 !important; box-shadow: none !important;')
-    expect(stylesSource).toContain('pointer-events: none; visibility: hidden;')
+    expect(appSource).not.toContain('class="drag-placeholder"')
+    expect(stylesSource).not.toContain('.drag-placeholder {')
   })
 })

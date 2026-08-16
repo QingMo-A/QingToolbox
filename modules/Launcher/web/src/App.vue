@@ -44,17 +44,26 @@ const recent = computed(() => visibleRecentItems(recentItems(state.recent.length
 const dragPreviewItem = computed(() => dragPreview.value ? state.items.find(item => item.id === dragPreview.value?.itemId) ?? null : null)
 const gridEntries = computed(() => {
   const projection = dragProjection.value
-  if (!projection) return visibleItems.value.map(item => ({ kind: 'item' as const, key: item.id, item }))
-  const items: Array<{ kind: 'item'; key: string; item: Item } | { kind: 'placeholder'; key: string }> = projection.baseRemainingIds
+  if (!projection) return visibleItems.value.map(item => ({ key: item.id, item }))
+  return projection.baseRemainingIds
     .map(id => state.items.find(item => item.id === id))
     .filter((item): item is Item => Boolean(item))
-    .map(item => ({ kind: 'item' as const, key: item.id, item }))
-  if (projection.candidateSlot !== null) {
-    const slot = Math.max(0, Math.min(projection.candidateSlot, items.length))
-    items.splice(slot, 0, { kind: 'placeholder' as const, key: 'drag-placeholder' })
-  }
-  return items
+    .map(item => ({ key: item.id, item }))
 })
+
+function gridEntryShift(index: number) {
+  const projection = dragProjection.value
+  const slot = projection?.candidateSlot
+  const metrics = projection?.metrics
+  if (slot === null || slot === undefined || !metrics || index < slot) return undefined
+  const columns = Math.max(1, metrics.columns)
+  const column = index % columns
+  const strideX = metrics.cellWidth + metrics.gapX
+  const strideY = metrics.cellHeight + metrics.gapY
+  return column < columns - 1
+    ? { translate: `${strideX}px 0px` }
+    : { translate: `${-(columns - 1) * strideX}px ${strideY}px` }
+}
 
 function apply(next: State) {
   state.sortMode = next.sortMode
@@ -338,13 +347,12 @@ onMounted(() => {
         </div>
         <section class="drop-area">
           <TransitionGroup v-if="gridEntries.length" ref="gridRef" name="launcher-grid" tag="div" class="launcher-grid" :class="{ 'pointer-reordering': Boolean(dragProjection) }">
-            <template v-for="entry in gridEntries" :key="entry.key">
-              <article v-if="entry.kind === 'item'" class="app-tile" :class="{ dragging: draggingId === entry.item.id, 'drag-over': pointerOverId === entry.item.id && draggingId !== entry.item.id }" :data-launcher-item-id="entry.item.id" :draggable="false" tabindex="0" @pointerdown="beginPointer(entry.item, $event)" @click="activate(entry.item)" @keydown.enter="launch(entry.item)">
+            <template v-for="(entry, index) in gridEntries" :key="entry.key">
+              <article class="app-tile" :class="{ dragging: draggingId === entry.item.id, 'drag-over': pointerOverId === entry.item.id && draggingId !== entry.item.id }" :style="gridEntryShift(index)" :data-launcher-item-id="entry.item.id" :draggable="false" tabindex="0" @pointerdown="beginPointer(entry.item, $event)" @click="activate(entry.item)" @keydown.enter="launch(entry.item)">
                 <div class="app-icon"><img v-if="iconFor(entry.item)" :src="iconFor(entry.item)" :alt="entry.item.name" /><span v-else class="fallback-icon">{{ entry.item.name.slice(0, 1).toUpperCase() }}</span></div>
                 <div class="app-name" :title="entry.item.name">{{ entry.item.name }}</div>
                 <button v-if="entry.item.source !== 'desktop'" class="remove-button" data-no-drag :aria-label="`${t('actions.remove', 'Remove')} ${entry.item.name}`" @pointerdown.stop.prevent @click.stop.prevent="remove(entry.item)">&#215;</button>
               </article>
-              <div v-else class="drag-placeholder" aria-hidden="true"></div>
             </template>
           </TransitionGroup>
           <div v-else class="empty-drop"><div class="empty-grid">{{ searchQuery ? '?' : state.sortMode === 'desktop' ? '⌂' : '+' }}</div><strong>{{ searchQuery ? t('search.noResults', 'No matching apps') : state.sortMode === 'desktop' ? t('view.desktopEmpty', 'No desktop applications found') : t('view.overlayEmpty', 'Drag an app or shortcut here') }}</strong></div>

@@ -90,13 +90,21 @@ describe('Launcher pointer drag projection', () => {
 
     window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 105, clientY: 50 }))
     await nextTick()
-    expect(wrapper.find('.drag-placeholder').exists()).toBe(true)
-    expect(Array.from(wrapper.find('.launcher-grid').element.children).map(element => element.classList.contains('drag-placeholder') ? 'gap' : element.getAttribute('data-launcher-item-id'))).toEqual(['a', 'gap', 'b', 'd', 'e'])
+    expect(wrapper.find('.drag-placeholder').exists()).toBe(false)
+    expect(wrapper.find('[data-launcher-item-id="b"]').attributes('style')).toContain('translate: 110px 0px')
+
+    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 270, clientY: 50 }))
+    await nextTick()
+    expect(wrapper.find('[data-launcher-item-id="b"]').attributes('style') ?? '').not.toContain('translate:')
+
+    window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 105, clientY: 50 }))
+    await nextTick()
+    expect(wrapper.find('[data-launcher-item-id="b"]').attributes('style')).toContain('translate: 110px 0px')
 
     window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 320, clientY: 160 }))
     await nextTick()
-    expect(wrapper.find('.drag-placeholder').exists()).toBe(true)
-    expect(Array.from(wrapper.find('.launcher-grid').element.children).at(-1)?.classList.contains('drag-placeholder')).toBe(true)
+    expect(wrapper.find('.drag-placeholder').exists()).toBe(false)
+    expect(wrapper.findAll('[data-launcher-item-id]').every(node => !node.attributes('style')?.includes('translate:'))).toBe(true)
 
     window.dispatchEvent(pointerEvent('pointerup', { pointerId: 9, clientX: 320, clientY: 160 }))
     await nextTick()
