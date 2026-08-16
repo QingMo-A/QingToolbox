@@ -68,15 +68,28 @@ internal sealed class EverythingRuntime : IEverythingSearchService
                 EverythingSearchMode.Directory => $"folder:{query}",
                 _ => query,
             };
-            var output = await RunQueryWithRetryAsync([
-                "-instance", _instanceName,
-                "-n", "20",
-                "-timeout", "15000",
-                "-utf8-bom",
-                "-no-header",
-                "-full-path-and-name",
-                constrainedQuery,
-            ], cancellationToken).ConfigureAwait(false);
+            Directory.CreateDirectory(_dataDirectory);
+            var exportPath = Path.Combine(_dataDirectory, $"query-{Guid.NewGuid():N}.txt");
+            string output;
+            try
+            {
+                _ = await RunQueryWithRetryAsync([
+                    "-instance", _instanceName,
+                    "-n", "20",
+                    "-timeout", "15000",
+                    "-utf8-bom",
+                    "-no-header",
+                    "-full-path-and-name",
+                    "-export-txt", exportPath,
+                    constrainedQuery,
+                ], cancellationToken).ConfigureAwait(false);
+                if (!File.Exists(exportPath)) throw new IOException("Everything did not create the query export.");
+                output = await File.ReadAllTextAsync(exportPath, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                try { File.Delete(exportPath); } catch (IOException) { }
+            }
             return output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(line => line.TrimStart('\uFEFF'))
                 .Where(Path.IsPathFullyQualified)

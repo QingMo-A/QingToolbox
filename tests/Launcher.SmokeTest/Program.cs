@@ -20,6 +20,8 @@ try
         Directory.CreateDirectory(indexRoot);
         var indexedFile = Path.Combine(indexRoot, "qing-everything-runtime-smoke.exe");
         await File.WriteAllBytesAsync(indexedFile, [0x4d, 0x5a]);
+        var unicodeFile = Path.Combine(indexRoot, "青启动台-编码验证.txt");
+        await File.WriteAllTextAsync(unicodeFile, "encoding smoke");
         await using var runtime = new EverythingRuntime(
             Path.Combine(root, "modules", "Launcher"),
             Path.Combine(temp, "everything-integration"),
@@ -27,6 +29,9 @@ try
         var runtimeResults = await runtime.SearchAsync(EverythingSearchMode.File, "qing-everything-runtime-smoke.exe");
         Require(runtimeResults.Any(result => result.Path.Equals(indexedFile, StringComparison.OrdinalIgnoreCase)),
             "Built-in Everything IPC integration did not return the controlled file.");
+        var unicodeResults = await runtime.SearchAsync(EverythingSearchMode.File, "青启动台-编码验证.txt");
+        Require(unicodeResults.Any(result => result.Path.Equals(unicodeFile, StringComparison.OrdinalIgnoreCase)),
+            "Built-in Everything IPC integration corrupted a Unicode path.");
         Console.WriteLine("Built-in Everything named-instance IPC smoke passed.");
     }
     var exeA = Path.Combine(temp, "Alpha.exe");
