@@ -50,7 +50,7 @@ RC 总控会对每个原生命令和 PowerShell 子阶段立即检查 PowerShell
 本候选（2026-08-15）的证据分层如下：
 
 - Local Pass：Release solution build、非 Mock Development Web Shell canary、Host smoke、Launcher/QingTransfer smoke、WebUI typecheck/Vitest（432 tests）、installer-only manifest/hash verification。
-- Previous release evidence：`v0.2.7-alpha` 已发布；最终 `0.2.8-alpha` 候选必须记录自己的 exact-HEAD CI 证据，不得复用旧版本结果。
+- Pre-handoff evidence：commit `b6a7cc29a05c4354f6cc75e8d7622fa32456ba82` 的 Preview validation run `31951259828` 已通过，包含 installer roundtrip 与 `v0.2.7-alpha → v0.2.8-alpha` 升级；发布 BAT 仍会对最终 HEAD 重新执行候选验证。
 - Blocked locally：真实 installer roundtrip/upgrade 会写固定 AppId 的当前用户卸载注册，脚本在非 GitHub Actions 环境安全拒绝；未设置 `GITHUB_ACTIONS` 伪造条件。
 - Not Run：真实用户多环境安装、登录/重登录、Repair、卸载、签名/SmartScreen 和代表性硬件/DPI 验收。
 

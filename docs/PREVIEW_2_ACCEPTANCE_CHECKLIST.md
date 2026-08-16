@@ -17,7 +17,7 @@ Complete this metadata for each candidate. Do not reuse evidence from a differen
 | Field | Value |
 |---|---|
 | Candidate commit | Pending final candidate commit |
-| Workflow run ID and URL | Pending exact-HEAD Preview validation |
+| Workflow run ID and URL | `31951259828` / https://github.com/QingMo-A/QingToolbox/actions/runs/31951259828 |
 | Workflow conclusion | Not Run |
 | Test date | 2026-08-15 |
 | Windows version | GitHub Actions `windows-latest` (image revision not recorded) |
@@ -34,18 +34,18 @@ The local and CI evidence above is supplementary release-gate evidence only. Rea
 
 | Check | Status | Evidence / notes |
 |---|---|---|
-| Use the official GitHub `v0.2.7-alpha` installer | Not Run | Pending exact-HEAD CI candidate gate |
+| Use the official GitHub `v0.2.7-alpha` installer | Automated Pass | CI run `31951259828` |
 | Verify its official SHA256 sidecar | Not Run | |
 | Install to the standard user-writable location | Not Run | |
-| Start v0.2.7-alpha | Not Run | Pending exact-HEAD CI candidate gate |
+| Start v0.2.7-alpha | Automated Pass | CI run `31951259828` |
 | Create real settings | Not Run | |
 | Add a test user module | Not Run | |
 | Create module data and cache | Not Run | |
 | Enable login startup | Not Run | |
 | Add an unknown file under the install directory | Not Run | |
-| Run 0.2.8-alpha without uninstalling v0.2.7-alpha | Not Run | Pending exact-HEAD CI in-place upgrade gate |
+| Run 0.2.8-alpha without uninstalling v0.2.7-alpha | Automated Pass | CI run `31951259828`; manual user-machine check remains Not Run |
 | Confirm the same install directory and safe old-process shutdown | Not Run | |
-| Confirm 0.2.8-alpha version and display name | Not Run | Pending exact-HEAD CI upgrade gate |
+| Confirm 0.2.8-alpha version and display name | Automated Pass | CI run `31951259828`; manual check remains Not Run |
 | Confirm settings, module, data, cache, and startup authorization are retained | Not Run | |
 | Confirm the unknown install file is retained | Not Run | |
 | Confirm current-user shortcuts are not duplicated and no public shortcuts appear | Not Run | |
