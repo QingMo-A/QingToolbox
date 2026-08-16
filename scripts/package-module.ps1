@@ -49,6 +49,16 @@ try {
     New-Item -ItemType Directory -Force -Path (Join-Path $staging "i18n"),$output | Out-Null
     foreach ($name in @("module.json", "icon.svg", $assemblyName)) { Copy-Item -LiteralPath (Join-Path $build $name) -Destination (Join-Path $staging $name) }
     foreach ($culture in @("en-US", "zh-CN")) { Copy-Item -LiteralPath (Join-Path $build "i18n\$culture.json") -Destination (Join-Path $staging "i18n\$culture.json") }
+    $thirdPartySource = Join-Path $moduleRoot "third-party"
+    if (Test-Path -LiteralPath $thirdPartySource) {
+        if ((Get-Item -LiteralPath $thirdPartySource).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Third-party asset root cannot be a reparse point." }
+        $thirdPartyDestination = Join-Path $staging "third-party"
+        New-Item -ItemType Directory -Force -Path $thirdPartyDestination | Out-Null
+        Get-ChildItem -LiteralPath $thirdPartySource -Force | ForEach-Object {
+            if ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Third-party assets cannot contain reparse points: $($_.FullName)" }
+            Copy-Item -LiteralPath $_.FullName -Destination $thirdPartyDestination -Recurse
+        }
+    }
     if ($webUiSource) { New-Item -ItemType Directory -Force -Path (Join-Path $staging "ui") | Out-Null; Copy-Item -LiteralPath (Join-Path $webUiSource "index.html") -Destination (Join-Path $staging "ui\index.html"); Copy-Item -LiteralPath (Join-Path $webUiSource "assets") -Destination (Join-Path $staging "ui\assets") -Recurse }
     Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $temporaryPackage
     Add-Type -AssemblyName System.IO.Compression.FileSystem

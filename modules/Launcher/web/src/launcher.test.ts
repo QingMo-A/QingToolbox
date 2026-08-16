@@ -1,9 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { LAUNCHER_MAX_ROWS, alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridInsertionCandidate, gridSlotFromPoint, movePointerGesture, pointerPreview, recentColumnCapacity, recentItems, reorderIds, reorderVisibleIds, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, stabilizeInsertionCandidate, targetPointerGesture, targetPointerInsertion, visibleRecentItems } from './launcher'
+import { LAUNCHER_MAX_ROWS, alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridInsertionCandidate, gridSlotFromPoint, isLatestEverythingResponse, movePointerGesture, parseSearchMode, pointerPreview, recentColumnCapacity, recentItems, reorderIds, reorderVisibleIds, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, stabilizeInsertionCandidate, targetPointerGesture, targetPointerInsertion, visibleRecentItems } from './launcher'
 
 const item = (id: string, name: string, lastLaunchedAt: string | null = null) => ({ id, name, iconKey: null, lastLaunchedAt })
 
 describe('launcher projections', () => {
+  it('keeps normal search separate from Everything modes', () => {
+    expect(parseSearchMode('minecraft')).toEqual({ mode: 'normal', query: 'minecraft' })
+    expect(parseSearchMode('/e minecraft')).toEqual({ mode: 'everything-all', query: 'minecraft' })
+    expect(parseSearchMode('/e:f *.exe')).toEqual({ mode: 'everything-file', query: '*.exe' })
+    expect(parseSearchMode('/e:d minecraft')).toEqual({ mode: 'everything-directory', query: 'minecraft' })
+    expect(parseSearchMode('/e:f minecraft*.exe').query).toBe('minecraft*.exe')
+  })
+  it('rejects stale Everything responses', () => {
+    expect(isLatestEverythingResponse(4, 3, true)).toBe(false)
+    expect(isLatestEverythingResponse(4, 4, false)).toBe(false)
+    expect(isLatestEverythingResponse(4, 4, true)).toBe(true)
+  })
   it('moves a tile before the hovered tile', () => expect(reorderIds(['a', 'b', 'c', 'd'], 'd', 'b')).toEqual(['a', 'd', 'b', 'c']))
   it('moves the first tile to the end without changing the other ids', () =>
     expect(reorderIds(['a', 'b', 'c', 'd'], 'a', 'd')).toEqual(['b', 'c', 'a', 'd']))

@@ -3,6 +3,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Json;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Abstractions.Modules;
@@ -13,6 +14,21 @@ var temp = Path.Combine(Path.GetTempPath(), "qing-launcher-smoke-" + Guid.NewGui
 Directory.CreateDirectory(temp);
 try
 {
+    if (args.Contains("--everything-runtime", StringComparer.Ordinal))
+    {
+        var indexRoot = Path.Combine(temp, "everything-index");
+        Directory.CreateDirectory(indexRoot);
+        var indexedFile = Path.Combine(indexRoot, "qing-everything-runtime-smoke.exe");
+        await File.WriteAllBytesAsync(indexedFile, [0x4d, 0x5a]);
+        await using var runtime = new EverythingRuntime(
+            Path.Combine(root, "modules", "Launcher"),
+            Path.Combine(temp, "everything-integration"),
+            [indexRoot]);
+        var runtimeResults = await runtime.SearchAsync(EverythingSearchMode.File, "qing-everything-runtime-smoke.exe");
+        Require(runtimeResults.Any(result => result.Path.Equals(indexedFile, StringComparison.OrdinalIgnoreCase)),
+            "Built-in Everything IPC integration did not return the controlled file.");
+        Console.WriteLine("Built-in Everything named-instance IPC smoke passed.");
+    }
     var exeA = Path.Combine(temp, "Alpha.exe");
     var exeB = Path.Combine(temp, "Beta.exe");
     File.WriteAllText(exeA, "not executed by smoke");
@@ -113,7 +129,13 @@ try
     var dataDirectory = Path.Combine(temp, "module-data");
     var fakeStarter = new FakeProcessStarter { Result = true };
     var fakeRegistration = new FakeHotkeyRegistration();
-    await using var module = new LauncherModule(fakeStarter, fakeRegistration, new FakeDesktopSource());
+    var everythingDirectory = Path.Combine(temp, "Everything Folder");
+    Directory.CreateDirectory(everythingDirectory);
+    var fakeEverything = new FakeEverythingSearchService
+    {
+        Results = [new(exeA, false), new(everythingDirectory, true)],
+    };
+    await using var module = new LauncherModule(fakeStarter, fakeRegistration, new FakeDesktopSource(), fakeEverything);
     Require(module.HostWindowPresentationMode == ModuleHostWindowPresentationMode.Overlay,
         "Launcher must request Overlay host window presentation.");
     var actions = new List<ModuleHostWindowAction>();
@@ -127,6 +149,23 @@ try
     });
     await module.OnActivateAsync();
     Require(fakeRegistration.Registered.Count == 1, "Default hotkey was not registered on activate.");
+    var everythingSearch = (await module.HandleWebRequestAsync("searchEverything", JsonSerializer.SerializeToElement(new
+    {
+        requestId = 7, mode = "everything-file", query = "*.exe"
+    })))!.Value;
+    Require(fakeEverything.LastMode == EverythingSearchMode.File && fakeEverything.LastQuery == "*.exe",
+        "Everything file query was not preserved or constrained by the backend.");
+    Require(everythingSearch.GetProperty("requestId").GetInt32() == 7 && everythingSearch.GetProperty("results").GetArrayLength() == 2,
+        "Everything results were not returned through the isolated response.");
+    var secureResultId = everythingSearch.GetProperty("results")[0].GetProperty("id").GetString()!;
+    await module.HandleWebRequestAsync("openEverythingResult", JsonSerializer.SerializeToElement(new { resultId = secureResultId }));
+    Require(fakeStarter.Started.Last().Target == exeA, "Everything resultId did not resolve through the backend result map.");
+    try
+    {
+        await module.HandleWebRequestAsync("openEverythingResult", JsonSerializer.SerializeToElement(new { resultId = exeB }));
+        throw new InvalidOperationException("A raw path was accepted as an Everything resultId.");
+    }
+    catch (InvalidOperationException exception) when (exception.Message.Contains("no longer available", StringComparison.OrdinalIgnoreCase)) { }
     await module.HandleWebRequestAsync("setSortMode", JsonSerializer.SerializeToElement(new { mode = "desktop" }));
     var unsupported = Path.Combine(temp, "readme.txt");
     File.WriteAllText(unsupported, "unsupported");
@@ -143,7 +182,7 @@ try
     Require(module.GetStateForTest().SortMode == "desktop", "Duplicate Desktop drop changed the active view.");
     await module.HandleWebRequestAsync("setSortMode", JsonSerializer.SerializeToElement(new { mode = "custom" }));
     await module.HandleWebRequestAsync("launchItem", JsonSerializer.SerializeToElement(new { id = ids[0] }));
-    Require(fakeStarter.Started.Count == 1, "Launch seam was not invoked.");
+    Require(fakeStarter.Started.Count == 2, "Launch seam was not invoked.");
     Require(actions.Contains(ModuleHostWindowAction.Hide), "Successful launch did not request Hide.");
     fakeStarter.Result = false;
     var failedBefore = (await module.HandleWebRequestAsync("getState", null))!.Value.GetProperty("recent").GetArrayLength();
@@ -155,6 +194,22 @@ try
     Require(actions.Contains(ModuleHostWindowAction.Toggle), "Hotkey did not request Toggle.");
     await module.HandleWebRequestAsync("hideWindow", null);
     Require(actions.Count(action => action == ModuleHostWindowAction.Hide) >= 2, "hideWindow did not request Hide.");
+
+    await using (var unavailableModule = new LauncherModule(new FakeProcessStarter { Result = true }, new FakeHotkeyRegistration(), new FakeDesktopSource(), new FakeEverythingSearchService { Unavailable = true }))
+    {
+        await unavailableModule.OnLoadAsync(new ModuleContext
+        {
+            ModuleId = "qing.launcher", ModuleDirectory = Path.Combine(root, "modules", "Launcher"),
+            DataDirectory = Path.Combine(temp, "unavailable"), Localization = new SmokeLocalization(),
+        });
+        var unavailable = (await unavailableModule.HandleWebRequestAsync("searchEverything", JsonSerializer.SerializeToElement(new
+        {
+            requestId = 8, mode = "everything-all", query = "minecraft"
+        })))!.Value;
+        Require(unavailable.GetProperty("status").GetString() == "Error", "Unavailable Everything runtime did not return a contained error state.");
+        Require((await unavailableModule.HandleWebRequestAsync("getState", null))!.Value.GetProperty("items").GetArrayLength() == 0,
+            "Unavailable Everything runtime broke ordinary Launcher state.");
+    }
 
     var replacementRegistration = new FakeHotkeyRegistration();
     var replacement = new LauncherHotkeyService(replacementRegistration);
@@ -188,9 +243,25 @@ static void VerifyPackage(string packagePath)
 {
     using var archive = ZipFile.OpenRead(packagePath);
     var entries = archive.Entries.Select(entry => entry.FullName.Replace('\\', '/')).ToHashSet(StringComparer.Ordinal);
-    foreach (var required in new[] { "module.json", "QingToolbox.Modules.Launcher.dll", "icon.svg", "i18n/en-US.json", "i18n/zh-CN.json", "ui/index.html" })
+    foreach (var required in new[] { "module.json", "QingToolbox.Modules.Launcher.dll", "icon.svg", "i18n/en-US.json", "i18n/zh-CN.json", "ui/index.html",
+        "third-party/Everything/Everything.exe", "third-party/Everything/es.exe", "third-party/Everything/Everything64.dll",
+        "third-party/Everything/LICENSE.txt", "third-party/Everything/NOTICE.md" })
         Require(entries.Contains(required), $"Package is missing {required}.");
     Require(entries.Any(entry => entry.StartsWith("ui/assets/", StringComparison.Ordinal)), "Package has no UI assets.");
+    foreach (var expected in new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["third-party/Everything/Everything.exe"] = "F191F756996A14A11E5445FA7103D302EFD510CF2FBF920E6C0C8ED51D512E36",
+        ["third-party/Everything/es.exe"] = "3BE7185707E8023CD9295DBCB7A3FA4092A3D8F52B7FA92A0B84243AB40D12F3",
+        ["third-party/Everything/Everything64.dll"] = "81B5BE18126ACD2C2B913F8F4A821E476B18393CDD3DEBD03387C50AFD8DB88F",
+        ["third-party/Everything/LICENSE.txt"] = "C13D19ADCBFD5D07E9512DE9DF99956A3423399ED1FADC5FD33186697AD8DF2F",
+    })
+    {
+        var entry = archive.Entries.FirstOrDefault(candidate =>
+            candidate.FullName.Replace('\\', '/').Equals(expected.Key, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException($"Package is missing {expected.Key}.");
+        using var stream = entry.Open();
+        Require(Convert.ToHexString(SHA256.HashData(stream)) == expected.Value, $"Package has an unexpected {expected.Key} hash.");
+    }
     Require(!entries.Any(entry => entry.Contains("web/src", StringComparison.OrdinalIgnoreCase) || entry.Contains("node_modules", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) || entry.EndsWith("package.json", StringComparison.OrdinalIgnoreCase) || entry.EndsWith("package-lock.json", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".map", StringComparison.OrdinalIgnoreCase)), "Package contains forbidden development content.");
 }
 
@@ -253,6 +324,22 @@ sealed class FakeHotkeyRegistration : ILauncherHotkeyRegistration
     public bool FailNext { get; set; }
     public bool Register(int id, LauncherHotkeySpec hotkey) { if (FailNext) { FailNext = false; return false; } Registered[id] = hotkey; return true; }
     public bool Unregister(int id) => Registered.Remove(id);
+}
+
+sealed class FakeEverythingSearchService : IEverythingSearchService
+{
+    public IReadOnlyList<EverythingPathResult> Results { get; init; } = [];
+    public bool Unavailable { get; init; }
+    public EverythingSearchMode? LastMode { get; private set; }
+    public string? LastQuery { get; private set; }
+    public Task<IReadOnlyList<EverythingPathResult>> SearchAsync(EverythingSearchMode mode, string query, CancellationToken cancellationToken = default)
+    {
+        LastMode = mode; LastQuery = query;
+        return Unavailable
+            ? Task.FromException<IReadOnlyList<EverythingPathResult>>(new InvalidOperationException("runtime unavailable"))
+            : Task.FromResult(Results);
+    }
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
 sealed class SmokeLocalization : ILocalizationService

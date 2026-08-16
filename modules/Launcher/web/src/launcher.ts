@@ -1,4 +1,4 @@
-import type { Hotkey, Item } from './types'
+import type { Hotkey, Item, ParsedSearch } from './types'
 
 export const POINTER_DRAG_THRESHOLD = 8
 export const LAUNCHER_MAX_ROWS = 3
@@ -8,6 +8,21 @@ export const RECENT_TILE_GAP = 8
 
 export function normalizeSearchQuery(query: string) {
   return query.trim().normalize('NFKC').toLocaleLowerCase()
+}
+
+export function parseSearchMode(value: string): ParsedSearch {
+  const match = /^\/e(?::([fd]))?(?:\s([\s\S]*))?$/i.exec(value)
+  if (!match) return { mode: 'normal', query: value }
+  return {
+    mode: match[1]?.toLowerCase() === 'f' ? 'everything-file'
+      : match[1]?.toLowerCase() === 'd' ? 'everything-directory'
+        : 'everything-all',
+    query: match[2] ?? '',
+  }
+}
+
+export function isLatestEverythingResponse(expectedRequestId: number, responseRequestId: number, modeStillActive: boolean) {
+  return modeStillActive && expectedRequestId === responseRequestId
 }
 
 export function searchLauncherItems(items: readonly Item[], query: string): Item[] {

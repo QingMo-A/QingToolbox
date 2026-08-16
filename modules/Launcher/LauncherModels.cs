@@ -61,6 +61,19 @@ public sealed record LauncherStateView(
     string HotkeyStatus,
     bool Active);
 
+public sealed record EverythingResultView(
+    string Id,
+    string Name,
+    string ParentPath,
+    string Type);
+
+public sealed record EverythingSearchView(
+    int RequestId,
+    string Status,
+    string? Error,
+    bool Stale,
+    IReadOnlyList<EverythingResultView> Results);
+
 internal sealed class LauncherStoreDocument
 {
     public string? SortMode { get; set; }

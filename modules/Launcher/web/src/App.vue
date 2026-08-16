@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { invoke, onDropResult, onPresentationChanged, onStateChanged, waitForPresentation } from './bridge'
-import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridInsertionCandidate, movePointerGesture, recentColumnCapacity, recentItems, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, stabilizeInsertionCandidate, visibleRecentItems } from './launcher'
+import { alphabeticalItems, beginPointerGesture, canStartPointerGesture, cancelPointerGesture, completePointerGesture, gridInsertionCandidate, isLatestEverythingResponse, movePointerGesture, parseSearchMode, recentColumnCapacity, recentItems, reorderVisibleToIndex, searchLauncherItems, shortcutFromKeyboard, stabilizeInsertionCandidate, visibleRecentItems } from './launcher'
 import type { FrozenGridMetrics, PointerGesture } from './launcher'
-import type { DropResult, Item, Presentation, State } from './types'
+import type { DropResult, EverythingResult, EverythingSearchResponse, Item, Presentation, State } from './types'
 
 const fallback: State = {
   sortMode: 'custom', items: [], recent: [],
@@ -36,14 +36,22 @@ let pointerSessionCleanup: (() => void) | undefined
 let pointerGrabOffset = { x: 32, y: 32 }
 const notice = ref('')
 const searchQuery = ref('')
+const parsedSearch = computed(() => parseSearchMode(searchQuery.value))
+const everythingMode = computed(() => parsedSearch.value.mode !== 'normal')
+const everythingStatus = ref<'Idle' | 'Loading' | 'Ready' | 'Error'>('Idle')
+const everythingError = ref('')
+const everythingResults = ref<EverythingResult[]>([])
+const everythingSelection = ref(0)
+let everythingRequestId = 0
+let everythingDebounceTimer: number | undefined
 const recentContainer = ref<HTMLElement | null>(null)
 const recentCapacity = ref(1)
 let recentResizeObserver: ResizeObserver | undefined
 const locale = computed(() => presentation.languageCode === 'zh-CN' ? 'zh-CN' : 'en-US')
 const t = (key: string, fallbackText = key) => resources.value[key] ?? fallbackText
 const sortedItems = computed(() => state.sortMode === 'alphabetical' ? alphabeticalItems(state.items) : state.items)
-const visibleItems = computed(() => searchLauncherItems(sortedItems.value, searchQuery.value))
-const recent = computed(() => visibleRecentItems(recentItems(state.recent.length ? state.recent : state.items), recentCapacity.value, searchQuery.value))
+const visibleItems = computed(() => everythingMode.value ? [] : searchLauncherItems(sortedItems.value, parsedSearch.value.query))
+const recent = computed(() => everythingMode.value ? [] : visibleRecentItems(recentItems(state.recent.length ? state.recent : state.items), recentCapacity.value, parsedSearch.value.query))
 const dragPreviewItem = computed(() => dragPreview.value ? state.items.find(item => item.id === dragPreview.value?.itemId) ?? null : null)
 const gridEntries = computed(() => {
   const projection = dragProjection.value
@@ -119,6 +127,64 @@ function iconFor(item: Item) { return icons[item.id] ?? '' }
 function hideLauncher() { void run('hideWindow') }
 function switchSort(mode: 'custom' | 'alphabetical' | 'desktop') { if (state.sortMode !== mode) void run('setSortMode', { mode }) }
 function clearSearch() { searchQuery.value = '' }
+function everythingBadge() {
+  return parsedSearch.value.mode === 'everything-file' ? t('everything.file', 'Everything · File')
+    : parsedSearch.value.mode === 'everything-directory' ? t('everything.directory', 'Everything · Directory')
+      : t('everything.all', 'Everything')
+}
+
+async function executeEverythingSearch(requestId: number, mode: 'everything-all' | 'everything-file' | 'everything-directory', query: string) {
+  everythingStatus.value = 'Loading'
+  everythingError.value = ''
+  try {
+    const response = await invoke<EverythingSearchResponse>('searchEverything', { requestId, mode, query })
+    if (!response || !isLatestEverythingResponse(requestId, response.requestId, parseSearchMode(searchQuery.value).mode === mode)) return
+    if (response.stale) return
+    everythingResults.value = response.results
+    everythingSelection.value = Math.min(everythingSelection.value, Math.max(0, response.results.length - 1))
+    everythingStatus.value = response.status
+    everythingError.value = response.error ?? ''
+  } catch {
+    if (requestId !== everythingRequestId || !everythingMode.value) return
+    everythingResults.value = []
+    everythingStatus.value = 'Error'
+    everythingError.value = t('everything.unavailable', 'Everything search is unavailable.')
+  }
+}
+
+function scheduleEverythingSearch() {
+  if (everythingDebounceTimer !== undefined) window.clearTimeout(everythingDebounceTimer)
+  const parsed = parsedSearch.value
+  const mode = parsed.mode
+  const requestId = ++everythingRequestId
+  if (mode === 'normal') {
+    everythingStatus.value = 'Idle'; everythingError.value = ''; everythingResults.value = []; everythingSelection.value = 0
+    return
+  }
+  everythingDebounceTimer = window.setTimeout(() => {
+    everythingDebounceTimer = undefined
+    void executeEverythingSearch(requestId, mode, parsed.query)
+  }, 100)
+}
+
+async function openEverythingResult(result: EverythingResult) {
+  try { await invoke('openEverythingResult', { resultId: result.id }) }
+  catch { everythingError.value = t('everything.openFailed', 'The selected result could not be opened.'); everythingStatus.value = 'Error' }
+}
+
+function handleSearchKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    event.preventDefault(); event.stopPropagation()
+    if (everythingMode.value && parsedSearch.value.query) clearSearch()
+    else if (!everythingMode.value && searchQuery.value) clearSearch()
+    else hideLauncher()
+    return
+  }
+  if (!everythingMode.value || !everythingResults.value.length) return
+  if (event.key === 'ArrowDown') { event.preventDefault(); everythingSelection.value = Math.min(everythingResults.value.length - 1, everythingSelection.value + 1) }
+  else if (event.key === 'ArrowUp') { event.preventDefault(); everythingSelection.value = Math.max(0, everythingSelection.value - 1) }
+  else if (event.key === 'Enter') { event.preventDefault(); void openEverythingResult(everythingResults.value[everythingSelection.value]) }
+}
 function measureRecentCapacity() {
   recentCapacity.value = recentColumnCapacity(recentContainer.value?.clientWidth ?? 0)
 }
@@ -352,12 +418,15 @@ onMounted(() => {
   recentResizeObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measureRecentCapacity)
   if (recentContainer.value) recentResizeObserver?.observe(recentContainer.value)
   measureRecentCapacity()
+  const stopSearchWatch = watch(searchQuery, scheduleEverythingSearch, { immediate: true })
   void initialLoad()
 onUnmounted(() => {
     offState(); offDrop(); offPresentation(); window.removeEventListener('keydown', onKeyDown, true); window.removeEventListener('keyup', onKeyUp, true)
     if (commitStartFrame !== undefined) window.cancelAnimationFrame(commitStartFrame)
     if (commitReleaseFrame !== undefined) window.cancelAnimationFrame(commitReleaseFrame)
     if (suppressClickTimer !== undefined) window.clearTimeout(suppressClickTimer)
+    if (everythingDebounceTimer !== undefined) window.clearTimeout(everythingDebounceTimer)
+    stopSearchWatch()
     stopPointerSession()
     pointerCaptureTarget = null
     recentResizeObserver?.disconnect()
@@ -382,9 +451,26 @@ onUnmounted(() => {
         </header>
         <div class="search-row">
           <span class="search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4.2 4.2" /></svg></span>
-          <input v-model="searchQuery" class="search-input" type="search" :placeholder="t('search.placeholder', 'Search apps')" :aria-label="t('search.placeholder', 'Search apps')" @keydown.escape.stop.prevent="clearSearch" />
+          <span v-if="everythingMode" class="everything-badge">{{ everythingBadge() }}</span>
+          <input v-model="searchQuery" class="search-input" type="search" :placeholder="t('search.placeholder', 'Search apps or use /e')" :aria-label="t('search.placeholder', 'Search apps or use /e')" @keydown="handleSearchKeydown" />
           <button v-if="searchQuery" class="search-clear" type="button" :aria-label="t('search.clear', 'Clear search')" @click="clearSearch">&#215;</button>
         </div>
+        <section v-if="everythingMode" class="everything-area" aria-live="polite">
+          <div v-if="everythingStatus === 'Loading'" class="everything-state"><span class="everything-spinner" />{{ t('everything.searching', 'Searching Everything…') }}</div>
+          <div v-else-if="everythingStatus === 'Error'" class="everything-state error-state">{{ everythingError || t('everything.unavailable', 'Everything search is unavailable.') }}</div>
+          <div v-else-if="everythingResults.length" class="everything-results" role="listbox" :aria-label="everythingBadge()">
+            <button v-for="(result, index) in everythingResults" :key="result.id" class="everything-result" :class="{ selected: index === everythingSelection }" role="option" :aria-selected="index === everythingSelection" @mouseenter="everythingSelection = index" @click="openEverythingResult(result)">
+              <span class="everything-result-icon" :class="result.type" aria-hidden="true">
+                <svg v-if="result.type === 'directory'" viewBox="0 0 24 24"><path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" /></svg>
+                <svg v-else viewBox="0 0 24 24"><path d="M6 3.5h8l4 4V20H6z" /><path d="M14 3.5V8h4" /></svg>
+              </span>
+              <span class="everything-result-copy"><strong>{{ result.name }}</strong><small>{{ result.parentPath }}</small></span>
+              <span class="everything-result-type">{{ result.type === 'directory' ? t('everything.typeDirectory', 'Folder') : t('everything.typeFile', 'File') }}</span>
+            </button>
+          </div>
+          <div v-else class="everything-state">{{ t('everything.noResults', 'No Everything results.') }}</div>
+        </section>
+        <template v-else>
         <section class="drop-area">
           <TransitionGroup v-if="gridEntries.length" ref="gridRef" name="launcher-grid" tag="div" class="launcher-grid" :class="{ 'pointer-reordering': Boolean(dragProjection), 'committing-reorder': committingReorder }">
             <template v-for="(entry, index) in gridEntries" :key="entry.key">
@@ -402,6 +488,7 @@ onUnmounted(() => {
           <div v-if="recent.length" class="recent-row"><button v-for="item in recent" :key="item.id" class="recent-tile" @click="launch(item)"><span class="recent-icon"><img v-if="iconFor(item)" :src="iconFor(item)" :alt="item.name" /><span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span></span><span class="recent-name">{{ item.name }}</span></button></div>
           <p v-else class="muted">{{ searchQuery ? t('search.noResults', 'No matching apps') : t('view.noRecent', 'Nothing launched yet.') }}</p>
         </section>
+        </template>
         <div v-if="dragPreview && dragPreviewItem" class="drag-preview" :style="{ left: `${dragPreview.x - dragPreview.offsetX}px`, top: `${dragPreview.y - dragPreview.offsetY}px` }" aria-hidden="true">
           <img v-if="iconFor(dragPreviewItem)" :src="iconFor(dragPreviewItem)" alt="" />
           <span v-else class="fallback-icon">{{ dragPreviewItem.name.slice(0, 1).toUpperCase() }}</span>

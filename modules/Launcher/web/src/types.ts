@@ -10,3 +10,7 @@ export type State = {
   active: boolean
 }
 export type DropResult = { added: string[]; skipped: string[] }
+export type SearchMode = 'normal' | 'everything-all' | 'everything-file' | 'everything-directory'
+export type ParsedSearch = { mode: SearchMode; query: string }
+export type EverythingResult = { id: string; name: string; parentPath: string; type: 'file' | 'directory' }
+export type EverythingSearchResponse = { requestId: number; status: 'Loading' | 'Ready' | 'Error'; error: string | null; stale: boolean; results: EverythingResult[] }

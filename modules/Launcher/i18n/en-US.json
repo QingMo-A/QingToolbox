@@ -38,5 +38,14 @@
   "settings.hotkeyHint": "Toggle the Launcher window from anywhere.",
   "settings.hotkeyHelp": "Ctrl, Alt, Shift, or Meta plus one key.",
   "drop.added": "Added",
-  "drop.skipped": "Skipped"
+  "drop.skipped": "Skipped",
+  "everything.all": "Everything",
+  "everything.file": "Everything · File",
+  "everything.directory": "Everything · Directory",
+  "everything.searching": "Searching Everything…",
+  "everything.noResults": "No Everything results.",
+  "everything.unavailable": "Everything search is unavailable.",
+  "everything.openFailed": "The selected result could not be opened.",
+  "everything.typeFile": "File",
+  "everything.typeDirectory": "Folder"
 }

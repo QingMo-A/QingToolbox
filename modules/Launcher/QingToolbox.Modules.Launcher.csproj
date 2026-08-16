@@ -21,6 +21,7 @@
     <None Update="module.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="icon.svg" CopyToOutputDirectory="PreserveNewest" />
     <None Include="i18n\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="third-party\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

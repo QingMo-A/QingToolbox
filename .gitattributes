@@ -1,0 +1,3 @@
+modules/Launcher/third-party/Everything/*.dll binary
+modules/Launcher/third-party/Everything/*.exe binary
+modules/Launcher/third-party/Everything/LICENSE.txt -whitespace

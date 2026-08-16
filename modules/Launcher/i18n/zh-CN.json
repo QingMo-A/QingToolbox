@@ -38,5 +38,14 @@
   "settings.hotkeyHint": "从任意位置切换启动台窗口。",
   "settings.hotkeyHelp": "使用 Ctrl、Alt、Shift 或 Meta 加一个按键。",
   "drop.added": "已添加",
-  "drop.skipped": "已跳过"
+  "drop.skipped": "已跳过",
+  "everything.all": "Everything",
+  "everything.file": "Everything · 文件",
+  "everything.directory": "Everything · 文件夹",
+  "everything.searching": "正在搜索 Everything…",
+  "everything.noResults": "没有 Everything 搜索结果。",
+  "everything.unavailable": "Everything 搜索暂不可用。",
+  "everything.openFailed": "无法打开所选结果。",
+  "everything.typeFile": "文件",
+  "everything.typeDirectory": "文件夹"
 }

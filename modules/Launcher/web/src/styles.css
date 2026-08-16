@@ -86,11 +86,27 @@ button:focus-visible, [tabindex]:focus-visible { outline: 3px solid color-mix(in
 .search-row { align-items: center; background: color-mix(in srgb, var(--tile) 85%, transparent); border: 1px solid var(--panel-border); border-radius: 13px; display: flex; gap: 8px; margin-top: 19px; min-height: 42px; padding: 0 10px; }
 .search-icon { align-items: center; color: var(--muted); display: inline-flex; flex: 0 0 18px; height: 18px; justify-content: center; width: 18px; }
 .search-icon svg { display: block; fill: none; height: 18px; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; width: 18px; }
+.everything-badge { background: color-mix(in srgb, var(--accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent); border-radius: 999px; color: var(--accent-strong); flex: 0 0 auto; font-size: 11px; font-weight: 700; padding: 3px 8px; }
 .search-input { background: transparent; border: 0; color: var(--text); flex: 1; font: inherit; min-width: 0; outline: 0; padding: 9px 0; }
 .search-input::placeholder { color: var(--muted); }
 .search-input::-webkit-search-cancel-button, .search-input::-webkit-search-decoration { -webkit-appearance: none; appearance: none; display: none; }
 .search-clear { background: transparent; border-radius: 7px; color: var(--muted); font-size: 18px; height: 26px; line-height: 1; width: 26px; }
 .search-clear:hover, .search-clear:focus-visible { background: var(--tile-hover); color: var(--text); }
+
+.everything-area { display: flex; flex: 1; min-height: 0; padding-top: 18px; }
+.everything-results { display: flex; flex: 1; flex-direction: column; gap: 5px; max-height: 440px; overflow-y: auto; overscroll-behavior: contain; padding: 2px; scrollbar-color: color-mix(in srgb, var(--accent) 55%, transparent) transparent; scrollbar-width: thin; }
+.everything-result { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 12px; display: grid; gap: 12px; grid-template-columns: 38px minmax(0, 1fr) auto; padding: 8px 10px; text-align: left; width: 100%; }
+.everything-result:hover, .everything-result.selected { background: var(--tile-hover); border-color: var(--panel-border); }
+.everything-result-icon { align-items: center; background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 9px; color: var(--accent); display: inline-flex; height: 38px; justify-content: center; width: 38px; }
+.everything-result-icon svg { fill: none; height: 22px; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; width: 22px; }
+.everything-result-copy { display: flex; flex-direction: column; min-width: 0; }
+.everything-result-copy strong, .everything-result-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.everything-result-copy strong { font-size: 13px; }
+.everything-result-copy small, .everything-result-type { color: var(--muted); font-size: 11px; }
+.everything-result-type { border: 1px solid var(--panel-border); border-radius: 999px; padding: 3px 8px; }
+.everything-state { align-items: center; color: var(--muted); display: flex; flex: 1; gap: 10px; justify-content: center; min-height: 260px; text-align: center; }
+.error-state { color: #c34550; }
+.everything-spinner { animation: everything-spin .8s linear infinite; border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent); border-radius: 50%; border-top-color: var(--accent); height: 18px; width: 18px; }
 
 .drop-area { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; padding-top: 18px; }
 .launcher-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
@@ -145,5 +161,6 @@ kbd { background: var(--tile); border: 1px solid var(--panel-border); border-rad
 .notice button { background: transparent; color: var(--muted); font-size: 17px; }
 
 @keyframes panel-in { from { opacity: 0; transform: scale(.98) translateY(4px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes everything-spin { to { transform: rotate(360deg); } }
 @media (max-width: 700px) { .panel-header { align-items: flex-start; flex-direction: column; } .top-actions { align-self: stretch; justify-content: space-between; } .launcher-panel { min-height: 0; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; scroll-behavior: auto !important; transition: none !important; } .launcher-grid-move, .drag-preview { transition-duration: .01ms !important; } }

@@ -19,6 +19,10 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
     private readonly ILauncherProcessStarter _processStarter;
     private readonly ILauncherDesktopSource _desktopSource;
     private readonly LauncherHotkeyService _hotkey;
+    private IEverythingSearchService? _everything;
+    private readonly bool _injectedEverything;
+    private readonly Dictionary<string, EverythingPathResult> _everythingResults = new(StringComparer.Ordinal);
+    private long _everythingSearchGeneration;
     private LauncherStore? _store;
     private ModuleContext? _context;
     private string? _iconsDirectory;
@@ -28,7 +32,7 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
     public LauncherModule()
         : this(null, null, null) { }
 
-    internal LauncherModule(ILauncherProcessStarter? processStarter, ILauncherHotkeyRegistration? hotkeyRegistration, ILauncherDesktopSource? desktopSource = null)
+    internal LauncherModule(ILauncherProcessStarter? processStarter, ILauncherHotkeyRegistration? hotkeyRegistration, ILauncherDesktopSource? desktopSource = null, IEverythingSearchService? everything = null)
     {
         _processStarter = processStarter ?? new WindowsLauncherProcessStarter();
         _desktopSource = desktopSource ?? new WindowsLauncherDesktopSource();
@@ -36,6 +40,8 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
             ? new LauncherHotkeyService()
             : new LauncherHotkeyService(hotkeyRegistration);
         _hotkey.Triggered += OnHotkeyTriggered;
+        _everything = everything;
+        _injectedEverything = everything is not null;
     }
 
     public string Id => "qing.launcher";
@@ -52,6 +58,7 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
         _context = context;
         _store = new LauncherStore(context.DataDirectory);
         _iconsDirectory = Path.Combine(context.DataDirectory, "icons");
+        _everything ??= new EverythingRuntime(context.ModuleDirectory, context.DataDirectory);
         RefreshDesktopItems();
         MigrateIconCache();
         return Task.CompletedTask;
@@ -107,6 +114,10 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
                 return GetIcon(RequiredString(payload, "id"));
             case "setHotkey":
                 return SetHotkey(payload);
+            case "searchEverything":
+                return await SearchEverythingAsync(payload, cancellationToken).ConfigureAwait(false);
+            case "openEverythingResult":
+                return OpenEverythingResult(RequiredString(payload, "resultId"));
             case "hideWindow":
                 RequestWindowAction(ModuleHostWindowAction.Hide);
                 return Snapshot();
@@ -153,18 +164,28 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
         _store = null;
         _iconsDirectory = null;
         _context = null;
-        await Task.CompletedTask;
+        lock (_gate) _everythingResults.Clear();
+        if (!_injectedEverything && _everything is not null)
+        {
+            await _everything.DisposeAsync().ConfigureAwait(false);
+            _everything = null;
+        }
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        if (_disposed) return ValueTask.CompletedTask;
+        if (_disposed) return;
         _disposed = true;
         _hotkey.Triggered -= OnHotkeyTriggered;
         _hotkey.Dispose();
         _store = null;
         _context = null;
-        return ValueTask.CompletedTask;
+        lock (_gate) _everythingResults.Clear();
+        if (_everything is not null)
+        {
+            await _everything.DisposeAsync().ConfigureAwait(false);
+            _everything = null;
+        }
     }
 
     internal LauncherStateView GetStateForTest() => RequireStore().Snapshot(_hotkey.Status, IsActive());
@@ -252,6 +273,66 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
         }
         catch (IOException) { return JsonSerializer.SerializeToElement(new { dataUrl = (string?)null }); }
         catch (UnauthorizedAccessException) { return JsonSerializer.SerializeToElement(new { dataUrl = (string?)null }); }
+    }
+
+    private async Task<JsonElement?> SearchEverythingAsync(JsonElement? payload, CancellationToken cancellationToken)
+    {
+        var modeText = RequiredString(payload, "mode");
+        var mode = modeText switch
+        {
+            "everything-all" => EverythingSearchMode.All,
+            "everything-file" => EverythingSearchMode.File,
+            "everything-directory" => EverythingSearchMode.Directory,
+            _ => throw new ArgumentException("Invalid Everything search mode."),
+        };
+        var query = OptionalString(payload, "query", string.Empty);
+        var requestId = OptionalInt(payload, "requestId", 0);
+        var generation = Interlocked.Increment(ref _everythingSearchGeneration);
+        try
+        {
+            var paths = await (_everything ?? throw new InvalidOperationException("The built-in Everything runtime is unavailable."))
+                .SearchAsync(mode, query, cancellationToken).ConfigureAwait(false);
+            if (generation != Volatile.Read(ref _everythingSearchGeneration))
+                return JsonSerializer.SerializeToElement(new EverythingSearchView(requestId, "Ready", null, true, []), JsonOptions);
+            var views = new List<EverythingResultView>();
+            lock (_gate)
+            {
+                _everythingResults.Clear();
+                foreach (var result in paths.Take(20))
+                {
+                    var id = Guid.NewGuid().ToString("N");
+                    _everythingResults[id] = result;
+                    views.Add(new(id, Path.GetFileName(result.Path.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } name ? name : result.Path,
+                        Path.GetDirectoryName(result.Path) ?? string.Empty, result.IsDirectory ? "directory" : "file"));
+                }
+            }
+            return JsonSerializer.SerializeToElement(new EverythingSearchView(requestId, "Ready", null, false, views), JsonOptions);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            if (generation == Volatile.Read(ref _everythingSearchGeneration)) lock (_gate) _everythingResults.Clear();
+            return JsonSerializer.SerializeToElement(new EverythingSearchView(requestId, "Error",
+                exception.Message.Contains("runtime", StringComparison.OrdinalIgnoreCase)
+                    ? "The built-in Everything runtime is unavailable."
+                    : "Everything search is unavailable.", false, []), JsonOptions);
+        }
+    }
+
+    private JsonElement OpenEverythingResult(string resultId)
+    {
+        EverythingPathResult result;
+        lock (_gate)
+        {
+            if (!_everythingResults.TryGetValue(resultId, out result!))
+                throw new InvalidOperationException("The Everything result is no longer available.");
+        }
+        if (result.IsDirectory ? !Directory.Exists(result.Path) : !File.Exists(result.Path))
+            throw new InvalidOperationException("The Everything result is no longer available.");
+        var item = new LauncherItem(resultId, Path.GetFileName(result.Path), result.Path, string.Empty,
+            Path.GetDirectoryName(result.Path) ?? string.Empty, null, null, result.Path, result.Path);
+        if (!_processStarter.Start(item)) throw new InvalidOperationException("The Everything result could not be opened.");
+        RequestWindowAction(ModuleHostWindowAction.Hide);
+        return Snapshot();
     }
 
     private void OnHotkeyTriggered(object? sender, EventArgs e)

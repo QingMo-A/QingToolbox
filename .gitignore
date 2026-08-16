@@ -2,6 +2,8 @@ bin/
 obj/
 *.dll
 *.exe
+!modules/Launcher/third-party/Everything/*.dll
+!modules/Launcher/third-party/Everything/*.exe
 *.pdb
 artifacts/
 *.qmod
