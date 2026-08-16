@@ -2,11 +2,12 @@
 
 ## Unreleased
 
-### 0.2.7-alpha candidate (not published)
+### 0.2.8-alpha candidate (not published)
 
-- Carries the Web module host boundary forward and fixes in-place upgrades so stale hashed WebUI assets are removed before the verified host payload is copied.
+- Carries the Web module host boundary forward and prepares the next host-only Preview upgrade from published `v0.2.7-alpha`.
+- Adds the host interaction hooks required by Web modules for overlay presentation and controlled external file drops.
 - The host installer remains installer-only and does not bundle concrete modules.
-- Candidate commit, installer size/SHA256, and exact-HEAD Preview validation evidence remain to be recorded after the final `0.2.7-alpha` candidate gate.
+- Candidate commit, installer size/SHA256, and exact-HEAD Preview validation evidence remain to be recorded after the final `0.2.8-alpha` candidate gate.
 - Real-user installation, upgrade, Repair, uninstall, signature/SmartScreen, and representative-environment acceptance remain unrecorded or CI-only until the acceptance checklist is completed.
 
 ## 0.2.5-alpha - 2026-08-11

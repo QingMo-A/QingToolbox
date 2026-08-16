@@ -1,8 +1,8 @@
 # Preview Release Candidate Process
 
-本文说明 QingToolbox `0.2.7-alpha` 的安装器唯一 Release Candidate 构建与人工发布交接流程。
+本文说明 QingToolbox `0.2.8-alpha` 的安装器唯一 Release Candidate 构建与人工发布交接流程。
 
-0.2.7-alpha RC 必须使用经过官方 SHA256 sidecar 验证的 `v0.2.5-alpha` 安装器，
+0.2.8-alpha RC 必须使用经过官方 SHA256 sidecar 验证的 `v0.2.7-alpha` 安装器，
 完成原地覆盖、同版本修复、降级拒绝、用户状态保留和单一卸载身份验证。
 该流程只验证候选产物，不创建 GitHub Release、tag，也不上传正式发布资产。
 
@@ -50,7 +50,7 @@ RC 总控会对每个原生命令和 PowerShell 子阶段立即检查 PowerShell
 本候选（2026-08-15）的证据分层如下：
 
 - Local Pass：Release solution build、非 Mock Development Web Shell canary、Host smoke、Launcher/QingTransfer smoke、WebUI typecheck/Vitest（432 tests）、installer-only manifest/hash verification。
-- Previous candidate evidence：精确 HEAD `1802a9979c71d035baf8aa8f6b5893644022d5ac` 的 Preview validation run `31888730101` 已通过；最终 `0.2.7-alpha` 候选必须重新记录 exact-HEAD CI 证据，不得复用该结果。
+- Previous release evidence：`v0.2.7-alpha` 已发布；最终 `0.2.8-alpha` 候选必须记录自己的 exact-HEAD CI 证据，不得复用旧版本结果。
 - Blocked locally：真实 installer roundtrip/upgrade 会写固定 AppId 的当前用户卸载注册，脚本在非 GitHub Actions 环境安全拒绝；未设置 `GITHUB_ACTIONS` 伪造条件。
 - Not Run：真实用户多环境安装、登录/重登录、Repair、卸载、签名/SmartScreen 和代表性硬件/DPI 验收。
 
@@ -79,16 +79,16 @@ RC 总控会对每个原生命令和 PowerShell 子阶段立即检查 PowerShell
 RC 脚本和 CI 都不会替发布者创建 Release/tag，不会推送代码，不会提交
 `artifacts/`，也不会更改版本或签名状态。
 
-`0.2.7-alpha` 是当前未发布候选，不是可下载的官方升级来源。真实
-`v0.2.5-alpha → 0.2.7-alpha` 升级测试会启动 Production 模式的旧宿主。Windows Known Folder 不能通过修改
+`0.2.8-alpha` 是当前未发布候选，不是可下载的官方升级来源。真实
+`v0.2.7-alpha → 0.2.8-alpha` 升级测试会启动 Production 模式的旧宿主。Windows Known Folder 不能通过修改
 `APPDATA`/`LOCALAPPDATA` 环境变量安全重定向，因此该自动化只允许在一次性 GitHub Actions
 Windows 账户中运行。普通本机 RC 应将这一阶段报告为 **Blocked**，不得强制关闭用户 Shell 或
 以真实用户配置换取测试通过。
 
 安装—卸载 Roundtrip 也会写入产品固定 AppId 对应的当前用户卸载注册。为避免覆盖开发者机器上
 真实安装的卸载信息，该脚本同样只允许在一次性 GitHub Actions Windows 账户中运行；本地调用会在
-启动安装器之前安全失败。自定义目录的 v0.2.5-alpha to 0.2.7-alpha 自动发现、运行中进程替换和 Repair
-验证由远程隔离门禁负责，0.2.7-alpha 与 Repair 均不得依赖测试代码传入 `/DIR`。
+启动安装器之前安全失败。自定义目录的 v0.2.7-alpha to 0.2.8-alpha 自动发现、运行中进程替换和 Repair
+验证由远程隔离门禁负责，0.2.8-alpha 与 Repair 均不得依赖测试代码传入 `/DIR`。
 
 目录选择优先级为：合法的显式 `/DIR`、可信自动发现目录、默认用户安装目录。显式目录允许是尚未
 创建的新目录，但仍拒绝空值、相对路径、UNC、磁盘根和受保护的 Windows、System、用户配置及
