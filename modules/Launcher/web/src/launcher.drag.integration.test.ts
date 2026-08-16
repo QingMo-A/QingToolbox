@@ -78,10 +78,12 @@ describe('Launcher pointer drag projection', () => {
     window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 258, clientY: 50 }))
     await nextTick()
 
-    expect(wrapper.findAll('[data-launcher-item-id]').map(node => node.attributes('data-launcher-item-id'))).toEqual(['a', 'b', 'd', 'e'])
+    expect(wrapper.findAll('[data-launcher-item-id]').map(node => node.attributes('data-launcher-item-id'))).toEqual(['a', 'b', 'c', 'd', 'e'])
+    expect(wrapper.find('[data-launcher-item-id="c"]').classes()).toContain('dragging')
+    expect(wrapper.find('[data-launcher-item-id="d"]').attributes('style')).toContain('translate: 220px -110px')
     expect(wrapper.find('.drag-placeholder').exists()).toBe(false)
     expect(wrapper.find('.drag-preview').exists()).toBe(true)
-    expect(wrapper.findAll('.app-name').some(node => node.text() === 'C')).toBe(false)
+    expect(wrapper.find('[data-launcher-item-id="c"] .app-name').text()).toBe('C')
     expect(wrapper.find('.drag-preview').attributes('style')).toContain('left: 228px')
 
     window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 150, clientY: 50 }))
@@ -92,6 +94,7 @@ describe('Launcher pointer drag projection', () => {
     await nextTick()
     expect(wrapper.find('.drag-placeholder').exists()).toBe(false)
     expect(wrapper.find('[data-launcher-item-id="b"]').attributes('style')).toContain('translate: 110px 0px')
+    expect(wrapper.find('[data-launcher-item-id="d"]').attributes('style') ?? '').not.toContain('translate:')
 
     window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 270, clientY: 50 }))
     await nextTick()
@@ -104,7 +107,8 @@ describe('Launcher pointer drag projection', () => {
     window.dispatchEvent(pointerEvent('pointermove', { pointerId: 9, clientX: 320, clientY: 160 }))
     await nextTick()
     expect(wrapper.find('.drag-placeholder').exists()).toBe(false)
-    expect(wrapper.findAll('[data-launcher-item-id]').every(node => !node.attributes('style')?.includes('translate:'))).toBe(true)
+    expect(wrapper.find('[data-launcher-item-id="d"]').attributes('style')).toContain('translate: 220px -110px')
+    expect(wrapper.find('[data-launcher-item-id="e"]').attributes('style')).toContain('translate: -110px 0px')
 
     window.dispatchEvent(pointerEvent('pointerup', { pointerId: 9, clientX: 320, clientY: 160 }))
     await nextTick()
