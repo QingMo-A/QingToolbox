@@ -117,7 +117,7 @@ internal sealed class EverythingRuntime : IEverythingSearchService
         {
             cancellationToken.ThrowIfCancellationRequested();
             try { return await RunCliAsync(arguments, cancellationToken).ConfigureAwait(false); }
-            catch (InvalidOperationException) when (_ownedProcess is { HasExited: false } && DateTimeOffset.UtcNow < deadline)
+            catch (InvalidOperationException) when (DateTimeOffset.UtcNow < deadline)
             {
                 await Task.Delay(250, cancellationToken).ConfigureAwait(false);
             }
@@ -132,6 +132,18 @@ internal sealed class EverythingRuntime : IEverythingSearchService
         if (!File.Exists(everything) || !File.Exists(es) || !File.Exists(license))
             throw new InvalidOperationException("The built-in Everything runtime is unavailable.");
 
+        // A previous module host may have left the persistent named client alive.
+        // Reuse it before touching its executable or configuration files.
+        if (_indexRoots is null)
+        {
+            try
+            {
+                _ = await RunCliAsync(["-instance", _instanceName, "-get-everything-version"], cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            catch (InvalidOperationException) { }
+        }
+
         if (_ownedProcess is null || _ownedProcess.HasExited)
         {
             Directory.CreateDirectory(_dataDirectory);
@@ -141,7 +153,14 @@ internal sealed class EverythingRuntime : IEverythingSearchService
             {
                 Directory.CreateDirectory(_clientRuntimeDirectory);
                 foreach (var fileName in new[] { "Everything.exe", "es.exe", "Everything64.dll", "LICENSE.txt", "NOTICE.md" })
-                    File.Copy(Path.Combine(_runtimeDirectory, fileName), Path.Combine(_clientRuntimeDirectory, fileName), overwrite: true);
+                {
+                    var source = Path.Combine(_runtimeDirectory, fileName);
+                    var destination = Path.Combine(_clientRuntimeDirectory, fileName);
+                    if (!File.Exists(destination) ||
+                        !Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(destination)))
+                            .Equals(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))), StringComparison.Ordinal))
+                        File.Copy(source, destination, overwrite: true);
+                }
                 everything = Path.Combine(_clientRuntimeDirectory, "Everything.exe");
                 es = Path.Combine(_clientRuntimeDirectory, "es.exe");
             }
@@ -200,7 +219,7 @@ internal sealed class EverythingRuntime : IEverythingSearchService
                     .ConfigureAwait(false);
                 return;
             }
-            catch (InvalidOperationException) when (!_ownedProcess.HasExited)
+            catch (InvalidOperationException)
             {
                 await Task.Delay(200, cancellationToken).ConfigureAwait(false);
             }

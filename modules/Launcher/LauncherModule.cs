@@ -313,7 +313,7 @@ public sealed class LauncherModule : IWebToolModule, IWebExternalFileDropSink, I
         {
             if (generation == Volatile.Read(ref _everythingSearchGeneration)) lock (_gate) _everythingResults.Clear();
             return JsonSerializer.SerializeToElement(new EverythingSearchView(requestId, "Error",
-                exception.Message == "indexing" ? "indexing" : exception.Message.Contains("runtime", StringComparison.OrdinalIgnoreCase)
+                exception.Message == "indexing" ? "indexing" : exception.Message == "The built-in Everything runtime is unavailable."
                     ? "The built-in Everything runtime is unavailable."
                     : "Everything search is unavailable.", false, []), JsonOptions);
         }

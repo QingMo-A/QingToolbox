@@ -32,6 +32,15 @@ try
         var unicodeResults = await runtime.SearchAsync(EverythingSearchMode.File, "青启动台-编码验证.txt");
         Require(unicodeResults.Any(result => result.Path.Equals(unicodeFile, StringComparison.OrdinalIgnoreCase)),
             "Built-in Everything IPC integration corrupted a Unicode path.");
+        await using (var reloadedRuntime = new EverythingRuntime(
+            Path.Combine(root, "modules", "Launcher"),
+            Path.Combine(temp, "everything-integration"),
+            [indexRoot]))
+        {
+            var reloadedResults = await reloadedRuntime.SearchAsync(EverythingSearchMode.File, "qing-everything-runtime-smoke.exe");
+            Require(reloadedResults.Any(result => result.Path.Equals(indexedFile, StringComparison.OrdinalIgnoreCase)),
+                "A second Launcher runtime could not reuse the persistent Everything client.");
+        }
         Console.WriteLine("Built-in Everything named-instance IPC smoke passed.");
     }
     var exeA = Path.Combine(temp, "Alpha.exe");
