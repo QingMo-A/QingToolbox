@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using QingToolbox.Shell.ViewModels;
 using QingToolbox.Shell.Services;
 using QingToolbox.Shell.Startup;
@@ -12,6 +13,8 @@ using QingToolbox.Abstractions.Localization;
 using QingToolbox.Shell.Views;
 using QingToolbox.Shell.Windowing;
 using QingToolbox.Shell.WebShell;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.Wpf;
 using Microsoft.Win32;
 
 namespace QingToolbox.Shell;
@@ -34,13 +37,18 @@ public partial class MainWindow : Window
     private readonly IWebShellInitializer _webShellInitializer;
     private readonly WebBridgeHost _webBridgeHost;
     private readonly WebWorkspacePresentationState _webWorkspacePresentation;
+    private readonly SemaphoreSlim _webViewLifecycleGate = new(1, 1);
     private Task? _backgroundStartupTask;
+    private WebView2? _developmentWebView;
+    private CoreWebView2? _suspendedWebViewCore;
     private long _workspaceTransitionVersion;
     private int _closeRequestPending;
     private int _floatingBadgeEntryPending;
     private System.Windows.Controls.Button? _floatingBadgeButton;
     private HwndSource? _nativeWindowSource;
     private WindowState _notificationAreaRestoreState = WindowState.Normal;
+    private bool _workspaceBackgrounded;
+    private bool _nativeBackgroundAnimationsPaused;
 
     public MainWindow(
         MainWindowViewModel viewModel,
@@ -89,6 +97,7 @@ public partial class MainWindow : Window
         Loaded += OnLoaded;
         SourceInitialized += OnSourceInitialized;
         SizeChanged += OnSizeChanged;
+        IsVisibleChanged += OnWindowVisibilityChanged;
         Closing += OnClosing;
         Closed += OnClosed;
     }
@@ -129,6 +138,7 @@ public partial class MainWindow : Window
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _floatingBadgeManager.StateChanged -= OnFloatingBadgeStateChanged;
         SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
+        IsVisibleChanged -= OnWindowVisibilityChanged;
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -204,6 +214,7 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
+        _ = Dispatcher.InvokeAsync(UpdateNativeBackgroundAnimationState, DispatcherPriority.Loaded);
         _sessionLog.Information("Shell", "Main window loaded; critical startup presentation is beginning.");
         try
         {
@@ -239,21 +250,25 @@ public partial class MainWindow : Window
         _ = webView;
     }
 
-    private void AttachPreparingWebShell(Microsoft.Web.WebView2.Wpf.WebView2 webView)
+    private void AttachPreparingWebShell(WebView2 webView)
     {
         if (!_webWorkspacePresentation.TryPrepare(_startupSession.State == StartupSessionState.Exiting)) return;
+        _developmentWebView = webView;
+        _suspendedWebViewCore = null;
         DevelopmentWebWorkspace.Content = webView;
         ApplyWorkspacePresentation(_webWorkspacePresentation.Snapshot);
     }
 
-    private void ShowReadyWebShell(Microsoft.Web.WebView2.Wpf.WebView2 webView)
+    private void ShowReadyWebShell(WebView2 webView)
     {
         if (_startupSession.State == StartupSessionState.Exiting) return;
         Dispatcher.InvokeAsync(() =>
         {
             if (!_webWorkspacePresentation.TryShowReady(_startupSession.State == StartupSessionState.Exiting)) return;
+            _developmentWebView = webView;
             DevelopmentWebWorkspace.Content = webView;
             ShowReadyWorkspacePresentation();
+            if (_workspaceBackgrounded) _ = SuspendWebShellForBackgroundAsync();
         });
     }
 
@@ -262,6 +277,8 @@ public partial class MainWindow : Window
         Dispatcher.InvokeAsync(() =>
         {
             _webWorkspacePresentation.ShowNativeFallback();
+            _developmentWebView = null;
+            _suspendedWebViewCore = null;
             DevelopmentWebWorkspace.Content = null;
             ApplyWorkspacePresentation(_webWorkspacePresentation.Snapshot);
             _viewModel.StatusMessage =
@@ -281,6 +298,7 @@ public partial class MainWindow : Window
         var transitionVersion = ++_workspaceTransitionVersion;
         CancelWorkspaceAnimations();
         NativeWorkspace.Visibility = Visibility.Collapsed;
+        UpdateNativeBackgroundAnimationState();
         WebShellStartupSurface.Visibility = Visibility.Visible;
         WebShellStartupSurface.Opacity = 1;
         DevelopmentWebWorkspace.Visibility = Visibility.Visible;
@@ -318,6 +336,7 @@ public partial class MainWindow : Window
         ++_workspaceTransitionVersion;
         CancelWorkspaceAnimations();
         NativeWorkspace.Visibility = snapshot.ShowNativeWorkspace ? Visibility.Visible : Visibility.Collapsed;
+        UpdateNativeBackgroundAnimationState();
         WebShellStartupSurface.Opacity = snapshot.ShowStartupSurface ? 1 : 0;
         WebShellStartupSurface.Visibility = snapshot.ShowStartupSurface ? Visibility.Visible : Visibility.Collapsed;
         DevelopmentWebWorkspace.Opacity = snapshot.EnableWebWorkspace ? 1 : 0;
@@ -329,6 +348,114 @@ public partial class MainWindow : Window
     {
         WebShellStartupSurface.BeginAnimation(OpacityProperty, null);
         DevelopmentWebWorkspace.BeginAnimation(OpacityProperty, null);
+    }
+
+    private void OnWindowVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e) =>
+        UpdateNativeBackgroundAnimationState();
+
+    private void UpdateNativeBackgroundAnimationState()
+    {
+        if (!IsLoaded) return;
+        var shouldRun = ShouldRunNativeBackgroundAnimations(
+            _workspaceBackgrounded, IsVisible, NativeWorkspace.Visibility == Visibility.Visible);
+        if (shouldRun == !_nativeBackgroundAnimationsPaused) return;
+
+        try
+        {
+            if (shouldRun)
+            {
+                NativeBackgroundOrbOneController.Storyboard.Resume(NativeBackgroundOrbOne);
+                NativeBackgroundOrbTwoController.Storyboard.Resume(NativeBackgroundOrbTwo);
+                NativeBackgroundOrbThreeController.Storyboard.Resume(NativeBackgroundOrbThree);
+            }
+            else
+            {
+                NativeBackgroundOrbOneController.Storyboard.Pause(NativeBackgroundOrbOne);
+                NativeBackgroundOrbTwoController.Storyboard.Pause(NativeBackgroundOrbTwo);
+                NativeBackgroundOrbThreeController.Storyboard.Pause(NativeBackgroundOrbThree);
+            }
+            _nativeBackgroundAnimationsPaused = !shouldRun;
+        }
+        catch (InvalidOperationException exception)
+        {
+            _sessionLog.Warning("Shell", $"Native background animation lifecycle degraded: {exception.GetType().Name}.");
+        }
+    }
+
+    internal static bool ShouldRunNativeBackgroundAnimations(
+        bool workspaceBackgrounded,
+        bool windowVisible,
+        bool nativeWorkspaceVisible) =>
+        !workspaceBackgrounded && windowVisible && nativeWorkspaceVisible;
+
+    internal static bool ShouldRestoreModulesAfterBadgeManager(FloatingBadgeState badgeState) =>
+        badgeState == FloatingBadgeState.Normal;
+
+    internal void PrepareWorkspaceForBackground()
+    {
+        _workspaceBackgrounded = true;
+        UpdateNativeBackgroundAnimationState();
+    }
+
+    internal async Task SuspendWebShellForBackgroundAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_workspaceBackgrounded || _startupSession.State == StartupSessionState.Exiting) return;
+        await _webViewLifecycleGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!_workspaceBackgrounded || _startupSession.State == StartupSessionState.Exiting) return;
+            var core = _developmentWebView?.CoreWebView2;
+            if (core is null || ReferenceEquals(_suspendedWebViewCore, core)) return;
+
+            try
+            {
+                if (await core.TrySuspendAsync())
+                {
+                    _suspendedWebViewCore = core;
+                    _sessionLog.Information("WebShell", "Main WebView2 suspended while the Shell is hidden.");
+                }
+                else
+                {
+                    _sessionLog.Warning("WebShell", "Main WebView2 declined background suspension; continuing safely.");
+                }
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or System.Runtime.InteropServices.COMException)
+            {
+                _sessionLog.Warning("WebShell", $"Main WebView2 background suspension degraded: {exception.GetType().Name}.");
+            }
+        }
+        finally
+        {
+            _webViewLifecycleGate.Release();
+        }
+    }
+
+    internal async Task ResumeWorkspaceForForegroundAsync(CancellationToken cancellationToken = default)
+    {
+        await _webViewLifecycleGate.WaitAsync(cancellationToken);
+        try
+        {
+            var core = _suspendedWebViewCore;
+            _suspendedWebViewCore = null;
+            if (core is not null)
+            {
+                try
+                {
+                    core.Resume();
+                    _sessionLog.Information("WebShell", "Main WebView2 resumed before the Shell became visible.");
+                }
+                catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or System.Runtime.InteropServices.COMException)
+                {
+                    _sessionLog.Warning("WebShell", $"Main WebView2 resume degraded: {exception.GetType().Name}.");
+                }
+            }
+        }
+        finally
+        {
+            _workspaceBackgrounded = false;
+            _webViewLifecycleGate.Release();
+            UpdateNativeBackgroundAnimationState();
+        }
     }
 
     private async Task PresentCriticalStartupAsync()
@@ -553,21 +680,26 @@ public partial class MainWindow : Window
             _viewModel.StatusMessage = _localization.GetString("floatingBadge.restoreFailed");
             return;
         }
+        PrepareWorkspaceForBackground();
         ShowInTaskbar = false;
         Hide();
+        await SuspendWebShellForBackgroundAsync();
     }
 
     internal async Task RestoreMainWindowAsync()
     {
         if (_exitCoordinator.ApplicationExitRequested) return;
+        var restoreModulesAfterBadgeManager =
+            ShouldRestoreModulesAfterBadgeManager(_floatingBadgeManager.State);
         await _floatingBadgeManager.RestoreAsync();
         if (_exitCoordinator.ApplicationExitRequested) return;
+        if (restoreModulesAfterBadgeManager) await ResumeWorkspaceForForegroundAsync();
         Opacity = 1;
         ShowActivated = true;
         ShowInTaskbar = true;
         Show();
         WindowState = _notificationAreaRestoreState;
-        if (!await _moduleWindowPresentation.RestoreAsync())
+        if (restoreModulesAfterBadgeManager && !await _moduleWindowPresentation.RestoreAsync())
         {
             _sessionLog.Warning("ModuleProcess", "One or more worker windows could not be restored from the notification area.");
             _viewModel.StatusMessage = _localization.GetString("floatingBadge.restoreFailed");

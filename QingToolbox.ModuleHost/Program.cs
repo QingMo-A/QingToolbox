@@ -202,6 +202,7 @@ internal static class Program
                 case ModuleHostWindowAction.Show:
                     {
                         var target = EnsureWebWindow();
+                        target.ResumeFromBackground();
                         if (!target.IsVisible) target.Show();
                         target.Activate();
                         WebModuleWindowPresentation.EnsureTopmost(target, presentationMode);
@@ -214,12 +215,13 @@ internal static class Program
                     if (window is null)
                     {
                         var target = EnsureWebWindow();
+                        target.ResumeFromBackground();
                         target.Show();
                         target.Activate();
                         WebModuleWindowPresentation.EnsureTopmost(target, presentationMode);
                     }
                     else if (window.IsVisible) window.Hide();
-                    else { window.Show(); window.Activate(); WebModuleWindowPresentation.EnsureTopmost(window, presentationMode); }
+                    else { window.ResumeFromBackground(); window.Show(); window.Activate(); WebModuleWindowPresentation.EnsureTopmost(window, presentationMode); }
                     break;
             }
         }
@@ -257,6 +259,7 @@ internal static class Program
                     case "Deactivate": if (active) { await webModule.OnDeactivateAsync(); active = false; } break;
                     case "OpenWindow":
                         var openedWindow = EnsureWebWindow();
+                        openedWindow.ResumeFromBackground();
                         openedWindow.Show(); openedWindow.Activate();
                         WebModuleWindowPresentation.EnsureTopmost(openedWindow, presentationMode);
                         break;
@@ -265,13 +268,13 @@ internal static class Program
                         if (window is not null && suspended is null)
                         {
                             suspended = new(window.IsVisible, window.WindowState, window.IsActive);
-                            if (window.IsVisible) window.Hide();
+                            await window.SuspendForBackgroundAsync(immediate: true);
                         }
                         break;
                     case "RestoreWindow":
                         if (window is not null && suspended is { } snapshot)
                         {
-                            if (snapshot.WasVisible) { window.Show(); window.WindowState = snapshot.State; if (snapshot.WasActive) window.Activate(); WebModuleWindowPresentation.EnsureTopmost(window, presentationMode); }
+                            if (snapshot.WasVisible) { window.ResumeFromBackground(); window.Show(); window.WindowState = snapshot.State; if (snapshot.WasActive) window.Activate(); WebModuleWindowPresentation.EnsureTopmost(window, presentationMode); }
                             suspended = null;
                         }
                         break;

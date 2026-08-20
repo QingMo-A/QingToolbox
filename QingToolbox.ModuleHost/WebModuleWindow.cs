@@ -19,6 +19,10 @@ namespace QingToolbox.ModuleHost;
 /// <summary>Small, isolated WebView2 host for a module's local Web entry.</summary>
 internal sealed class WebModuleWindow : Window
 {
+    private const int MaximumPendingLiveEvents = 256;
+    private const int MaximumEventsPerDispatch = 32;
+    private const int BackgroundSuspendDelayMilliseconds = 1000;
+
     private readonly string _moduleId;
     private readonly string _version;
     private readonly string _host;
@@ -40,6 +44,10 @@ internal sealed class WebModuleWindow : Window
     private readonly DragEventHandler? _externalDragLeaveHandler = null;
     private readonly DragEventHandler? _externalDropEventHandler = null;
     private readonly DispatcherTimer? _deferredDismissTimer;
+    private readonly object _eventGate = new();
+    private readonly Queue<ModuleWebEventArgs> _pendingLiveEvents = new();
+    private readonly CoalescedWebEventBuffer _deferredEvents = new(64);
+    private readonly SemaphoreSlim _webViewLifecycleGate = new(1, 1);
     private HwndSource? _windowSource;
     private string _appearancePresetId;
     private string _languageCode;
@@ -47,6 +55,11 @@ internal sealed class WebModuleWindow : Window
     private bool _presentationReady;
     private bool _presentationFallbackSent;
     private bool _closed;
+    private volatile bool _backgroundSuspended;
+    private bool _eventDispatchScheduled;
+    private bool _presentationDirty;
+    private int _lifecycleGeneration;
+    private CancellationTokenSource? _suspendDelayCancellation;
     private bool _externalFileDragActive;
     private long _lastExternalDropTick = long.MinValue;
     private readonly string _presentationNonce = Guid.NewGuid().ToString("N");
@@ -99,11 +112,11 @@ internal sealed class WebModuleWindow : Window
             };
             _deferredDismissTimer.Tick += OnDeferredDismissTick;
             Deactivated += OnOverlayDeactivated;
-            IsVisibleChanged += OnVisibilityChanged;
             SourceInitialized += OnOverlaySourceInitialized;
             KeyDown += OnOverlayKeyDown;
             KeyUp += OnOverlayKeyUp;
         }
+        IsVisibleChanged += OnVisibilityChanged;
         ApplySurfaceTheme();
         _surface.Children.Add(_browser);
         var stack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
@@ -174,6 +187,8 @@ internal sealed class WebModuleWindow : Window
             // profile cannot replay a stale cached index.html after a module
             // update. The query is host-only and never reaches the bridge.
             core.Navigate($"https://{_host}/{EncodeEntry(_entry)}?qingHostSession={_presentationNonce}");
+            if (_backgroundSuspended && _suspendDelayCancellation is null)
+                await TrySuspendWebViewAsync(_lifecycleGeneration);
         }
         catch (Exception exception)
         {
@@ -212,6 +227,8 @@ internal sealed class WebModuleWindow : Window
             languageCode = _languageCode
         });
         _browser.CoreWebView2.PostWebMessageAsJson(message);
+        _presentationDirty = false;
+        SchedulePendingEventsIfNeeded();
         // Keep a host-owned fallback for pages that replace the document or suppress the
         // document-created callback. This is the same nonce- and origin-checked presentation
         // signal, and is intentionally separate from the hostReady protocol message.
@@ -238,7 +255,16 @@ internal sealed class WebModuleWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         if (_closed) return;
-        _closed = true;
+        lock (_eventGate)
+        {
+            _closed = true;
+            _backgroundSuspended = true;
+            _lifecycleGeneration++;
+            _pendingLiveEvents.Clear();
+            _deferredEvents.Clear();
+            _eventDispatchScheduled = false;
+        }
+        CancelPendingSuspendDelay();
         Loaded -= OnLoaded;
         Closed -= OnClosed;
         Deactivated -= OnOverlayDeactivated;
@@ -332,7 +358,14 @@ internal sealed class WebModuleWindow : Window
 
     private void OnVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        if (!IsVisible) StopDeferredDismiss();
+        if (!IsVisible)
+        {
+            StopDeferredDismiss();
+            _ = SuspendForBackgroundAsync();
+            return;
+        }
+
+        ResumeFromBackground();
     }
 
     private void StopDeferredDismiss() => _deferredDismissTimer?.Stop();
@@ -408,8 +441,11 @@ internal sealed class WebModuleWindow : Window
             {
                 if (_closed || _presentationReady || _surface.Children.Count < 2) return;
                 _presentationReady = true;
-                _browser.Visibility = Visibility.Visible;
-                _browser.IsHitTestVisible = true;
+                if (!_backgroundSuspended)
+                {
+                    _browser.Visibility = Visibility.Visible;
+                    _browser.IsHitTestVisible = true;
+                }
                 _surface.Children.RemoveAt(1);
             }));
             return true;
@@ -420,31 +456,317 @@ internal sealed class WebModuleWindow : Window
 
     public void PostEvent(ModuleWebEventArgs eventArgs)
     {
-        if (!Dispatcher.CheckAccess())
+        var scheduleDispatch = false;
+        lock (_eventGate)
         {
-            _ = Dispatcher.BeginInvoke(new Action(() => PostEvent(eventArgs)));
-            return;
+            if (_closed) return;
+            if (_backgroundSuspended)
+            {
+                _deferredEvents.Add(eventArgs);
+                return;
+            }
+
+            if (_pendingLiveEvents.Count >= MaximumPendingLiveEvents) _pendingLiveEvents.Dequeue();
+            _pendingLiveEvents.Enqueue(eventArgs);
+            if (!_eventDispatchScheduled)
+            {
+                _eventDispatchScheduled = true;
+                scheduleDispatch = true;
+            }
         }
-        if (_closed) return;
-        if (!_readySent || _browser.CoreWebView2 is null || _bridge is null) return;
-        var message = _bridge.SerializeEvent(eventArgs);
-        if (message is not null) _browser.CoreWebView2.PostWebMessageAsJson(message);
+
+        if (scheduleDispatch) ScheduleEventDispatch();
     }
 
     public void ApplyPresentation(string appearancePresetId, string languageCode)
     {
         _appearancePresetId = AppearancePresetIds.Normalize(appearancePresetId);
         _languageCode = languageCode is "en-US" or "zh-CN" ? languageCode : "en-US";
+        if (_backgroundSuspended)
+        {
+            _presentationDirty = true;
+            return;
+        }
         if (!_readySent || _browser.CoreWebView2 is null) return;
-        _browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
+        PostPresentationChanged(_browser.CoreWebView2);
+    }
+
+    public Task SuspendForBackgroundAsync(bool immediate = false)
+    {
+        if (!Dispatcher.CheckAccess())
+            return Dispatcher.InvokeAsync(() => SuspendForBackgroundAsync(immediate)).Task.Unwrap();
+
+        int generation;
+        lock (_eventGate)
+        {
+            if (_closed || (_backgroundSuspended && !immediate)) return Task.CompletedTask;
+            _backgroundSuspended = true;
+            generation = ++_lifecycleGeneration;
+            while (_pendingLiveEvents.TryDequeue(out var eventArgs)) _deferredEvents.Add(eventArgs);
+        }
+        CancelPendingSuspendDelay();
+        if (IsVisible) Hide();
+        _browser.IsHitTestVisible = false;
+        _browser.Visibility = Visibility.Hidden;
+        if (immediate) return TrySuspendWebViewAsync(generation);
+
+        var delayCancellation = new CancellationTokenSource();
+        _suspendDelayCancellation = delayCancellation;
+        return SuspendAfterDelayAsync(generation, delayCancellation);
+    }
+
+    public void ResumeFromBackground()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(new Action(ResumeFromBackground));
+            return;
+        }
+        if (_closed) return;
+
+        lock (_eventGate)
+        {
+            _backgroundSuspended = false;
+            _lifecycleGeneration++;
+        }
+        CancelPendingSuspendDelay();
+        TryResumeWebView();
+        if (_presentationReady)
+        {
+            _browser.Visibility = Visibility.Visible;
+            _browser.IsHitTestVisible = true;
+        }
+        if (_presentationDirty && _readySent && _browser.CoreWebView2 is { } core)
+        {
+            _presentationDirty = false;
+            PostPresentationChanged(core);
+        }
+
+        var scheduleDispatch = false;
+        lock (_eventGate)
+        {
+            foreach (var eventArgs in _deferredEvents.Drain())
+            {
+                if (_pendingLiveEvents.Count >= MaximumPendingLiveEvents) _pendingLiveEvents.Dequeue();
+                _pendingLiveEvents.Enqueue(eventArgs);
+            }
+            if (_pendingLiveEvents.Count > 0 && !_eventDispatchScheduled)
+            {
+                _eventDispatchScheduled = true;
+                scheduleDispatch = true;
+            }
+        }
+        if (scheduleDispatch) ScheduleEventDispatch();
+    }
+
+    private async Task SuspendAfterDelayAsync(int generation, CancellationTokenSource delayCancellation)
+    {
+        try
+        {
+            await Task.Delay(BackgroundSuspendDelayMilliseconds, delayCancellation.Token);
+        }
+        catch (OperationCanceledException) when (delayCancellation.IsCancellationRequested)
+        {
+            return;
+        }
+        finally
+        {
+            if (ReferenceEquals(_suspendDelayCancellation, delayCancellation))
+                _suspendDelayCancellation = null;
+            delayCancellation.Dispose();
+        }
+
+        await TrySuspendWebViewAsync(generation);
+    }
+
+    private void CancelPendingSuspendDelay()
+    {
+        var cancellation = _suspendDelayCancellation;
+        _suspendDelayCancellation = null;
+        if (cancellation is not null && !cancellation.IsCancellationRequested) cancellation.Cancel();
+    }
+
+    private async Task TrySuspendWebViewAsync(int generation)
+    {
+        // The SDK requires the controller to be invisible before TrySuspendAsync.
+        // Yield once so WebView2CompositionControl can propagate WPF visibility.
+        await Dispatcher.Yield(DispatcherPriority.Background);
+        await _webViewLifecycleGate.WaitAsync();
+        try
+        {
+            if (!ShouldTrySuspend(_closed, _backgroundSuspended, generation, _lifecycleGeneration)) return;
+            try
+            {
+                var core = _browser.CoreWebView2;
+                if (core is null || core.IsSuspended) return;
+                if (!await core.TrySuspendAsync())
+                    System.Diagnostics.Debug.WriteLine($"Web module '{_moduleId}' could not enter suspended state; hidden fallback remains active.");
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or COMException or ObjectDisposedException)
+            {
+                // Older runtimes or a controller racing shutdown may reject suspend.
+                // The native window remains hidden and can still be restored safely.
+                System.Diagnostics.Debug.WriteLine($"Web module '{_moduleId}' suspend unavailable: {exception.GetType().Name}");
+            }
+
+            if (!_closed && (!_backgroundSuspended || generation != _lifecycleGeneration)) TryResumeWebView();
+        }
+        finally
+        {
+            _webViewLifecycleGate.Release();
+        }
+    }
+
+    internal static bool ShouldTrySuspend(bool closed, bool backgroundSuspended,
+        int scheduledGeneration, int currentGeneration) =>
+        !closed && backgroundSuspended && scheduledGeneration == currentGeneration;
+
+    private void TryResumeWebView()
+    {
+        try
+        {
+            if (_browser.CoreWebView2 is { IsSuspended: true } core) core.Resume();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or COMException or ObjectDisposedException)
+        {
+            System.Diagnostics.Debug.WriteLine($"Web module '{_moduleId}' resume unavailable: {exception.GetType().Name}");
+        }
+    }
+
+    private void ScheduleEventDispatch()
+    {
+        try
+        {
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(DrainPendingEvents));
+        }
+        catch (TaskCanceledException)
+        {
+            lock (_eventGate) _eventDispatchScheduled = false;
+        }
+        catch (InvalidOperationException)
+        {
+            lock (_eventGate) _eventDispatchScheduled = false;
+        }
+    }
+
+    private void DrainPendingEvents()
+    {
+        for (var delivered = 0; delivered < MaximumEventsPerDispatch; delivered++)
+        {
+            ModuleWebEventArgs? eventArgs;
+            lock (_eventGate)
+            {
+                if (_closed)
+                {
+                    _pendingLiveEvents.Clear();
+                    _eventDispatchScheduled = false;
+                    return;
+                }
+                if (_backgroundSuspended)
+                {
+                    while (_pendingLiveEvents.TryDequeue(out var deferred)) _deferredEvents.Add(deferred);
+                    _eventDispatchScheduled = false;
+                    return;
+                }
+                if (!_readySent || _browser.CoreWebView2 is null || _bridge is null)
+                {
+                    _eventDispatchScheduled = false;
+                    return;
+                }
+                if (!_pendingLiveEvents.TryDequeue(out eventArgs))
+                {
+                    _eventDispatchScheduled = false;
+                    return;
+                }
+            }
+
+            var message = _bridge.SerializeEvent(eventArgs);
+            if (message is null) continue;
+            try
+            {
+                _browser.CoreWebView2.PostWebMessageAsJson(message);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or COMException or ObjectDisposedException)
+            {
+                System.Diagnostics.Debug.WriteLine($"Web module '{_moduleId}' event delivery unavailable: {exception.GetType().Name}");
+                lock (_eventGate) _eventDispatchScheduled = false;
+                return;
+            }
+        }
+
+        lock (_eventGate)
+        {
+            if (_pendingLiveEvents.Count == 0)
+            {
+                _eventDispatchScheduled = false;
+                return;
+            }
+        }
+        ScheduleEventDispatch();
+    }
+
+    private void SchedulePendingEventsIfNeeded()
+    {
+        var scheduleDispatch = false;
+        lock (_eventGate)
+        {
+            if (!_closed && !_backgroundSuspended && _pendingLiveEvents.Count > 0 && !_eventDispatchScheduled)
+            {
+                _eventDispatchScheduled = true;
+                scheduleDispatch = true;
+            }
+        }
+        if (scheduleDispatch) ScheduleEventDispatch();
+    }
+
+    private void PostPresentationChanged(CoreWebView2 core) =>
+        core.PostWebMessageAsJson(JsonSerializer.Serialize(new
         {
             type = "presentationChanged",
             appearancePresetId = _appearancePresetId,
             languageCode = _languageCode
         }));
-    }
 
     private static string EncodeEntry(string entry) =>
         string.Join('/', entry.Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Select(Uri.EscapeDataString));
+}
+
+internal sealed class CoalescedWebEventBuffer(int capacity)
+{
+    private readonly int _capacity = capacity > 0 ? capacity : throw new ArgumentOutOfRangeException(nameof(capacity));
+    private readonly Dictionary<string, ModuleWebEventArgs> _events = new(StringComparer.Ordinal);
+    private readonly Queue<string> _order = new();
+
+    public int Count => _events.Count;
+
+    public void Add(ModuleWebEventArgs eventArgs)
+    {
+        var name = eventArgs.Name ?? string.Empty;
+        if (_events.ContainsKey(name))
+        {
+            _events[name] = eventArgs;
+            return;
+        }
+        while (_events.Count >= _capacity && _order.TryDequeue(out var oldest)) _events.Remove(oldest);
+        _events.Add(name, eventArgs);
+        _order.Enqueue(name);
+    }
+
+    public IReadOnlyList<ModuleWebEventArgs> Drain()
+    {
+        if (_events.Count == 0) return [];
+        var result = new List<ModuleWebEventArgs>(_events.Count);
+        while (_order.TryDequeue(out var name))
+        {
+            if (_events.Remove(name, out var eventArgs)) result.Add(eventArgs);
+        }
+        return result;
+    }
+
+    public void Clear()
+    {
+        _events.Clear();
+        _order.Clear();
+    }
 }

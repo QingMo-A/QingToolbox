@@ -64,7 +64,8 @@
               ClipToBounds="True"
               IsHitTestVisible="False"
               Opacity="0.72">
-            <Path Width="430"
+            <Path x:Name="NativeBackgroundOrbOne"
+                  Width="430"
                   Height="360"
                   HorizontalAlignment="Left"
                   VerticalAlignment="Top"
@@ -93,7 +94,7 @@
                 </Path.RenderTransform>
                 <Path.Triggers>
                     <EventTrigger RoutedEvent="Loaded">
-                        <BeginStoryboard>
+                        <BeginStoryboard x:Name="NativeBackgroundOrbOneController">
                             <Storyboard RepeatBehavior="Forever"
                                         AutoReverse="True">
                                 <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(TranslateTransform.X)"
@@ -122,7 +123,8 @@
                 </Path.Triggers>
             </Path>
 
-            <Path Width="520"
+            <Path x:Name="NativeBackgroundOrbTwo"
+                  Width="520"
                   Height="430"
                   HorizontalAlignment="Right"
                   VerticalAlignment="Center"
@@ -151,7 +153,7 @@
                 </Path.RenderTransform>
                 <Path.Triggers>
                     <EventTrigger RoutedEvent="Loaded">
-                        <BeginStoryboard>
+                        <BeginStoryboard x:Name="NativeBackgroundOrbTwoController">
                             <Storyboard RepeatBehavior="Forever"
                                         AutoReverse="True">
                                 <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(TranslateTransform.X)"
@@ -180,7 +182,8 @@
                 </Path.Triggers>
             </Path>
 
-            <Path Width="360"
+            <Path x:Name="NativeBackgroundOrbThree"
+                  Width="360"
                   Height="300"
                   HorizontalAlignment="Center"
                   VerticalAlignment="Bottom"
@@ -210,7 +213,7 @@
                 </Path.RenderTransform>
                 <Path.Triggers>
                     <EventTrigger RoutedEvent="Loaded">
-                        <BeginStoryboard>
+                        <BeginStoryboard x:Name="NativeBackgroundOrbThreeController">
                             <Storyboard RepeatBehavior="Forever"
                                         AutoReverse="True">
                                 <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(TranslateTransform.X)"

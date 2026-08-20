@@ -8,14 +8,28 @@ import QButton from './QButton.vue'
 import QIcon from './QIcon.vue'
 
 const client=inject<HostUpdateClient>('hostUpdateClient')!
-const app=useAppStore();const store=useHostUpdateStore();const {t}=useLocalization();const dismissedVersion=ref('');let timer:number|undefined
+const app=useAppStore();const store=useHostUpdateStore();const {t}=useLocalization();const dismissedVersion=ref('')
+let timer:number|undefined;let mounted=false;let operationRequiresPolling=false
 const visible=computed(()=>app.snapshot?.environmentKind==='Production'&&store.snapshot?.showBanner===true&&dismissedVersion.value!==store.snapshot.latestVersion)
 const progress=computed(()=>{const s=store.snapshot;if(!s||s.expectedBytes<=0)return 0;return Math.min(100,Math.round(s.bytesReceived/s.expectedBytes*100))})
-async function run(action:()=>Promise<import('../../contracts/hostUpdate').HostUpdateSnapshot>){if(store.busy)return;store.busy=true;try{store.complete(await action())}catch(e){store.fail(e)}finally{store.busy=false}}
+const pageVisible=()=>document.visibilityState!=='hidden'
+const snapshotNeedsPolling=()=>store.snapshot?.state==='Checking'||['Downloading','Verifying'].includes(store.snapshot?.downloadState??'')
+const stopPolling=()=>{if(timer!==undefined){window.clearTimeout(timer);timer=undefined}}
+function syncPolling(){
+  if(!mounted||!pageVisible()||(!operationRequiresPolling&&!snapshotNeedsPolling())){stopPolling();return}
+  if(timer!==undefined)return
+  timer=window.setTimeout(async()=>{timer=undefined;await refreshProgress();syncPolling()},1000)
+}
+async function run(action:()=>Promise<import('../../contracts/hostUpdate').HostUpdateSnapshot>,pollWhilePending=false){
+  if(store.busy)return
+  store.busy=true;operationRequiresPolling=pollWhilePending;syncPolling()
+  try{store.complete(await action())}catch(e){store.fail(e)}finally{store.busy=false;operationRequiresPolling=false;syncPolling()}
+}
 const refresh=()=>run(()=>client.getSnapshot())
 async function refreshProgress(){try{store.complete(await client.getSnapshot())}catch(e){store.fail(e)}}
-onMounted(()=>{void refresh();timer=window.setInterval(()=>void refreshProgress(),1000)})
-onBeforeUnmount(()=>{if(timer!==undefined)window.clearInterval(timer)})
+function onVisibilityChange(){if(!pageVisible()){stopPolling();return}void refresh().finally(syncPolling)}
+onMounted(()=>{mounted=true;document.addEventListener('visibilitychange',onVisibilityChange);if(pageVisible())void refresh().finally(syncPolling)})
+onBeforeUnmount(()=>{mounted=false;stopPolling();document.removeEventListener('visibilitychange',onVisibilityChange)})
 </script>
 <template>
   <section v-if="visible" class="q-host-update-banner" role="status">
@@ -24,7 +38,7 @@ onBeforeUnmount(()=>{if(timer!==undefined)window.clearInterval(timer)})
     <div class="q-host-update-actions">
       <QButton @click="dismissedVersion=store.snapshot!.latestVersion">{{ t('hostUpdate.banner.later') }}</QButton>
       <QButton v-if="store.snapshot!.canCancelDownload" :disabled="store.busy" @click="run(()=>client.cancel())">{{ t('hostUpdate.banner.cancel') }}</QButton>
-      <QButton v-if="store.snapshot!.canDownload" variant="primary" :disabled="store.busy" @click="run(()=>client.download())">{{ t('hostUpdate.banner.download') }}</QButton>
+      <QButton v-if="store.snapshot!.canDownload" variant="primary" :disabled="store.busy" @click="run(()=>client.download(),true)">{{ t('hostUpdate.banner.download') }}</QButton>
       <QButton v-if="store.snapshot!.canInstall" variant="primary" :disabled="store.busy" @click="run(()=>client.install())">{{ t('hostUpdate.banner.install') }}</QButton>
       <QButton v-if="store.snapshot!.canCheck&&!store.snapshot!.canDownload&&!store.snapshot!.canInstall" :disabled="store.busy" @click="run(()=>client.check())">{{ t('hostUpdate.banner.check') }}</QButton>
     </div>

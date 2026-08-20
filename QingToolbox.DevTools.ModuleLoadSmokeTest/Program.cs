@@ -13,6 +13,7 @@ using QingToolbox.Abstractions.Modules;
 using QingToolbox.Core.Runtime;
 using QingToolbox.Core.Settings;
 using QingToolbox.ModuleLoader;
+using QingToolbox.Shell;
 using QingToolbox.Shell.Services;
 using QingToolbox.Shell.ViewModels;
 using QingToolbox.Shell.WebShell;
@@ -158,6 +159,18 @@ internal static class Program
         Require(managerSource.Contains("badge.DragCompletedAsync +=", StringComparison.Ordinal) &&
                 managerSource.Contains("AwaitPendingBadgePositionSaveAsync", StringComparison.Ordinal),
             "Floating badge manager must await the final drag position save before transitions.");
+        Require(MainWindow.ShouldRunNativeBackgroundAnimations(false, true, true),
+            "Visible native workspace animations should run while the Shell is foregrounded.");
+        Require(!MainWindow.ShouldRunNativeBackgroundAnimations(true, true, true) &&
+                !MainWindow.ShouldRunNativeBackgroundAnimations(false, false, true) &&
+                !MainWindow.ShouldRunNativeBackgroundAnimations(false, true, false),
+            "Native background animations must pause while backgrounded, window-hidden, or workspace-hidden.");
+        Require(MainWindow.ShouldRestoreModulesAfterBadgeManager(FloatingBadgeState.Normal),
+            "Notification-area restore must restore module windows once.");
+        Require(!MainWindow.ShouldRestoreModulesAfterBadgeManager(FloatingBadgeState.EnteringBadge) &&
+                !MainWindow.ShouldRestoreModulesAfterBadgeManager(FloatingBadgeState.Badge) &&
+                !MainWindow.ShouldRestoreModulesAfterBadgeManager(FloatingBadgeState.Restoring),
+            "Badge restore must leave module restoration to FloatingBadgeManager and avoid a second restore.");
 
         Require(WindowHitTestService.DecodeScreenPoint(Pack(120, 250)) == new Point(120, 250),
             "Positive screen coordinates were decoded incorrectly.");

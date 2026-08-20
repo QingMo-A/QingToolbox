@@ -48,6 +48,27 @@ Require(!WebModuleWindow.ShouldForwardAltSpace(ModuleHostWindowPresentationMode.
         !WebModuleWindow.ShouldForwardAltSpace(ModuleHostWindowPresentationMode.Overlay, 0x41, true),
     "Alt+Space forwarding must remain isolated from Standard windows and unrelated keys.");
 
+var deferredEvents = new CoalescedWebEventBuffer(2);
+deferredEvents.Add(new ModuleWebEventArgs("stateChanged", JsonSerializer.SerializeToElement(new { revision = 1 })));
+deferredEvents.Add(new ModuleWebEventArgs("backgroundEvent", JsonSerializer.SerializeToElement(new { revision = 2 })));
+deferredEvents.Add(new ModuleWebEventArgs("stateChanged", JsonSerializer.SerializeToElement(new { revision = 3 })));
+Require(deferredEvents.Count == 2, "Hidden Web events must be bounded by event name.");
+var coalescedEvents = deferredEvents.Drain();
+Require(coalescedEvents.Count == 2 && coalescedEvents[0].Name == "stateChanged" &&
+        coalescedEvents[0].Payload?.GetProperty("revision").GetInt32() == 3 &&
+        coalescedEvents[1].Name == "backgroundEvent",
+    "Hidden Web events must retain only the latest payload for each name.");
+deferredEvents.Add(new ModuleWebEventArgs("first", null));
+deferredEvents.Add(new ModuleWebEventArgs("second", null));
+deferredEvents.Add(new ModuleWebEventArgs("third", null));
+Require(deferredEvents.Drain().Select(value => value.Name).SequenceEqual(["second", "third"]),
+    "Hidden Web event overflow must evict the oldest event name.");
+Require(WebModuleWindow.ShouldTrySuspend(false, true, 7, 7),
+    "A window that remains hidden through the debounce must be eligible for WebView suspension.");
+Require(!WebModuleWindow.ShouldTrySuspend(false, false, 7, 8) &&
+        !WebModuleWindow.ShouldTrySuspend(false, true, 7, 8),
+    "A rapid hide/show or a newer visibility transition must cancel the stale WebView suspension.");
+
 var dragCancelSequence = new[]
 {
     OverlayDismissPolicy.OnDeactivated(ModuleHostWindowPresentationMode.Overlay, false, true, false, true),

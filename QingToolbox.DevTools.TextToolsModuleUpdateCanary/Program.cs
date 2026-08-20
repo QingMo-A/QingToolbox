@@ -1058,6 +1058,81 @@ internal static class Program
             Require(primary.WindowVisible && secondary.WindowVisible,
                 "Batch workers did not start with visible windows.");
 
+            var concurrentArrivals = 0;
+            var bothConcurrentCommandsStarted = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            _broker.TestHooks = new ModuleProcessBrokerTestHooks
+            {
+                BeforeBatchCommandAsync = async (command, currentModuleId, token) =>
+                {
+                    if (command != "SuspendWindow" ||
+                        currentModuleId != primaryModuleId && currentModuleId != batchModuleId)
+                        return;
+                    if (Interlocked.Increment(ref concurrentArrivals) == 2)
+                        bothConcurrentCommandsStarted.TrySetResult();
+                    await bothConcurrentCommandsStarted.Task.WaitAsync(TimeSpan.FromSeconds(2), token);
+                }
+            };
+            try
+            {
+                Require(await _broker.SuspendWindowsAsync(),
+                    "Batch suspend did not dispatch independent worker commands concurrently.");
+                Require(concurrentArrivals == 2 &&
+                        _broker.GetState(primaryModuleId) is { WindowVisible: false } &&
+                        _broker.GetState(batchModuleId) is { WindowVisible: false },
+                    "Concurrent batch suspend did not reach both workers.");
+            }
+            finally { _broker.TestHooks = null; }
+            Require(await _broker.RestoreWindowsAsync(),
+                "Workers could not restore after the concurrent batch probe.");
+
+            primary = _broker.GetState(primaryModuleId)!;
+            var timedOutGeneration = primary.RuntimeGeneration;
+            var timedOutWorkerExit = new TaskCompletionSource<ModuleProcessExitedEventArgs>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler<ModuleProcessExitedEventArgs> timedOutWorkerHandler = (_, args) =>
+            {
+                if (args.ModuleId == primaryModuleId && args.RuntimeGeneration == timedOutGeneration)
+                    timedOutWorkerExit.TrySetResult(args);
+            };
+            _broker.ProcessExited += timedOutWorkerHandler;
+            _broker.TestHooks = new ModuleProcessBrokerTestHooks
+            {
+                BatchCommandTimeout = TimeSpan.FromMilliseconds(250),
+                BeforeBatchCommandAsync = async (command, currentModuleId, token) =>
+                {
+                    if (command == "SuspendWindow" && currentModuleId == primaryModuleId)
+                        await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                }
+            };
+            var timeoutProbe = Stopwatch.StartNew();
+            try
+            {
+                Require(!await _broker.SuspendWindowsAsync(),
+                    "A timed-out batch session reported complete success.");
+                timeoutProbe.Stop();
+                Require(timeoutProbe.Elapsed < TimeSpan.FromSeconds(3),
+                    "A timed-out worker serialized or delayed the healthy batch peer.");
+                Require(_broker.GetState(batchModuleId) is { WindowVisible: false },
+                    "The healthy worker did not complete while its peer timed out.");
+                var timedOutExit = await timedOutWorkerExit.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                Require(!timedOutExit.Expected &&
+                        timedOutExit.FailureCode == "ModuleHost.BatchCommandTimeout" &&
+                        !_broker.HasSession(primaryModuleId),
+                    "The timed-out batch session was retained or misclassified.");
+            }
+            finally
+            {
+                _broker.TestHooks = null;
+                _broker.ProcessExited -= timedOutWorkerHandler;
+            }
+
+            Require(await _adapter.RestorePreviousRuntimeStateAsync(primaryModuleId, desired, CancellationToken.None),
+                "The primary worker could not restart after the batch timeout probe.");
+            Require(await _broker.RestoreWindowsAsync(),
+                "Batch workers could not restore after the timeout probe.");
+            primary = _broker.GetState(primaryModuleId)!;
+
             var suspendedPeerExit = new TaskCompletionSource(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             EventHandler<ModuleProcessExitedEventArgs> suspendedPeerHandler = (_, args) =>

@@ -64,8 +64,10 @@ public sealed class FloatingBadgeManager(
                     if (!await moduleWindowPresentation.SuspendAsync(cancellationToken))
                         throw new InvalidOperationException("One or more module worker windows could not be suspended.");
                 }
+                mainWindow.PrepareWorkspaceForBackground();
                 mainWindow.ShowInTaskbar = false;
                 mainWindow.Hide();
+                await mainWindow.SuspendWebShellForBackgroundAsync(cancellationToken);
                 _badgeWindow = badge;
                 badge.Activate();
                 badge.Focus();
@@ -76,6 +78,7 @@ public sealed class FloatingBadgeManager(
                 CloseBadge(badge);
                 if (!_exitRequested)
                 {
+                    await mainWindow.ResumeWorkspaceForForegroundAsync(CancellationToken.None);
                     mainWindow.ShowInTaskbar = _snapshot?.ShowInTaskbar ?? true;
                     mainWindow.Show();
                     await moduleWindowPresentation.RestoreAsync(CancellationToken.None);
@@ -122,6 +125,7 @@ public sealed class FloatingBadgeManager(
                 // persisting the badge position may take longer than showing the Shell.
                 if (badge?.IsVisible == true) badge.Hide();
                 var snapshot = _snapshot ?? WindowSnapshot.Capture(mainWindow);
+                await mainWindow.ResumeWorkspaceForForegroundAsync(cancellationToken);
                 mainWindow.ShowInTaskbar = snapshot.ShowInTaskbar;
                 mainWindow.Show();
                 RestoreMainWindow(mainWindow, snapshot);

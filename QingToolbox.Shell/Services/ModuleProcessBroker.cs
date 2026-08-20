@@ -188,39 +188,81 @@ public sealed class ModuleProcessBroker(ApplicationPaths paths, SessionLogServic
     private async Task<bool> CommandAllAsync(string command, CancellationToken token)
     {
         var snapshot = _sessions.ToArray();
-        TestHooks?.AfterBatchSnapshot?.Invoke(command, snapshot.Select(item => item.Value.State).ToArray());
-        var allSucceeded = true;
-        foreach (var (moduleId, session) in snapshot)
-        {
-            var failureCode = "ModuleHost.BatchSessionUnavailable";
-            try
-            {
-                if (!_sessions.TryGetValue(moduleId, out var current) || !ReferenceEquals(current, session))
-                {
-                    allSucceeded = false;
-                    LogBatchFailure(moduleId, session, command, failureCode);
-                    continue;
-                }
+        var testHooks = TestHooks;
+        testHooks?.AfterBatchSnapshot?.Invoke(command, snapshot.Select(item => item.Value.State).ToArray());
+        var operationTimeout = testHooks?.BatchCommandTimeout is { } testTimeout && testTimeout > TimeSpan.Zero
+            ? testTimeout
+            : OperationTimeout;
+        var results = await Task.WhenAll(snapshot.Select(item =>
+            CommandBatchSessionAsync(item.Key, item.Value, command, operationTimeout, testHooks, token)));
+        return results.All(succeeded => succeeded);
+    }
 
-                if (!await session.CommandAsync(command, token))
-                {
-                    allSucceeded = false;
-                    failureCode = "ModuleHost.BatchCommandRejected";
-                    LogBatchFailure(moduleId, session, command, failureCode);
-                }
-            }
-            catch (Exception exception)
+    private async Task<bool> CommandBatchSessionAsync(
+        string moduleId,
+        Session session,
+        string command,
+        TimeSpan operationTimeout,
+        ModuleProcessBrokerTestHooks? testHooks,
+        CancellationToken token)
+    {
+        var failureCode = "ModuleHost.BatchSessionUnavailable";
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+        operationCancellation.CancelAfter(operationTimeout);
+        try
+        {
+            if (!_sessions.TryGetValue(moduleId, out var current) || !ReferenceEquals(current, session))
             {
-                allSucceeded = false;
-                failureCode = exception is UnauthorizedAccessException
+                LogBatchFailure(moduleId, session, command, failureCode);
+                return false;
+            }
+
+            if (testHooks?.BeforeBatchCommandAsync is { } beforeCommand)
+                await beforeCommand(command, moduleId, operationCancellation.Token)
+                    .WaitAsync(operationCancellation.Token);
+
+            if (!await session.CommandAsync(command, operationCancellation.Token)
+                    .WaitAsync(operationCancellation.Token))
+            {
+                failureCode = "ModuleHost.BatchCommandRejected";
+                LogBatchFailure(moduleId, session, command, failureCode);
+                return false;
+            }
+            return true;
+        }
+        catch (Exception exception)
+        {
+            var timedOut = !token.IsCancellationRequested &&
+                           (exception is TimeoutException ||
+                            exception is OperationCanceledException && operationCancellation.IsCancellationRequested);
+            failureCode = timedOut
+                ? "ModuleHost.BatchCommandTimeout"
+                : exception is UnauthorizedAccessException
                     ? "ModuleHost.ResponseIdentityMismatch"
                     : $"ModuleHost.{exception.GetType().Name}";
-                LogBatchFailure(moduleId, session, command, failureCode);
-                if (exception is UnauthorizedAccessException)
-                    await RemoveAndTerminateAsync(moduleId, session, expected: false, failureCode);
-            }
+            LogBatchFailure(moduleId, session, command, failureCode);
+
+            // A timed-out pipe request can leave a late State response behind. The
+            // protocol deliberately has no request IDs, so retaining that session
+            // would let the next command consume stale state as its own response.
+            if (timedOut || exception is UnauthorizedAccessException)
+                await RemoveFailedBatchSessionAsync(moduleId, session, command, failureCode);
+            return false;
         }
-        return allSucceeded;
+    }
+
+    private async Task RemoveFailedBatchSessionAsync(
+        string moduleId, Session session, string command, string failureCode)
+    {
+        try
+        {
+            await RemoveAndTerminateAsync(moduleId, session, expected: false, failureCode);
+        }
+        catch (Exception exception)
+        {
+            log.Warning("ModuleProcess",
+                $"Batch session cleanup failed; command={command}; module={moduleId}; generation={session.State.RuntimeGeneration}; failure={failureCode}; cleanup={exception.GetType().Name}.");
+        }
     }
 
     private void LogBatchFailure(string moduleId, Session session, string command, string failureCode) =>
@@ -487,4 +529,6 @@ internal sealed class ModuleProcessBrokerTestHooks
     public Action<string, ProcessStartInfo>? ConfigureWorkerStart { get; init; }
     public Action<string, Process>? AfterSessionPublishedBeforeExitObservation { get; init; }
     public Action<string, IReadOnlyList<ModuleProcessRuntimeState>>? AfterBatchSnapshot { get; init; }
+    public Func<string, string, CancellationToken, Task>? BeforeBatchCommandAsync { get; init; }
+    public TimeSpan? BatchCommandTimeout { get; init; }
 }
