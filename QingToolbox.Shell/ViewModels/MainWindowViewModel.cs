@@ -991,7 +991,8 @@ public sealed partial class MainWindowViewModel(
 
     public bool CanInstallVerifiedModuleUpdateFromWeb(string moduleId)
     {
-        if (!executionEnvironment.IsDevelopment || gatedModuleUpdateTransactions is null) return false;
+        if (!ModuleUpdateTransactionHostPolicy.SupportsWebInstall(executionEnvironment) ||
+            gatedModuleUpdateTransactions is null) return false;
         var module = Modules.FirstOrDefault(item => item.Id == moduleId);
         return module is not null && module.IsUserInstalled && module.IsValid && !module.IsBusy &&
             !module.IsStartupAuthorizationBusy && !module.IsDownloadActive &&
@@ -1011,7 +1012,8 @@ public sealed partial class MainWindowViewModel(
     public async Task<WebModuleUpdateInstallOperationResult> InstallVerifiedModuleUpdateFromWebAsync(
         string moduleId, CancellationToken cancellationToken)
     {
-        if (!executionEnvironment.IsDevelopment || gatedModuleUpdateTransactions is null)
+        if (!ModuleUpdateTransactionHostPolicy.SupportsWebInstall(executionEnvironment) ||
+            gatedModuleUpdateTransactions is null)
             return new(WebModuleUpdateInstallOperationStatus.Unavailable);
         if (!await _webModuleUpdateGate.WaitAsync(0, cancellationToken))
             return new(WebModuleUpdateInstallOperationStatus.Busy);
@@ -1039,14 +1041,14 @@ public sealed partial class MainWindowViewModel(
                         ? WebModuleUpdateInstallOperationStatus.RecoveryRequired
                         : WebModuleUpdateInstallOperationStatus.Failed;
             sessionLog.Information("ModuleUpdate",
-                $"Development Web verified update install completed; module={moduleId}; source={sourceVersion}; target={targetVersion}; status={status}.");
+                $"Web verified update install completed; environment={executionEnvironment.Kind}; module={moduleId}; source={sourceVersion}; target={targetVersion}; status={status}.");
             return new(status, sourceVersion, targetVersion);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception)
         {
             sessionLog.Warning("ModuleUpdate",
-                $"Development Web verified update install failed; module={moduleId}; failure={exception.GetType().Name}.");
+                $"Web verified update install failed; environment={executionEnvironment.Kind}; module={moduleId}; failure={exception.GetType().Name}.");
             await RefreshModulesCoreAsync(CancellationToken.None);
             return new(WebModuleUpdateInstallOperationStatus.Failed);
         }

@@ -169,7 +169,7 @@ public sealed class ModuleUpdateTransactionService : IAsyncDisposable
         IModuleUpdateRuntimeCoordinator runtime,
         Action<ModuleUpdateTransactionLogEvent>? log, ModuleUpdateTransactionTestHooks? hooks)
     {
-        if (environmentIdentity is not ("Development" or "ModuleTest"))
+        if (environmentIdentity is not ("Production" or "Development" or "ModuleTest"))
             throw Configuration(ModuleUpdateTransactionConfigurationFailureCode.UnsupportedEnvironment);
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(stagingAttestor);

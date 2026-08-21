@@ -16,6 +16,7 @@ try
 {
     Directory.CreateDirectory(root);
     await SuccessAndIsolationAsync(root);
+    await ProductionLifecycleAsync(root);
     await ValidationAndLifecycleAsync(root);
     await FailureRollbackAsync(root);
     await PostRestoreRollbackAsync(root);
@@ -28,6 +29,51 @@ try
     Console.WriteLine("Module update transaction smoke test passed: parent-relative rename, tree leases, schema migration, runtime-consistent rollback, five crash windows and isolation.");
 }
 finally { try { Directory.Delete(root, true); } catch { } }
+
+static async Task ProductionLifecycleAsync(string root)
+{
+    const string production = "Production";
+    var commit = await Fixture.CreateAsync(root, "production-commit", "qing.production-commit", "2.0.0",
+        "1.0.0", runtimeIsolation: "OutOfProcess", uiKind: "Web", environmentIdentity: production);
+    var commitCoordinator = new FakeCoordinator(new(true, true, true, true));
+    await using (var service = commit.Service(commitCoordinator))
+    {
+        var result = await service.ExecuteAsync(new(commit.Attestation));
+        Require(result.Succeeded && result.State == ModuleUpdateTransactionState.Committed &&
+                Fixture.Version(commit.Installed) == "2.0.0",
+            "Production transaction constructs and commits a verified update");
+    }
+
+    var rollback = await Fixture.CreateAsync(root, "production-rollback", "qing.production-rollback", "2.0.0",
+        "1.0.0", runtimeIsolation: "OutOfProcess", uiKind: "Web", environmentIdentity: production);
+    var rollbackCoordinator = new FakeCoordinator(new(false, false, true, false)) { FailRestore = true };
+    await using (var service = rollback.Service(rollbackCoordinator))
+    {
+        var result = await service.ExecuteAsync(new(rollback.Attestation));
+        Require(result.FailureCode == ModuleUpdateTransactionFailureCode.RuntimeRestoreFailed &&
+                result.RolledBack && Fixture.Version(rollback.Installed) == "1.0.0",
+            "Production runtime restore failure rolls back to the installed version");
+    }
+
+    var recovery = await Fixture.CreateAsync(root, "production-recovery", "qing.production-recovery", "2.0.0",
+        "1.0.0", environmentIdentity: production);
+    var cleanupHooks = new ModuleUpdateTransactionTestHooks(
+        BackupCleanupStarting: () => throw new IOException("leave committed journal for cold-start recovery"));
+    await using (var service = recovery.Service(
+                     new FakeCoordinator(new(false, false, false, false)), cleanupHooks))
+    {
+        var result = await service.ExecuteAsync(new(recovery.Attestation));
+        Require(result.Succeeded && result.CleanupPending,
+            "Production commit preserves a recoverable cleanup-pending journal");
+    }
+    await using (var coldStart = recovery.Service(new FakeCoordinator(new(false, false, false, false))))
+    {
+        var result = await coldStart.RecoverAsync();
+        Require(result.CleanupCompleted == 1 && result.RecoveryRequired == 0 &&
+                !Directory.EnumerateFiles(recovery.Journal, "*.json", SearchOption.AllDirectories).Any(),
+            "Production cold-start recovery completes the committed transaction journal");
+    }
+}
 
 static async Task SuccessAndIsolationAsync(string root)
 {
@@ -1239,37 +1285,41 @@ sealed class TestAttestor(string environment, string physicalRoot) : IQmodVerifi
 sealed class Fixture
 {
     private const string Api = "experimental-0.1";
-    public required string Root, ModuleId, PackagePath, Installed, Journal, UserModules, CacheRoot;
+    public required string Root, ModuleId, PackagePath, Installed, Journal, UserModules, CacheRoot,
+        EnvironmentIdentity;
     public required QmodVerifiedStagingAttestation Attestation;
     public required QmodPackageStagingService Staging;
     public ModuleUpdateTransactionService Service(FakeCoordinator coordinator, ModuleUpdateTransactionTestHooks? hooks = null) =>
-        new("ModuleTest", UserModules, CacheRoot, Api, Staging, coordinator, null, hooks);
+        new(EnvironmentIdentity, UserModules, CacheRoot, Api, Staging, coordinator, null, hooks);
 
     public static async Task<Fixture> CreateAsync(string root, string name, string moduleId, string targetVersion,
         string? installedVersion, string moduleApi = Api,
-        string runtimeIsolation = "InProcessCollectible", string uiKind = "None")
+        string runtimeIsolation = "InProcessCollectible", string uiKind = "None",
+        string environmentIdentity = "ModuleTest")
     {
         var fixtureRoot = Path.Combine(root, name); Directory.CreateDirectory(fixtureRoot);
         var package = CreatePackage(fixtureRoot, moduleId, targetVersion, moduleApi, runtimeIsolation, uiKind);
-        var fixture = await FromExistingAsync(fixtureRoot, package, moduleId, targetVersion, moduleApi);
+        var fixture = await FromExistingAsync(
+            fixtureRoot, package, moduleId, targetVersion, moduleApi, environmentIdentity);
         if (installedVersion is not null) WriteModule(fixture.Installed, moduleId, installedVersion, "old");
         return fixture;
     }
 
     public static async Task<Fixture> FromExistingAsync(string root, string package, string moduleId, string version,
-        string moduleApi = Api)
+        string moduleApi = Api, string environmentIdentity = "ModuleTest")
     {
         var user = Path.Combine(root, "UserModules"); var cache = Path.Combine(root, "cache", "ModuleTransactions");
         Directory.CreateDirectory(user);
         var input = Input(package, moduleId, version, moduleApi);
         var staging = new QmodPackageStagingService(Path.Combine(root, "cache", "Staging"),
-            TimeProvider.System, "ModuleTest", user);
+            TimeProvider.System, environmentIdentity, user);
         var staged = await staging.StageAsync(input);
         if (!staged.Succeeded) throw new Exception("Assertion failed: fixture staged");
         var attestation = await staging.AttestVerifiedStagingAsync(input) ?? throw new Exception("fixture attestation failed");
         return new Fixture { Root = root, ModuleId = moduleId, PackagePath = package,
             Installed = Path.Combine(user, moduleId), Journal = Path.Combine(cache, "Journal"),
-            UserModules = user, CacheRoot = cache, Attestation = attestation, Staging = staging };
+            UserModules = user, CacheRoot = cache, Attestation = attestation, Staging = staging,
+            EnvironmentIdentity = environmentIdentity };
     }
 
     private static string CreatePackage(string root, string moduleId, string version, string moduleApi,

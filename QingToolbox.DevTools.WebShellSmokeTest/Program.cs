@@ -1,8 +1,10 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Windows;
+using Microsoft.Extensions.DependencyInjection;
 using QingToolbox.Core.Settings;
 using QingToolbox.Core.Localization;
+using QingToolbox.Core.Updates;
 using QingToolbox.Shell.Services;
 using QingToolbox.Shell.Startup;
 using QingToolbox.Shell.WebShell;
@@ -10,10 +12,58 @@ using QingToolbox.Shell.Windowing;
 
 var root = Directory.GetCurrentDirectory();
 var dev = ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.Development, "WebShellSmoke", root);
+var production = ApplicationExecutionEnvironment.Production();
+var moduleTest = ApplicationExecutionEnvironment.Sandbox(
+    ApplicationEnvironmentKind.ModuleTest, "WebShellSmoke", root);
 Console.WriteLine("Verifying Web Shell environment and protocol v4 session semantics...");
-Require(new WebShellState(ApplicationExecutionEnvironment.Production()).IsEnvironmentAllowed, "Production must allow the verified Web Shell.");
+Require(new WebShellState(production).IsEnvironmentAllowed, "Production must allow the verified Web Shell.");
 Require(new WebShellState(dev).IsEnvironmentAllowed, "Development must allow Web Shell.");
-Require(!new WebShellState(ApplicationExecutionEnvironment.Sandbox(ApplicationEnvironmentKind.ModuleTest, "WebShellSmoke", root)).IsEnvironmentAllowed, "ModuleTest must disable Web Shell.");
+Require(!new WebShellState(moduleTest).IsEnvironmentAllowed, "ModuleTest must disable Web Shell.");
+Require(ModuleUpdateTransactionHostPolicy.SupportsTransactions(production) &&
+        ModuleUpdateTransactionHostPolicy.SupportsTransactions(dev) &&
+        ModuleUpdateTransactionHostPolicy.SupportsTransactions(moduleTest),
+    "All isolated host environments must register the gated module transaction coordinator.");
+Require(ModuleUpdateTransactionHostPolicy.SupportsWebInstall(production) &&
+        ModuleUpdateTransactionHostPolicy.SupportsWebInstall(dev) &&
+        !ModuleUpdateTransactionHostPolicy.SupportsWebInstall(moduleTest),
+    "Production and Development must register the verified-update Web handler while ModuleTest remains native-only.");
+var productionModuleUpdateServices = new ServiceCollection();
+ModuleUpdateTransactionHostRegistration.AddTransactionServices(productionModuleUpdateServices, production);
+ModuleUpdateTransactionHostRegistration.AddWebInstallServices(productionModuleUpdateServices, production);
+Require(productionModuleUpdateServices.Any(descriptor =>
+            descriptor.ServiceType == typeof(ModuleUpdateTransactionService)) &&
+        productionModuleUpdateServices.Any(descriptor =>
+            descriptor.ServiceType == typeof(GatedModuleUpdateTransactionCoordinator)) &&
+        productionModuleUpdateServices.Any(descriptor =>
+            descriptor.ServiceType == typeof(IWebModuleUpdateInstallOperations)) &&
+        productionModuleUpdateServices.Any(descriptor =>
+            descriptor.ServiceType == typeof(IWebCommandHandler) &&
+            descriptor.ImplementationType == typeof(WebModuleInstallVerifiedUpdateCommandHandler)),
+    "Production composition must register the transaction service, gated coordinator and verified-update Web handler.");
+var developmentModuleUpdateServices = new ServiceCollection();
+ModuleUpdateTransactionHostRegistration.AddTransactionServices(developmentModuleUpdateServices, dev);
+ModuleUpdateTransactionHostRegistration.AddWebInstallServices(developmentModuleUpdateServices, dev);
+Require(developmentModuleUpdateServices.Any(descriptor =>
+            descriptor.ServiceType == typeof(ModuleUpdateTransactionService)) &&
+        developmentModuleUpdateServices.Any(descriptor =>
+            descriptor.ServiceType == typeof(GatedModuleUpdateTransactionCoordinator)) &&
+        developmentModuleUpdateServices.Any(descriptor =>
+            descriptor.ServiceType == typeof(IWebModuleUpdateInstallOperations)) &&
+        developmentModuleUpdateServices.Any(descriptor =>
+            descriptor.ServiceType == typeof(IWebCommandHandler) &&
+            descriptor.ImplementationType == typeof(WebModuleInstallVerifiedUpdateCommandHandler)),
+    "Development composition must preserve the transaction service, gated coordinator and verified-update Web handler.");
+var moduleTestModuleUpdateServices = new ServiceCollection();
+ModuleUpdateTransactionHostRegistration.AddTransactionServices(moduleTestModuleUpdateServices, moduleTest);
+ModuleUpdateTransactionHostRegistration.AddWebInstallServices(moduleTestModuleUpdateServices, moduleTest);
+Require(moduleTestModuleUpdateServices.Any(descriptor =>
+            descriptor.ServiceType == typeof(ModuleUpdateTransactionService)) &&
+        moduleTestModuleUpdateServices.Any(descriptor =>
+            descriptor.ServiceType == typeof(GatedModuleUpdateTransactionCoordinator)) &&
+        !moduleTestModuleUpdateServices.Any(descriptor =>
+            descriptor.ServiceType == typeof(IWebModuleUpdateInstallOperations) ||
+            descriptor.ServiceType == typeof(IWebCommandHandler)),
+    "ModuleTest must retain transaction recovery support without exposing a Web install handler.");
 
 Console.WriteLine("Verifying native Web workspace presentation transitions...");
 Require(WindowChromeBehavior.GetDwmCornerPreference(WindowState.Normal) == WindowChromeBehavior.DwmWindowCornerPreferenceRound &&

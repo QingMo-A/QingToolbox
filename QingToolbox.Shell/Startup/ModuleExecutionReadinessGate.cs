@@ -52,7 +52,7 @@ public interface IModuleExecutionReadinessGate
 
 /// <summary>
 /// Publishes one startup recovery decision and serializes normal execution with
-/// Development-only update transactions on a per-module boundary.
+/// Verified update transactions on a per-module boundary.
 /// </summary>
 public sealed class ModuleTransactionRecoveryGate
 {

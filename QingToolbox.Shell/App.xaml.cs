@@ -191,29 +191,7 @@ public partial class App : Application
                 }));
             services.AddSingleton<IQmodVerifiedStagingAttestor>(provider =>
                 provider.GetRequiredService<QmodPackageStagingService>());
-            if (!environment.IsProduction)
-            {
-                services.AddSingleton(provider => new ModuleUpdateTransactionService(
-                    environment.Kind.ToString(),
-                    provider.GetRequiredService<ApplicationPaths>().UserModulesDirectory,
-                    provider.GetRequiredService<ApplicationPaths>().ModuleTransactionsDirectory,
-                    ModuleUpdateIdentity.ModuleApiVersion,
-                    provider.GetRequiredService<IQmodVerifiedStagingAttestor>(),
-                    provider.GetRequiredService<IModuleUpdateRuntimeCoordinator>(),
-                    entry =>
-                    {
-                        var message = $"{entry.EventName}; module={entry.ModuleId}; " +
-                                      $"source={entry.SourceVersion}; target={entry.TargetVersion}; " +
-                                      $"transaction={entry.TransactionIdPrefix}; state={entry.State}; " +
-                                      $"failure={entry.FailureCode}.";
-                        var logger = provider.GetRequiredService<SessionLogService>();
-                        if (entry.FailureCode == ModuleUpdateTransactionFailureCode.None)
-                            logger.Information("ModuleTransaction", message);
-                        else
-                            logger.Warning("ModuleTransaction", message);
-                    }));
-                services.AddSingleton<GatedModuleUpdateTransactionCoordinator>();
-            }
+            ModuleUpdateTransactionHostRegistration.AddTransactionServices(services, environment);
             services.AddSingleton<ModuleTransactionRecoveryCoordinator>();
             services.AddSingleton(provider => new StartupHealthJournal(
                 provider.GetRequiredService<ApplicationPaths>().StartupHealthPath,
@@ -308,8 +286,7 @@ public partial class App : Application
                 services.AddSingleton<IWebModuleImportOperations, WebModuleImportOperations>();
                 services.AddSingleton<IWebModuleManagementOperations, WebModuleManagementOperations>();
                 services.AddSingleton<IWebModuleUpdateOperations, WebModuleUpdateOperations>();
-                if (environment.IsDevelopment)
-                    services.AddSingleton<IWebModuleUpdateInstallOperations, WebModuleUpdateInstallOperations>();
+                ModuleUpdateTransactionHostRegistration.AddWebInstallServices(services, environment);
                 services.AddSingleton<IWebModuleStartupAuthorizationOperations, WebModuleStartupAuthorizationOperations>();
                 services.AddSingleton<IWebLogSnapshotSource, WebLogSnapshotSource>();
                 services.AddSingleton<WebLogSnapshotProvider>();
@@ -330,8 +307,6 @@ public partial class App : Application
                 services.AddSingleton<IWebCommandHandler, WebModuleRemoveCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleCheckUpdateCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleDownloadUpdateCommandHandler>();
-                if (environment.IsDevelopment)
-                    services.AddSingleton<IWebCommandHandler, WebModuleInstallVerifiedUpdateCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleLoadCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleActivateCommandHandler>();
                 services.AddSingleton<IWebCommandHandler, WebModuleOpenCommandHandler>();

@@ -1,7 +1,7 @@
-using System.IO;
 using Microsoft.Extensions.DependencyInjection;
 using QingToolbox.Core.Updates;
 using QingToolbox.Shell.Startup;
+using QingToolbox.Shell.WebShell;
 
 namespace QingToolbox.Shell.Services;
 
@@ -20,10 +20,70 @@ public sealed record DeferredModuleRuntimeRestoreOutcome(
     int Blocked,
     int Failed);
 
+internal static class ModuleUpdateTransactionHostPolicy
+{
+    internal static bool SupportsTransactions(ApplicationExecutionEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        return environment.Kind is ApplicationEnvironmentKind.Production or
+            ApplicationEnvironmentKind.Development or ApplicationEnvironmentKind.ModuleTest;
+    }
+
+    internal static bool SupportsWebInstall(ApplicationExecutionEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        return environment.Kind is ApplicationEnvironmentKind.Production or
+            ApplicationEnvironmentKind.Development;
+    }
+}
+
+internal static class ModuleUpdateTransactionHostRegistration
+{
+    internal static void AddTransactionServices(
+        IServiceCollection services,
+        ApplicationExecutionEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        if (!ModuleUpdateTransactionHostPolicy.SupportsTransactions(environment)) return;
+
+        services.AddSingleton(provider => new ModuleUpdateTransactionService(
+            environment.Kind.ToString(),
+            provider.GetRequiredService<ApplicationPaths>().UserModulesDirectory,
+            provider.GetRequiredService<ApplicationPaths>().ModuleTransactionsDirectory,
+            ModuleUpdateIdentity.ModuleApiVersion,
+            provider.GetRequiredService<IQmodVerifiedStagingAttestor>(),
+            provider.GetRequiredService<IModuleUpdateRuntimeCoordinator>(),
+            entry =>
+            {
+                var message = $"{entry.EventName}; module={entry.ModuleId}; " +
+                              $"source={entry.SourceVersion}; target={entry.TargetVersion}; " +
+                              $"transaction={entry.TransactionIdPrefix}; state={entry.State}; " +
+                              $"failure={entry.FailureCode}.";
+                var logger = provider.GetRequiredService<SessionLogService>();
+                if (entry.FailureCode == ModuleUpdateTransactionFailureCode.None)
+                    logger.Information("ModuleTransaction", message);
+                else
+                    logger.Warning("ModuleTransaction", message);
+            }));
+        services.AddSingleton<GatedModuleUpdateTransactionCoordinator>();
+    }
+
+    internal static void AddWebInstallServices(
+        IServiceCollection services,
+        ApplicationExecutionEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        if (!ModuleUpdateTransactionHostPolicy.SupportsWebInstall(environment)) return;
+
+        services.AddSingleton<IWebModuleUpdateInstallOperations, WebModuleUpdateInstallOperations>();
+        services.AddSingleton<IWebCommandHandler, WebModuleInstallVerifiedUpdateCommandHandler>();
+    }
+}
+
 /// <summary>
-/// The only host-side entry for Development/ModuleTest transaction execution.
+/// The only host-side entry for verified module-update transaction execution.
 /// Its per-module lease closes the VerifyUnloaded-to-rename race against Shell
-/// commands without exposing a Production update path.
+/// commands in every supported host environment.
 /// </summary>
 public sealed class GatedModuleUpdateTransactionCoordinator(
     ModuleUpdateTransactionService transactions,
@@ -54,7 +114,6 @@ public sealed class GatedModuleUpdateTransactionCoordinator(
 /// </summary>
 public sealed class ModuleTransactionRecoveryCoordinator(
     ApplicationExecutionEnvironment environment,
-    ApplicationPaths paths,
     ModuleTransactionRecoveryGate gate,
     ModuleUpdateRuntimeCoordinator runtimeAdapter,
     IServiceProvider services,
@@ -68,18 +127,6 @@ public sealed class ModuleTransactionRecoveryCoordinator(
 
         try
         {
-            if (environment.IsProduction)
-            {
-                var hasUnexpectedJournal = await Task.Run(
-                    () => HasUnexpectedProductionJournal(paths.ModuleTransactionJournalDirectory),
-                    cancellationToken).ConfigureAwait(false);
-                gate.CompleteRecovery([], hasUnexpectedJournal);
-                var production = new ModuleTransactionRecoveryOutcome(
-                    0, 0, hasUnexpectedJournal ? 1 : 0, [], hasUnexpectedJournal);
-                LogCompletion(production);
-                return production;
-            }
-
             ModuleUpdateRecoveryResult result;
             using (runtimeAdapter.BeginStartupRecoveryDeferral())
             {
@@ -192,42 +239,6 @@ public sealed class ModuleTransactionRecoveryCoordinator(
         else
         {
             sessionLog.Information("ModuleRecovery", message);
-        }
-    }
-
-    private static bool HasUnexpectedProductionJournal(string journalRoot)
-    {
-        if (!Directory.Exists(journalRoot))
-        {
-            return false;
-        }
-
-        try
-        {
-            foreach (var entry in Directory.EnumerateFileSystemEntries(journalRoot))
-            {
-                if (File.Exists(entry))
-                {
-                    return true;
-                }
-
-                if (!Directory.Exists(entry) ||
-                    (File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0)
-                {
-                    return true;
-                }
-
-                if (Directory.EnumerateFileSystemEntries(entry).Any())
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return true;
         }
     }
 

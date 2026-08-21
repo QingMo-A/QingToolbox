@@ -30,5 +30,7 @@ The matrix verifies:
 - RecoveryRequired: an injected inability to prove v2 exit prevents directory replacement and
   retains the journal and backup while unrelated modules remain available.
 
-All canary worker processes are disposed after each scenario. This is Development/ModuleTest gate
-coverage only and does not enable Production transactions or automatic module installation.
+All canary worker processes are disposed after each scenario. This canary remains isolated
+Development/ModuleTest runtime coverage; Production uses the same transaction core with separate
+Production commit, rollback, and cold-start recovery smoke coverage. It does not authorize automatic
+module installation or arbitrary local same-ID package overwrite.
