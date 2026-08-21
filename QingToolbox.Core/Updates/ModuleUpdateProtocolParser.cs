@@ -58,7 +58,8 @@ public static class ModuleUpdateProtocolParser
             var api = Text(item, "moduleApiVersion"); if (string.IsNullOrWhiteSpace(api)) throw Error("Empty moduleApiVersion.");
             if (!SemanticVersion.TryParse(Text(item, "minimumHostVersion"), out var minimum)) throw Error("Invalid minimumHostVersion.");
             SemanticVersion? maximum = null;
-            if (item.TryGetProperty("maximumHostVersionExclusive", out var maxElement))
+            if (item.TryGetProperty("maximumHostVersionExclusive", out var maxElement) &&
+                maxElement.ValueKind != JsonValueKind.Null)
             {
                 if (maxElement.ValueKind != JsonValueKind.String || !SemanticVersion.TryParse(maxElement.GetString(), out maximum)) throw Error("Invalid maximumHostVersionExclusive.");
                 if (maximum!.CompareTo(minimum) <= 0) throw Error("Maximum host version must exceed minimum.");

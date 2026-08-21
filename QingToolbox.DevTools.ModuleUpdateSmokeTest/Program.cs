@@ -34,7 +34,24 @@ static class Smoke
         Reject(() => ModuleUpdateProtocolParser.ParseIndex(new byte[256 * 1024 + 1]), "large index");
         Reject(() => ModuleUpdateProtocolParser.ParseUpdate(new byte[128 * 1024 + 1], "qing.demo"), "large update");
         var release = """[{"version":"0.2.0-alpha","channel":"preview","moduleApiVersion":"experimental-0.1","minimumHostVersion":"0.1.0-alpha","maximumHostVersionExclusive":"1.0.0","publishedAt":"2026-07-20T08:00:00Z","package":{"fileName":"Demo-0.2.0-alpha.qmod","url":"https://github.com/QingMo-A/QingToolbox/releases/download/v0.2.0-alpha/Demo-0.2.0-alpha.qmod","size":42,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"releaseNotes":{"zh-CN":"说明","en-US":"Notes"}}]""";
-        Assert(ModuleUpdateProtocolParser.ParseUpdate(Bytes(Update(release)), "qing.demo").Releases.Count == 1, "release");
+        var bounded = ModuleUpdateProtocolParser.ParseUpdate(Bytes(Update(release)), "qing.demo");
+        Assert(bounded.Releases.Count == 1 && bounded.Releases[0].MaximumHostVersionExclusive?.ToString() == "1.0.0", "release");
+        var explicitNullMaximum = release.Replace("\"maximumHostVersionExclusive\":\"1.0.0\"", "\"maximumHostVersionExclusive\":null");
+        var omittedMaximum = release.Replace(",\"maximumHostVersionExclusive\":\"1.0.0\"", string.Empty);
+        Assert(ModuleUpdateProtocolParser.ParseUpdate(Bytes(Update(explicitNullMaximum)), "qing.demo")
+            .Releases.Single().MaximumHostVersionExclusive is null, "explicit null maximum host bound");
+        Assert(ModuleUpdateProtocolParser.ParseUpdate(Bytes(Update(omittedMaximum)), "qing.demo")
+            .Releases.Single().MaximumHostVersionExclusive is null, "omitted maximum host bound");
+        foreach (var invalidMaximum in new[] { "true", "1", "{}", "[]" })
+            Reject(() => ModuleUpdateProtocolParser.ParseUpdate(Bytes(Update(release.Replace(
+                "\"maximumHostVersionExclusive\":\"1.0.0\"",
+                $"\"maximumHostVersionExclusive\":{invalidMaximum}"))), "qing.demo"),
+                "non-string maximum host bound " + invalidMaximum);
+        foreach (var invalidMaximum in new[] { "not-semver", "0.1.0-alpha", "0.1.0-0" })
+            Reject(() => ModuleUpdateProtocolParser.ParseUpdate(Bytes(Update(release.Replace(
+                "\"maximumHostVersionExclusive\":\"1.0.0\"",
+                $"\"maximumHostVersionExclusive\":\"{invalidMaximum}\""))), "qing.demo"),
+                "invalid maximum host bound " + invalidMaximum);
         Assert(ModuleUpdateProtocolParser.ParseUpdate(Bytes(Update(release.Replace("08:00:00Z", "08:00:00.1234567Z"))), "qing.demo").Releases.Count == 1, "fractional UTC");
         foreach (var timestamp in new[] { "2026-07-20T08:00:00+00:00", "2026-07-20 08:00:00Z", "2026-7-20T8:00:00Z", " 2026-07-20T08:00:00Z" })
             Reject(() => ModuleUpdateProtocolParser.ParseUpdate(Bytes(Update(release.Replace("2026-07-20T08:00:00Z", timestamp))), "qing.demo"), "strict UTC " + timestamp);
