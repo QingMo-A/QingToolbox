@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Tag = "v0.2.7-alpha",
+    [string]$Tag = "v0.2.8-alpha",
     [string]$InstallerPath,
     [Parameter(Mandatory = $true)][string]$OutputDirectory
 )

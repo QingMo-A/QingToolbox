@@ -2,13 +2,20 @@
 
 ## Unreleased
 
-### 0.2.8-alpha candidate (not published)
+### 0.2.9-alpha candidate (not published)
 
-- Carries the Web module host boundary forward and prepares the next host-only Preview upgrade from published `v0.2.7-alpha`.
-- Adds the host interaction hooks required by Web modules for overlay presentation and controlled external file drops.
+- Reduces stalls when restoring the Shell, floating badge, and Web modules after long background sessions by suspending hidden WebView2 surfaces, pausing hidden native animations, coalescing deferred module events, and bounding concurrent module-window lifecycle work.
+- Enables explicit, user-confirmed Production updates for already installed modules from host-authorized official metadata, with strict package staging, runtime quiescing, atomic replacement, rollback, and cold-start recovery.
+- Accepts omitted or explicit-null maximum host-version metadata while retaining strict rejection of malformed bounds.
 - The host installer remains installer-only and does not bundle concrete modules.
-- Candidate commit, installer size/SHA256, and exact-HEAD Preview validation evidence remain to be recorded after the final `0.2.8-alpha` candidate gate.
+- Candidate commit, installer size/SHA256, and exact-HEAD Preview validation evidence remain to be recorded after the final `0.2.9-alpha` candidate gate.
 - Real-user installation, upgrade, Repair, uninstall, signature/SmartScreen, and representative-environment acceptance remain unrecorded or CI-only until the acceptance checklist is completed.
+
+## 0.2.8-alpha - 2026-08-16
+
+- Added optional Web Module host window presentation and controlled external file-drop hooks.
+- Preserved Standard Web module windows while enabling transparent Overlay modules without changing the Web bridge protocol.
+- Kept concrete modules independently distributed as `.qmod` packages outside the host installer and host Release.
 
 ## 0.2.5-alpha - 2026-08-11
 
