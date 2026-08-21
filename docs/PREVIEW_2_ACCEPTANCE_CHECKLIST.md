@@ -16,15 +16,15 @@ Complete this metadata for each candidate. Do not reuse evidence from a differen
 
 | Field | Value |
 |---|---|
-| Candidate commit | Pending final candidate commit |
-| Workflow run ID and URL | Pending exact-HEAD Preview validation |
-| Workflow conclusion | Not Run |
+| Candidate commit | `d4b30d5d9672fc54f0b08446157d2456406c59d1` (pre-handoff; the publishing workflow revalidates the final documentation HEAD) |
+| Workflow run ID and URL | `32462342007` / https://github.com/QingMo-A/QingToolbox/actions/runs/32462342007 |
+| Workflow conclusion | Automated Pass |
 | Test date | 2026-08-21 |
 | Windows version | GitHub Actions `windows-latest` (image revision not recorded) |
-| Installer SHA256 | Pending final candidate build |
-| Tester | Pending |
-| Evidence or log location | Pending |
-| Notes | Candidate is installer-only and not published. The published upgrade baseline is `v0.2.8-alpha`. |
+| Installer SHA256 | `F5496DF3479322D6F46544BEBE78B22DF5DBFED39FD8BE5FE22EFF9212142CC7` (58,299,475 bytes) |
+| Tester | GitHub Actions automated gate |
+| Evidence or log location | https://github.com/QingMo-A/QingToolbox/actions/runs/32462342007 |
+| Notes | Pre-handoff candidate is installer-only. The published upgrade baseline is `v0.2.8-alpha`; the publishing BAT performs a fresh exact-HEAD gate before creating the tag. |
 
 Historical automated evidence is informative only: workflow run `32458823753` passed for feature-complete commit `10bd6597c106b72416de414688bb44c79ec4985c`. The candidate above must have its own exact-HEAD run after release metadata is prepared.
 
@@ -34,18 +34,18 @@ The local and CI evidence above is supplementary release-gate evidence only. Rea
 
 | Check | Status | Evidence / notes |
 |---|---|---|
-| Use the official GitHub `v0.2.8-alpha` installer | Not Run | Pending exact-HEAD CI candidate gate |
+| Use the official GitHub `v0.2.8-alpha` installer | Automated Pass | CI run `32462342007` |
 | Verify its official SHA256 sidecar | Not Run | |
 | Install to the standard user-writable location | Not Run | |
-| Start v0.2.8-alpha | Not Run | Pending exact-HEAD CI candidate gate |
+| Start v0.2.8-alpha | Automated Pass | CI run `32462342007` |
 | Create real settings | Not Run | |
 | Add a test user module | Not Run | |
 | Create module data and cache | Not Run | |
 | Enable login startup | Not Run | |
 | Add an unknown file under the install directory | Not Run | |
-| Run 0.2.9-alpha without uninstalling v0.2.8-alpha | Not Run | Pending exact-HEAD CI in-place upgrade gate |
+| Run 0.2.9-alpha without uninstalling v0.2.8-alpha | Automated Pass | CI run `32462342007`; manual user-machine check remains Not Run |
 | Confirm the same install directory and safe old-process shutdown | Not Run | |
-| Confirm 0.2.9-alpha version and display name | Not Run | Pending exact-HEAD CI upgrade gate |
+| Confirm 0.2.9-alpha version and display name | Automated Pass | CI run `32462342007`; manual check remains Not Run |
 | Confirm settings, module, data, cache, and startup authorization are retained | Not Run | |
 | Confirm the unknown install file is retained | Not Run | |
 | Confirm current-user shortcuts are not duplicated and no public shortcuts appear | Not Run | |
