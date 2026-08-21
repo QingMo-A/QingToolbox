@@ -15,6 +15,15 @@ $output = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { Join-Path $repo 
 $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($manifest.id -notmatch '^[a-z0-9]+(?:[._-][a-z0-9]+)+$') { throw "Invalid module id: $($manifest.id)" }
 if ($manifest.version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') { throw "Invalid SemVer: $($manifest.version)" }
+$moduleApiVersion = "experimental-0.1"
+$packageManifestName = "qmod.json"
+$packageManifestJson = [ordered]@{
+    schemaVersion = 1
+    moduleId = [string]$manifest.id
+    version = [string]$manifest.version
+    moduleApiVersion = $moduleApiVersion
+    entryManifest = "module.json"
+} | ConvertTo-Json -Compress
 $assemblyVersion = (($manifest.version -split '-')[0]) + ".0"
 $project = Join-Path $moduleRoot "QingToolbox.Modules.$ModuleName.csproj"
 $build = Join-Path $moduleRoot "bin\$Configuration\net10.0-windows"
@@ -47,6 +56,10 @@ try {
     $dllVersion = [Reflection.AssemblyName]::GetAssemblyName((Join-Path $build $assemblyName)).Version.ToString(3)
     if ($dllVersion -ne $manifest.version) { throw "DLL version $dllVersion does not match manifest $($manifest.version)." }
     New-Item -ItemType Directory -Force -Path (Join-Path $staging "i18n"),$output | Out-Null
+    [IO.File]::WriteAllText(
+        (Join-Path $staging $packageManifestName),
+        $packageManifestJson,
+        [Text.UTF8Encoding]::new($false))
     foreach ($name in @("module.json", "icon.svg", $assemblyName)) { Copy-Item -LiteralPath (Join-Path $build $name) -Destination (Join-Path $staging $name) }
     foreach ($culture in @("en-US", "zh-CN")) { Copy-Item -LiteralPath (Join-Path $build "i18n\$culture.json") -Destination (Join-Path $staging "i18n\$culture.json") }
     $thirdPartySource = Join-Path $moduleRoot "third-party"
@@ -65,7 +78,20 @@ try {
     $archive = [IO.Compression.ZipFile]::OpenRead($temporaryPackage)
     try {
         $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\','/') })
-        foreach ($required in @("module.json",$assemblyName,"icon.svg","i18n/en-US.json","i18n/zh-CN.json")) { if ($required -notin $entries) { throw "Missing package entry: $required" } }
+        foreach ($required in @($packageManifestName,"module.json",$assemblyName,"icon.svg","i18n/en-US.json","i18n/zh-CN.json")) { if ($required -notin $entries) { throw "Missing package entry: $required" } }
+        $packageManifestEntries = @($archive.Entries | Where-Object {
+            $_.FullName.Replace('\','/').Equals($packageManifestName, [StringComparison]::OrdinalIgnoreCase)
+        })
+        if ($packageManifestEntries.Count -ne 1 -or $packageManifestEntries[0].FullName.Replace('\','/') -cne $packageManifestName) {
+            throw "Package must contain exactly one root-level $packageManifestName entry with canonical casing."
+        }
+        $packageManifestReader = [IO.StreamReader]::new(
+            $packageManifestEntries[0].Open(),
+            [Text.UTF8Encoding]::new($false, $true),
+            $false)
+        try {
+            if ($packageManifestReader.ReadToEnd() -cne $packageManifestJson) { throw "Package manifest content changed during packaging." }
+        } finally { $packageManifestReader.Dispose() }
         if ($manifest.uiKind -eq "Web" -and "ui/index.html" -notin $entries) { throw "Missing package entry: ui/index.html" }
         if ($entries | Where-Object { $_ -match '(^|/)(QingToolbox\.(Abstractions|Shell|Core).*|bin|obj|web/src|web/node_modules)(/|$)|\.pdb$|\.cs$|\.csproj$|package(-lock)?\.json$|settings\.json$|\.log$|\.map$' }) { throw "Forbidden package content detected." }
     } finally { $archive.Dispose() }

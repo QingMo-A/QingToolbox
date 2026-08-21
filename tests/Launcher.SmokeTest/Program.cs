@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using QingToolbox.Abstractions.Localization;
 using QingToolbox.Abstractions.Modules;
+using QingToolbox.Core.Updates;
 using QingToolbox.Modules.Launcher;
 
 var root = FindRoot(AppContext.BaseDirectory);
@@ -253,7 +254,7 @@ try
     {
         var value = manifest.RootElement;
         Require(value.GetProperty("id").GetString() == "qing.launcher", "Launcher module id changed.");
-        Require(value.GetProperty("version").GetString() == "0.2.1" && value.GetProperty("minimumHostVersion").GetString() == "0.2.6-alpha", "Launcher version contract changed.");
+        Require(value.GetProperty("version").GetString() == "0.2.2" && value.GetProperty("minimumHostVersion").GetString() == "0.2.6-alpha", "Launcher version contract changed.");
         Require(value.GetProperty("uiKind").GetString() == "Web" && value.GetProperty("runtimeIsolation").GetString() == "OutOfProcess" && value.GetProperty("webEntry").GetString() == "ui/index.html", "Launcher Web manifest contract changed.");
         Require(value.GetProperty("loadMode").GetString() == "Manual", "Launcher must remain manually loaded.");
     }
@@ -261,35 +262,99 @@ try
         Require(File.Exists(Path.Combine(root, "modules", "Launcher", "i18n", culture + ".json")), $"Missing {culture} resources.");
     Require(File.Exists(Path.Combine(root, "modules", "Launcher", "ui", "index.html")), "Launcher UI build output is missing.");
 
-    if (args.Length >= 2 && args[0] == "--package") VerifyPackage(args[1]);
+    if (args.Length >= 2 && args[0] == "--package") await VerifyPackageAsync(args[1], Path.Combine(temp, "package-staging"));
     Console.WriteLine("Qing Launcher smoke test passed.");
 }
 finally { try { Directory.Delete(temp, true); } catch { } }
 
-static void VerifyPackage(string packagePath)
+static async Task VerifyPackageAsync(string packagePath, string stagingTestRoot)
 {
-    using var archive = ZipFile.OpenRead(packagePath);
-    var entries = archive.Entries.Select(entry => entry.FullName.Replace('\\', '/')).ToHashSet(StringComparer.Ordinal);
-    foreach (var required in new[] { "module.json", "QingToolbox.Modules.Launcher.dll", "icon.svg", "i18n/en-US.json", "i18n/zh-CN.json", "ui/index.html",
-        "third-party/Everything/Everything.exe", "third-party/Everything/es.exe", "third-party/Everything/Everything64.dll",
-        "third-party/Everything/LICENSE.txt", "third-party/Everything/NOTICE.md" })
-        Require(entries.Contains(required), $"Package is missing {required}.");
-    Require(entries.Any(entry => entry.StartsWith("ui/assets/", StringComparison.Ordinal)), "Package has no UI assets.");
-    foreach (var expected in new Dictionary<string, string>(StringComparer.Ordinal)
+    const string moduleId = "qing.launcher";
+    const string version = "0.2.2";
+    const string moduleApiVersion = "experimental-0.1";
+    using (var archive = ZipFile.OpenRead(packagePath))
     {
-        ["third-party/Everything/Everything.exe"] = "F191F756996A14A11E5445FA7103D302EFD510CF2FBF920E6C0C8ED51D512E36",
-        ["third-party/Everything/es.exe"] = "3BE7185707E8023CD9295DBCB7A3FA4092A3D8F52B7FA92A0B84243AB40D12F3",
-        ["third-party/Everything/Everything64.dll"] = "81B5BE18126ACD2C2B913F8F4A821E476B18393CDD3DEBD03387C50AFD8DB88F",
-        ["third-party/Everything/LICENSE.txt"] = "C13D19ADCBFD5D07E9512DE9DF99956A3423399ED1FADC5FD33186697AD8DF2F",
-    })
-    {
-        var entry = archive.Entries.FirstOrDefault(candidate =>
-            candidate.FullName.Replace('\\', '/').Equals(expected.Key, StringComparison.Ordinal))
-            ?? throw new InvalidOperationException($"Package is missing {expected.Key}.");
-        using var stream = entry.Open();
-        Require(Convert.ToHexString(SHA256.HashData(stream)) == expected.Value, $"Package has an unexpected {expected.Key} hash.");
+        var entries = archive.Entries.Select(entry => entry.FullName.Replace('\\', '/')).ToHashSet(StringComparer.Ordinal);
+        foreach (var required in new[] { "qmod.json", "module.json", "QingToolbox.Modules.Launcher.dll", "icon.svg", "i18n/en-US.json", "i18n/zh-CN.json", "ui/index.html",
+            "third-party/Everything/Everything.exe", "third-party/Everything/es.exe", "third-party/Everything/Everything64.dll",
+            "third-party/Everything/LICENSE.txt", "third-party/Everything/NOTICE.md" })
+            Require(entries.Contains(required), $"Package is missing {required}.");
+        var packageManifests = archive.Entries.Where(entry =>
+            entry.FullName.Replace('\\', '/').Equals("qmod.json", StringComparison.OrdinalIgnoreCase)).ToArray();
+        Require(packageManifests.Length == 1 && packageManifests[0].FullName.Replace('\\', '/') == "qmod.json",
+            "Package must contain exactly one canonical root qmod.json.");
+        var qmodBytes = ReadEntryBytes(packageManifests[0]);
+        Require(!qmodBytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }), "qmod.json must be UTF-8 without BOM.");
+        using (var qmod = JsonDocument.Parse(qmodBytes, new JsonDocumentOptions
+        {
+            AllowTrailingCommas = false,
+            CommentHandling = JsonCommentHandling.Disallow,
+        }))
+        {
+            Require(qmod.RootElement.ValueKind == JsonValueKind.Object, "qmod.json root must be an object.");
+            var propertyNames = qmod.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
+            var expectedProperties = new[] { "schemaVersion", "moduleId", "version", "moduleApiVersion", "entryManifest" };
+            Require(propertyNames.Length == expectedProperties.Length &&
+                    propertyNames.Distinct(StringComparer.Ordinal).Count() == expectedProperties.Length &&
+                    propertyNames.ToHashSet(StringComparer.Ordinal).SetEquals(expectedProperties),
+                "qmod.json must contain exactly the schema-1 properties.");
+            Require(qmod.RootElement.GetProperty("schemaVersion").GetInt32() == 1 &&
+                    qmod.RootElement.GetProperty("moduleId").GetString() == moduleId &&
+                    qmod.RootElement.GetProperty("version").GetString() == version &&
+                    qmod.RootElement.GetProperty("moduleApiVersion").GetString() == moduleApiVersion &&
+                    qmod.RootElement.GetProperty("entryManifest").GetString() == "module.json",
+                "qmod.json identity does not match the Launcher package.");
+        }
+        using (var moduleManifest = JsonDocument.Parse(ReadEntryBytes(archive.GetEntry("module.json")!)))
+            Require(moduleManifest.RootElement.GetProperty("id").GetString() == moduleId &&
+                    moduleManifest.RootElement.GetProperty("version").GetString() == version,
+                "module.json identity does not agree with qmod.json.");
+        Require(entries.Any(entry => entry.StartsWith("ui/assets/", StringComparison.Ordinal)), "Package has no UI assets.");
+        foreach (var expected in new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["third-party/Everything/Everything.exe"] = "F191F756996A14A11E5445FA7103D302EFD510CF2FBF920E6C0C8ED51D512E36",
+            ["third-party/Everything/es.exe"] = "3BE7185707E8023CD9295DBCB7A3FA4092A3D8F52B7FA92A0B84243AB40D12F3",
+            ["third-party/Everything/Everything64.dll"] = "81B5BE18126ACD2C2B913F8F4A821E476B18393CDD3DEBD03387C50AFD8DB88F",
+            ["third-party/Everything/LICENSE.txt"] = "C13D19ADCBFD5D07E9512DE9DF99956A3423399ED1FADC5FD33186697AD8DF2F",
+        })
+        {
+            var entry = archive.Entries.FirstOrDefault(candidate =>
+                candidate.FullName.Replace('\\', '/').Equals(expected.Key, StringComparison.Ordinal))
+                ?? throw new InvalidOperationException($"Package is missing {expected.Key}.");
+            using var stream = entry.Open();
+            Require(Convert.ToHexString(SHA256.HashData(stream)) == expected.Value, $"Package has an unexpected {expected.Key} hash.");
+        }
+        Require(!entries.Any(entry => entry.Contains("web/src", StringComparison.OrdinalIgnoreCase) || entry.Contains("node_modules", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) || entry.EndsWith("package.json", StringComparison.OrdinalIgnoreCase) || entry.EndsWith("package-lock.json", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".map", StringComparison.OrdinalIgnoreCase)), "Package contains forbidden development content.");
     }
-    Require(!entries.Any(entry => entry.Contains("web/src", StringComparison.OrdinalIgnoreCase) || entry.Contains("node_modules", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) || entry.EndsWith("package.json", StringComparison.OrdinalIgnoreCase) || entry.EndsWith("package-lock.json", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".map", StringComparison.OrdinalIgnoreCase)), "Package contains forbidden development content.");
+
+    packagePath = Path.GetFullPath(packagePath);
+    var packageInfo = new FileInfo(packagePath);
+    var packageHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(packagePath))).ToLowerInvariant();
+    var packageName = Path.GetFileName(packagePath);
+    var verifiedPackage = new VerifiedModulePackage(moduleId, SemanticVersion.Parse(version), packageName,
+        packagePath, packageInfo.Length, packageHash, DateTimeOffset.UtcNow);
+    var releaseIdentity = new ModulePackageDownloadIdentity(moduleId, "0.2.1", version, packageName,
+        $"https://github.com/QingMo-A/QingToolbox/releases/download/modules-launcher-v{version}/{packageName}",
+        packageInfo.Length, packageHash);
+    Directory.CreateDirectory(stagingTestRoot);
+    var userModulesRoot = Path.Combine(stagingTestRoot, "UserModules");
+    Directory.CreateDirectory(userModulesRoot);
+    await using var staging = new QmodPackageStagingService(Path.Combine(stagingTestRoot, "Staging"),
+        TimeProvider.System, "ModuleTest", userModulesRoot);
+    var result = await staging.StageAsync(new QmodStagingInput(verifiedPackage, releaseIdentity,
+        moduleApiVersion, "qingtoolbox-official"));
+    Require(result.Succeeded && result.FailureCode == QmodStagingFailureCode.None &&
+            result.StagingDirectory is not null && File.Exists(Path.Combine(result.StagingDirectory, "qmod.json")),
+        $"QmodPackageStagingService rejected the Launcher package: {result.FailureCode}.");
+    Console.WriteLine("Launcher package verified-staging acceptance passed.");
+}
+
+static byte[] ReadEntryBytes(ZipArchiveEntry entry)
+{
+    using var stream = entry.Open();
+    using var buffer = new MemoryStream();
+    stream.CopyTo(buffer);
+    return buffer.ToArray();
 }
 
 static string FindRoot(string path)

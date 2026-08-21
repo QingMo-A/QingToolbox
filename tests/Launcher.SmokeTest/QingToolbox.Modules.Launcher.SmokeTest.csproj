@@ -9,5 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\modules\Launcher\QingToolbox.Modules.Launcher.csproj" AdditionalProperties="QingToolboxHostRoot=$(QingToolboxHostRoot)" />
+    <ProjectReference Include="$(QingToolboxHostRoot)\QingToolbox.Core\QingToolbox.Core.csproj" />
   </ItemGroup>
 </Project>
