@@ -89,7 +89,7 @@ async function loadSettings(): Promise<void> {
         language: 'system',
         appearancePresetId: 'qing-default',
         closeBehavior: 'ask',
-        startupPresentation: 'tray',
+        startupPresentation: 'main',
         launchAtLogin: false,
         showLogsInSidebar: false,
         recentModuleIds: [],
