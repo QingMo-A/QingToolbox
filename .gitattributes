@@ -1,4 +1,5 @@
 # Preserve the upstream Everything license byte-for-byte. Its historical
 # tab-indented lines intentionally contain trailing spaces; those are not
 # project-authored source whitespace and must not trigger diff checks.
-QingToolbox.Tauri/native-launcher/third-party/Everything/LICENSE.txt whitespace=-trailing-space
+QingToolbox.Tauri/native-launcher/third-party/Everything/LICENSE.txt -text -diff whitespace=-trailing-space
+QingToolbox.Tauri/native-launcher/third-party/Everything/NOTICE.md -text -diff
