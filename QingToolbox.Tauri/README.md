@@ -14,6 +14,8 @@ QingToolbox.Tauri/
 │  ├─ src/lib.rs                # Tauri Builder 与 typed command
 │  ├─ src/modules.rs            # 后端拥有的清单发现与索引
 │  ├─ src/paths.rs              # 模块根和资源路径边界
+│  ├─ src/settings.rs           # Rust 持有的共享设置与原子保存
+│  ├─ src/importer.rs           # 有界、安全的 .qmod 导入与原子发布
 │  ├─ src/protocol.rs           # JSON envelope/frame 校验
 │  ├─ src/runtime.rs            # 新模块进程生命周期
 │  ├─ src/web.rs                # 受控 qmod:// Web 资源和模块窗口
@@ -61,6 +63,14 @@ pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop
   `stop_module`、`invoke_module`、`invoke_module_window`、
   `get_module_window_context`、`hide_module_window` 和 `open_module` 窄 typed command；模块发现只读取清单，
   进程启动必须来自后端索引中的 manifest-owned `.exe`。
+- 已接入 Rust 持有的宿主设置：语言、外观、关闭行为、启动显示模式、登录启动偏好和
+  最近模块 ID 通过固定 `%APPDATA%\\QingToolbox\\settings.json` 字段读写。
+  更新使用同目录临时文件和备份回滚；未知旧字段会被保留，损坏文件会生成有限数量的
+  `settings.corrupt-*.json` 备份。
+- 主窗口可以通过原生文件选择器导入 `.qmod`。导入器只接受 ZIP 容器，限制条目、展开大小、
+  单文件大小和压缩比，拒绝绝对/穿越/重复/加密/符号链接路径；包先在用户模块根下的随机
+  临时目录中解压并通过新宿主 manifest 校验，随后以同卷 rename 原子发布。导入阶段不会
+  启动模块，也不会覆盖同 ID 目录。
 - 已接入最小托盘菜单（打开工具箱 / 退出）和关闭窗口转入托盘行为。
 - 应用退出事件会先请求所有由本宿主创建的模块进程优雅关闭，超时后由
   Rust runtime supervisor 强制收拢，不会触碰用户自行启动的同名进程。
@@ -77,10 +87,11 @@ pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop
   校验 manifest operations。
 - `scripts/build-tauri-canary.ps1` 和 `scripts/smoke-tauri-canary.ps1` 提供
   一个真实子进程的 hello、invoke、shutdown 协议验证闭环。
-- 尚未接入全局快捷键、Everything、Explorer 拖入、更新器和设置迁移；这些会
+- 尚未接入全局快捷键、Everything、Explorer 拖入、更新器、登录启动注册和完整设置迁移；这些会
   在新协议确认后逐项重写，不建立旧 ABI 兼容层。
 - `bundle.active` 暂时关闭，避免在品牌图标和签名资产就绪前生成安装包。
-- capability 当前只授予 Tauri core 默认能力；新增系统能力必须显式增加权限。
+- capability 当前只授予 Tauri core 默认能力和显式的 dialog 文件选择器权限；新增系统能力必须
+  显式增加权限。Vue 仍不能直接读写文件系统或启动进程。
 - 不修改、不加载现有 WPF 项目；旧模块迁移将在协议确定后单独进行。
 
 ## 版本策略

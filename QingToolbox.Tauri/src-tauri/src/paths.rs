@@ -113,7 +113,7 @@ pub fn resolve_module_roots() -> Vec<ModuleRoot> {
     roots
 }
 
-fn user_modules_root() -> Option<PathBuf> {
+pub fn user_modules_root() -> Option<PathBuf> {
     Some(user_data_root()?.join("Modules"))
 }
 
@@ -133,6 +133,24 @@ pub fn user_data_root() -> Option<PathBuf> {
         })
     }?;
     Some(PathBuf::from(base).join("QingToolbox"))
+}
+
+/// Shared settings location used by the legacy host as well. Keeping the
+/// file under the roaming profile lets the Tauri host pick up preferences
+/// without moving or deleting the existing WPF data during migration.
+pub fn settings_path() -> Option<PathBuf> {
+    let base = if cfg!(windows) {
+        env::var_os("APPDATA").or_else(|| env::var_os("LOCALAPPDATA"))
+    } else {
+        env::var_os("XDG_CONFIG_HOME").or_else(|| {
+            env::var_os("HOME").map(|home| PathBuf::from(home).join(".config").into_os_string())
+        })
+    }?;
+    Some(
+        PathBuf::from(base)
+            .join("QingToolbox")
+            .join("settings.json"),
+    )
 }
 
 /// Resolve the host-owned data directory for one module. The module id is

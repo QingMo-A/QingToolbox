@@ -58,11 +58,14 @@ i18n/
 - A package may contain at most 2,048 entries and expand to at most 256 MB.
 - The manifest must be valid and its entry DLL must exist before installation.
 
-The Preview importer extracts into a temporary directory under
-`%LOCALAPPDATA%\QingToolbox\Modules`. It moves the completed directory into
-place only after validation. Failed imports remove the temporary directory.
-Existing module IDs are rejected; remove the old module manually before
-importing another package with the same ID.
+The legacy Preview importer extracts into a temporary directory under
+`%LOCALAPPDATA%\QingToolbox\Modules`. The Tauri host has a separate importer
+for the process profile: it validates the complete ZIP first, rejects unsafe
+entries (including duplicate case-insensitive names, encrypted entries and
+symlinks), extracts below a random staging directory, runs the new-host
+manifest validator, and moves the finished directory into place only after
+validation. Failed imports remove the staging directory. Existing module IDs
+are rejected; the importer never replaces or executes a package during import.
 
 Import and Refresh only read and validate files. They do not load the entry DLL.
 Loading remains an explicit user action.

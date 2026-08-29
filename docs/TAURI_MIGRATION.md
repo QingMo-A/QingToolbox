@@ -95,7 +95,7 @@ the first release.
 - Record WPF baseline metrics: cold start, idle RSS, hidden/resume latency and
   module launch latency. (The comparison dataset is still pending.)
 
-### M1 — host core (foundation slice implemented)
+### M1 — host core (settings and import slice implemented)
 
 - Implement single-instance locking, tray, hide/show and close-to-tray behavior
   in Rust.
@@ -103,8 +103,14 @@ the first release.
   loading module code.
 - Keep process handshake deadlines and child cleanup in a Rust supervisor loop;
   Vue status polling is informational only.
-- Add capability files; no filesystem, shell or dialog plugin is exposed to
-  the Vue window. Settings migration and activation delivery remain next.
+- Add capability files with only the explicit dialog file-picker permission;
+  Vue still cannot perform filesystem or process operations. Rust now owns the
+  typed host settings snapshot and atomic persistence at the shared settings
+  path, while preserving unknown legacy fields and bounded corrupt backups.
+- Add a bounded `.qmod` importer for the new process profile. It validates the
+  ZIP before extraction, stages below the backend-selected user module root,
+  validates the extracted manifest without executing it, and publishes with an
+  atomic same-volume rename. Existing IDs are rejected instead of replaced.
 
 ### M2 — first native module (in progress)
 

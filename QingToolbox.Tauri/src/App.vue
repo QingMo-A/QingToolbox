@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core'
+import { open } from '@tauri-apps/plugin-dialog'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   isProtocolEnvelope,
@@ -8,12 +9,18 @@ import {
   type ModuleRuntimeSnapshot,
   type ModuleSummary,
   type ProtocolEnvelope,
+  type SettingsSnapshot,
+  type SettingsUpdate,
 } from './protocol'
 
 const hostInfo = ref<HostInfo | null>(null)
 const modules = ref<ModuleSummary[]>([])
 const roots = ref<ModuleListPayload['roots']>([])
 const runtimeById = ref<Record<string, ModuleRuntimeSnapshot>>({})
+const settings = ref<SettingsSnapshot | null>(null)
+const settingsExpanded = ref(false)
+const settingsBusy = ref(false)
+const importing = ref(false)
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref<string | null>(null)
@@ -22,6 +29,15 @@ let runtimePollTimer: number | undefined
 
 const validModuleCount = computed(() => modules.value.filter((module) => module.valid).length)
 const invalidModuleCount = computed(() => modules.value.length - validModuleCount.value)
+const appearanceLabel = computed(() => {
+  const value = settings.value?.appearancePresetId
+  return {
+    'qing-default': 'Qing 默认',
+    'light': '浅色',
+    'dark': '深色',
+    'system': '跟随系统',
+  }[value ?? ''] ?? '自定义预设'
+})
 const statusLabel = computed(() => {
   if (loading.value || refreshing.value) return '正在扫描模块…'
   if (error.value) return '扫描失败'
@@ -55,6 +71,79 @@ async function loadHostInfo(): Promise<void> {
       throw new Error(reasonMessage(reason))
     }
   }
+}
+
+function applyAppearance(value: string | undefined): void {
+  if (typeof document === 'undefined') return
+  document.documentElement.dataset.appearance = value || 'qing-default'
+}
+
+async function loadSettings(): Promise<void> {
+  try {
+    settings.value = await invoke<SettingsSnapshot>('get_settings')
+    applyAppearance(settings.value.appearancePresetId)
+  } catch (reason) {
+    if (import.meta.env.DEV) {
+      settings.value = {
+        settingsSchemaVersion: 1,
+        language: 'system',
+        appearancePresetId: 'qing-default',
+        closeBehavior: 'ask',
+        startupPresentation: 'tray',
+        launchAtLogin: false,
+        showLogsInSidebar: false,
+        recentModuleIds: [],
+      }
+      applyAppearance(settings.value.appearancePresetId)
+      return
+    }
+    throw new Error(reasonMessage(reason))
+  }
+}
+
+async function saveSettings(update: SettingsUpdate): Promise<void> {
+  if (settingsBusy.value) return
+  settingsBusy.value = true
+  error.value = null
+  try {
+    settings.value = await invoke<SettingsSnapshot>('update_settings', { update })
+    applyAppearance(settings.value.appearancePresetId)
+  } catch (reason) {
+    error.value = reasonMessage(reason)
+  } finally {
+    settingsBusy.value = false
+  }
+}
+
+async function importModule(): Promise<void> {
+  if (importing.value || refreshing.value || hostInfo.value?.backend !== 'rust') return
+  importing.value = true
+  error.value = null
+  try {
+    const selected = await open({
+      title: '导入 QingToolbox 模块',
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'QingToolbox module', extensions: ['qmod'] }],
+    })
+    if (!selected || Array.isArray(selected)) return
+    await invoke('import_module', { sourcePath: selected })
+    await refreshModules()
+  } catch (reason) {
+    error.value = reasonMessage(reason)
+  } finally {
+    importing.value = false
+  }
+}
+
+function selectSetting(name: keyof SettingsUpdate, event: Event): void {
+  const value = (event.target as HTMLSelectElement).value
+  void saveSettings({ [name]: value })
+}
+
+function toggleSetting(name: keyof SettingsUpdate, event: Event): void {
+  const value = (event.target as HTMLInputElement).checked
+  void saveSettings({ [name]: value })
 }
 
 async function refreshModules(): Promise<void> {
@@ -134,11 +223,13 @@ async function toggleModule(module: ModuleSummary): Promise<void> {
 }
 
 async function initialize(): Promise<void> {
-  try {
-    await loadHostInfo()
-  } catch (reason) {
+  const hostInfoResult = loadHostInfo().catch((reason) => {
     error.value = reasonMessage(reason)
-  }
+  })
+  const settingsResult = loadSettings().catch((reason) => {
+    error.value = reasonMessage(reason)
+  })
+  await Promise.all([hostInfoResult, settingsResult])
   await refreshModules()
   loading.value = false
   if (hostInfo.value?.backend === 'rust' && runtimePollTimer === undefined) {
@@ -178,6 +269,9 @@ onBeforeUnmount(() => {
       </div>
       <div class="brand-actions">
         <span class="migration-badge">Tauri 迁移预览</span>
+        <button class="quiet-button" type="button" :aria-expanded="settingsExpanded" @click="settingsExpanded = !settingsExpanded">
+          {{ settingsExpanded ? '收起设置' : '设置' }}
+        </button>
         <button class="quiet-button" type="button" @click="hideToTray">隐藏到托盘</button>
       </div>
     </header>
@@ -224,13 +318,77 @@ onBeforeUnmount(() => {
       </dl>
     </section>
 
+    <section v-if="settingsExpanded && settings" class="settings-card" aria-labelledby="settings-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Rust 持久化</p>
+          <h2 id="settings-title">宿主设置</h2>
+        </div>
+        <span class="settings-summary">{{ appearanceLabel }}</span>
+      </div>
+      <div class="settings-grid">
+        <label class="setting-field">
+          <span>界面语言</span>
+          <select :value="settings.language" :disabled="settingsBusy" @change="selectSetting('language', $event)">
+            <option value="system">跟随系统</option>
+            <option value="zh-CN">简体中文</option>
+            <option value="en-US">English</option>
+          </select>
+        </label>
+        <label class="setting-field">
+          <span>外观预设</span>
+          <select :value="settings.appearancePresetId" :disabled="settingsBusy" @change="selectSetting('appearancePresetId', $event)">
+            <option value="qing-default">Qing 默认</option>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+            <option value="system">跟随系统</option>
+            <option value="neon-circuit">Neon Circuit</option>
+            <option value="greenline">Greenline</option>
+            <option value="aurora-flow">Aurora Flow</option>
+            <option value="qing-nova">Qing Nova</option>
+          </select>
+        </label>
+        <label class="setting-field">
+          <span>关闭窗口时</span>
+          <select :value="settings.closeBehavior" :disabled="settingsBusy" @change="selectSetting('closeBehavior', $event)">
+            <option value="ask">每次询问</option>
+            <option value="tray">最小化到托盘</option>
+            <option value="exit">退出工具箱</option>
+          </select>
+        </label>
+        <label class="setting-field">
+          <span>启动时显示</span>
+          <select :value="settings.startupPresentation" :disabled="settingsBusy" @change="selectSetting('startupPresentation', $event)">
+            <option value="main">主窗口</option>
+            <option value="minimized">最小化窗口</option>
+            <option value="tray">托盘</option>
+          </select>
+        </label>
+      </div>
+      <div class="settings-toggles">
+        <label class="setting-toggle">
+          <input type="checkbox" :checked="settings.launchAtLogin" :disabled="settingsBusy" @change="toggleSetting('launchAtLogin', $event)" />
+          <span><strong>登录时启动</strong><small>保存偏好；启动注册接入将在后续迁移阶段启用。</small></span>
+        </label>
+        <label class="setting-toggle">
+          <input type="checkbox" :checked="settings.showLogsInSidebar" :disabled="settingsBusy" @change="toggleSetting('showLogsInSidebar', $event)" />
+          <span><strong>在侧栏显示日志</strong><small>为后续诊断面板保留的宿主偏好。</small></span>
+        </label>
+      </div>
+    </section>
+
     <section class="modules-section" aria-labelledby="modules-title">
       <div class="section-heading">
         <div>
           <p class="eyebrow">只读发现</p>
           <h2 id="modules-title">模块</h2>
         </div>
-        <span v-if="invalidModuleCount" class="warning-count">{{ invalidModuleCount }} 个清单需要修复</span>
+        <div class="section-actions">
+          <span v-if="invalidModuleCount" class="warning-count">{{ invalidModuleCount }} 个清单需要修复</span>
+          <button class="import-button" type="button" :disabled="importing || refreshing || hostInfo?.backend !== 'rust'" @click="importModule">
+            {{ importing ? '导入中…' : '导入 .qmod' }}
+          </button>
+        </div>
       </div>
 
       <p v-if="loading" class="empty-state">正在读取固定模块根…</p>

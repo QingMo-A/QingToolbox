@@ -64,6 +64,27 @@ export type HostInfo = {
   protocolVersion: string
 }
 
+export type SettingsSnapshot = {
+  settingsSchemaVersion: number
+  language: 'system' | 'zh-CN' | 'en-US' | string
+  appearancePresetId: string
+  closeBehavior: 'ask' | 'tray' | 'exit' | string
+  startupPresentation: 'main' | 'minimized' | 'tray' | string
+  launchAtLogin: boolean
+  showLogsInSidebar: boolean
+  recentModuleIds: string[]
+}
+
+export type SettingsUpdate = {
+  language?: string
+  appearancePresetId?: string
+  closeBehavior?: string
+  startupPresentation?: string
+  launchAtLogin?: boolean
+  showLogsInSidebar?: boolean
+  recentModuleIds?: string[]
+}
+
 export function isProtocolEnvelope<T>(
   value: unknown,
   messageType: string,

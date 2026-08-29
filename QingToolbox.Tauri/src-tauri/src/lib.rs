@@ -6,16 +6,20 @@ use tauri::{
     menu::MenuBuilder, tray::TrayIconBuilder, webview::WebviewWindow, Manager, State, WindowEvent,
 };
 
+mod importer;
 mod modules;
 mod paths;
 pub mod protocol;
 mod runtime;
+mod settings;
 mod web;
 
+use importer::{import_qmod, ModuleImportResult};
 use modules::{discover_modules, ModuleListPayload};
 use paths::{resolve_module_roots, ModuleRoot};
 use protocol::ProtocolEnvelope;
 use runtime::{ModuleRuntimeManager, ModuleRuntimeSnapshot, RuntimeError};
+use settings::{SettingsSnapshot, SettingsStore, SettingsUpdate};
 use web::{open_module_window, serve_module_asset};
 
 /// Process-wide state owned by the Rust host. Paths and module records stay on
@@ -26,6 +30,7 @@ pub struct HostState {
     module_index: Mutex<std::collections::BTreeMap<String, modules::ModuleRecord>>,
     scan_gate: Mutex<()>,
     runtime: Mutex<ModuleRuntimeManager>,
+    settings: Mutex<SettingsStore>,
 }
 
 impl HostState {
@@ -35,6 +40,7 @@ impl HostState {
             module_index: Mutex::new(std::collections::BTreeMap::new()),
             scan_gate: Mutex::new(()),
             runtime: Mutex::new(ModuleRuntimeManager::new()),
+            settings: Mutex::new(SettingsStore::new()),
         }
     }
 }
@@ -67,11 +73,70 @@ fn get_host_info() -> HostInfo {
 }
 
 #[tauri::command]
-fn hide_to_tray(window: tauri::WebviewWindow) -> Result<(), CommandError> {
+fn hide_to_tray(window: WebviewWindow) -> Result<(), CommandError> {
+    ensure_main_window(&window)?;
     window.hide().map_err(|error| CommandError {
         code: "windowUnavailable",
         message: format!("无法隐藏工具箱窗口：{error}"),
     })
+}
+
+#[tauri::command]
+fn get_settings(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+) -> Result<SettingsSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    let settings = state.settings.lock().map_err(|_| CommandError {
+        code: "stateUnavailable",
+        message: "工具箱设置状态不可用。".to_string(),
+    })?;
+    Ok(settings.snapshot())
+}
+
+/// Apply a bounded, typed settings patch. The frontend cannot provide a
+/// destination path or arbitrary JSON document; Rust keeps the canonical file
+/// location and performs an atomic replacement.
+#[tauri::command]
+fn update_settings(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+    update: SettingsUpdate,
+) -> Result<SettingsSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    let mut settings = state.settings.lock().map_err(|_| CommandError {
+        code: "stateUnavailable",
+        message: "工具箱设置状态不可用。".to_string(),
+    })?;
+    settings.update(update).map_err(|error| CommandError {
+        code: error.code,
+        message: error.message,
+    })
+}
+
+/// Import a user-selected `.qmod` package. The path is accepted only for this
+/// explicit file-import operation; the importer validates the archive and
+/// publishes a new process-profile module without executing it. Module launch
+/// commands continue to use manifest-owned records and opaque ids.
+#[tauri::command]
+fn import_module(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+    source_path: String,
+) -> Result<ModuleImportResult, CommandError> {
+    ensure_main_window(&window)?;
+    let result = import_qmod(&source_path).map_err(|error| CommandError {
+        code: error.code,
+        message: error.message,
+    })?;
+    // Refresh the in-memory discovery index so the newly imported module is
+    // immediately visible. A successful package publication remains valid even
+    // if this best-effort UI index refresh cannot acquire its mutex.
+    let discovery = discover_modules(&state.roots);
+    if let Ok(mut index) = state.module_index.lock() {
+        *index = discovery.records;
+    }
+    Ok(result)
 }
 
 #[derive(Debug, Serialize)]
@@ -79,6 +144,17 @@ fn hide_to_tray(window: tauri::WebviewWindow) -> Result<(), CommandError> {
 struct CommandError {
     code: &'static str,
     message: String,
+}
+
+fn ensure_main_window(window: &WebviewWindow) -> Result<(), CommandError> {
+    if window.label() == "main" {
+        Ok(())
+    } else {
+        Err(CommandError {
+            code: "mainWindowUnauthorized",
+            message: "该操作只能由工具箱主窗口发起。".to_string(),
+        })
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -106,7 +182,9 @@ impl From<RuntimeError> for CommandError {
 #[tauri::command]
 fn list_modules(
     state: State<'_, HostState>,
+    window: WebviewWindow,
 ) -> Result<ProtocolEnvelope<ModuleListPayload>, CommandError> {
+    ensure_main_window(&window)?;
     let _scan_guard = state.scan_gate.lock().map_err(|_| CommandError {
         code: "stateUnavailable",
         message: "模块扫描状态不可用。".to_string(),
@@ -129,7 +207,7 @@ fn list_modules(
     Ok(envelope)
 }
 
-fn valid_module_id(value: &str) -> bool {
+pub(crate) fn valid_module_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value
@@ -158,8 +236,10 @@ fn valid_operation_name(value: &str) -> bool {
 #[tauri::command]
 fn start_module(
     state: State<'_, HostState>,
+    window: WebviewWindow,
     module_id: String,
 ) -> Result<ModuleRuntimeSnapshot, CommandError> {
+    ensure_main_window(&window)?;
     if !valid_module_id(&module_id) {
         return Err(CommandError {
             code: "moduleIdInvalid",
@@ -195,8 +275,10 @@ fn start_module(
 async fn open_module(
     app: tauri::AppHandle,
     state: State<'_, HostState>,
+    window: WebviewWindow,
     module_id: String,
 ) -> Result<(), CommandError> {
+    ensure_main_window(&window)?;
     if !valid_module_id(&module_id) {
         return Err(CommandError {
             code: "moduleIdInvalid",
@@ -246,8 +328,10 @@ async fn open_module(
 #[tauri::command]
 fn stop_module(
     state: State<'_, HostState>,
+    window: WebviewWindow,
     module_id: String,
 ) -> Result<ModuleRuntimeSnapshot, CommandError> {
+    ensure_main_window(&window)?;
     if !valid_module_id(&module_id) {
         return Err(CommandError {
             code: "moduleIdInvalid",
@@ -268,10 +352,12 @@ fn stop_module(
 #[tauri::command]
 fn invoke_module(
     state: State<'_, HostState>,
+    window: WebviewWindow,
     module_id: String,
     method: String,
     payload: Value,
 ) -> Result<Value, CommandError> {
+    ensure_main_window(&window)?;
     if !valid_module_id(&module_id) {
         return Err(CommandError {
             code: "moduleIdInvalid",
@@ -457,8 +543,10 @@ fn module_id_from_window_label(label: &str) -> Option<String> {
 #[tauri::command]
 fn get_module_runtime(
     state: State<'_, HostState>,
+    window: WebviewWindow,
     module_id: String,
 ) -> Result<ModuleRuntimeSnapshot, CommandError> {
+    ensure_main_window(&window)?;
     if !valid_module_id(&module_id) {
         return Err(CommandError {
             code: "moduleIdInvalid",
@@ -475,7 +563,9 @@ fn get_module_runtime(
 #[tauri::command]
 fn get_all_module_runtime(
     state: State<'_, HostState>,
+    window: WebviewWindow,
 ) -> Result<Vec<ModuleRuntimeSnapshot>, CommandError> {
+    ensure_main_window(&window)?;
     let mut runtime = state.runtime.lock().map_err(|_| CommandError {
         code: "stateUnavailable",
         message: "模块运行状态不可用。".to_string(),
@@ -485,6 +575,7 @@ fn get_all_module_runtime(
 
 pub fn run() {
     let mut builder = tauri::Builder::default();
+    builder = builder.plugin(tauri_plugin_dialog::init());
     // Desktop smoke tests may run alongside the user's installed QingToolbox.
     // Keep the production single-instance behavior by default, while allowing
     // an explicitly opted-in debug test process to use its own host instance.
@@ -502,6 +593,9 @@ pub fn run() {
         .manage(HostState::new())
         .invoke_handler(tauri::generate_handler![
             get_host_info,
+            get_settings,
+            update_settings,
+            import_module,
             list_modules,
             hide_to_tray,
             start_module,
