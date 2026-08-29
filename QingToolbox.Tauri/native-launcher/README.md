@@ -11,6 +11,8 @@ the module previously returned from its own state snapshot.
 
 The current migration slice covers `.exe`/`.lnk`/`.url` items visible on the
 user Desktop, custom/alphabetical/desktop projections, persistent custom
-ordering (including Desktop refreshes), and launch-by-id. The old WPF Launcher remains a separate legacy package while
-Everything, global hotkey and Explorer drop handling are migrated onto this
-protocol.
+ordering (including Desktop refreshes), launch-by-id, and custom-mode folders
+with bounded rename/move/order operations. Folder state is module-owned and
+stored atomically beside the launcher data. The old WPF Launcher remains a
+separate legacy package while Everything, global hotkey and Explorer drop
+handling are migrated onto this protocol.

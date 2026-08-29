@@ -16,6 +16,9 @@ const PROTOCOL_VERSION: u16 = 1;
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
 const MAX_ITEMS: usize = 512;
 const MAX_ORDER_IDS: usize = 512;
+const MAX_FOLDERS: usize = 128;
+const MAX_FOLDER_ITEMS: usize = 512;
+const MAX_FOLDER_NAME_LENGTH: usize = 40;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,12 +59,21 @@ struct LauncherItem {
     source: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LauncherFolder {
+    id: String,
+    name: String,
+    item_ids: Vec<String>,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StoreDocument {
     sort_mode: Option<String>,
     items: Option<Vec<LauncherItem>>,
     desktop_items: Option<Vec<LauncherItem>>,
+    folders: Option<Vec<LauncherFolder>>,
     custom_order: Option<Vec<String>>,
 }
 
@@ -71,6 +83,7 @@ struct LauncherStore {
     sort_mode: String,
     items: Vec<LauncherItem>,
     desktop_items: Vec<LauncherItem>,
+    folders: Vec<LauncherFolder>,
     custom_order: Vec<String>,
 }
 
@@ -86,10 +99,18 @@ struct ItemView {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct FolderView {
+    id: String,
+    name: String,
+    items: Vec<ItemView>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct LauncherState {
     sort_mode: String,
     items: Vec<ItemView>,
-    folders: Vec<Value>,
+    folders: Vec<FolderView>,
     custom_order: Vec<String>,
     recent: Vec<ItemView>,
     hotkey: HotkeyView,
@@ -121,8 +142,10 @@ impl LauncherStore {
             sort_mode: normalize_sort_mode(document.sort_mode.as_deref()),
             items: normalize_items(document.items.unwrap_or_default(), "custom"),
             desktop_items: normalize_items(document.desktop_items.unwrap_or_default(), "desktop"),
+            folders: document.folders.unwrap_or_default(),
             custom_order: document.custom_order.unwrap_or_default(),
         };
+        store.normalize_folders();
         store.normalize_order();
         store
     }
@@ -132,6 +155,7 @@ impl LauncherStore {
             sort_mode: Some(self.sort_mode.clone()),
             items: Some(self.items.clone()),
             desktop_items: Some(self.desktop_items.clone()),
+            folders: Some(self.folders.clone()),
             custom_order: Some(self.custom_order.clone()),
         };
         let bytes = serde_json::to_vec_pretty(&document)
@@ -144,20 +168,65 @@ impl LauncherStore {
     }
 
     fn normalize_order(&mut self) {
+        let foldered = self
+            .folders
+            .iter()
+            .flat_map(|folder| folder.item_ids.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
         let known = self
             .items
             .iter()
+            .filter(|item| !foldered.contains(&item.id))
             .map(|item| item.id.as_str())
+            .chain(self.folders.iter().map(|folder| folder.id.as_str()))
             .collect::<BTreeSet<_>>();
         let mut seen = BTreeSet::new();
         self.custom_order
             .retain(|id| known.contains(id.as_str()) && seen.insert(id.clone()));
         for item in &self.items {
-            if seen.insert(item.id.clone()) {
+            if !foldered.contains(&item.id) && seen.insert(item.id.clone()) {
                 self.custom_order.push(item.id.clone());
             }
         }
+        for folder in &self.folders {
+            if seen.insert(folder.id.clone()) {
+                self.custom_order.push(folder.id.clone());
+            }
+        }
         self.custom_order.truncate(MAX_ORDER_IDS);
+    }
+
+    fn normalize_folders(&mut self) {
+        let known_items = self
+            .items
+            .iter()
+            .map(|item| item.id.clone())
+            .collect::<BTreeSet<_>>();
+        let mut folder_ids = BTreeSet::new();
+        let mut claimed = BTreeSet::new();
+        self.folders = std::mem::take(&mut self.folders)
+            .into_iter()
+            .filter_map(|mut folder| {
+                folder.id = folder.id.trim().to_string();
+                if !valid_local_id(&folder.id)
+                    || known_items.contains(&folder.id)
+                    || !folder_ids.insert(folder.id.clone())
+                {
+                    return None;
+                }
+                folder.name = normalize_folder_name(&folder.name);
+                folder.item_ids = folder
+                    .item_ids
+                    .into_iter()
+                    .map(|id| id.trim().to_string())
+                    .filter(|id| known_items.contains(id) && claimed.insert(id.clone()))
+                    .take(MAX_FOLDER_ITEMS)
+                    .collect();
+                Some(folder)
+            })
+            .take(MAX_FOLDERS)
+            .collect();
     }
 
     fn synchronize_desktop(&mut self, discovered: Vec<LauncherItem>) {
@@ -228,31 +297,165 @@ impl LauncherStore {
                 .collect::<HashMap<_, _>>();
             self.desktop_items = ids.iter().filter_map(|id| by_id.get(id).cloned()).collect();
         } else {
-            if !same_ids(ids, self.items.iter().map(|item| &item.id)) {
+            if !same_ids(ids, self.top_level_ids().iter()) {
                 return false;
             }
             self.custom_order = ids.to_vec();
-            let by_id = self
-                .items
-                .iter()
-                .cloned()
-                .map(|item| (item.id.clone(), item))
-                .collect::<HashMap<_, _>>();
-            self.items = ids.iter().filter_map(|id| by_id.get(id).cloned()).collect();
         }
         self.save().is_ok()
     }
 
     fn remove(&mut self, id: &str) -> bool {
-        let before = self.items.len() + self.desktop_items.len();
+        let before = self.items.len() + self.desktop_items.len() + self.folders.len();
         self.items.retain(|item| item.id != id);
         self.desktop_items.retain(|item| item.id != id);
         self.custom_order.retain(|value| value != id);
-        let changed = before != self.items.len() + self.desktop_items.len();
+        let mut membership_changed = false;
+        for folder in &mut self.folders {
+            let original = folder.item_ids.len();
+            folder.item_ids.retain(|value| value != id);
+            membership_changed |= original != folder.item_ids.len();
+        }
+        self.folders.retain(|folder| folder.id != id);
+        let changed = membership_changed
+            || before != self.items.len() + self.desktop_items.len() + self.folders.len();
         if changed {
             let _ = self.save();
         }
         changed
+    }
+
+    fn top_level_ids(&self) -> Vec<String> {
+        let foldered = self
+            .folders
+            .iter()
+            .flat_map(|folder| folder.item_ids.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        self.items
+            .iter()
+            .filter(|item| !foldered.contains(&item.id))
+            .map(|item| item.id.clone())
+            .chain(self.folders.iter().map(|folder| folder.id.clone()))
+            .collect()
+    }
+
+    fn create_folder(&mut self, name: &str) -> Result<(), &'static str> {
+        if self.folders.len() >= MAX_FOLDERS {
+            return Err("folder limit reached");
+        }
+        let folder = LauncherFolder {
+            id: unique_id("folder"),
+            name: normalize_folder_name(name),
+            item_ids: Vec::new(),
+        };
+        self.custom_order.push(folder.id.clone());
+        self.folders.push(folder);
+        self.normalize_order();
+        self.save().map_err(|_| "launcher state could not be saved")
+    }
+
+    fn rename_folder(&mut self, id: &str, name: &str) -> Result<(), &'static str> {
+        let folder = self
+            .folders
+            .iter_mut()
+            .find(|folder| folder.id == id)
+            .ok_or("folder not found")?;
+        folder.name = normalize_folder_name(name);
+        self.save().map_err(|_| "launcher state could not be saved")
+    }
+
+    fn move_item_to_folder(&mut self, item_id: &str, folder_id: &str) -> Result<(), &'static str> {
+        if !self.items.iter().any(|item| item.id == item_id) {
+            return Err("item not found");
+        }
+        let target_index = self
+            .folders
+            .iter()
+            .position(|folder| folder.id == folder_id)
+            .ok_or("folder not found")?;
+        if self.folders[target_index].item_ids.len() >= MAX_FOLDER_ITEMS
+            && !self.folders[target_index]
+                .item_ids
+                .iter()
+                .any(|id| id == item_id)
+        {
+            return Err("folder item limit reached");
+        }
+        for folder in &mut self.folders {
+            folder.item_ids.retain(|id| id != item_id);
+        }
+        self.custom_order.retain(|id| id != item_id);
+        let folder = &mut self.folders[target_index];
+        if !folder.item_ids.iter().any(|id| id == item_id) {
+            folder.item_ids.push(item_id.to_string());
+        }
+        self.save().map_err(|_| "launcher state could not be saved")
+    }
+
+    fn move_item_out_of_folder(
+        &mut self,
+        item_id: &str,
+        folder_id: &str,
+    ) -> Result<(), &'static str> {
+        {
+            let folder = self
+                .folders
+                .iter_mut()
+                .find(|folder| folder.id == folder_id)
+                .ok_or("folder not found")?;
+            if !folder.item_ids.iter().any(|id| id == item_id) {
+                return Err("item is not in folder");
+            }
+            folder.item_ids.retain(|id| id != item_id);
+        }
+        let position = self
+            .custom_order
+            .iter()
+            .position(|id| id == folder_id)
+            .map(|index| index + 1)
+            .unwrap_or(self.custom_order.len());
+        self.custom_order
+            .insert(position.min(self.custom_order.len()), item_id.to_string());
+        self.save().map_err(|_| "launcher state could not be saved")
+    }
+
+    fn set_folder_order(&mut self, folder_id: &str, ids: &[String]) -> Result<(), &'static str> {
+        let folder = self
+            .folders
+            .iter_mut()
+            .find(|folder| folder.id == folder_id)
+            .ok_or("folder not found")?;
+        if !same_ids(ids, folder.item_ids.iter()) {
+            return Err("order must contain every folder item exactly once");
+        }
+        folder.item_ids = ids.to_vec();
+        self.save().map_err(|_| "launcher state could not be saved")
+    }
+
+    fn delete_folder(&mut self, folder_id: &str) -> Result<(), &'static str> {
+        let index = self
+            .folders
+            .iter()
+            .position(|folder| folder.id == folder_id)
+            .ok_or("folder not found")?;
+        let folder = self.folders.remove(index);
+        let position = self
+            .custom_order
+            .iter()
+            .position(|id| id == folder_id)
+            .unwrap_or(self.custom_order.len());
+        self.custom_order.retain(|id| id != folder_id);
+        let items = folder
+            .item_ids
+            .into_iter()
+            .filter(|id| self.items.iter().any(|item| &item.id == id));
+        self.custom_order.splice(
+            position.min(self.custom_order.len())..position.min(self.custom_order.len()),
+            items,
+        );
+        self.normalize_order();
+        self.save().map_err(|_| "launcher state could not be saved")
     }
 
     fn launch(&mut self, id: &str) -> Result<(), &'static str> {
@@ -297,6 +500,24 @@ impl LauncherStore {
                 .filter_map(|id| self.items.iter().find(|item| &item.id == id).cloned())
                 .collect()
         };
+        let folders = if self.sort_mode == "custom" {
+            self.custom_order
+                .iter()
+                .filter_map(|id| self.folders.iter().find(|folder| &folder.id == id))
+                .map(|folder| FolderView {
+                    id: folder.id.clone(),
+                    name: folder.name.clone(),
+                    items: folder
+                        .item_ids
+                        .iter()
+                        .filter_map(|id| self.items.iter().find(|item| &item.id == id))
+                        .map(|item| item_view(item.clone()))
+                        .collect(),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let mut all = self
             .items
             .iter()
@@ -320,7 +541,7 @@ impl LauncherStore {
         LauncherState {
             sort_mode: self.sort_mode.clone(),
             items: source.into_iter().map(item_view).collect(),
-            folders: Vec::new(),
+            folders,
             custom_order: if self.sort_mode == "custom" {
                 self.custom_order.clone()
             } else {
@@ -540,6 +761,82 @@ fn handle_method(
                 )
             })
         }
+        "createFolder" => {
+            let name = required_string(&payload, "name")?;
+            store
+                .create_folder(&name)
+                .map_err(|message| ("folder_failed", message.to_string()))?;
+            serde_json::to_value(store.state()).map_err(|_| {
+                (
+                    "serialization_failed",
+                    "state could not be serialized".to_string(),
+                )
+            })
+        }
+        "renameFolder" => {
+            let id = required_string(&payload, "id")?;
+            let name = required_string(&payload, "name")?;
+            store
+                .rename_folder(&id, &name)
+                .map_err(|message| ("folder_failed", message.to_string()))?;
+            serde_json::to_value(store.state()).map_err(|_| {
+                (
+                    "serialization_failed",
+                    "state could not be serialized".to_string(),
+                )
+            })
+        }
+        "moveItemToFolder" => {
+            let item_id = required_string(&payload, "itemId")?;
+            let folder_id = required_string(&payload, "folderId")?;
+            store
+                .move_item_to_folder(&item_id, &folder_id)
+                .map_err(|message| ("folder_failed", message.to_string()))?;
+            serde_json::to_value(store.state()).map_err(|_| {
+                (
+                    "serialization_failed",
+                    "state could not be serialized".to_string(),
+                )
+            })
+        }
+        "moveItemOutOfFolder" => {
+            let item_id = required_string(&payload, "itemId")?;
+            let folder_id = required_string(&payload, "folderId")?;
+            store
+                .move_item_out_of_folder(&item_id, &folder_id)
+                .map_err(|message| ("folder_failed", message.to_string()))?;
+            serde_json::to_value(store.state()).map_err(|_| {
+                (
+                    "serialization_failed",
+                    "state could not be serialized".to_string(),
+                )
+            })
+        }
+        "setFolderOrder" => {
+            let folder_id = required_string(&payload, "folderId")?;
+            let ids = required_string_array(&payload, "ids")?;
+            store
+                .set_folder_order(&folder_id, &ids)
+                .map_err(|message| ("folder_failed", message.to_string()))?;
+            serde_json::to_value(store.state()).map_err(|_| {
+                (
+                    "serialization_failed",
+                    "state could not be serialized".to_string(),
+                )
+            })
+        }
+        "deleteFolder" => {
+            let folder_id = required_string(&payload, "id")?;
+            store
+                .delete_folder(&folder_id)
+                .map_err(|message| ("folder_failed", message.to_string()))?;
+            serde_json::to_value(store.state()).map_err(|_| {
+                (
+                    "serialization_failed",
+                    "state could not be serialized".to_string(),
+                )
+            })
+        }
         _ => Err((
             "unknown_method",
             format!("unknown launcher operation: {method}"),
@@ -749,6 +1046,22 @@ fn normalize_sort_mode(value: Option<&str>) -> String {
     }
 }
 
+fn valid_local_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+}
+
+fn normalize_folder_name(value: &str) -> String {
+    let normalized = value.trim();
+    if normalized.is_empty() {
+        return "文件夹".to_string();
+    }
+    normalized.chars().take(MAX_FOLDER_NAME_LENGTH).collect()
+}
+
 fn identity_key(value: &str) -> String {
     value.replace('/', "\\").to_ascii_lowercase()
 }
@@ -848,6 +1161,7 @@ mod tests {
                 source: "custom".to_string(),
             }],
             desktop_items: Vec::new(),
+            folders: Vec::new(),
             custom_order: vec!["one".to_string()],
         }
     }
@@ -956,5 +1270,111 @@ mod tests {
             Some("00000000000000000001")
         );
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn folders_keep_items_out_of_top_level_order_and_restore_them_on_delete() {
+        let mut store = test_store();
+        store.items.push(LauncherItem {
+            id: "two".to_string(),
+            name: "Two".to_string(),
+            target: "C:\\Two.exe".to_string(),
+            arguments: String::new(),
+            working_directory: "C:\\".to_string(),
+            last_launched_at: None,
+            source: "custom".to_string(),
+        });
+        store.custom_order.push("two".to_string());
+
+        store.create_folder("工具").expect("folder created");
+        let folder_id = store.folders[0].id.clone();
+        store
+            .move_item_to_folder("one", &folder_id)
+            .expect("item moved into folder");
+        let state = store.state();
+        assert_eq!(
+            state
+                .items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["two"]
+        );
+        assert_eq!(state.folders[0].items[0].id, "one");
+
+        assert!(store.set_order(&["two".to_string(), folder_id.clone()]));
+        store
+            .move_item_out_of_folder("one", &folder_id)
+            .expect("item moved out");
+        assert_eq!(
+            store.custom_order,
+            vec!["two".to_string(), folder_id.clone(), "one".to_string()]
+        );
+        store.delete_folder(&folder_id).expect("folder deleted");
+        assert!(store.folders.is_empty());
+        assert_eq!(
+            store.custom_order,
+            vec!["two".to_string(), "one".to_string()]
+        );
+    }
+
+    #[test]
+    fn folder_order_rejects_unknown_or_duplicate_items() {
+        let mut store = test_store();
+        store.items.push(LauncherItem {
+            id: "two".to_string(),
+            name: "Two".to_string(),
+            target: "C:\\Two.exe".to_string(),
+            arguments: String::new(),
+            working_directory: "C:\\".to_string(),
+            last_launched_at: None,
+            source: "custom".to_string(),
+        });
+        store.create_folder("Folder").expect("folder created");
+        let folder_id = store.folders[0].id.clone();
+        store
+            .move_item_to_folder("one", &folder_id)
+            .expect("item moved into folder");
+        assert!(store
+            .set_folder_order(&folder_id, &["one".to_string(), "one".to_string()])
+            .is_err());
+        assert!(store
+            .set_folder_order(&folder_id, &["two".to_string()])
+            .is_err());
+    }
+
+    #[test]
+    fn folder_normalization_drops_duplicate_ids_and_memberships() {
+        let mut store = test_store();
+        store.items.push(LauncherItem {
+            id: "two".to_string(),
+            name: "Two".to_string(),
+            target: "C:\\Two.exe".to_string(),
+            arguments: String::new(),
+            working_directory: "C:\\".to_string(),
+            last_launched_at: None,
+            source: "custom".to_string(),
+        });
+        store.folders = vec![
+            LauncherFolder {
+                id: "folder-a".to_string(),
+                name: " A ".to_string(),
+                item_ids: vec!["one".to_string(), "one".to_string(), "two".to_string()],
+            },
+            LauncherFolder {
+                id: "folder-a".to_string(),
+                name: "duplicate".to_string(),
+                item_ids: vec!["two".to_string()],
+            },
+            LauncherFolder {
+                id: "two".to_string(),
+                name: "collides with item".to_string(),
+                item_ids: Vec::new(),
+            },
+        ];
+        store.normalize_folders();
+        assert_eq!(store.folders.len(), 1);
+        assert_eq!(store.folders[0].name, "A");
+        assert_eq!(store.folders[0].item_ids, vec!["one", "two"]);
     }
 }

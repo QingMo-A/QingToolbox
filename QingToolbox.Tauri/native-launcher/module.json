@@ -17,7 +17,13 @@
     "setSortMode",
     "setCustomOrder",
     "launchItem",
-    "removeItem"
+    "removeItem",
+    "createFolder",
+    "renameFolder",
+    "moveItemToFolder",
+    "moveItemOutOfFolder",
+    "setFolderOrder",
+    "deleteFolder"
   ],
   "icon": "icon.svg"
 }

@@ -17,10 +17,16 @@ export type LauncherItem = {
   source: 'custom' | 'desktop' | string
 }
 
+export type LauncherFolder = {
+  id: string
+  name: string
+  items: LauncherItem[]
+}
+
 export type LauncherState = {
   sortMode: 'custom' | 'alphabetical' | 'desktop'
   items: LauncherItem[]
-  folders: unknown[]
+  folders: LauncherFolder[]
   customOrder: string[]
   recent: LauncherItem[]
   hotkey: { ctrl: boolean; alt: boolean; shift: boolean; win: boolean; virtualKey: number; keyLabel: string }
