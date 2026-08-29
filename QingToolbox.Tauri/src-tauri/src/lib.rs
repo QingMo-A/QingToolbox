@@ -122,6 +122,10 @@ fn valid_module_id(value: &str) -> bool {
         && value.len() <= 128
         && value
             .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && value
+            .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
