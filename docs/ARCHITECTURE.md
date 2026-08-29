@@ -11,11 +11,11 @@
 
 当前已落地：固定模块根扫描、清单和图标资源校验、1 MiB 单行协议帧限制、
 nonce-bound hello 握手（每次启动使用系统 RNG nonce）、Rust 后台监督的新模块
-executable 启动/停止状态管理、官方单实例插件、
-受 manifest `operations` allowlist 约束的 invoke 通道、受控 `qmod://` Web 资源协议
-和最小托盘菜单。Qing Launcher 已将固定版本 Everything 作为模块自己的受控
-runtime 管理（私有实例、独立服务管道、后端 result-id 映射），而不是把它放进
-Rust Shell 的通用 filesystem bridge；qpdf 等其余重型能力也应遵循同一边界。
+executable 启动/停止状态管理、官方单实例插件、受 manifest `operations`
+allowlist 约束的 invoke 通道、受控 `qmod://` Web 资源协议和最小托盘菜单。
+Qing Launcher、Qing PDF、QingTransfer 已按同一边界迁移为独立 Rust 进程模块：
+Launcher 管理私有 Everything runtime，PDF 管理固定 qpdf runtime，Transfer 管理
+DNS-SD/握手/文件流；这些重型能力不会进入 Rust Shell 的通用 filesystem bridge。
 
 模块窗口的 `invoke_module_window` 会从 `module-<id>` 窗口标签推导模块身份，
 不接受页面提交的模块 id；操作仍必须同时出现在该模块的 `operations` allowlist。
@@ -24,11 +24,22 @@ Rust Shell 的通用 filesystem bridge；qpdf 等其余重型能力也应遵循�
 
 ## 分层
 
-- **Shell**：WPF 应用入口、窗口、导航和模块页面容器。
-- **Abstractions**：Shell 与模块共享的最小接口、模型和契约。
-- **Core**：模块注册、状态、配置、导航和服务抽象。
-- **ModuleLoader**：读取 `module.json`；后续使用可回收的 `AssemblyLoadContext` 扫描、加载和卸载模块。
-- **Modules**：独立工具模块，只依赖 Abstractions。
+### 当前 Tauri 分层
+
+- **Tauri Rust Core**：窗口、托盘、单实例、快捷键、设置、模块清单、路径权限、
+  qmod 资源和模块进程监督。
+- **Vue Shell / module surfaces**：只渲染序列化快照，通过 typed commands 和模块
+  窗口 IPC 请求操作，不直接读文件、启动进程或提交任意路径。
+- **Native process modules**：每个模块拥有自己的 Rust 状态机和协议边界；重型
+  第三方 runtime 与许可证只随所属模块交付。
+
+### Legacy WPF 分层（迁移完成前保留）
+
+- **Shell**：旧 WPF 应用入口、窗口、导航和模块页面容器。
+- **Abstractions**：旧 Shell 与模块共享的接口、模型和契约。
+- **Core / ModuleLoader / Modules**：旧模块注册、AssemblyLoadContext 和进程内模块。
+
+新 Tauri 宿主不会引用这些旧项目，也不会尝试加载旧 DLL。
 
 ## 模块契约
 

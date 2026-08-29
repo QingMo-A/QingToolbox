@@ -125,7 +125,7 @@ the first release.
   `QING_TAURI_DISABLE_AUTOSTART_SYNC=1`, including when it exercises a Release
   executable.
 
-### M2 — first native module (in progress)
+### M2 — native product modules (in progress)
 
 - `native-launcher/` now provides the first Rust process profile and a Vue
   surface. Its state store, Desktop projection, custom/alphabetical/desktop
@@ -145,9 +145,25 @@ the first release.
   hotkey and the full overlay interaction model remain staged next. The old
   WPF Launcher is not loaded by this host.
 
+- `native-pdf/` is a Rust process module with a Vue surface. It keeps qpdf
+  12.4.1 in a checked-in, hash-pinned module-owned runtime and performs merge,
+  balanced split, page extraction and rotation through bounded native
+  operations. Input and output paths are canonicalized in Rust, outputs are
+  written through a temporary file and atomically replaced, and generated
+  results are opened through opaque IDs.
+
+- `native-transfer/` is a Rust process module with a Vue surface. It owns
+  DNS-SD discovery, a nonce-bound TCP endpoint probe, connection approval,
+  bounded JSON control frames, SHA-256 verified file streaming and atomic
+  receive-file publication. Discovery or network failures stay in module
+  state and do not make arbitrary filesystem or process operations available
+  to the WebView.
+
 ### M3 — remaining modules
 
-- Rewrite QingTransfer and QingPdf, then the smaller utility modules.
+- Rewrite the smaller utility modules (TextTools, PowerGuard, WindowTopmost and
+  ScreenPin), then add parity-specific host integrations such as Explorer drag
+  and module hotkeys.
 - Run heavy runtimes (Everything/qpdf) as module-owned child processes or
   sidecars and close only instances created by the module. Qing Launcher now
   follows this rule for its private Everything client; its dedicated service

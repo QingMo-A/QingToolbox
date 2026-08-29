@@ -1,0 +1,38 @@
+{
+  "id": "qing.qingtransfer",
+  "name": "QingTransfer",
+  "description": "Transfer files between QingToolbox devices on the local network.",
+  "version": "0.3.0",
+  "author": "QingMo",
+  "minimumHostVersion": "0.1.0",
+  "entry": "bin/qing-transfer-module.exe",
+  "runtimeType": "Process",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
+  "loadMode": "Manual",
+  "permissions": ["FileRead", "FileWrite", "Network", "WindowControl"],
+  "icon": "icon.svg",
+  "defaultLanguage": "zh-CN",
+  "localization": {
+    "basePath": "i18n",
+    "resources": {
+      "en-US": "i18n/en-US.json",
+      "zh-CN": "i18n/zh-CN.json"
+    }
+  },
+  "operations": [
+    "getState",
+    "refresh",
+    "connect",
+    "disconnect",
+    "sendFile",
+    "acceptIncomingConnection",
+    "rejectIncomingConnection",
+    "acceptIncomingFile",
+    "rejectIncomingFile",
+    "setReceivePreferences",
+    "clearReceiveDirectory",
+    "dismissError"
+  ]
+}

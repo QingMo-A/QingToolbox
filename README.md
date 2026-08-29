@@ -3,8 +3,9 @@
 ## Tauri 重构基线
 
 新一代工具箱宿主位于 [`QingToolbox.Tauri`](QingToolbox.Tauri/)，采用 Rust
-核心、Tauri 2 和 Vue 3。它目前与 WPF 宿主并行，用于承载新的模块协议和本体
-能力，不会自动替换现有生产启动入口。迁移边界、数据保留策略和分阶段验收见
+核心、Tauri 2 和 Vue 3。当前原生迁移已覆盖 Qing Launcher、Qing PDF 和
+QingTransfer，旧 WPF 宿主仍并行保留，直到剩余模块完成验收；新宿主不会自动
+替换现有生产启动入口。迁移边界、数据保留策略和分阶段验收见
 [`docs/TAURI_MIGRATION.md`](docs/TAURI_MIGRATION.md)；协议定义见
 [`protocol/README.md`](protocol/README.md)。
 
@@ -25,8 +26,8 @@ Tauri 宿主，不会替换或改写现有 WPF 安装。
 `run-tauri-portable.bat`。该目录包含 Rust 宿主、已迁移的 Qing Launcher、逐文件
 SHA256 manifest 和第三方许可，但仍是迁移预览，不会改变现有 WPF 安装器。
 
-当前宿主已支持受 manifest allowlist 约束的模块 `invoke` 请求；产品模块仍在
-按阶段重写，旧 WPF 模块不会被新宿主自动加载。
+当前宿主已支持受 manifest allowlist 约束的模块 `invoke` 请求；内置模块均以
+Rust 进程 + Vue 页面交付，旧 WPF 模块不会被新宿主自动加载。
 
 The Modules page provides read-only detection against the official per-module update metadata. Checks use isolated conditional-request caches and never download or install packages. See [module update detection](docs/MODULE_UPDATE_DETECTION.md).
 

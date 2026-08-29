@@ -3,3 +3,7 @@
 # project-authored source whitespace and must not trigger diff checks.
 QingToolbox.Tauri/native-launcher/third-party/Everything/LICENSE.txt -text -diff whitespace=-trailing-space
 QingToolbox.Tauri/native-launcher/third-party/Everything/NOTICE.md -text -diff
+
+# Preserve qpdf's upstream notice/license bytes when checking out on Windows.
+QingToolbox.Tauri/native-pdf/third-party/qpdf/LICENSE.txt -text -diff
+QingToolbox.Tauri/native-pdf/third-party/qpdf/NOTICE.md -text -diff

@@ -24,3 +24,23 @@ coverage/
 !QingToolbox.Tauri/native-launcher/third-party/Everything/
 !QingToolbox.Tauri/native-launcher/third-party/Everything/*.exe
 !QingToolbox.Tauri/native-launcher/third-party/Everything/*.dll
+
+# Qing PDF redistributes a fixed, license-bundled qpdf runtime.
+!QingToolbox.Tauri/native-pdf/third-party/
+!QingToolbox.Tauri/native-pdf/third-party/qpdf/
+!QingToolbox.Tauri/native-pdf/third-party/qpdf/*.exe
+!QingToolbox.Tauri/native-pdf/third-party/qpdf/*.dll
+!QingToolbox.Tauri/native-pdf/third-party/qpdf/*.txt
+!QingToolbox.Tauri/native-pdf/third-party/qpdf/*.md
+
+# Generated module resources and Rust/Front-end build output.
+/QingToolbox.Tauri/native-pdf/target/
+/QingToolbox.Tauri/native-pdf/ui-src/node_modules/
+/QingToolbox.Tauri/native-pdf/ui-src/dist/
+/QingToolbox.Tauri/src-tauri/resources/modules/qing.pdf/
+
+# QingTransfer generated Rust/UI output and staged module resources.
+/QingToolbox.Tauri/native-transfer/target/
+/QingToolbox.Tauri/native-transfer/ui-src/node_modules/
+/QingToolbox.Tauri/native-transfer/ui-src/dist/
+/QingToolbox.Tauri/src-tauri/resources/modules/qing.qingtransfer/

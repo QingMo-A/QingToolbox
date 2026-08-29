@@ -38,36 +38,64 @@ try {
     spawnExit,
   ])
   await waitFor(async () => Boolean(await evaluate(target, `!document.querySelector('.empty-state')?.textContent?.includes('正在读取') && !document.querySelector('.status-label')?.textContent?.includes('扫描模块')`)), 10000)
-  await waitFor(async () => Boolean(await evaluate(target, `Boolean([...document.querySelectorAll('.module-card')]
-    .find((node) => node.textContent?.includes('Qing Launcher'))
-    ?.querySelector('button.module-action'))`)), 10000)
-  await evaluate(target, `(() => {
-    const card = [...document.querySelectorAll('.module-card')]
-      .find((node) => node.textContent?.includes('Qing Launcher'))
-    const button = card?.querySelector('button.module-action')
-    if (!button) throw new Error('Qing Launcher card/button was not rendered')
-    button.click()
-    return true
-  })()`)
-  await delay(1200)
-  moduleTarget = await waitForTarget((value) =>
-    value.url.includes('qing.launcher') || value.title.includes('Qing Launcher'),
-  )
+  moduleTarget = await openModuleCard('Qing Launcher', 'qing.launcher')
   await waitFor(() => evaluate(moduleTarget, `({
     shell: Boolean(document.querySelector('.launcher-shell')),
     loading: Boolean(document.querySelector('.loading-card')),
     error: document.querySelector('.error')?.textContent ?? '',
-  })`).then((value) => value.shell && !value.loading && !value.error), 8000)
-  const snapshot = await evaluate(moduleTarget, `({
+  })`).then((value) => value.shell && !value.loading && !value.error), 12000)
+  const launcherSnapshot = await evaluate(moduleTarget, `({
     text: document.body.innerText,
     icon: Boolean(document.querySelector('.brand-mark img')),
   })`)
-  if (!String(snapshot?.text).includes('启动台')) throw new Error('Launcher UI did not finish rendering')
-  if (!snapshot?.icon) throw new Error('Launcher did not receive its validated module icon')
+  if (!String(launcherSnapshot?.text).includes('启动台')) throw new Error('Launcher UI did not finish rendering')
+  if (!launcherSnapshot?.icon) throw new Error('Launcher did not receive its validated module icon')
+  await closeTarget(moduleTarget)
+  moduleTarget = undefined
+
+  moduleTarget = await openModuleCard('Qing PDF', 'qing.pdf')
+  await waitFor(() => evaluate(moduleTarget, `({
+    workspace: Boolean(document.querySelector('.workspace')),
+    loading: document.querySelector('.runtime')?.textContent?.includes('正在准备') ?? true,
+    error: document.querySelector('.error-alert')?.textContent ?? '',
+  })`).then((value) => value.workspace && !value.loading && !value.error), 12000)
+  const pdfSnapshot = await evaluate(moduleTarget, `({ text: document.body.innerText })`)
+  if (!String(pdfSnapshot?.text).includes('Qing PDF') || !String(pdfSnapshot?.text).includes('拼接')) {
+    throw new Error('Qing PDF UI did not finish rendering')
+  }
+  await closeTarget(moduleTarget)
+  moduleTarget = undefined
+
+  moduleTarget = await openModuleCard('QingTransfer', 'qing.qingtransfer')
+  await waitFor(() => evaluate(moduleTarget, `({
+    shell: Boolean(document.querySelector('.shell')),
+    loading: document.querySelector('.runtime-pill')?.textContent?.includes('正在准备') ?? true,
+    error: document.querySelector('.alert.danger')?.textContent ?? '',
+  })`).then((value) => value.shell && !value.loading && !value.error), 15000)
+  const transferSnapshot = await evaluate(moduleTarget, `({ text: document.body.innerText })`)
+  if (!String(transferSnapshot?.text).includes('QingTransfer') || !String(transferSnapshot?.text).includes('附近设备')) {
+    throw new Error('QingTransfer UI did not finish rendering')
+  }
   console.log('Tauri module window IPC smoke passed.')
 } finally {
   if (moduleTarget) await closeTarget(moduleTarget).catch(() => {})
   await terminate(host)
+}
+
+async function openModuleCard(name, moduleId) {
+  await waitFor(async () => Boolean(await evaluate(target, `Boolean([...document.querySelectorAll('.module-card')]
+    .find((node) => node.textContent?.includes(${JSON.stringify(name)}))
+    ?.querySelector('button.module-action'))`)), 12000)
+  await evaluate(target, `(() => {
+    const card = [...document.querySelectorAll('.module-card')]
+      .find((node) => node.textContent?.includes(${JSON.stringify(name)}))
+    const button = card?.querySelector('button.module-action')
+    if (!button) throw new Error(${JSON.stringify(`${name} card/button was not rendered`)})
+    button.click()
+    return true
+  })()`)
+  await delay(250)
+  return waitForTarget((value) => value.url.includes(moduleId) || value.title.includes(name), 15000)
 }
 
 async function listTargets() {

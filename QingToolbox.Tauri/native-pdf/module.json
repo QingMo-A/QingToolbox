@@ -1,0 +1,39 @@
+{
+  "id": "qing.pdf",
+  "name": "Qing PDF",
+  "description": "Merge, split, extract, and rotate PDF files locally.",
+  "version": "0.1.0",
+  "author": "QingMo-A",
+  "minimumHostVersion": "0.1.0",
+  "entry": "bin/qing-pdf-module.exe",
+  "runtimeType": "Process",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
+  "loadMode": "Manual",
+  "permissions": ["FileRead", "FileWrite", "ProcessStart", "WindowControl"],
+  "operations": [
+    "getState",
+    "addMergeFiles",
+    "setSource",
+    "setMergeOrder",
+    "removeMergeFile",
+    "clearMergeFiles",
+    "runMerge",
+    "runSplit",
+    "runExtract",
+    "runRotate",
+    "cancel",
+    "openResult",
+    "clearResult"
+  ],
+  "icon": "icon.svg",
+  "defaultLanguage": "zh-CN",
+  "localization": {
+    "basePath": "i18n",
+    "resources": {
+      "en-US": "i18n/en-US.json",
+      "zh-CN": "i18n/zh-CN.json"
+    }
+  }
+}

@@ -29,9 +29,9 @@ QingToolbox.Tauri/
 ```
 
 `native-module-canary/` 是一个可复现的 Rust 进程模块样例，用于验证
-nonce-bound hello、invoke 和有界 shutdown。`native-launcher/` 是第一个产品
-迁移切片：它把启动台状态、桌面投影、排序和按 ID 启动放在独立 Rust 进程，
-UI 通过模块窗口 IPC 调用，不接收绝对路径。
+nonce-bound hello、invoke 和有界 shutdown。`native-launcher/`、`native-pdf/`
+和 `native-transfer/` 是当前产品迁移切片：各自的状态、文件边界和重型运行时
+都在独立 Rust 进程中，Vue 只通过模块窗口 IPC 调用，不接收可直接执行的路径。
 
 ## 本地运行
 
@@ -48,7 +48,8 @@ npm run tauri dev
 仓库根目录也提供了 `run-tauri-dev.bat`：它会先构建协议 canary 和 Rust
 Launcher 模块，再启动 Tauri 开发宿主。
 
-桌面构建完成后可用仓库脚本运行启动、单实例和 Launcher 模块窗口烟测：
+桌面构建完成后可用仓库脚本运行启动、单实例以及 Launcher、Qing PDF、
+QingTransfer 模块窗口烟测：
 
 ```powershell
 pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop -SmokeEverything
@@ -61,8 +62,9 @@ pwsh ../scripts/build-tauri-portable.ps1 -Smoke -Zip
 ```
 
 脚本会把 Tauri executable、`resources/modules`、逐文件 SHA256 manifest 和许可
-文件放到 `artifacts/tauri-portable/`。这条路径与现有 WPF/Inno 发布链并行，直到
-所有官方模块迁移完成后才考虑替换正式安装入口。
+文件放到 `artifacts/tauri-portable/`。当前 portable 目录已包含原生 Launcher、
+Qing PDF（固定 qpdf 运行时）和 QingTransfer；这条路径与现有 WPF/Inno 发布链
+并行，直到所有官方模块迁移完成后才考虑替换正式安装入口。
 
 没有 Tauri 环境时仍可使用 `npm run dev` 在浏览器中预览；前端会显示
 `浏览器预览` 状态，而不会伪装成 Rust 后端。
@@ -104,11 +106,18 @@ pwsh ../scripts/build-tauri-portable.ps1 -Smoke -Zip
   模式；固定版本运行时和许可证随模块资源交付，结果只通过后端签发的
   `resultId` 打开或复制路径。模块窗口 IPC 权限匹配 `module-*` 标签，Rust
   会再次校验 manifest operations。
+- Qing PDF 已迁移为 Rust + qpdf 进程模块：拼接、均分、页面提取和旋转均在本机
+  通过固定版本的 qpdf 完成，输入/输出路径在模块内重新 canonicalize，结果用
+  不透明 `resultId` 打开；qpdf 的许可证、通知和哈希清单随模块资源交付。
+- QingTransfer 已迁移为 Rust 进程模块：DNS-SD 只负责发现，解析出的端点还必须
+  完成 nonce-bound TCP 探测才会进入设备列表；连接和文件传输使用有界 JSON 控制帧、
+  SHA-256 校验、临时文件和原子改名。接收目录偏好由模块数据目录保存，关闭时只
+  收拢本模块创建的监听/发现资源。
 - `scripts/build-tauri-canary.ps1` 和 `scripts/smoke-tauri-canary.ps1` 提供
   一个真实子进程的 hello、invoke、shutdown 协议验证闭环。
-- 尚未接入 Explorer 拖入、更新器和完整设置迁移；Everything 已作为
-  Qing Launcher 的模块内受控 runtime 接入，其余能力会在新协议确认后
-  逐项重写，不建立旧 ABI 兼容层。
+- 尚未接入 Explorer 拖入、更新器和完整设置迁移；Launcher 的 Explorer 拖入、
+  全局模块快捷键和 overlay 细节仍在后续切片。Everything、qpdf 和局域网发现
+  都是模块内受控 runtime/资源，不建立旧 ABI 兼容层。
 - `bundle.active` 暂时关闭，避免在品牌图标和签名资产就绪前生成安装包。
 - capability 当前只授予 Tauri core 默认能力和显式的 dialog 文件选择器权限；新增系统能力必须
   显式增加权限。Vue 仍不能直接读写文件系统或启动进程。

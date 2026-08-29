@@ -9,5 +9,12 @@ Build the checked-in native handshake canary into this directory with:
 ./scripts/build-tauri-canary.ps1
 ```
 
-Generated binaries are intentionally not committed. Product modules will be
-added here only after their process protocol and package provenance are fixed.
+Generated binaries are intentionally not committed. The build scripts stage
+the current native product modules here after checking their fixed inputs:
+
+- `qing.launcher` — Launcher state and the private Everything runtime.
+- `qing.pdf` — local PDF operations and the pinned qpdf runtime.
+- `qing.qingtransfer` — local-network discovery and verified file transfer.
+
+Each module remains an independent `Process`/`OutOfProcess` package. The host
+does not load legacy .NET DLLs from this directory.

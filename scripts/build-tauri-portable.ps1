@@ -94,6 +94,12 @@ if (-not $SkipModuleBuild) {
     Invoke-Checked -Label 'Build Qing Launcher module' -Action {
         & (Join-Path $repoRoot 'scripts\build-tauri-launcher.ps1')
     }
+    Invoke-Checked -Label 'Build Qing PDF module' -Action {
+        & (Join-Path $repoRoot 'scripts\build-tauri-pdf.ps1')
+    }
+    Invoke-Checked -Label 'Build QingTransfer module' -Action {
+        & (Join-Path $repoRoot 'scripts\build-tauri-transfer.ps1')
+    }
 }
 
 Push-Location $appRoot
