@@ -3,5 +3,11 @@
   "identifier": "main-capability",
   "description": "Minimal permissions for the QingToolbox migration shell.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "global-shortcut:allow-is-registered",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister"
+  ]
 }

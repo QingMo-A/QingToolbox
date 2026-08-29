@@ -586,6 +586,10 @@ fn get_all_module_runtime(
 pub fn run() {
     let mut builder = tauri::Builder::default();
     builder = builder.plugin(tauri_plugin_dialog::init());
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    }
     // Desktop smoke tests may run alongside the user's installed QingToolbox.
     // Keep the production single-instance behavior by default, while allowing
     // an explicitly opted-in debug test process to use its own host instance.
@@ -620,6 +624,8 @@ pub fn run() {
         ])
         .setup(|app| {
             start_runtime_supervisor(app.handle().clone());
+
+            register_toggle_hotkey(app);
 
             let menu = MenuBuilder::new(app)
                 .text("open", "打开工具箱")
@@ -660,6 +666,44 @@ pub fn run() {
         });
 }
 
+#[cfg(desktop)]
+fn register_toggle_hotkey<R: tauri::Runtime>(app: &mut tauri::App<R>) {
+    use std::str::FromStr;
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+
+    let value = app
+        .try_state::<HostState>()
+        .and_then(|state| {
+            state
+                .settings
+                .lock()
+                .ok()
+                .map(|settings| settings.snapshot().toggle_hotkey)
+        })
+        .unwrap_or_else(|| "Ctrl+Alt+Space".to_string());
+    let shortcut = match Shortcut::from_str(&value) {
+        Ok(shortcut) => shortcut,
+        Err(error) => {
+            eprintln!("QingToolbox global hotkey is invalid ({value}): {error}");
+            return;
+        }
+    };
+    let result = app
+        .handle()
+        .global_shortcut()
+        .on_shortcut(shortcut, |_app, _shortcut, event| {
+            if event.state() == ShortcutState::Pressed {
+                toggle_main_window(_app);
+            }
+        });
+    if let Err(error) = result {
+        eprintln!("QingToolbox global hotkey could not be registered ({value}): {error}");
+    }
+}
+
+#[cfg(not(desktop))]
+fn register_toggle_hotkey<R: tauri::Runtime>(_app: &mut tauri::App<R>) {}
+
 /// Enforce process exits and hello deadlines in Rust. Runtime correctness must
 /// not depend on the Vue page polling status or remaining responsive.
 fn start_runtime_supervisor<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
@@ -680,6 +724,17 @@ fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+}
+
+fn toggle_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let visible = window.is_visible().unwrap_or(false);
+        if visible {
+            let _ = window.hide();
+        } else {
+            show_main_window(app);
+        }
     }
 }
 

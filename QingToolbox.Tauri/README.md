@@ -72,6 +72,9 @@ pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop
   临时目录中解压并通过新宿主 manifest 校验，随后以同卷 rename 原子发布。导入阶段不会
   启动模块，也不会覆盖同 ID 目录。
 - 已接入最小托盘菜单（打开工具箱 / 退出）和关闭窗口转入托盘行为。
+- 宿主通过固定版本的 global-shortcut 插件在 Rust setup 阶段注册持久化的
+  `Ctrl+Alt+Space`（可在设置中修改，重启后生效）；回调只切换主窗口显示状态，
+  页面不会直接持有全局键盘监听。
 - 应用退出事件会先请求所有由本宿主创建的模块进程优雅关闭，超时后由
   Rust runtime supervisor 强制收拢，不会触碰用户自行启动的同名进程。
 - 已实现版本化 envelope、单行 JSON frame 限制（1 MiB）、nonce-bound hello
@@ -87,7 +90,7 @@ pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop
   校验 manifest operations。
 - `scripts/build-tauri-canary.ps1` 和 `scripts/smoke-tauri-canary.ps1` 提供
   一个真实子进程的 hello、invoke、shutdown 协议验证闭环。
-- 尚未接入全局快捷键、Everything、Explorer 拖入、更新器、登录启动注册和完整设置迁移；这些会
+- 尚未接入 Everything、Explorer 拖入、更新器和完整设置迁移；这些会
   在新协议确认后逐项重写，不建立旧 ABI 兼容层。
 - `bundle.active` 暂时关闭，避免在品牌图标和签名资产就绪前生成安装包。
 - capability 当前只授予 Tauri core 默认能力和显式的 dialog 文件选择器权限；新增系统能力必须

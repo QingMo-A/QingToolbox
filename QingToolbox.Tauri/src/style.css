@@ -165,9 +165,10 @@ dd { margin: 5px 0 0; color: #163e74; font-weight: 700; }
 .settings-summary { padding: 7px 10px; border-radius: 999px; color: #2e69bc; background: #edf4ff; font-size: 11px; }
 .settings-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
 .setting-field { display: grid; gap: 7px; color: #5f789a; font-size: 11px; }
-.setting-field select { width: 100%; padding: 8px 9px; border: 1px solid #c8daf2; border-radius: 9px; outline: none; color: #234b7b; background: #fff; font-size: 12px; }
-.setting-field select:focus { border-color: #78a9e4; box-shadow: 0 0 0 3px rgba(58,126,220,.12); }
-.setting-field select:disabled { cursor: wait; opacity: .62; }
+.setting-field select, .setting-field input { width: 100%; padding: 8px 9px; border: 1px solid #c8daf2; border-radius: 9px; outline: none; color: #234b7b; background: #fff; font-size: 12px; }
+.setting-field select:focus, .setting-field input:focus { border-color: #78a9e4; box-shadow: 0 0 0 3px rgba(58,126,220,.12); }
+.setting-field select:disabled, .setting-field input:disabled { cursor: wait; opacity: .62; }
+.setting-help { color: #8197b3; font-size: 10px; line-height: 1.35; }
 .settings-toggles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid #dce7f5; }
 .setting-toggle { display: flex; align-items: flex-start; gap: 10px; color: #315a8d; font-size: 12px; }
 .setting-toggle input { width: 16px; height: 16px; margin: 1px 0 0; accent-color: #2678dc; }
@@ -196,7 +197,7 @@ dd { margin: 5px 0 0; color: #163e74; font-weight: 700; }
 :root[data-appearance="dark"] .module-action,
 :root[data-appearance="dark"] .quiet-button,
 :root[data-appearance="dark"] .import-button,
-:root[data-appearance="dark"] .setting-field select { border-color: #385985; color: #dceaff; background: #172943; }
+:root[data-appearance="dark"] .setting-field select, :root[data-appearance="dark"] .setting-field input { border-color: #385985; color: #dceaff; background: #172943; }
 :root[data-appearance="dark"] .module-source,
 :root[data-appearance="dark"] .settings-summary,
 :root[data-appearance="dark"] .migration-badge { color: #acd0ff; background: #1d385d; }

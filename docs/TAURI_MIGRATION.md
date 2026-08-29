@@ -114,6 +114,9 @@ the first release.
 - Apply the persisted startup presentation and close behavior in the native
   window lifecycle. A first-run Tauri profile opens the main window; tray and
   exit paths remain explicit settings, and the `ask` path uses a native dialog.
+- Register the host toggle shortcut in Rust through the fixed Tauri global
+  shortcut plugin. The Vue shell only edits the bounded preference; a failed
+  registration is diagnostic and does not prevent the host from starting.
 
 ### M2 — first native module (in progress)
 

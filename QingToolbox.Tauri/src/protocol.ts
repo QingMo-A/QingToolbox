@@ -70,6 +70,7 @@ export type SettingsSnapshot = {
   appearancePresetId: string
   closeBehavior: 'ask' | 'tray' | 'exit' | string
   startupPresentation: 'main' | 'minimized' | 'tray' | string
+  toggleHotkey: string
   launchAtLogin: boolean
   showLogsInSidebar: boolean
   recentModuleIds: string[]
@@ -80,6 +81,7 @@ export type SettingsUpdate = {
   appearancePresetId?: string
   closeBehavior?: string
   startupPresentation?: string
+  toggleHotkey?: string
   launchAtLogin?: boolean
   showLogsInSidebar?: boolean
   recentModuleIds?: string[]

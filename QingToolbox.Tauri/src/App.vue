@@ -90,6 +90,7 @@ async function loadSettings(): Promise<void> {
         appearancePresetId: 'qing-default',
         closeBehavior: 'ask',
         startupPresentation: 'main',
+        toggleHotkey: 'Ctrl+Alt+Space',
         launchAtLogin: false,
         showLogsInSidebar: false,
         recentModuleIds: [],
@@ -363,6 +364,17 @@ onBeforeUnmount(() => {
             <option value="minimized">最小化窗口</option>
             <option value="tray">托盘</option>
           </select>
+        </label>
+        <label class="setting-field">
+          <span>全局快捷键</span>
+          <input
+            :value="settings.toggleHotkey"
+            :disabled="settingsBusy"
+            maxlength="64"
+            placeholder="Ctrl+Alt+Space"
+            @change="selectSetting('toggleHotkey', $event)"
+          />
+          <small class="setting-help">用于显示或隐藏主窗口，重启后生效。</small>
         </label>
       </div>
       <div class="settings-toggles">

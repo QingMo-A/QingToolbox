@@ -14,6 +14,7 @@ const SETTINGS_SCHEMA_VERSION: u32 = 1;
 const MAX_SETTINGS_BYTES: u64 = 1024 * 1024;
 const MAX_RECENT_MODULES: usize = 10;
 const MAX_STRING_LENGTH: usize = 128;
+const MAX_HOTKEY_LENGTH: usize = 64;
 const MAX_CORRUPT_BACKUPS: usize = 3;
 
 /// The small public settings surface shared by the Rust host and Vue shell.
@@ -28,6 +29,7 @@ pub struct SettingsSnapshot {
     pub appearance_preset_id: String,
     pub close_behavior: String,
     pub startup_presentation: String,
+    pub toggle_hotkey: String,
     pub launch_at_login: bool,
     pub show_logs_in_sidebar: bool,
     pub recent_module_ids: Vec<String>,
@@ -43,6 +45,7 @@ pub struct SettingsUpdate {
     pub appearance_preset_id: Option<String>,
     pub close_behavior: Option<String>,
     pub startup_presentation: Option<String>,
+    pub toggle_hotkey: Option<String>,
     pub launch_at_login: Option<bool>,
     pub show_logs_in_sidebar: Option<bool>,
     pub recent_module_ids: Option<Vec<String>>,
@@ -54,6 +57,7 @@ struct Settings {
     appearance_preset_id: String,
     close_behavior: String,
     startup_presentation: String,
+    toggle_hotkey: String,
     launch_at_login: bool,
     show_logs_in_sidebar: bool,
     recent_module_ids: Vec<String>,
@@ -71,6 +75,7 @@ impl Default for Settings {
             // A first launch of the standalone Tauri host should be visible.
             // Existing legacy settings still map FloatingBadge to `tray`.
             startup_presentation: "main".to_string(),
+            toggle_hotkey: "Ctrl+Alt+Space".to_string(),
             launch_at_login: false,
             show_logs_in_sidebar: false,
             recent_module_ids: Vec::new(),
@@ -92,6 +97,8 @@ struct SettingsDocument {
     close_behavior: Option<Value>,
     #[serde(alias = "StartupPresentationMode")]
     startup_presentation: Option<Value>,
+    #[serde(alias = "ToggleHotkey", alias = "GlobalHotkey")]
+    toggle_hotkey: Option<String>,
     #[serde(alias = "LaunchAtLogin")]
     launch_at_login: Option<bool>,
     #[serde(alias = "ShowLogsInSidebar")]
@@ -110,6 +117,7 @@ impl From<&Settings> for SettingsDocument {
             appearance_preset_id: Some(settings.appearance_preset_id.clone()),
             close_behavior: Some(Value::String(settings.close_behavior.clone())),
             startup_presentation: Some(Value::String(settings.startup_presentation.clone())),
+            toggle_hotkey: Some(settings.toggle_hotkey.clone()),
             launch_at_login: Some(settings.launch_at_login),
             show_logs_in_sidebar: Some(settings.show_logs_in_sidebar),
             recent_module_ids: Some(settings.recent_module_ids.clone()),
@@ -160,6 +168,7 @@ impl SettingsStore {
             appearance_preset_id: self.settings.appearance_preset_id.clone(),
             close_behavior: self.settings.close_behavior.clone(),
             startup_presentation: self.settings.startup_presentation.clone(),
+            toggle_hotkey: self.settings.toggle_hotkey.clone(),
             launch_at_login: self.settings.launch_at_login,
             show_logs_in_sidebar: self.settings.show_logs_in_sidebar,
             recent_module_ids: self.settings.recent_module_ids.clone(),
@@ -180,6 +189,9 @@ impl SettingsStore {
         if let Some(value) = update.startup_presentation {
             candidate.startup_presentation =
                 normalize_startup_presentation(Some(&Value::String(value)));
+        }
+        if let Some(value) = update.toggle_hotkey {
+            candidate.toggle_hotkey = normalize_hotkey(&value);
         }
         if let Some(value) = update.launch_at_login {
             candidate.launch_at_login = value;
@@ -241,6 +253,7 @@ fn settings_from_document(document: &SettingsDocument) -> Settings {
         startup_presentation: normalize_startup_presentation(
             document.startup_presentation.as_ref(),
         ),
+        toggle_hotkey: normalize_hotkey(document.toggle_hotkey.as_deref().unwrap_or_default()),
         launch_at_login: document.launch_at_login.unwrap_or(false),
         show_logs_in_sidebar: document.show_logs_in_sidebar.unwrap_or(false),
         recent_module_ids: normalize_recent(document.recent_module_ids.clone().unwrap_or_default()),
@@ -285,6 +298,43 @@ fn normalize_startup_presentation(value: Option<&Value>) -> String {
         Some("tray") | Some("FloatingBadge") | Some("2") => "tray".to_string(),
         _ => "main".to_string(),
     }
+}
+
+fn normalize_hotkey(value: &str) -> String {
+    let normalized = value.trim();
+    if !valid_hotkey_shape(normalized) {
+        return "Ctrl+Alt+Space".to_string();
+    }
+    normalized.chars().take(MAX_HOTKEY_LENGTH).collect()
+}
+
+fn valid_hotkey_shape(value: &str) -> bool {
+    let tokens = value.split('+').map(str::trim).collect::<Vec<_>>();
+    if tokens.len() < 2 || tokens.iter().any(|token| token.is_empty()) {
+        return false;
+    }
+    let mut has_modifier = false;
+    for token in &tokens[..tokens.len() - 1] {
+        if matches!(
+            token.to_ascii_lowercase().as_str(),
+            "ctrl"
+                | "control"
+                | "alt"
+                | "option"
+                | "shift"
+                | "win"
+                | "super"
+                | "command"
+                | "cmd"
+                | "commandorcontrol"
+                | "cmdorcontrol"
+        ) {
+            has_modifier = true;
+        } else {
+            return false;
+        }
+    }
+    has_modifier && tokens[tokens.len() - 1].chars().count() <= 32
 }
 
 fn value_string_or_number(value: Option<&Value>) -> Option<String> {
@@ -409,6 +459,7 @@ mod tests {
             appearance_preset_id: Some("neon-circuit".to_string()),
             close_behavior: Some(Value::Number(1.into())),
             startup_presentation: Some(Value::String("MainWindow".to_string())),
+            toggle_hotkey: Some("Ctrl+Alt+Space".to_string()),
             launch_at_login: Some(true),
             show_logs_in_sidebar: Some(true),
             recent_module_ids: Some(vec!["a".to_string(), "a".to_string(), "b".to_string()]),
@@ -475,5 +526,14 @@ mod tests {
         assert!(bytes.contains("Unrelated"));
         assert!(bytes.contains("\"language\": \"zh-CN\""));
         let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn hotkey_preference_is_bounded_and_defaults_when_empty() {
+        assert_eq!(normalize_hotkey(""), "Ctrl+Alt+Space");
+        assert_eq!(normalize_hotkey("Space"), "Ctrl+Alt+Space");
+        assert_eq!(normalize_hotkey("Ctrl++Space"), "Ctrl+Alt+Space");
+        let long = "Ctrl+Alt+".to_string() + &"K".repeat(200);
+        assert_eq!(normalize_hotkey(&long), "Ctrl+Alt+Space");
     }
 }
