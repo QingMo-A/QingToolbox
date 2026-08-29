@@ -17,7 +17,15 @@ license texts and transitive dependency versions are fixed by
 | Vite | 7.1.10 | MIT — https://github.com/vitejs/vite |
 
 The native canary uses Serde and serde_json under their respective MIT or
-Apache-2.0 licenses. No Everything, qpdf or other heavyweight runtime is
-bundled in this foundation; a future module must record its own fixed runtime
-and license before packaging it. The ZIP importer uses the fixed `zip` crate
+Apache-2.0 licenses. The Tauri host itself does not bundle Everything, qpdf or
+another heavyweight runtime. Qing Launcher is the explicitly scoped module
+exception:
+its package carries the fixed official Everything 1.4.1.1032 x64 portable
+components, ES 1.1.0.37 and the SDK DLL under
+`native-launcher/third-party/Everything/`, together with `LICENSE.txt` and
+`NOTICE.md`. The pinned component hashes and official source URLs are recorded
+in that notice; the build does not download a moving `latest` dependency. The
+native Launcher also uses `sha2` 0.10.9 (MIT OR Apache-2.0) for asset and
+instance identity checks and `windows-sys` 0.61.2 (MIT OR Apache-2.0) only for
+Windows clipboard/elevation APIs. The ZIP importer uses the fixed `zip` crate
 only for package extraction; it is not a general filesystem bridge.

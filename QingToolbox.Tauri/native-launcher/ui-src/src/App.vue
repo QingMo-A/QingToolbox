@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   getContext,
   hideModuleWindow,
   invokeModule,
+  parseSearchMode,
+  type EverythingResult,
+  type EverythingSearchMode,
+  type EverythingSearchResponse,
   type LauncherItem,
   type LauncherState,
   type ModuleContext,
@@ -26,13 +30,29 @@ const query = ref('')
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
+const everythingResults = ref<EverythingResult[]>([])
+const everythingStatus = ref<EverythingSearchResponse['status']>('idle')
+const everythingError = ref('')
+const selectedEverythingIndex = ref(-1)
+const resultMenu = ref<{ result: EverythingResult; x: number; y: number } | null>(null)
 const draggedId = ref<string | null>(null)
 const dropIndex = ref<number | null>(null)
 const draggedClickGuard = ref(false)
 const openFolderId = ref<string | null>(null)
 let draggedClickGuardTimer: number | undefined
+let everythingDebounceTimer: number | undefined
+let everythingRequestSerial = 0
+
+const search = computed(() => parseSearchMode(query.value))
+const everythingActive = computed(() => search.value.mode !== 'normal')
+const everythingBadge = computed(() => ({
+  'everything-all': 'Everything',
+  'everything-file': 'Everything · 文件',
+  'everything-directory': 'Everything · 文件夹',
+}[search.value.mode as Exclude<EverythingSearchMode, 'normal'>] ?? 'Everything'))
 
 const filteredItems = computed(() => {
+  if (everythingActive.value) return []
   const needle = query.value.trim().toLocaleLowerCase()
   return needle
     ? state.value.items.filter((item) => item.name.toLocaleLowerCase().includes(needle))
@@ -56,6 +76,174 @@ function messageOf(reason: unknown): string {
   return String(reason)
 }
 
+function everythingStatusLabel(): string {
+  if (everythingStatus.value === 'searching') return '正在搜索 Everything…'
+  if (everythingStatus.value === 'indexing') return 'Everything 正在建立索引，请稍后重试'
+  if (everythingStatus.value === 'unavailable') return '内置 Everything 暂不可用'
+  if (everythingStatus.value === 'error') return 'Everything 搜索暂时不可用'
+  if (!search.value.query) return '输入关键词开始搜索'
+  return `${everythingResults.value.length} 个结果`
+}
+
+function scheduleEverythingSearch(): void {
+  if (everythingDebounceTimer !== undefined) window.clearTimeout(everythingDebounceTimer)
+  const serial = ++everythingRequestSerial
+  everythingResults.value = []
+  selectedEverythingIndex.value = -1
+  resultMenu.value = null
+  everythingError.value = ''
+  if (!everythingActive.value) {
+    everythingStatus.value = 'idle'
+    return
+  }
+  everythingStatus.value = 'searching'
+  everythingDebounceTimer = window.setTimeout(() => {
+    everythingDebounceTimer = undefined
+    void runEverythingSearch(serial, search.value.mode, search.value.query)
+  }, 100)
+}
+
+async function runEverythingSearch(serial: number, mode: EverythingSearchMode, value: string): Promise<void> {
+  if (mode === 'normal') return
+  try {
+    const response = await invokeModule<EverythingSearchResponse>('searchEverything', {
+      mode,
+      query: value,
+      requestId: `ui-${serial}`,
+    })
+    // A slow IPC response must never overwrite a newer query or a return to
+    // normal Launcher mode.
+    if (serial !== everythingRequestSerial || search.value.mode !== mode) return
+    everythingStatus.value = response.status
+    everythingResults.value = Array.isArray(response.results) ? response.results : []
+    everythingError.value = response.error ?? ''
+    selectedEverythingIndex.value = everythingResults.value.length ? 0 : -1
+  } catch (reason) {
+    if (serial !== everythingRequestSerial || search.value.mode !== mode) return
+    everythingStatus.value = 'error'
+    everythingResults.value = []
+    everythingError.value = messageOf(reason)
+  }
+}
+
+function resultTypeLabel(result: EverythingResult): string {
+  return result.isDirectory || result.resultType === 'directory' ? '文件夹' : '文件'
+}
+
+function resultIcon(result: EverythingResult): string {
+  return result.isDirectory || result.resultType === 'directory' ? '▱' : '□'
+}
+
+function selectEverythingResult(index: number): void {
+  if (index < 0 || index >= everythingResults.value.length) return
+  selectedEverythingIndex.value = index
+}
+
+function showEverythingMenu(event: MouseEvent, result: EverythingResult): void {
+  event.preventDefault()
+  const width = 188
+  const height = 132
+  resultMenu.value = {
+    result,
+    x: Math.min(event.clientX, Math.max(8, window.innerWidth - width - 8)),
+    y: Math.min(event.clientY, Math.max(8, window.innerHeight - height - 8)),
+  }
+  selectEverythingResult(everythingResults.value.indexOf(result))
+}
+
+function closeEverythingMenu(): void {
+  resultMenu.value = null
+}
+
+async function openEverythingResult(result: EverythingResult): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  everythingError.value = ''
+  try {
+    await invokeModule('openEverythingResult', { resultId: result.id })
+    await hideModuleWindow()
+  } catch (reason) {
+    everythingError.value = messageOf(reason)
+    everythingStatus.value = 'error'
+  } finally {
+    busy.value = false
+    closeEverythingMenu()
+  }
+}
+
+async function openEverythingResultFolder(result: EverythingResult): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  everythingError.value = ''
+  try {
+    await invokeModule('openEverythingResultFolder', { resultId: result.id })
+    await hideModuleWindow()
+  } catch (reason) {
+    everythingError.value = messageOf(reason)
+    everythingStatus.value = 'error'
+  } finally {
+    busy.value = false
+    closeEverythingMenu()
+  }
+}
+
+async function copyEverythingResultPath(result: EverythingResult): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  everythingError.value = ''
+  try {
+    await invokeModule('copyEverythingResultPath', { resultId: result.id })
+    everythingStatus.value = 'ready'
+  } catch (reason) {
+    everythingError.value = messageOf(reason)
+    everythingStatus.value = 'error'
+  } finally {
+    busy.value = false
+    closeEverythingMenu()
+  }
+}
+
+function onWindowKeydown(event: KeyboardEvent): void {
+  if (resultMenu.value && event.key === 'Escape') {
+    event.preventDefault()
+    closeEverythingMenu()
+    return
+  }
+  if (everythingActive.value) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (!everythingResults.value.length) return
+      event.preventDefault()
+      const delta = event.key === 'ArrowDown' ? 1 : -1
+      const count = everythingResults.value.length
+      selectedEverythingIndex.value = (selectedEverythingIndex.value + delta + count) % count
+      return
+    }
+    if (event.key === 'Enter') {
+      const selected = everythingResults.value[selectedEverythingIndex.value]
+      if (selected) {
+        event.preventDefault()
+        void openEverythingResult(selected)
+      }
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeEverythingMenu()
+      // `/e` by itself is a mode selector, not a search. Preserve the
+      // launcher's established Escape-to-hide behavior until the user has
+      // entered an actual Everything query; once a query exists, Escape
+      // clears it and immediately returns to the normal Launcher surface.
+      if (search.value.query.trim()) query.value = ''
+      else void hideModuleWindow()
+    }
+    return
+  }
+  if (event.key === 'Escape' && !query.value) {
+    event.preventDefault()
+    void hideModuleWindow()
+  }
+}
+
 async function load(): Promise<void> {
   loading.value = true
   error.value = ''
@@ -66,6 +254,7 @@ async function load(): Promise<void> {
     error.value = messageOf(reason)
   } finally {
     loading.value = false
+    if (everythingActive.value) scheduleEverythingSearch()
   }
 }
 
@@ -294,9 +483,16 @@ function cancelDrag(): void {
   dropIndex.value = null
 }
 
-onMounted(() => { void load() })
+watch(query, () => scheduleEverythingSearch())
+
+onMounted(() => {
+  window.addEventListener('keydown', onWindowKeydown)
+  void load()
+})
 onBeforeUnmount(() => {
   if (draggedClickGuardTimer !== undefined) window.clearTimeout(draggedClickGuardTimer)
+  if (everythingDebounceTimer !== undefined) window.clearTimeout(everythingDebounceTimer)
+  window.removeEventListener('keydown', onWindowKeydown)
 })
 </script>
 
@@ -321,31 +517,67 @@ onBeforeUnmount(() => {
 
     <section class="search-row" aria-label="搜索应用">
       <span class="search-icon" aria-hidden="true">⌕</span>
+      <span v-if="everythingActive" class="everything-badge" :title="everythingBadge">{{ everythingBadge }}</span>
       <input v-model="query" type="search" placeholder="搜索应用…" />
       <button v-if="query" class="clear" type="button" aria-label="清空搜索" @click="query = ''">×</button>
     </section>
 
     <nav class="mode-tabs" aria-label="排序方式">
-      <button v-for="mode in (['custom', 'alphabetical', 'desktop'] as const)" :key="mode" type="button" :class="{ active: state.sortMode === mode }" :disabled="busy" @click="setMode(mode)">
+      <button v-for="mode in (['custom', 'alphabetical', 'desktop'] as const)" :key="mode" type="button" :class="{ active: state.sortMode === mode }" :disabled="busy || everythingActive" @click="setMode(mode)">
         {{ { custom: '自定义', alphabetical: '首字母', desktop: '桌面' }[mode] }}
       </button>
-      <span class="mode-hint">{{ modeLabel }} · {{ state.items.length }} 个应用</span>
-      <button v-if="state.sortMode === 'custom' && !query.trim()" class="folder-add" type="button" :disabled="busy" @click="createFolder">
+      <span v-if="!everythingActive" class="mode-hint">{{ modeLabel }} · {{ state.items.length }} 个应用</span>
+      <span v-else class="mode-hint everything-mode-hint">{{ everythingStatusLabel() }}</span>
+      <button v-if="state.sortMode === 'custom' && !query.trim() && !everythingActive" class="folder-add" type="button" :disabled="busy" @click="createFolder">
         ＋ 文件夹
       </button>
     </nav>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="everythingActive && everythingError" class="error everything-error" role="alert">{{ everythingError }}</p>
     <section v-if="loading" class="loading-card" aria-live="polite">
       <span class="spinner" aria-hidden="true" />
       <div><strong>正在准备启动台</strong><small>读取 Rust 模块状态…</small></div>
     </section>
     <section v-else class="content">
+      <section v-if="everythingActive" class="everything-panel" aria-live="polite" @contextmenu.prevent>
+        <div v-if="everythingStatus === 'searching'" class="everything-loading">
+          <span class="spinner" aria-hidden="true" />
+          <span>正在查询内置 Everything…</span>
+        </div>
+        <div v-else-if="!everythingResults.length" class="empty everything-empty">
+          <span class="empty-icon" aria-hidden="true">⌕</span>
+          <strong>{{ everythingError || (search.query ? '没有找到匹配结果' : '输入关键词开始搜索') }}</strong>
+          <small>{{ everythingError ? '普通启动台搜索仍可正常使用' : '支持 *.exe、file:、folder: 等 Everything 查询语法' }}</small>
+        </div>
+        <div v-else class="everything-list" role="listbox" aria-label="Everything 搜索结果" :aria-activedescendant="selectedEverythingIndex >= 0 ? `everything-result-${everythingResults[selectedEverythingIndex]?.id}` : undefined">
+          <article
+            v-for="(result, index) in everythingResults"
+            :id="`everything-result-${result.id}`"
+            :key="result.id"
+            class="everything-result"
+            :class="{ selected: selectedEverythingIndex === index }"
+            role="option"
+            :aria-selected="selectedEverythingIndex === index"
+            @mouseenter="selectEverythingResult(index)"
+            @click="openEverythingResult(result)"
+            @contextmenu="showEverythingMenu($event, result)"
+          >
+            <span class="everything-result-icon" aria-hidden="true">{{ resultIcon(result) }}</span>
+            <span class="everything-result-copy">
+              <strong :title="result.name">{{ result.name }}</strong>
+              <small :title="result.parentPath">{{ result.parentPath || '—' }}</small>
+            </span>
+            <span class="everything-result-type">{{ resultTypeLabel(result) }}</span>
+          </article>
+        </div>
+      </section>
+      <template v-else>
       <div v-if="!filteredItems.length && !(state.sortMode === 'custom' && !query.trim() && state.folders.length)" class="empty">
-        <span class="empty-icon" aria-hidden="true">⌁</span>
-        <strong>{{ query ? '没有匹配的应用' : '桌面上还没有可用项目' }}</strong>
-        <small>{{ query ? '换个关键词试试' : '将 .exe、.lnk 或 .url 放到桌面后刷新' }}</small>
-      </div>
+          <span class="empty-icon" aria-hidden="true">⌁</span>
+          <strong>{{ query ? '没有匹配的应用' : '桌面上还没有可用项目' }}</strong>
+          <small>{{ query ? '换个关键词试试' : '将 .exe、.lnk 或 .url 放到桌面后刷新' }}</small>
+        </div>
       <section v-if="state.sortMode === 'custom' && !query.trim() && state.folders.length" class="folder-grid" aria-label="文件夹">
         <article
           v-for="folder in state.folders"
@@ -419,7 +651,17 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </section>
+      </template>
     </section>
+
+    <div v-if="resultMenu" class="result-menu-backdrop" @click="closeEverythingMenu" @contextmenu.prevent="closeEverythingMenu">
+      <div class="result-menu" :style="{ left: `${resultMenu.x}px`, top: `${resultMenu.y}px` }" role="menu" @click.stop>
+        <strong class="result-menu-title" :title="resultMenu.result.name">{{ resultMenu.result.name }}</strong>
+        <button type="button" role="menuitem" @click="openEverythingResult(resultMenu.result)">打开</button>
+        <button type="button" role="menuitem" @click="openEverythingResultFolder(resultMenu.result)">打开所在目录</button>
+        <button type="button" role="menuitem" @click="copyEverythingResultPath(resultMenu.result)">复制文件路径</button>
+      </div>
+    </div>
 
     <footer><span>拖动图标可调整顺序</span><span v-if="state.sortMode === 'alphabetical'">首字母模式下排序已锁定</span><span v-else>位置由 Rust 持久化</span></footer>
   </main>

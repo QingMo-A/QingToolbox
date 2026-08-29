@@ -2,7 +2,8 @@
 param(
     [switch]$BuildDesktop,
     [switch]$SkipCanary,
-    [switch]$SmokeDesktop
+    [switch]$SmokeDesktop,
+    [switch]$SmokeEverything
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,7 +38,11 @@ if (-not $SkipCanary) {
 }
 
 & (Join-Path $repoRoot 'scripts/build-tauri-launcher.ps1')
-& (Join-Path $repoRoot 'scripts/smoke-tauri-launcher.ps1') -ExecutablePath $launcherExecutable
+if ($SmokeEverything) {
+    & (Join-Path $repoRoot 'scripts/smoke-tauri-launcher.ps1') -ExecutablePath $launcherExecutable -Everything
+} else {
+    & (Join-Path $repoRoot 'scripts/smoke-tauri-launcher.ps1') -ExecutablePath $launcherExecutable
+}
 
 Push-Location $launcherRoot
 try {

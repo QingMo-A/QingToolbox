@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$ExecutablePath
+    [string]$ExecutablePath,
+    [switch]$Everything,
+    [switch]$EverythingService
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,7 +22,29 @@ $psi.Environment['QINGTOOLBOX_MODULE_ID'] = 'qing.launcher'
 $psi.Environment['QINGTOOLBOX_MODULE_NONCE'] = $nonce
 $dataRoot = Join-Path ([IO.Path]::GetTempPath()) ('qing-launcher-smoke-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null
+$everythingIndexRoot = $null
+if ($Everything -and -not $EverythingService) {
+    $everythingIndexRoot = Join-Path $dataRoot 'everything-index'
+    New-Item -ItemType Directory -Force -Path $everythingIndexRoot | Out-Null
+    Set-Content -LiteralPath (Join-Path $everythingIndexRoot 'qing-everything-smoke.txt') -Value 'Everything smoke' -Encoding utf8
+}
 $psi.Environment['QINGTOOLBOX_MODULE_DATA_DIR'] = $dataRoot
+if ($Everything -or $EverythingService) {
+    # The controlled root keeps this optional integration smoke bounded and
+    # avoids changing a developer's global Everything index configuration.
+    $moduleDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\QingToolbox.Tauri\native-launcher'))
+    $psi.Environment['QINGTOOLBOX_MODULE_DIRECTORY'] = $moduleDirectory
+    if ($EverythingService) {
+        # Exercise the production service path against a file on a fixed
+        # volume.  The dedicated service is already installed by the user (or
+        # the smoke fails with a clear unavailable status); no global index
+        # configuration is modified by this script.
+        $psi.Environment['QING_LAUNCHER_EVERYTHING_SERVICE'] = '1'
+    } else {
+        $psi.Environment['QING_LAUNCHER_EVERYTHING_SERVICE'] = '0'
+        $psi.Environment['QING_LAUNCHER_EVERYTHING_INDEX_ROOTS'] = $everythingIndexRoot
+    }
+}
 $process = [Diagnostics.Process]::new()
 $process.StartInfo = $psi
 try {
@@ -37,6 +61,17 @@ try {
     $state = $reader.ReadLine() | ConvertFrom-Json
     if ($state.messageType -ne 'module.invoke.response' -or $null -eq $state.payload.items -or $null -eq $state.payload.sortMode) { throw 'Launcher getState response was invalid.' }
     if ($state.payload.items | Get-Member -Name target -ErrorAction SilentlyContinue) { throw 'Launcher state leaked a target path.' }
+
+    if ($Everything) {
+        $everythingQuery = if ($EverythingService) { 'Everything.exe' } else { 'qing-everything-smoke.txt' }
+        $writer.WriteLine((ConvertTo-Json @{ protocolVersion = 1; messageType = 'module.invoke.request'; requestId = 'everything-1'; payload = @{ method = 'searchEverything'; payload = @{ mode = 'everything-file'; query = $everythingQuery; requestId = 'smoke-1' } } } -Compress))
+        $writer.Flush()
+        $everythingResponse = $reader.ReadLine() | ConvertFrom-Json
+        if ($everythingResponse.messageType -ne 'module.invoke.response' -or $everythingResponse.payload.status -ne 'ready') { throw "Everything search was not ready: $($everythingResponse | ConvertTo-Json -Compress)" }
+        if (-not ($everythingResponse.payload.results | Where-Object { $_.name -eq $everythingQuery })) { throw "Everything search did not return $everythingQuery." }
+        $resultId = ($everythingResponse.payload.results | Where-Object { $_.name -eq $everythingQuery } | Select-Object -First 1).id
+        if ([string]::IsNullOrWhiteSpace($resultId) -or $resultId -match '[\\/]') { throw 'Everything response exposed an unsafe result id.' }
+    }
 
     $writer.WriteLine((ConvertTo-Json @{ protocolVersion = 1; messageType = 'module.shutdown.request'; requestId = 'shutdown-1'; payload = @{} } -Compress))
     $writer.Flush()

@@ -13,9 +13,9 @@
 nonce-bound hello 握手（每次启动使用系统 RNG nonce）、Rust 后台监督的新模块
 executable 启动/停止状态管理、官方单实例插件、
 受 manifest `operations` allowlist 约束的 invoke 通道、受控 `qmod://` Web 资源协议
-和最小托盘菜单。Everything、qpdf 等重型能力
-应作为模块自己的固定 sidecar 管理，不进入 Rust Shell 的通用 filesystem
-bridge。
+和最小托盘菜单。Qing Launcher 已将固定版本 Everything 作为模块自己的受控
+runtime 管理（私有实例、独立服务管道、后端 result-id 映射），而不是把它放进
+Rust Shell 的通用 filesystem bridge；qpdf 等其余重型能力也应遵循同一边界。
 
 模块窗口的 `invoke_module_window` 会从 `module-<id>` 窗口标签推导模块身份，
 不接受页面提交的模块 id；操作仍必须同时出现在该模块的 `operations` allowlist。

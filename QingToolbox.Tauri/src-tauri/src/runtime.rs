@@ -19,7 +19,12 @@ use crate::{
 
 const SHUTDOWN_GRACE: Duration = Duration::from_millis(350);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
-const INVOKE_TIMEOUT: Duration = Duration::from_secs(10);
+// Module operations are normally sub-second, but a first-run native module
+// may need to complete one-time runtime setup (for example the dedicated
+// Everything service authorization). Keep the host boundary finite while
+// allowing that setup to finish without turning a healthy module into a
+// spurious timeout.
+const INVOKE_TIMEOUT: Duration = Duration::from_secs(75);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

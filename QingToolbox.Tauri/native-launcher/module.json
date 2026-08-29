@@ -23,7 +23,11 @@
     "moveItemToFolder",
     "moveItemOutOfFolder",
     "setFolderOrder",
-    "deleteFolder"
+    "deleteFolder",
+    "searchEverything",
+    "openEverythingResult",
+    "openEverythingResultFolder",
+    "copyEverythingResultPath"
   ],
   "icon": "icon.svg"
 }

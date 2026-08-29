@@ -135,15 +135,24 @@ the first release.
   `invoke_module_window` and `hide_module_window` to a `module-*` window. The
   window label supplies the module identity; a page cannot select another
   module or submit an executable path.
-- Remaining Launcher parity is deliberately staged: icon extraction, Explorer
-  drop, global hotkey, Everything and the full overlay interaction model are
-  next protocol operations. The old WPF Launcher is not loaded by this host.
+- Launcher search parity now includes a bounded Everything bridge. The module
+  bundles the fixed, license-preserving Everything 1.4.1.1032 runtime, owns a
+  private named instance/service pipe, and returns only opaque result IDs for
+  open/copy actions. `/e`, `/e:f` and `/e:d` are mutually exclusive with the
+  Launcher/Desktop/Recent projections; stale Vue requests are ignored. Runtime
+  or IPC failure is contained in the Everything result surface and does not
+  change normal Launcher search. Icon extraction, Explorer drop, the module
+  hotkey and the full overlay interaction model remain staged next. The old
+  WPF Launcher is not loaded by this host.
 
 ### M3 — remaining modules
 
 - Rewrite QingTransfer and QingPdf, then the smaller utility modules.
 - Run heavy runtimes (Everything/qpdf) as module-owned child processes or
-  sidecars and close only instances created by the module.
+  sidecars and close only instances created by the module. Qing Launcher now
+  follows this rule for its private Everything client; its dedicated service
+  remains independently named and is never used to terminate a user's own
+  Everything instance.
 
 ### M4 — retire WPF
 

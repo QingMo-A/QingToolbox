@@ -16,3 +16,11 @@ coverage/
 
 # Local QingToolbox development environments
 /.qingtoolbox/
+
+# Qing Launcher redistributes a fixed, license-bundled Everything runtime.
+# Keep generated module resources ignored while allowing the pinned source
+# assets to be committed and reviewed.
+!QingToolbox.Tauri/native-launcher/third-party/
+!QingToolbox.Tauri/native-launcher/third-party/Everything/
+!QingToolbox.Tauri/native-launcher/third-party/Everything/*.exe
+!QingToolbox.Tauri/native-launcher/third-party/Everything/*.dll

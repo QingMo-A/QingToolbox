@@ -34,6 +34,45 @@ export type LauncherState = {
   active: boolean
 }
 
+export type EverythingSearchMode = 'normal' | 'everything-all' | 'everything-file' | 'everything-directory'
+
+export type ParsedSearch = {
+  mode: EverythingSearchMode
+  query: string
+}
+
+export type EverythingResult = {
+  id: string
+  name: string
+  parentPath: string
+  isDirectory: boolean
+  resultType: 'file' | 'directory' | string
+}
+
+export type EverythingSearchResponse = {
+  requestId: string
+  mode: Exclude<EverythingSearchMode, 'normal'>
+  query: string
+  status: 'ready' | 'indexing' | 'unavailable' | 'error' | string
+  results: EverythingResult[]
+  error?: string
+}
+
+/** The prefix is intentionally tiny and explicit; everything after it stays
+ * untouched so native Everything syntax such as `*.exe` keeps working. */
+export function parseSearchMode(value: string): ParsedSearch {
+  const match = /^\/e(?::([fd]))?(?:\s([\s\S]*))?$/i.exec(value)
+  if (!match) return { mode: 'normal', query: value }
+  return {
+    mode: match[1]?.toLowerCase() === 'f'
+      ? 'everything-file'
+      : match[1]?.toLowerCase() === 'd'
+        ? 'everything-directory'
+        : 'everything-all',
+    query: match[2] ?? '',
+  }
+}
+
 export function getContext() {
   return tauriInvoke<ModuleContext>('get_module_window_context')
 }

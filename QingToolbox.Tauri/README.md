@@ -51,7 +51,7 @@ Launcher 模块，再启动 Tauri 开发宿主。
 桌面构建完成后可用仓库脚本运行启动、单实例和 Launcher 模块窗口烟测：
 
 ```powershell
-pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop
+pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop -SmokeEverything
 ```
 
 要生成便于手工体验的 Release portable 目录（不生成安装器），运行：
@@ -100,12 +100,15 @@ pwsh ../scripts/build-tauri-portable.ps1 -Smoke -Zip
   模块清单；旧 DLL 清单会明确显示为无效，不会被尝试加载。
 - Qing Launcher 的迁移样板已随开发宿主资源构建：它支持 Desktop `.exe`、
   `.lnk`、`.url` 投影、custom/alphabetical/desktop 三种视图、稳定 ID 启动和
-  原子 JSON 状态保存。模块窗口 IPC 权限匹配 `module-*` 标签，Rust 会再次
-  校验 manifest operations。
+  原子 JSON 状态保存。搜索框支持 `/e`、`/e:f`、`/e:d` 的内置 Everything
+  模式；固定版本运行时和许可证随模块资源交付，结果只通过后端签发的
+  `resultId` 打开或复制路径。模块窗口 IPC 权限匹配 `module-*` 标签，Rust
+  会再次校验 manifest operations。
 - `scripts/build-tauri-canary.ps1` 和 `scripts/smoke-tauri-canary.ps1` 提供
   一个真实子进程的 hello、invoke、shutdown 协议验证闭环。
-- 尚未接入 Everything、Explorer 拖入、更新器和完整设置迁移；这些会
-  在新协议确认后逐项重写，不建立旧 ABI 兼容层。
+- 尚未接入 Explorer 拖入、更新器和完整设置迁移；Everything 已作为
+  Qing Launcher 的模块内受控 runtime 接入，其余能力会在新协议确认后
+  逐项重写，不建立旧 ABI 兼容层。
 - `bundle.active` 暂时关闭，避免在品牌图标和签名资产就绪前生成安装包。
 - capability 当前只授予 Tauri core 默认能力和显式的 dialog 文件选择器权限；新增系统能力必须
   显式增加权限。Vue 仍不能直接读写文件系统或启动进程。

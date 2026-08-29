@@ -33,6 +33,21 @@ $uiDist = Join-Path $uiRoot 'dist'
 if (-not (Test-Path -LiteralPath $binary)) { throw "Launcher binary was not produced: $binary" }
 if (-not (Test-Path -LiteralPath (Join-Path $uiDist 'index.html'))) { throw "Launcher UI was not produced: $uiDist" }
 
+$everythingRoot = Join-Path $moduleRoot 'third-party/Everything'
+$everythingHashes = @{
+    'Everything.exe' = 'F191F756996A14A11E5445FA7103D302EFD510CF2FBF920E6C0C8ED51D512E36'
+    'es.exe' = '3BE7185707E8023CD9295DBCB7A3FA4092A3D8F52B7FA92A0B84243AB40D12F3'
+    'Everything64.dll' = '81B5BE18126ACD2C2B913F8F4A821E476B18393CDD3DEBD03387C50AFD8DB88F'
+    'LICENSE.txt' = 'C13D19ADCBFD5D07E9512DE9DF99956A3423399ED1FADC5FD33186697AD8DF2F'
+    'NOTICE.md' = '35BEFBE14AB7B24657E07B6EC3B481CF17526AD8BC3248211FFAAED39AC7C41B'
+}
+foreach ($name in $everythingHashes.Keys) {
+    $asset = Join-Path $everythingRoot $name
+    if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) { throw "Pinned Everything asset is missing: $asset" }
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash.ToUpperInvariant()
+    if ($actual -ne $everythingHashes[$name]) { throw "Pinned Everything asset hash mismatch: $name" }
+}
+
 # The destination is a fixed development resource root. Resolve it before the
 # bounded cleanup so a malformed repository path cannot broaden the delete.
 $resolvedResource = [IO.Path]::GetFullPath($resourceRoot)
@@ -45,8 +60,10 @@ if (Test-Path -LiteralPath $resolvedResource) {
 }
 New-Item -ItemType Directory -Force -Path (Join-Path $resolvedResource 'bin') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $resolvedResource 'ui') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $resolvedResource 'third-party/Everything') | Out-Null
 Copy-Item -LiteralPath (Join-Path $moduleRoot 'module.json') -Destination $resolvedResource -Force
 Copy-Item -LiteralPath (Join-Path $moduleRoot 'icon.svg') -Destination $resolvedResource -Force
 Copy-Item -LiteralPath $binary -Destination (Join-Path $resolvedResource 'bin/qing-launcher-module.exe') -Force
 Copy-Item -Path (Join-Path $uiDist '*') -Destination (Join-Path $resolvedResource 'ui') -Recurse -Force
+Copy-Item -Path (Join-Path $everythingRoot '*') -Destination (Join-Path $resolvedResource 'third-party/Everything') -Force
 Write-Host "Qing Launcher module installed at $resolvedResource"

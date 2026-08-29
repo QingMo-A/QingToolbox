@@ -12,6 +12,12 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod everything;
+
+use everything::{
+    parse_search_mode, EverythingRuntime, EverythingSearchMode, EverythingSearchResponse,
+};
+
 const PROTOCOL_VERSION: u16 = 1;
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
 const MAX_ITEMS: usize = 512;
@@ -569,6 +575,11 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| env::temp_dir().join("QingToolbox").join("qing.launcher"));
     let mut store = LauncherStore::load(&data_directory);
+    let module_directory = env::var_os("QINGTOOLBOX_MODULE_DIRECTORY")
+        .map(PathBuf::from)
+        .or_else(|| env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let mut everything = EverythingRuntime::new(module_directory, data_directory.clone());
     let mut desktop_loaded = false;
     let stdin = io::stdin();
     let mut stdout = BufWriter::new(io::stdout());
@@ -635,7 +646,13 @@ fn main() {
                     continue;
                 };
                 let payload = object.get("payload").cloned().unwrap_or(Value::Null);
-                match handle_method(method, payload, &mut store, &mut desktop_loaded) {
+                match handle_method(
+                    method,
+                    payload,
+                    &mut store,
+                    &mut desktop_loaded,
+                    &mut everything,
+                ) {
                     Ok(value) => write_response(
                         &mut stdout,
                         Response {
@@ -677,6 +694,7 @@ fn main() {
             ),
         }
     }
+    everything.shutdown();
 }
 
 fn handle_method(
@@ -684,6 +702,7 @@ fn handle_method(
     payload: Value,
     store: &mut LauncherStore,
     desktop_loaded: &mut bool,
+    everything: &mut EverythingRuntime,
 ) -> Result<Value, (&'static str, String)> {
     match method {
         "ping" => Ok(json!({ "pong": true })),
@@ -837,10 +856,107 @@ fn handle_method(
                 )
             })
         }
+        "searchEverything" => {
+            let query = payload
+                .get("query")
+                .and_then(Value::as_str)
+                .ok_or(("invalid_payload", "query is required".to_string()))?
+                .to_string();
+            let request_id = payload
+                .get("requestId")
+                .and_then(Value::as_str)
+                .filter(|value| valid_token(value, 128))
+                .unwrap_or("request")
+                .to_string();
+            let supplied_mode = match payload.get("mode") {
+                None => None,
+                Some(value) => Some(
+                    parse_wire_search_mode(
+                        value
+                            .as_str()
+                            .ok_or(("invalid_payload", "mode must be a string".to_string()))?,
+                    )
+                    .ok_or((
+                        "invalid_payload",
+                        "mode must be everything-all, everything-file or everything-directory"
+                            .to_string(),
+                    ))?,
+                ),
+            };
+            // The UI sends the prefix-stripped query. If a caller sends a raw
+            // `/e...` query, normalize it here rather than allowing a mode and
+            // query to disagree.
+            let (parsed_mode, parsed_query) = parse_search_mode(&query);
+            let has_raw_prefix = parsed_query != query;
+            let mode = supplied_mode
+                .or_else(|| has_raw_prefix.then_some(parsed_mode))
+                .ok_or((
+                    "invalid_payload",
+                    "mode must be everything-all, everything-file or everything-directory"
+                        .to_string(),
+                ))?;
+            if has_raw_prefix && supplied_mode != Some(parsed_mode) {
+                return Err((
+                    "invalid_payload",
+                    "Everything mode does not match the query prefix".to_string(),
+                ));
+            }
+            let effective_query = if has_raw_prefix {
+                parsed_query
+            } else {
+                query.clone()
+            };
+            let response = everything
+                .search(mode, effective_query.clone(), request_id.clone())
+                .unwrap_or_else(|error| EverythingSearchResponse {
+                    request_id,
+                    mode: mode.as_wire(),
+                    query: effective_query,
+                    status: error.status(),
+                    results: Vec::new(),
+                    error: Some(error.message),
+                });
+            serde_json::to_value(response).map_err(|_| {
+                (
+                    "serialization_failed",
+                    "Everything response could not be serialized".to_string(),
+                )
+            })
+        }
+        "openEverythingResult" => {
+            let result_id = required_string(&payload, "resultId")?;
+            everything
+                .open_result(&result_id)
+                .map_err(|error| ("everything_open_failed", error.message))?;
+            Ok(json!({ "ok": true }))
+        }
+        "openEverythingResultFolder" => {
+            let result_id = required_string(&payload, "resultId")?;
+            everything
+                .open_result_folder(&result_id)
+                .map_err(|error| ("everything_open_failed", error.message))?;
+            Ok(json!({ "ok": true }))
+        }
+        "copyEverythingResultPath" => {
+            let result_id = required_string(&payload, "resultId")?;
+            everything
+                .copy_result_path(&result_id)
+                .map_err(|error| ("everything_copy_failed", error.message))?;
+            Ok(json!({ "ok": true }))
+        }
         _ => Err((
             "unknown_method",
             format!("unknown launcher operation: {method}"),
         )),
+    }
+}
+
+fn parse_wire_search_mode(value: &str) -> Option<EverythingSearchMode> {
+    match value {
+        "everything-all" => Some(EverythingSearchMode::All),
+        "everything-file" => Some(EverythingSearchMode::File),
+        "everything-directory" => Some(EverythingSearchMode::Directory),
+        _ => None,
     }
 }
 
@@ -1376,5 +1492,62 @@ mod tests {
         assert_eq!(store.folders.len(), 1);
         assert_eq!(store.folders[0].name, "A");
         assert_eq!(store.folders[0].item_ids, vec!["one", "two"]);
+    }
+
+    #[test]
+    fn everything_failure_is_contained_and_does_not_change_launcher_state() {
+        let mut store = test_store();
+        let before = serde_json::to_value(store.state()).expect("state JSON");
+        let mut desktop_loaded = true;
+        let root = env::temp_dir().join(format!(
+            "qing-launcher-everything-missing-{}",
+            unique_id("test")
+        ));
+        let mut runtime = EverythingRuntime::new(root.clone(), root.join("data"));
+        let response = handle_method(
+            "searchEverything",
+            json!({
+                "mode": "everything-file",
+                "query": "*.exe",
+                "requestId": "test-1"
+            }),
+            &mut store,
+            &mut desktop_loaded,
+            &mut runtime,
+        )
+        .expect("contained Everything response");
+        assert_eq!(response["status"], "unavailable");
+        assert_eq!(response["results"].as_array().map(Vec::len), Some(0));
+        assert_eq!(
+            serde_json::to_value(store.state()).expect("state JSON"),
+            before
+        );
+        assert!(runtime.open_result("C:\\arbitrary.txt").is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn raw_everything_prefix_and_declared_mode_cannot_disagree() {
+        let mut store = test_store();
+        let mut desktop_loaded = true;
+        let root = env::temp_dir().join(format!(
+            "qing-launcher-everything-mode-{}",
+            unique_id("test")
+        ));
+        let mut runtime = EverythingRuntime::new(root.clone(), root.join("data"));
+        let error = handle_method(
+            "searchEverything",
+            json!({
+                "mode": "everything-file",
+                "query": "/e:d folder",
+                "requestId": "test-2"
+            }),
+            &mut store,
+            &mut desktop_loaded,
+            &mut runtime,
+        )
+        .expect_err("mode mismatch must be rejected");
+        assert_eq!(error.0, "invalid_payload");
+        let _ = fs::remove_dir_all(root);
     }
 }

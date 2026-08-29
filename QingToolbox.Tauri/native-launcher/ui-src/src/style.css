@@ -90,3 +90,27 @@ footer { justify-content: space-between; margin-top: 28px; color: #8aa0bb; font-
 @keyframes drop-pulse { from { opacity: .55; transform: scaleY(.82); } to { opacity: 1; transform: scaleY(1); } }
 @media (max-width: 680px) { .launcher-shell { width: calc(100% - 28px); padding-top: 22px; } .version { display: none; } .app-grid, .folder-grid { grid-template-columns: repeat(auto-fill, minmax(96px,1fr)); gap: 8px; } .folder-add { margin-left: auto; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+/* Everything mode deliberately uses a separate result surface.  Keeping it
+   out of the launcher grid makes the mode boundary visible and prevents a
+   file result from looking like an installed application. */
+.everything-badge { max-width: 180px; overflow: hidden; padding: 4px 9px; border: 1px solid #9ec8ef; border-radius: 999px; color: #1768b3; background: #e6f3ff; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.everything-mode-hint { color: #2a78be; }
+.everything-error { margin-top: 10px; }
+.everything-panel { min-height: 300px; }
+.everything-loading { min-height: 220px; display: flex; align-items: center; justify-content: center; gap: 11px; border: 1px dashed #c9dbf2; border-radius: 20px; color: #5f80a7; background: rgba(255,255,255,.55); font-size: 12px; }
+.everything-empty { min-height: 220px; }
+.everything-list { display: grid; gap: 7px; max-height: min(520px, calc(100vh - 280px)); overflow-y: auto; padding: 2px 4px 8px 2px; scrollbar-width: thin; }
+.everything-result { min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 8px 11px; border: 1px solid transparent; border-radius: 13px; background: rgba(255,255,255,.62); cursor: pointer; transition: border-color .16s ease, background .16s ease, transform .18s cubic-bezier(.2,1.25,.35,1), box-shadow .16s ease; user-select: none; }
+.everything-result:hover, .everything-result.selected { border-color: #b7d3f1; background: rgba(239,247,255,.94); box-shadow: 0 6px 15px rgba(41,101,174,.08); transform: translateX(2px); }
+.everything-result:active { transform: translateX(2px) scale(.995); }
+.everything-result-icon { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border: 1px solid #c7def5; border-radius: 11px; color: #2e84d4; background: #eaf5ff; font-size: 22px; }
+.everything-result-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.everything-result-copy strong { overflow: hidden; color: #1b3d6a; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.everything-result-copy small { overflow: hidden; color: #7890ad; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.everything-result-type { flex: 0 0 auto; padding: 4px 8px; border: 1px solid #c9dcf3; border-radius: 999px; color: #5c7ca3; background: rgba(255,255,255,.72); font-size: 10px; }
+.result-menu-backdrop { position: fixed; inset: 0; z-index: 30; }
+.result-menu { position: fixed; width: 188px; display: grid; gap: 3px; padding: 8px; border: 1px solid #c6daf1; border-radius: 13px; background: rgba(255,255,255,.98); box-shadow: 0 18px 42px rgba(31,75,129,.22); }
+.result-menu-title { max-width: 100%; overflow: hidden; padding: 4px 7px 7px; color: #254a78; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.result-menu button { padding: 8px 9px; border: 0; border-radius: 8px; color: #315a89; background: transparent; text-align: left; font-size: 11px; }
+.result-menu button:hover, .result-menu button:focus-visible { outline: 0; color: #185ca9; background: #eaf4ff; }

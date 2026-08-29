@@ -21,6 +21,8 @@ pwsh ./scripts/build-tauri-portable.ps1 -Smoke -Zip
 宿主/模块窗口烟测后启动 portable 目录中的 exe。首次构建若没有模块资源，去掉
 `-SkipModuleBuild`（默认行为）即可。
 
-当前 portable 预览依赖系统已安装的 Windows WebView2，不捆绑 Everything、qpdf
-或旧 .NET 模块。正式替换 WPF 安装链前，仍需完成 QingTransfer、QingPdf、更新器、
-图标提取和完整模块协议迁移；这些缺口不会被此脚本隐藏。
+当前 portable 预览依赖系统已安装的 Windows WebView2。Qing Launcher 自带固定版本
+Everything runtime 和许可证，首次使用 Everything 搜索时按需准备独立客户端/服务；
+不会调用用户自己安装的实例，也不会弹出 Everything 界面。qpdf、旧 .NET 模块和其余
+官方模块仍未随 Tauri 预览交付。正式替换 WPF 安装链前，仍需完成 QingTransfer、QingPdf、
+更新器、图标提取和完整模块协议迁移；这些缺口不会被此脚本隐藏。
