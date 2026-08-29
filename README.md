@@ -20,6 +20,11 @@ pwsh ./scripts/verify-tauri.ps1
 交互式开发启动可直接运行仓库根目录的 `run-tauri-dev.bat`；它只启动新
 Tauri 宿主，不会替换或改写现有 WPF 安装。
 
+需要体验可交付的 Tauri 预览目录时，可运行
+`pwsh ./scripts/build-tauri-portable.ps1 -Smoke -Zip`，或使用
+`run-tauri-portable.bat`。该目录包含 Rust 宿主、已迁移的 Qing Launcher、逐文件
+SHA256 manifest 和第三方许可，但仍是迁移预览，不会改变现有 WPF 安装器。
+
 当前宿主已支持受 manifest allowlist 约束的模块 `invoke` 请求；产品模块仍在
 按阶段重写，旧 WPF 模块不会被新宿主自动加载。
 

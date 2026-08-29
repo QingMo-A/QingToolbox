@@ -702,6 +702,13 @@ fn autostart_sync_enabled() -> bool {
     // A normal release build owns its registration. Development and smoke
     // processes must not unexpectedly edit the user's Run key or launch agent;
     // set this switch only when an integration test explicitly opts in.
+    if std::env::var("QING_TAURI_DISABLE_AUTOSTART_SYNC")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        return false;
+    }
     !cfg!(debug_assertions)
         || std::env::var("QING_TAURI_ENABLE_AUTOSTART_SYNC")
             .ok()

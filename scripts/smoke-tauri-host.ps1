@@ -19,6 +19,9 @@ function New-HostStartInfo([string]$Path, [string]$WorkingDirectory) {
     # Keep the smoke deterministic even when the developer's shared legacy
     # settings request a tray/floating presentation.
     $info.EnvironmentVariables['QING_TAURI_STARTUP_PRESENTATION'] = 'main'
+    # A smoke run must never add or remove the current user's login startup
+    # registration, even when this script is pointed at a release binary.
+    $info.EnvironmentVariables['QING_TAURI_DISABLE_AUTOSTART_SYNC'] = '1'
     return $info
 }
 

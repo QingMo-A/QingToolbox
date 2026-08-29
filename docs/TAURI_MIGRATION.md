@@ -120,7 +120,10 @@ the first release.
 - Synchronize the typed `launchAtLogin` preference through the fixed Tauri
   autostart plugin. Release builds repair the current-user startup entry during
   setup; debug/smoke builds require an explicit opt-in environment variable so
-  validation never mutates a developer's login configuration accidentally.
+  validation never mutates a developer's login configuration accidentally. A
+  smoke process can force-disable synchronization with
+  `QING_TAURI_DISABLE_AUTOSTART_SYNC=1`, including when it exercises a Release
+  executable.
 
 ### M2 — first native module (in progress)
 

@@ -54,6 +54,16 @@ Launcher 模块，再启动 Tauri 开发宿主。
 pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop
 ```
 
+要生成便于手工体验的 Release portable 目录（不生成安装器），运行：
+
+```powershell
+pwsh ../scripts/build-tauri-portable.ps1 -Smoke -Zip
+```
+
+脚本会把 Tauri executable、`resources/modules`、逐文件 SHA256 manifest 和许可
+文件放到 `artifacts/tauri-portable/`。这条路径与现有 WPF/Inno 发布链并行，直到
+所有官方模块迁移完成后才考虑替换正式安装入口。
+
 没有 Tauri 环境时仍可使用 `npm run dev` 在浏览器中预览；前端会显示
 `浏览器预览` 状态，而不会伪装成 Rust 后端。
 
@@ -77,7 +87,8 @@ pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop
   页面不会直接持有全局键盘监听。
 - 登录启动由固定版本的 autostart 插件在 Rust 宿主侧同步。发布版启动时会校正
   当前用户的启动项；开发/烟测默认不改注册表，只有显式设置
-  `QING_TAURI_ENABLE_AUTOSTART_SYNC=1` 才会启用该副作用。
+  `QING_TAURI_ENABLE_AUTOSTART_SYNC=1` 才会启用该副作用；烟测统一设置
+  `QING_TAURI_DISABLE_AUTOSTART_SYNC=1`，即使指向 Release 可执行文件也不会改动登录项。
 - 应用退出事件会先请求所有由本宿主创建的模块进程优雅关闭，超时后由
   Rust runtime supervisor 强制收拢，不会触碰用户自行启动的同名进程。
 - 已实现版本化 envelope、单行 JSON frame 限制（1 MiB）、nonce-bound hello
