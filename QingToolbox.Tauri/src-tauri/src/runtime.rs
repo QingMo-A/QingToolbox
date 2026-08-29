@@ -351,14 +351,18 @@ impl ModuleRuntimeManager {
                 return Ok(response);
             }
             if let Some(failure) = failure {
-                let _ = self.refresh_one(module_id);
+                if failure.code != "moduleInvokeFailed" {
+                    self.fail_running(module_id, failure.message.clone());
+                }
                 return Err(failure);
             }
             if Instant::now() >= deadline {
-                return Err(RuntimeError {
+                let failure = RuntimeError {
                     code: "moduleInvokeTimeout",
                     message: "模块操作响应超时。".to_string(),
-                });
+                };
+                self.fail_running(module_id, failure.message.clone());
+                return Err(failure);
             }
             thread::sleep(Duration::from_millis(10));
         }
@@ -474,9 +478,7 @@ impl ModuleRuntimeManager {
                         // be routed to the UI once an operation contract exists.
                     }
                     Ok(RuntimeMessage::Invalid(error)) | Ok(RuntimeMessage::Io(error)) => {
-                        if !running.handshake_complete {
-                            handshake_error = Some(error);
-                        }
+                        handshake_error = Some(error);
                     }
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) if !running.handshake_complete => {
@@ -577,6 +579,32 @@ impl ModuleRuntimeManager {
         self.snapshots
             .insert(module_id.to_string(), snapshot.clone());
         Some(snapshot)
+    }
+
+    fn fail_running(&mut self, module_id: &str, error: String) {
+        let generation = self
+            .running
+            .remove(module_id)
+            .map(|mut running| {
+                let generation = running.generation;
+                terminate_child(&mut running.child);
+                generation
+            })
+            .or_else(|| {
+                self.snapshots
+                    .get(module_id)
+                    .map(|snapshot| snapshot.generation)
+            })
+            .unwrap_or_default();
+        self.snapshots.insert(
+            module_id.to_string(),
+            ModuleRuntimeSnapshot {
+                module_id: module_id.to_string(),
+                state: ModuleRuntimeState::Failed,
+                generation,
+                last_error: Some(error),
+            },
+        );
     }
 }
 
@@ -761,6 +789,8 @@ fn new_nonce() -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::paths::ModuleSource;
+    use std::{collections::BTreeSet, env, path::PathBuf};
 
     #[test]
     fn unsupported_entries_are_rejected_before_spawn() {
@@ -805,5 +835,39 @@ mod tests {
         assert_eq!(first.len(), 64);
         assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn invoke_round_trip_with_canary_when_verification_provides_one() {
+        let Some(path) = env::var_os("QING_TAURI_CANARY_PATH") else {
+            return;
+        };
+        let entry = PathBuf::from(path);
+        if !entry.is_file() {
+            return;
+        }
+        let directory = entry.parent().expect("canary directory").to_path_buf();
+        let record = ModuleRecord {
+            directory,
+            entry,
+            web_entry: None,
+            operations: BTreeSet::from(["ping".to_string()]),
+            source: ModuleSource::Bundled,
+        };
+        let mut manager = ModuleRuntimeManager::new();
+        let response = manager
+            .invoke(
+                "qing.canary",
+                &record,
+                "ping",
+                serde_json::json!({ "source": "runtime-test" }),
+            )
+            .expect("canary invoke response");
+        assert_eq!(response["pong"], true);
+        assert_eq!(response["echo"]["source"], "runtime-test");
+        assert_eq!(
+            manager.stop("qing.canary").state,
+            ModuleRuntimeState::Stopped
+        );
     }
 }

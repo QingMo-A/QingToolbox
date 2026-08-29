@@ -43,6 +43,8 @@ if (-not (Test-Path -LiteralPath $cargoPath)) {
 }
 
 Push-Location $rustRoot
+$previousCanaryPath = $env:QING_TAURI_CANARY_PATH
+$env:QING_TAURI_CANARY_PATH = $canaryExecutable
 try {
     & $cargoPath fmt --all -- --check
     if ($LASTEXITCODE -ne 0) { throw "cargo fmt check failed with exit code $LASTEXITCODE" }
@@ -53,6 +55,11 @@ try {
     & $cargoPath clippy --locked --all-targets -- -D warnings
     if ($LASTEXITCODE -ne 0) { throw "cargo clippy failed with exit code $LASTEXITCODE" }
 } finally {
+    if ($null -eq $previousCanaryPath) {
+        Remove-Item Env:QING_TAURI_CANARY_PATH -ErrorAction SilentlyContinue
+    } else {
+        $env:QING_TAURI_CANARY_PATH = $previousCanaryPath
+    }
     Pop-Location
 }
 
