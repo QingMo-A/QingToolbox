@@ -55,7 +55,7 @@ pwsh ../scripts/smoke-tauri-host.ps1 -ExecutablePath ./src-tauri/target/debug/qi
 ## 当前边界
 
 - 已实现 `get_host_info`、`list_modules`、`hide_to_tray`、`start_module`、
-  `stop_module` 和 `open_module` 窄 typed command；模块发现只读取清单，
+  `stop_module`、`invoke_module` 和 `open_module` 窄 typed command；模块发现只读取清单，
   进程启动必须来自后端索引中的 manifest-owned `.exe`。
 - 已接入最小托盘菜单（打开工具箱 / 退出）和关闭窗口转入托盘行为。
 - 已实现版本化 envelope、单行 JSON frame 限制（1 MiB）、nonce-bound hello
@@ -66,7 +66,7 @@ pwsh ../scripts/smoke-tauri-host.ps1 -ExecutablePath ./src-tauri/target/debug/qi
 - 新宿主只接受 `runtimeType=Process`、`runtimeIsolation=OutOfProcess` 的
   模块清单；旧 DLL 清单会明确显示为无效，不会被尝试加载。
 - `scripts/build-tauri-canary.ps1` 和 `scripts/smoke-tauri-canary.ps1` 提供
-  一个真实子进程的协议验证闭环。
+  一个真实子进程的 hello、invoke、shutdown 协议验证闭环。
 - 尚未接入全局快捷键、更新器、设置迁移和产品模块；这些会在新协议确认后
   逐项重写，不建立旧 ABI 兼容层。
 - `bundle.active` 暂时关闭，避免在品牌图标和签名资产就绪前生成安装包。

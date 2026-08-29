@@ -13,11 +13,13 @@ use serde_json::Value;
 
 use crate::{
     modules::ModuleRecord,
+    paths::module_data_directory,
     protocol::{decode_line, ProtocolEnvelope, MAX_FRAME_BYTES},
 };
 
 const SHUTDOWN_GRACE: Duration = Duration::from_millis(350);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const INVOKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,6 +71,7 @@ pub struct ModuleRuntimeManager {
     running: BTreeMap<String, RunningModule>,
     snapshots: BTreeMap<String, ModuleRuntimeSnapshot>,
     next_generation: u64,
+    next_request_id: u64,
 }
 
 impl ModuleRuntimeManager {
@@ -77,6 +80,7 @@ impl ModuleRuntimeManager {
             running: BTreeMap::new(),
             snapshots: BTreeMap::new(),
             next_generation: 0,
+            next_request_id: 0,
         }
     }
 
@@ -107,6 +111,14 @@ impl ModuleRuntimeManager {
             code: "nonceGenerationFailed",
             message,
         })?;
+        let data_directory = module_data_directory(module_id).map_err(|error| RuntimeError {
+            code: "moduleDataPathInvalid",
+            message: format!("无法解析模块数据目录：{error}"),
+        })?;
+        fs::create_dir_all(&data_directory).map_err(|error| RuntimeError {
+            code: "moduleDataUnavailable",
+            message: format!("无法创建模块数据目录：{error}"),
+        })?;
         let mut command = Command::new(&record.entry);
         command
             .current_dir(&record.directory)
@@ -115,7 +127,8 @@ impl ModuleRuntimeManager {
             .stderr(Stdio::piped())
             .env("QINGTOOLBOX_MODULE_PROTOCOL", "qing.module/1")
             .env("QINGTOOLBOX_MODULE_ID", module_id)
-            .env("QINGTOOLBOX_MODULE_NONCE", &nonce);
+            .env("QINGTOOLBOX_MODULE_NONCE", &nonce)
+            .env("QINGTOOLBOX_MODULE_DATA_DIR", &data_directory);
         apply_hidden_process_flags(&mut command);
 
         let mut child = command.spawn().map_err(|error| RuntimeError {
@@ -184,6 +197,171 @@ impl ModuleRuntimeManager {
         self.snapshots
             .insert(module_id.to_string(), snapshot.clone());
         Ok(snapshot)
+    }
+
+    /// Invoke one manifest-declared operation and wait for its matching
+    /// response. The runtime mutex is held by the caller while this method is
+    /// waiting, so the supervisor cannot consume the response out from under
+    /// the request. Vue never gets access to the process pipe itself.
+    pub fn invoke(
+        &mut self,
+        module_id: &str,
+        record: &ModuleRecord,
+        method: &str,
+        payload: Value,
+    ) -> Result<Value, RuntimeError> {
+        if !crate::valid_operation_name(method) {
+            return Err(RuntimeError {
+                code: "operationInvalid",
+                message: "模块操作名无效。".to_string(),
+            });
+        }
+        let initial = self.start(module_id, record)?;
+        if matches!(
+            initial.state,
+            ModuleRuntimeState::Starting | ModuleRuntimeState::Running
+        ) {
+            let deadline = Instant::now() + HANDSHAKE_TIMEOUT;
+            loop {
+                let snapshot = self.snapshot(module_id);
+                match snapshot.state {
+                    ModuleRuntimeState::Running => break,
+                    ModuleRuntimeState::Failed => {
+                        return Err(RuntimeError {
+                            code: "moduleHandshakeFailed",
+                            message: snapshot
+                                .last_error
+                                .unwrap_or_else(|| "模块 hello 握手失败。".to_string()),
+                        });
+                    }
+                    ModuleRuntimeState::Starting if Instant::now() < deadline => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    ModuleRuntimeState::Starting => {
+                        return Err(RuntimeError {
+                            code: "moduleHandshakeTimeout",
+                            message: "模块 hello 握手超时。".to_string(),
+                        });
+                    }
+                    _ => {
+                        return Err(RuntimeError {
+                            code: "moduleNotRunning",
+                            message: "模块没有处于运行状态。".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        self.next_request_id = self.next_request_id.saturating_add(1);
+        let request_id = format!("invoke-{}-{}", initial.generation, self.next_request_id);
+        let request = ProtocolEnvelope::new(
+            "module.invoke.request",
+            request_id.clone(),
+            serde_json::json!({
+                "method": method,
+                "payload": payload,
+            }),
+        );
+
+        {
+            let running = self
+                .running
+                .get_mut(module_id)
+                .ok_or_else(|| RuntimeError {
+                    code: "moduleNotRunning",
+                    message: "模块没有处于运行状态。".to_string(),
+                })?;
+            if !running.handshake_complete {
+                return Err(RuntimeError {
+                    code: "moduleNotRunning",
+                    message: "模块 hello 尚未完成。".to_string(),
+                });
+            }
+            write_frame(&mut running.stdin, &request)?;
+        }
+
+        let deadline = Instant::now() + INVOKE_TIMEOUT;
+        loop {
+            let mut response = None;
+            let mut failure = None;
+            {
+                let running = self
+                    .running
+                    .get_mut(module_id)
+                    .ok_or_else(|| RuntimeError {
+                        code: "moduleNotRunning",
+                        message: "模块在调用期间退出。".to_string(),
+                    })?;
+                loop {
+                    match running.messages.try_recv() {
+                        Ok(RuntimeMessage::Frame(frame)) if frame.request_id == request_id => {
+                            if frame.message_type != "module.invoke.response" {
+                                failure = Some(RuntimeError {
+                                    code: "moduleResponseInvalid",
+                                    message: format!(
+                                        "模块返回了意外的 invoke 消息类型：{}",
+                                        frame.message_type
+                                    ),
+                                });
+                            } else if let Some(error) = frame.error {
+                                failure = Some(RuntimeError {
+                                    code: "moduleInvokeFailed",
+                                    message: format!("{} ({})", error.message, error.code),
+                                });
+                            } else {
+                                response = Some(frame.payload);
+                            }
+                            break;
+                        }
+                        Ok(RuntimeMessage::Frame(_)) => {
+                            // Events and late responses for another request
+                            // cannot satisfy this request and are ignored.
+                        }
+                        Ok(RuntimeMessage::Invalid(error)) | Ok(RuntimeMessage::Io(error)) => {
+                            failure = Some(RuntimeError {
+                                code: "moduleProtocolFailed",
+                                message: error,
+                            });
+                            break;
+                        }
+                        Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+                    }
+                }
+                if failure.is_none() && response.is_none() {
+                    match running.child.try_wait() {
+                        Ok(Some(status)) => {
+                            failure = Some(RuntimeError {
+                                code: "moduleExited",
+                                message: format!("模块进程已退出：{status}"),
+                            });
+                        }
+                        Err(error) => {
+                            failure = Some(RuntimeError {
+                                code: "moduleStatusUnavailable",
+                                message: format!("无法读取模块进程状态：{error}"),
+                            });
+                        }
+                        Ok(None) => {}
+                    }
+                }
+            }
+
+            if let Some(response) = response {
+                return Ok(response);
+            }
+            if let Some(failure) = failure {
+                let _ = self.refresh_one(module_id);
+                return Err(failure);
+            }
+            if Instant::now() >= deadline {
+                return Err(RuntimeError {
+                    code: "moduleInvokeTimeout",
+                    message: "模块操作响应超时。".to_string(),
+                });
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     pub fn stop(&mut self, module_id: &str) -> ModuleRuntimeSnapshot {

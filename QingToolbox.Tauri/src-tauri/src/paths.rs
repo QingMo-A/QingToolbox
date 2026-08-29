@@ -135,6 +135,36 @@ pub fn user_data_root() -> Option<PathBuf> {
     Some(PathBuf::from(base).join("QingToolbox"))
 }
 
+/// Resolve the host-owned data directory for one module. The module id is
+/// already validated by manifest discovery; this helper repeats the lexical
+/// boundary so it is safe to call from the runtime layer as well.
+pub fn module_data_directory(module_id: &str) -> Result<PathBuf, PathError> {
+    if module_id.is_empty()
+        || module_id.len() > 128
+        || !module_id
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        || !module_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+    {
+        return Err(PathError::InvalidComponent);
+    }
+    let base = if cfg!(windows) {
+        env::var_os("APPDATA").or_else(|| env::var_os("LOCALAPPDATA"))
+    } else {
+        env::var_os("XDG_CONFIG_HOME").or_else(|| {
+            env::var_os("HOME").map(|home| PathBuf::from(home).join(".config").into_os_string())
+        })
+    }
+    .ok_or(PathError::Missing)?;
+    Ok(PathBuf::from(base)
+        .join("QingToolbox")
+        .join("Data")
+        .join(module_id))
+}
+
 fn push_unique_root(roots: &mut Vec<ModuleRoot>, candidate: ModuleRoot) {
     let key = normalize_for_compare(&candidate.path);
     if roots

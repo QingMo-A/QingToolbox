@@ -57,6 +57,13 @@ Event:
 {"protocolVersion":1,"messageType":"module.state.event","requestId":"event-3","payload":{"state":"running"}}
 ```
 
+Invoke request/response:
+
+```json
+{"protocolVersion":1,"messageType":"module.invoke.request","requestId":"invoke-4","payload":{"method":"getState","payload":{}}}
+{"protocolVersion":1,"messageType":"module.invoke.response","requestId":"invoke-4","payload":{"ok":true}}
+```
+
 ## Lifecycle
 
 The host owns the lifecycle. It sends `module.hello.request` first and only
@@ -70,3 +77,8 @@ grace period and then terminates an unresponsive child.
 result is returned only to the host. Any path, process or window operation
 must be represented by a host-defined command and an opaque ID; modules and
 frontends must not turn user-provided strings into arbitrary OS calls.
+
+The manifest may declare an `operations` array. The host forwards only an
+operation present in that list; an omitted or empty list exposes no invoke
+surface. Each request uses a fresh host-owned `requestId`, and the host waits
+for the matching `module.invoke.response` before returning to the Web UI.

@@ -11,5 +11,6 @@
   "webEntry": "ui/index.html",
   "loadMode": "Manual",
   "permissions": [],
+  "operations": ["ping"],
   "icon": "icon.svg"
 }

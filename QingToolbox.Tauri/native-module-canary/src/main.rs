@@ -83,6 +83,29 @@ fn main() {
                 write_response(&mut stdout, &response);
                 break;
             }
+            "module.invoke.request" => {
+                let Some(object) = envelope.payload.as_object() else {
+                    write_error(&mut stdout, &envelope.request_id, "invalid_payload", "Invoke payload must be an object.");
+                    continue;
+                };
+                let Some(method) = object.get("method").and_then(Value::as_str) else {
+                    write_error(&mut stdout, &envelope.request_id, "invalid_method", "Invoke method is required.");
+                    continue;
+                };
+                if method == "ping" {
+                    let payload = object.get("payload").cloned().unwrap_or(Value::Null);
+                    let response = Response {
+                        protocol_version: PROTOCOL_VERSION,
+                        message_type: "module.invoke.response",
+                        request_id: &envelope.request_id,
+                        payload: serde_json::json!({ "pong": true, "echo": payload }),
+                        error: None,
+                    };
+                    write_response(&mut stdout, &response);
+                } else {
+                    write_error(&mut stdout, &envelope.request_id, "unknown_method", "The canary does not implement this operation.");
+                }
+            }
             _ => {
                 let response = Response {
                     protocol_version: PROTOCOL_VERSION,
@@ -98,6 +121,17 @@ fn main() {
             }
         }
     }
+}
+
+fn write_error(stdout: &mut impl Write, request_id: &str, code: &'static str, message: &'static str) {
+    let response = Response {
+        protocol_version: PROTOCOL_VERSION,
+        message_type: "module.invoke.response",
+        request_id,
+        payload: Value::Null,
+        error: Some(ErrorBody { code, message }),
+    };
+    write_response(stdout, &response);
 }
 
 fn write_response(stdout: &mut impl Write, response: &Response<'_>) {

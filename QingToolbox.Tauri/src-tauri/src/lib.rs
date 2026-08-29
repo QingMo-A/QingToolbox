@@ -1,6 +1,7 @@
 use std::{sync::Mutex, thread, time::Duration};
 
 use serde::Serialize;
+use serde_json::Value;
 use tauri::{
     menu::MenuBuilder, tray::TrayIconBuilder, webview::WebviewWindow, Manager, State, WindowEvent,
 };
@@ -129,6 +130,18 @@ fn valid_module_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
+fn valid_operation_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b':'))
+}
+
 /// Start only the executable recorded in a previously discovered manifest.
 /// The frontend cannot submit a path or arbitrary command line.
 #[tauri::command]
@@ -237,6 +250,57 @@ fn stop_module(
     Ok(runtime.stop(&module_id))
 }
 
+/// Forward a module-specific operation only when the module declared it in
+/// `module.json`. The payload is opaque to the host, but the process and
+/// operation identity remain backend-owned and the response is correlated by
+/// a host-generated request id inside the runtime manager.
+#[tauri::command]
+fn invoke_module(
+    state: State<'_, HostState>,
+    module_id: String,
+    method: String,
+    payload: Value,
+) -> Result<Value, CommandError> {
+    if !valid_module_id(&module_id) {
+        return Err(CommandError {
+            code: "moduleIdInvalid",
+            message: "模块 id 无效。".to_string(),
+        });
+    }
+    if !valid_operation_name(&method) {
+        return Err(CommandError {
+            code: "operationInvalid",
+            message: "模块操作名无效。".to_string(),
+        });
+    }
+    let record = state
+        .module_index
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块索引状态不可用。".to_string(),
+        })?
+        .get(&module_id)
+        .cloned()
+        .ok_or_else(|| CommandError {
+            code: "moduleNotFound",
+            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
+        })?;
+    if !record.operations.contains(&method) {
+        return Err(CommandError {
+            code: "operationNotDeclared",
+            message: "该模块未声明此操作。".to_string(),
+        });
+    }
+    let mut runtime = state.runtime.lock().map_err(|_| CommandError {
+        code: "stateUnavailable",
+        message: "模块运行状态不可用。".to_string(),
+    })?;
+    runtime
+        .invoke(&module_id, &record, &method, payload)
+        .map_err(CommandError::from)
+}
+
 #[tauri::command]
 fn get_module_runtime(
     state: State<'_, HostState>,
@@ -282,6 +346,7 @@ pub fn run() {
             start_module,
             open_module,
             stop_module,
+            invoke_module,
             get_module_runtime,
             get_all_module_runtime
         ])

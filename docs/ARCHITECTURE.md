@@ -12,7 +12,8 @@
 当前已落地：固定模块根扫描、清单和图标资源校验、1 MiB 单行协议帧限制、
 nonce-bound hello 握手（每次启动使用系统 RNG nonce）、Rust 后台监督的新模块
 executable 启动/停止状态管理、官方单实例插件、
-受控 `qmod://` Web 资源协议和最小托盘菜单。Everything、qpdf 等重型能力
+受 manifest `operations` allowlist 约束的 invoke 通道、受控 `qmod://` Web 资源协议
+和最小托盘菜单。Everything、qpdf 等重型能力
 应作为模块自己的固定 sidecar 管理，不进入 Rust Shell 的通用 filesystem
 bridge。
 

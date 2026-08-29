@@ -55,6 +55,24 @@ try {
         throw 'Canary hello response did not satisfy the nonce-bound protocol contract.'
     }
 
+    $invoke = @{
+        protocolVersion = 1
+        messageType = 'module.invoke.request'
+        requestId = 'invoke-smoke'
+        payload = @{ method = 'ping'; payload = @{ source = 'smoke' } }
+    } | ConvertTo-Json -Compress -Depth 8
+    $process.StandardInput.WriteLine($invoke)
+    $process.StandardInput.Flush()
+
+    $invokeResponse = Read-Response $process 'invoke'
+    if ($invokeResponse.protocolVersion -ne 1 -or
+        $invokeResponse.messageType -ne 'module.invoke.response' -or
+        $invokeResponse.requestId -ne 'invoke-smoke' -or
+        $invokeResponse.payload.pong -ne $true -or
+        $invokeResponse.payload.echo.source -ne 'smoke') {
+        throw 'Canary invoke response did not satisfy the request correlation contract.'
+    }
+
     $shutdown = @{
         protocolVersion = 1
         messageType = 'module.shutdown.request'

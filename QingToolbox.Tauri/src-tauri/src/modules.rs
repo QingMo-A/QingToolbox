@@ -20,6 +20,8 @@ const MAX_NAME_LENGTH: usize = 256;
 const MAX_DESCRIPTION_LENGTH: usize = 4096;
 const MAX_VERSION_LENGTH: usize = 64;
 const MAX_AUTHOR_LENGTH: usize = 256;
+const MAX_OPERATION_LENGTH: usize = 64;
+const MAX_OPERATIONS: usize = 64;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,6 +67,9 @@ pub struct ModuleRecord {
     /// Manifest-relative entry route for a validated `uiKind=Web` module. The
     /// frontend does not receive this path; the host resolves it on demand.
     pub web_entry: Option<String>,
+    /// Operations the module explicitly exposes through `module.invoke`.
+    /// An omitted/empty list means that the module has no host-call surface.
+    pub operations: BTreeSet<String>,
     pub source: ModuleSource,
 }
 
@@ -90,6 +95,7 @@ struct RawManifest {
     ui_kind: Option<String>,
     load_mode: Option<String>,
     permissions: Option<Vec<serde_json::Value>>,
+    operations: Option<Vec<String>>,
     #[allow(dead_code)]
     minimum_host_version: Option<String>,
     #[allow(dead_code)]
@@ -176,12 +182,19 @@ pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
                     .filter(|kind| *kind == "Web")
                     .and(manifest.web_entry.as_deref())
                     .map(str::to_string);
+                let operations = manifest
+                    .operations
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect::<BTreeSet<_>>();
                 records.insert(
                     id,
                     ModuleRecord {
                         directory,
                         entry,
                         web_entry,
+                        operations,
                         source: root.source,
                     },
                 );
@@ -321,6 +334,7 @@ fn validate_manifest(
     }
 
     validate_permissions(manifest.permissions.as_deref(), &mut issues);
+    validate_operations(manifest.operations.as_deref(), &mut issues);
 
     match manifest.entry.as_deref() {
         Some(entry)
@@ -462,6 +476,38 @@ fn validate_permissions(permissions: Option<&[serde_json::Value]>, issues: &mut 
             issues.push(issue(
                 "permissionInvalid",
                 format!("模块 permission 未知或重复：{value}"),
+            ));
+        }
+    }
+}
+
+fn validate_operations(operations: Option<&[String]>, issues: &mut Vec<ModuleIssue>) {
+    let Some(operations) = operations else {
+        return;
+    };
+    if operations.len() > MAX_OPERATIONS {
+        issues.push(issue(
+            "operationsTooMany",
+            format!("模块 operations 不得超过 {MAX_OPERATIONS} 项。"),
+        ));
+        return;
+    }
+    let mut seen = BTreeSet::new();
+    for operation in operations {
+        if operation.is_empty()
+            || operation.len() > MAX_OPERATION_LENGTH
+            || !operation
+                .bytes()
+                .next()
+                .is_some_and(|byte| byte.is_ascii_alphanumeric())
+            || !operation.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b':')
+            })
+            || !seen.insert(operation)
+        {
+            issues.push(issue(
+                "operationInvalid",
+                format!("模块 operation 无效或重复：{operation}"),
             ));
         }
     }
@@ -651,6 +697,44 @@ mod tests {
             result.records["demo.web"].web_entry.as_deref(),
             Some("ui/index.html")
         );
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn declared_operations_are_kept_backend_only() {
+        let (temp, root) = temp_module(
+            "operations",
+            r#"{"id":"demo.operations","name":"Operations","version":"1.0.0","entry":"entry.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual","operations":["getState","ping"]}"#,
+        );
+        let result = discover_modules(&[root]);
+        assert!(result.payload.modules[0].valid);
+        assert_eq!(
+            result.records["demo.operations"]
+                .operations
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec!["getState".to_string(), "ping".to_string()]
+        );
+        assert!(!serde_json::to_string(&result.payload.modules[0])
+            .expect("summary")
+            .contains("getState"));
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn invalid_declared_operation_does_not_enter_the_lookup_index() {
+        let (temp, root) = temp_module(
+            "bad-operations",
+            r#"{"id":"demo.badops","name":"Bad Operations","version":"1.0.0","entry":"entry.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual","operations":["../escape"]}"#,
+        );
+        let result = discover_modules(&[root]);
+        assert!(!result.payload.modules[0].valid);
+        assert!(result.payload.modules[0]
+            .issues
+            .iter()
+            .any(|issue| issue.code == "operationInvalid"));
+        assert!(result.records.is_empty());
         let _ = fs::remove_dir_all(temp);
     }
 

@@ -118,7 +118,8 @@ The minimum process-profile fields are:
   "uiKind": "Web",
   "webEntry": "ui/index.html",
   "loadMode": "Manual",
-  "permissions": []
+  "permissions": [],
+  "operations": ["getState"]
 }
 ```
 
@@ -133,3 +134,7 @@ The process profile is intentionally Windows-executable-only in its first
 implementation. Script wrappers and arbitrary command lines are not accepted;
 if a module needs a helper runtime, package that helper as a fixed sidecar and
 keep its lifecycle under the module process.
+
+`operations` is an optional allowlist for the versioned `module.invoke` bridge.
+The host rejects calls that are not declared by the manifest; an empty or
+missing list keeps the module UI read-only until a later contract is added.

@@ -20,6 +20,9 @@ pwsh ./scripts/verify-tauri.ps1
 交互式开发启动可直接运行仓库根目录的 `run-tauri-dev.bat`；它只启动新
 Tauri 宿主，不会替换或改写现有 WPF 安装。
 
+当前宿主已支持受 manifest allowlist 约束的模块 `invoke` 请求；产品模块仍在
+按阶段重写，旧 WPF 模块不会被新宿主自动加载。
+
 The Modules page provides read-only detection against the official per-module update metadata. Checks use isolated conditional-request caches and never download or install packages. See [module update detection](docs/MODULE_UPDATE_DETECTION.md).
 
 QingToolbox Shell 和模块宿主窗口共享可扩展的 WPF `WindowChrome` 标题栏基础设施。它保留系统拖动、缩放、系统菜单和标准窗口命令，并通过最大化按钮命中测试支持 Windows 11 Snap Layout；MainWindow 的自定义操作区提供主动切换桌面悬浮标的入口。
