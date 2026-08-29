@@ -14,6 +14,7 @@ const host = spawn(executablePath, [], {
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
     WEBVIEW2_USER_DATA_FOLDER: `${process.env.TEMP ?? process.env.TMP ?? '.'}\\qingtoolbox-tauri-window-smoke-${port}`,
     QING_TAURI_DISABLE_SINGLE_INSTANCE: '1',
+    QING_TAURI_STARTUP_PRESENTATION: 'main',
   },
   stdio: 'ignore',
 })

@@ -111,6 +111,9 @@ the first release.
   ZIP before extraction, stages below the backend-selected user module root,
   validates the extracted manifest without executing it, and publishes with an
   atomic same-volume rename. Existing IDs are rejected instead of replaced.
+- Apply the persisted startup presentation and close behavior in the native
+  window lifecycle. A first-run Tauri profile opens the main window; tray and
+  exit paths remain explicit settings, and the `ask` path uses a native dialog.
 
 ### M2 — first native module (in progress)
 

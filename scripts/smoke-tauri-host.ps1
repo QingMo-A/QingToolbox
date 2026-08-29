@@ -16,6 +16,9 @@ function New-HostStartInfo([string]$Path, [string]$WorkingDirectory) {
     $info.WorkingDirectory = $WorkingDirectory
     $info.UseShellExecute = $false
     $info.CreateNoWindow = $true
+    # Keep the smoke deterministic even when the developer's shared legacy
+    # settings request a tray/floating presentation.
+    $info.EnvironmentVariables['QING_TAURI_STARTUP_PRESENTATION'] = 'main'
     return $info
 }
 

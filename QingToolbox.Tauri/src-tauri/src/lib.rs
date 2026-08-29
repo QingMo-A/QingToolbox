@@ -1,10 +1,18 @@
-use std::{sync::Mutex, thread, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
+    thread,
+    time::Duration,
+};
 
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{
     menu::MenuBuilder, tray::TrayIconBuilder, webview::WebviewWindow, Manager, State, WindowEvent,
 };
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 mod importer;
 mod modules;
@@ -31,6 +39,7 @@ pub struct HostState {
     scan_gate: Mutex<()>,
     runtime: Mutex<ModuleRuntimeManager>,
     settings: Mutex<SettingsStore>,
+    close_prompt_active: AtomicBool,
 }
 
 impl HostState {
@@ -41,6 +50,7 @@ impl HostState {
             scan_gate: Mutex::new(()),
             runtime: Mutex::new(ModuleRuntimeManager::new()),
             settings: Mutex::new(SettingsStore::new()),
+            close_prompt_active: AtomicBool::new(false),
         }
     }
 }
@@ -633,7 +643,8 @@ pub fn run() {
                 .build(app)?;
 
             if let Some(window) = app.get_webview_window("main") {
-                install_close_to_tray_behavior(&window);
+                install_close_behavior(&window);
+                apply_startup_presentation(app.handle(), &window);
             }
             Ok(())
         })
@@ -680,12 +691,98 @@ fn stop_all_modules<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
-fn install_close_to_tray_behavior(window: &WebviewWindow) {
+fn apply_startup_presentation<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    window: &WebviewWindow<R>,
+) {
+    let configured = app
+        .try_state::<HostState>()
+        .and_then(|state| {
+            state
+                .settings
+                .lock()
+                .ok()
+                .map(|settings| settings.snapshot().startup_presentation)
+        })
+        .unwrap_or_else(|| "main".to_string());
+    // Smoke and local development can request a deterministic visible window
+    // without changing the user's persisted preference. Production has no
+    // override unless the environment is explicitly set.
+    let presentation = std::env::var("QING_TAURI_STARTUP_PRESENTATION")
+        .ok()
+        .filter(|value| matches!(value.as_str(), "main" | "minimized" | "tray"))
+        .unwrap_or(configured);
+    match presentation.as_str() {
+        "minimized" => {
+            let _ = window.show();
+            let _ = window.minimize();
+        }
+        "tray" => {
+            let _ = window.hide();
+        }
+        _ => show_main_window(app),
+    }
+}
+
+fn install_close_behavior(window: &WebviewWindow) {
     let window_for_handler = window.clone();
+    let app = window.app_handle().clone();
     window.on_window_event(move |event| {
-        if let WindowEvent::CloseRequested { api, .. } = event {
-            api.prevent_close();
-            let _ = window_for_handler.hide();
+        let WindowEvent::CloseRequested { api, .. } = event else {
+            return;
+        };
+        let behavior = app
+            .try_state::<HostState>()
+            .and_then(|state| {
+                state
+                    .settings
+                    .lock()
+                    .ok()
+                    .map(|settings| settings.snapshot().close_behavior)
+            })
+            .unwrap_or_else(|| "tray".to_string());
+        match behavior.as_str() {
+            "exit" => {
+                // Prevent the event first and let Tauri's exit path perform
+                // the normal module supervisor cleanup exactly once.
+                api.prevent_close();
+                app.exit(0);
+            }
+            "ask" => {
+                api.prevent_close();
+                let Some(state) = app.try_state::<HostState>() else {
+                    let _ = window_for_handler.hide();
+                    return;
+                };
+                if state.close_prompt_active.swap(true, Ordering::AcqRel) {
+                    return;
+                }
+                let callback_app = app.clone();
+                let callback_window = window_for_handler.clone();
+                app.dialog()
+                    .message("关闭窗口后要如何处理 QingToolbox？")
+                    .title("QingToolbox")
+                    .kind(MessageDialogKind::Info)
+                    .buttons(MessageDialogButtons::OkCancelCustom(
+                        "退出工具箱".to_string(),
+                        "最小化到托盘".to_string(),
+                    ))
+                    .parent(&window_for_handler)
+                    .show(move |should_exit| {
+                        if let Some(state) = callback_app.try_state::<HostState>() {
+                            state.close_prompt_active.store(false, Ordering::Release);
+                        }
+                        if should_exit {
+                            callback_app.exit(0);
+                        } else {
+                            let _ = callback_window.hide();
+                        }
+                    });
+            }
+            _ => {
+                api.prevent_close();
+                let _ = window_for_handler.hide();
+            }
         }
     });
 }

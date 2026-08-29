@@ -92,6 +92,10 @@ pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop
 - `bundle.active` 暂时关闭，避免在品牌图标和签名资产就绪前生成安装包。
 - capability 当前只授予 Tauri core 默认能力和显式的 dialog 文件选择器权限；新增系统能力必须
   显式增加权限。Vue 仍不能直接读写文件系统或启动进程。
+- 新宿主首次启动默认显示主窗口；之后读取共享设置中的启动显示模式。开发/烟测可用
+  `QING_TAURI_STARTUP_PRESENTATION=main|minimized|tray` 临时覆盖，而不会写入用户设置。
+- 主窗口关闭行为由设置控制：`tray` 隐藏到托盘，`exit` 走 Tauri 正常退出清理，`ask`
+  使用原生确认对话框让用户选择。本体退出时只收拢本宿主创建的模块进程。
 - 不修改、不加载现有 WPF 项目；旧模块迁移将在协议确定后单独进行。
 
 ## 版本策略

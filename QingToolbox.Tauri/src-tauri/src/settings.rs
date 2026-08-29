@@ -68,7 +68,9 @@ impl Default for Settings {
             language: "system".to_string(),
             appearance_preset_id: "qing-default".to_string(),
             close_behavior: "ask".to_string(),
-            startup_presentation: "tray".to_string(),
+            // A first launch of the standalone Tauri host should be visible.
+            // Existing legacy settings still map FloatingBadge to `tray`.
+            startup_presentation: "main".to_string(),
             launch_at_login: false,
             show_logs_in_sidebar: false,
             recent_module_ids: Vec::new(),
@@ -281,7 +283,7 @@ fn normalize_startup_presentation(value: Option<&Value>) -> String {
         Some("main") | Some("MainWindow") | Some("0") => "main".to_string(),
         Some("minimized") | Some("Minimized") | Some("1") => "minimized".to_string(),
         Some("tray") | Some("FloatingBadge") | Some("2") => "tray".to_string(),
-        _ => "tray".to_string(),
+        _ => "main".to_string(),
     }
 }
 
