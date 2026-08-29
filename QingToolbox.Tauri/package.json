@@ -1,0 +1,25 @@
+{
+  "name": "qingtoolbox-tauri",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "QingToolbox's lightweight Tauri shell (migration scaffold).",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "vue": "3.5.42"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@vitejs/plugin-vue": "6.0.1",
+    "typescript": "5.9.3",
+    "vite": "7.1.10",
+    "vue-tsc": "3.3.11"
+  }
+}

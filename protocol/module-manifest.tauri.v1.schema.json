@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qingtoolbox.dev/schemas/module-manifest.tauri.v1.schema.json",
+  "title": "QingToolbox Tauri module manifest v1",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "version",
+    "entry",
+    "runtimeType",
+    "runtimeIsolation",
+    "loadMode"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "entry": {
+      "type": "string",
+      "pattern": "^(?![\\\\/])(?!.*\\.\\.)[^:]*\\.exe$"
+    },
+    "icon": {
+      "type": "string",
+      "pattern": "^(?![\\\\/])(?!.*\\.\\.)[^:]+$"
+    },
+    "runtimeType": {
+      "const": "Process"
+    },
+    "runtimeIsolation": {
+      "const": "OutOfProcess"
+    },
+    "uiKind": {
+      "enum": ["None", "Web"]
+    },
+    "webEntry": {
+      "type": "string",
+      "pattern": "^(?![\\\\/])(?!.*\\.\\.)[^:]+\\.html$"
+    },
+    "loadMode": {
+      "enum": ["Manual", "Startup"]
+    },
+    "permissions": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "FileRead",
+          "FileWrite",
+          "ProcessStart",
+          "Network",
+          "Clipboard",
+          "WindowControl"
+        ]
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "uiKind": { "const": "Web" }
+        }
+      },
+      "then": {
+        "required": ["webEntry"]
+      }
+    }
+  ],
+  "additionalProperties": true
+}

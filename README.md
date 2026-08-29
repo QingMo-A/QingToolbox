@@ -1,5 +1,25 @@
 # QingToolbox
 
+## Tauri 重构基线
+
+新一代工具箱宿主位于 [`QingToolbox.Tauri`](QingToolbox.Tauri/)，采用 Rust
+核心、Tauri 2 和 Vue 3。它目前与 WPF 宿主并行，用于承载新的模块协议和本体
+能力，不会自动替换现有生产启动入口。迁移边界、数据保留策略和分阶段验收见
+[`docs/TAURI_MIGRATION.md`](docs/TAURI_MIGRATION.md)；协议定义见
+[`protocol/README.md`](protocol/README.md)。
+
+在已安装 Rust stable、Node.js 和 Windows WebView2 的开发机上，可运行：
+
+```powershell
+pwsh ./scripts/verify-tauri.ps1
+```
+
+需要连同桌面可执行文件和单实例启动烟测一起验证时运行
+`pwsh ./scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop`。
+
+交互式开发启动可直接运行仓库根目录的 `run-tauri-dev.bat`；它只启动新
+Tauri 宿主，不会替换或改写现有 WPF 安装。
+
 The Modules page provides read-only detection against the official per-module update metadata. Checks use isolated conditional-request caches and never download or install packages. See [module update detection](docs/MODULE_UPDATE_DETECTION.md).
 
 QingToolbox Shell 和模块宿主窗口共享可扩展的 WPF `WindowChrome` 标题栏基础设施。它保留系统拖动、缩放、系统菜单和标准窗口命令，并通过最大化按钮命中测试支持 Windows 11 Snap Layout；MainWindow 的自定义操作区提供主动切换桌面悬浮标的入口。

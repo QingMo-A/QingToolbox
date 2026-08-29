@@ -1,5 +1,10 @@
 # QingToolbox `.qmod` Package Format
 
+> This document contains both the existing WPF package profile and the new
+> Tauri process profile. New modules should use the Tauri profile below; the
+> WPF DLL profile is retained only for the current host while migration is in
+> progress.
+
 Version: `0.2.0-alpha` Preview 2
 
 ## Container
@@ -12,6 +17,12 @@ wrap the package contents in an extra top-level directory.
 Secure staging `qmod.json` schema 1 contains `schemaVersion`, `moduleId`,
 `version`, `moduleApiVersion`, and `entryManifest`; `entryManifest` must be the
 root `module.json`. See [`QMOD_STAGING_SECURITY.md`](QMOD_STAGING_SECURITY.md).
+
+## Existing WPF profile (legacy)
+
+The following profile is read only by the current WPF host during migration.
+It is not loaded by `QingToolbox.Tauri` and has no compatibility adapter in the
+new host.
 
 Required manifest fields:
 
@@ -77,3 +88,48 @@ packages from sources you trust.
 Verified staging remains isolated cache state and is not module installation.
 Future work includes package signing, a module marketplace, transactional
 replacement and rollback, richer permission declarations, and dependency resolution.
+
+## Tauri process profile
+
+The Tauri host does not load a module DLL. A new module package must declare an
+independent executable and communicate with the host through the versioned
+JSON-lines contract in [`../protocol/README.md`](../protocol/README.md):
+
+```text
+module.json
+bin/
+  qing-example.exe
+ui/
+  index.html
+  assets/...
+icon.svg
+```
+
+The minimum process-profile fields are:
+
+```json
+{
+  "id": "qing.example",
+  "name": "Example",
+  "version": "0.1.0",
+  "entry": "bin/qing-example.exe",
+  "runtimeType": "Process",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
+  "loadMode": "Manual",
+  "permissions": []
+}
+```
+
+`entry` and `webEntry` are relative paths. The Tauri backend canonicalizes and
+rechecks them against the module directory before a process can be started;
+the Vue frontend never receives or submits those paths. The host starts only
+the executable recorded by a validated manifest, sends a `module.hello`
+request, and owns the shutdown timeout. A failed or unsupported process does
+not affect discovery of other modules.
+
+The process profile is intentionally Windows-executable-only in its first
+implementation. Script wrappers and arbitrary command lines are not accepted;
+if a module needs a helper runtime, package that helper as a fixed sidecar and
+keep its lifecycle under the module process.

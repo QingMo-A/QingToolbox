@@ -1,0 +1,15 @@
+{
+  "id": "qing.canary",
+  "name": "Tauri Module Canary",
+  "description": "A tiny native process used to verify the Tauri module handshake.",
+  "version": "0.1.0",
+  "author": "QingMo-A",
+  "entry": "bin/qing-module-canary.exe",
+  "runtimeType": "Process",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
+  "loadMode": "Manual",
+  "permissions": [],
+  "icon": "icon.svg"
+}

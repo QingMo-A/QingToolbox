@@ -1,5 +1,21 @@
 # 架构
 
+## Tauri 新宿主（迁移中）
+
+新宿主位于 `QingToolbox.Tauri`，以 Tauri 2 的 Rust Core 取代 WPF Shell，
+以 Vue 页面作为唯一界面。Rust 负责模块发现、路径/权限边界、窗口托盘和
+模块进程生命周期；前端只调用窄 typed commands 并消费序列化快照。新模块
+通过 [`../protocol/README.md`](../protocol/README.md) 的版本化 JSON 协议运行，
+不再直接加载 .NET DLL。迁移阶段 WPF 宿主仍保留，但不会被新宿主引用或作为
+兼容层嵌入。
+
+当前已落地：固定模块根扫描、清单和图标资源校验、1 MiB 单行协议帧限制、
+nonce-bound hello 握手（每次启动使用系统 RNG nonce）、Rust 后台监督的新模块
+executable 启动/停止状态管理、官方单实例插件、
+受控 `qmod://` Web 资源协议和最小托盘菜单。Everything、qpdf 等重型能力
+应作为模块自己的固定 sidecar 管理，不进入 Rust Shell 的通用 filesystem
+bridge。
+
 ## 分层
 
 - **Shell**：WPF 应用入口、窗口、导航和模块页面容器。
