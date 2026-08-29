@@ -16,3 +16,11 @@ native-transfer/ui-src/node_modules/
 native-transfer/ui-src/dist/
 src-tauri/resources/modules/qing.pdf/
 src-tauri/resources/modules/qing.qingtransfer/
+native-texttools/target/
+native-texttools/ui-src/node_modules/
+native-texttools/ui-src/dist/
+src-tauri/resources/modules/qing.texttools/
+native-windowtopmost/target/
+native-windowtopmost/ui-src/node_modules/
+native-windowtopmost/ui-src/dist/
+src-tauri/resources/modules/qing.windowtopmost/

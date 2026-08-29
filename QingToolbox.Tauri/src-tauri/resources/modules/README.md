@@ -15,6 +15,8 @@ the current native product modules here after checking their fixed inputs:
 - `qing.launcher` — Launcher state and the private Everything runtime.
 - `qing.pdf` — local PDF operations and the pinned qpdf runtime.
 - `qing.qingtransfer` — local-network discovery and verified file transfer.
+- `qing.texttools` — bounded local text conversion and backend-owned clipboard writes.
+- `qing.windowtopmost` — visible-window enumeration and opaque-ID topmost control.
 
 Each module remains an independent `Process`/`OutOfProcess` package. The host
 does not load legacy .NET DLLs from this directory.

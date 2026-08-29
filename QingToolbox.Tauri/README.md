@@ -29,8 +29,8 @@ QingToolbox.Tauri/
 ```
 
 `native-module-canary/` 是一个可复现的 Rust 进程模块样例，用于验证
-nonce-bound hello、invoke 和有界 shutdown。`native-launcher/`、`native-pdf/`
-和 `native-transfer/` 是当前产品迁移切片：各自的状态、文件边界和重型运行时
+nonce-bound hello、invoke 和有界 shutdown。`native-launcher/`、`native-pdf/`、
+`native-transfer/`、`native-texttools/` 和 `native-windowtopmost/` 是当前产品迁移切片：各自的状态、系统能力、文件边界和重型运行时
 都在独立 Rust 进程中，Vue 只通过模块窗口 IPC 调用，不接收可直接执行的路径。
 
 ## 本地运行
@@ -48,8 +48,7 @@ npm run tauri dev
 仓库根目录也提供了 `run-tauri-dev.bat`：它会先构建协议 canary 和 Rust
 Launcher 模块，再启动 Tauri 开发宿主。
 
-桌面构建完成后可用仓库脚本运行启动、单实例以及 Launcher、Qing PDF、
-QingTransfer 模块窗口烟测：
+桌面构建完成后可用仓库脚本运行启动、单实例以及全部已迁移模块的窗口烟测：
 
 ```powershell
 pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop -SmokeEverything
@@ -63,7 +62,7 @@ pwsh ../scripts/build-tauri-portable.ps1 -Smoke -Zip
 
 脚本会把 Tauri executable、`resources/modules`、逐文件 SHA256 manifest 和许可
 文件放到 `artifacts/tauri-portable/`。当前 portable 目录已包含原生 Launcher、
-Qing PDF（固定 qpdf 运行时）和 QingTransfer；这条路径与现有 WPF/Inno 发布链
+Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools 和 Window Topmost；这条路径与现有 WPF/Inno 发布链
 并行，直到所有官方模块迁移完成后才考虑替换正式安装入口。
 
 没有 Tauri 环境时仍可使用 `npm run dev` 在浏览器中预览；前端会显示
@@ -113,6 +112,12 @@ Qing PDF（固定 qpdf 运行时）和 QingTransfer；这条路径与现有 WPF/
   完成 nonce-bound TCP 探测才会进入设备列表；连接和文件传输使用有界 JSON 控制帧、
   SHA-256 校验、临时文件和原子改名。接收目录偏好由模块数据目录保存，关闭时只
   收拢本模块创建的监听/发现资源。
+- Text Tools 已迁移为 Rust 进程模块：JSON、Base64、URL 编码和大小写等转换均
+  在 2 MiB 输入/4 MiB 输出边界内执行；剪贴板写入由模块后端完成，Vue 不直接
+  获得系统剪贴板能力。
+- Window Topmost 已迁移为 Rust 进程模块：后端枚举当前桌面的普通可见窗口，
+  仅向 Vue 发放短期 `windowId`；真实 HWND 保留在进程内并在每次置顶操作前重新
+  校验，不提供通用 Win32 调用桥。
 - `scripts/build-tauri-canary.ps1` 和 `scripts/smoke-tauri-canary.ps1` 提供
   一个真实子进程的 hello、invoke、shutdown 协议验证闭环。
 - 尚未接入 Explorer 拖入、更新器和完整设置迁移；Launcher 的 Explorer 拖入、

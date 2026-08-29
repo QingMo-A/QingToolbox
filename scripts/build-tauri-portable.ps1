@@ -100,6 +100,12 @@ if (-not $SkipModuleBuild) {
     Invoke-Checked -Label 'Build QingTransfer module' -Action {
         & (Join-Path $repoRoot 'scripts\build-tauri-transfer.ps1')
     }
+    Invoke-Checked -Label 'Build Text Tools module' -Action {
+        & (Join-Path $repoRoot 'scripts\build-tauri-texttools.ps1')
+    }
+    Invoke-Checked -Label 'Build Window Topmost module' -Action {
+        & (Join-Path $repoRoot 'scripts\build-tauri-windowtopmost.ps1')
+    }
 }
 
 Push-Location $appRoot

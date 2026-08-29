@@ -76,6 +76,32 @@ try {
   if (!String(transferSnapshot?.text).includes('QingTransfer') || !String(transferSnapshot?.text).includes('附近设备')) {
     throw new Error('QingTransfer UI did not finish rendering')
   }
+  await closeTarget(moduleTarget)
+  moduleTarget = undefined
+
+  moduleTarget = await openModuleCard('Text Tools', 'qing.texttools')
+  await waitFor(() => evaluate(moduleTarget, `({
+    shell: Boolean(document.querySelector('.shell')),
+    loading: document.querySelector('.status')?.textContent?.includes('正在准备') ?? true,
+    error: document.querySelector('.alert.danger')?.textContent ?? '',
+  })`).then((value) => value.shell && !value.loading && !value.error), 10000)
+  const textToolsSnapshot = await evaluate(moduleTarget, `({ text: document.body.innerText })`)
+  if (!String(textToolsSnapshot?.text).includes('Text Tools') || !String(textToolsSnapshot?.text).includes('格式化 JSON')) {
+    throw new Error('Text Tools UI did not finish rendering')
+  }
+  await closeTarget(moduleTarget)
+  moduleTarget = undefined
+
+  moduleTarget = await openModuleCard('Window Topmost', 'qing.windowtopmost')
+  await waitFor(() => evaluate(moduleTarget, `({
+    shell: Boolean(document.querySelector('.shell')),
+    loading: document.body.innerText.includes('正在准备窗口列表'),
+    error: document.querySelector('.alert.danger')?.textContent ?? '',
+  })`).then((value) => value.shell && !value.loading && !value.error), 10000)
+  const topmostSnapshot = await evaluate(moduleTarget, `({ text: document.body.innerText })`)
+  if (!String(topmostSnapshot?.text).includes('Window Topmost') || !String(topmostSnapshot?.text).includes('拾取窗口')) {
+    throw new Error('Window Topmost UI did not finish rendering')
+  }
   console.log('Tauri module window IPC smoke passed.')
 } finally {
   if (moduleTarget) await closeTarget(moduleTarget).catch(() => {})

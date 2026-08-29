@@ -17,6 +17,7 @@ license texts and transitive dependency versions are fixed by
 | Vite | 7.1.10 | MIT — https://github.com/vitejs/vite |
 | mdns-sd | 0.21.0 | Apache-2.0 OR MIT — https://github.com/keeshastudios/mdns-sd |
 | qpdf | 12.4.1 | Apache-2.0 — https://github.com/qpdf/qpdf |
+| base64 | 0.22.1 | Apache-2.0 OR MIT — https://github.com/marshallpierce/rust-base64 |
 
 The native canary and native modules use Serde and serde_json under their
 respective MIT or Apache-2.0 licenses. The Tauri host itself does not bundle
@@ -38,3 +39,8 @@ Qing PDF carries the official qpdf 12.4.1 Windows runtime under
 hashes. QingTransfer uses the fixed `mdns-sd` 0.21.0 crate for DNS-SD discovery;
 its transitive versions are recorded in `native-transfer/Cargo.lock`. No build
 step downloads a moving `latest` runtime.
+
+Text Tools uses the fixed `base64` 0.22.1 crate and `windows-sys` 0.61.2 for
+bounded text conversion and Windows clipboard writes. Window Topmost reuses
+`windows-sys` 0.61.2 only for the narrow window enumeration, cursor-pick and
+`SetWindowPos` calls implemented inside its Rust process.

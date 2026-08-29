@@ -44,3 +44,15 @@ coverage/
 /QingToolbox.Tauri/native-transfer/ui-src/node_modules/
 /QingToolbox.Tauri/native-transfer/ui-src/dist/
 /QingToolbox.Tauri/src-tauri/resources/modules/qing.qingtransfer/
+
+# Text Tools generated Rust/UI output and staged module resources.
+/QingToolbox.Tauri/native-texttools/target/
+/QingToolbox.Tauri/native-texttools/ui-src/node_modules/
+/QingToolbox.Tauri/native-texttools/ui-src/dist/
+/QingToolbox.Tauri/src-tauri/resources/modules/qing.texttools/
+
+# Window Topmost generated Rust/UI output and staged module resources.
+/QingToolbox.Tauri/native-windowtopmost/target/
+/QingToolbox.Tauri/native-windowtopmost/ui-src/node_modules/
+/QingToolbox.Tauri/native-windowtopmost/ui-src/dist/
+/QingToolbox.Tauri/src-tauri/resources/modules/qing.windowtopmost/

@@ -159,10 +159,18 @@ the first release.
   state and do not make arbitrary filesystem or process operations available
   to the WebView.
 
+- `native-texttools/` is a bounded Rust text-processing module with a Vue
+  surface. JSON/Base64/URL/case transforms and clipboard writes are backend
+  operations; no general clipboard or filesystem primitive is exposed.
+
+- `native-windowtopmost/` enumerates ordinary visible windows in Rust and
+  exposes only short-lived opaque IDs to Vue. HWND values are retained in the
+  module process and revalidated immediately before `SetWindowPos`.
+
 ### M3 — remaining modules
 
-- Rewrite the smaller utility modules (TextTools, PowerGuard, WindowTopmost and
-  ScreenPin), then add parity-specific host integrations such as Explorer drag
+- Rewrite the remaining utility modules (PowerGuard and ScreenPin), then add
+  parity-specific host integrations such as Explorer drag
   and module hotkeys.
 - Run heavy runtimes (Everything/qpdf) as module-owned child processes or
   sidecars and close only instances created by the module. Qing Launcher now

@@ -5,7 +5,9 @@ param(
     [switch]$SmokeDesktop,
     [switch]$SmokeEverything,
     [switch]$SkipPdf,
-    [switch]$SkipTransfer
+    [switch]$SkipTransfer,
+    [switch]$SkipTextTools,
+    [switch]$SkipWindowTopmost
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,9 +37,13 @@ $canaryExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.canary/
 $launcherExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.launcher/bin/qing-launcher-module.exe'
 $pdfExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.pdf/bin/qing-pdf-module.exe'
 $transferExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.qingtransfer/bin/qing-transfer-module.exe'
+$textToolsExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.texttools/bin/qing-texttools-module.exe'
+$windowTopmostExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.windowtopmost/bin/qing-windowtopmost-module.exe'
 $launcherRoot = Join-Path $appRoot 'native-launcher'
 $pdfRoot = Join-Path $appRoot 'native-pdf'
 $transferRoot = Join-Path $appRoot 'native-transfer'
+$textToolsRoot = Join-Path $appRoot 'native-texttools'
+$windowTopmostRoot = Join-Path $appRoot 'native-windowtopmost'
 if (-not $SkipCanary) {
     & (Join-Path $repoRoot 'scripts/build-tauri-canary.ps1')
     & (Join-Path $repoRoot 'scripts/smoke-tauri-canary.ps1') -ExecutablePath $canaryExecutable
@@ -51,6 +57,14 @@ if (-not $SkipPdf) {
 if (-not $SkipTransfer) {
     & (Join-Path $repoRoot 'scripts/build-tauri-transfer.ps1')
     & (Join-Path $repoRoot 'scripts/smoke-tauri-transfer.ps1') -ExecutablePath $transferExecutable
+}
+if (-not $SkipTextTools) {
+    & (Join-Path $repoRoot 'scripts/build-tauri-texttools.ps1')
+    & (Join-Path $repoRoot 'scripts/smoke-tauri-texttools.ps1') -ExecutablePath $textToolsExecutable
+}
+if (-not $SkipWindowTopmost) {
+    & (Join-Path $repoRoot 'scripts/build-tauri-windowtopmost.ps1')
+    & (Join-Path $repoRoot 'scripts/smoke-tauri-windowtopmost.ps1') -ExecutablePath $windowTopmostExecutable
 }
 if ($SmokeEverything) {
     & (Join-Path $repoRoot 'scripts/smoke-tauri-launcher.ps1') -ExecutablePath $launcherExecutable -Everything
@@ -93,6 +107,34 @@ if (-not $SkipTransfer) {
         if ($LASTEXITCODE -ne 0) { throw "QingTransfer cargo test failed with exit code $LASTEXITCODE" }
         & $cargoPath clippy --locked --all-targets -- -D warnings
         if ($LASTEXITCODE -ne 0) { throw "QingTransfer cargo clippy failed with exit code $LASTEXITCODE" }
+    } finally {
+        Pop-Location
+    }
+}
+
+if (-not $SkipTextTools) {
+    Push-Location $textToolsRoot
+    try {
+        & $cargoPath fmt -- --check
+        if ($LASTEXITCODE -ne 0) { throw "Text Tools cargo fmt check failed with exit code $LASTEXITCODE" }
+        & $cargoPath test --locked
+        if ($LASTEXITCODE -ne 0) { throw "Text Tools cargo test failed with exit code $LASTEXITCODE" }
+        & $cargoPath clippy --locked --all-targets -- -D warnings
+        if ($LASTEXITCODE -ne 0) { throw "Text Tools cargo clippy failed with exit code $LASTEXITCODE" }
+    } finally {
+        Pop-Location
+    }
+}
+
+if (-not $SkipWindowTopmost) {
+    Push-Location $windowTopmostRoot
+    try {
+        & $cargoPath fmt -- --check
+        if ($LASTEXITCODE -ne 0) { throw "Window Topmost cargo fmt check failed with exit code $LASTEXITCODE" }
+        & $cargoPath test --locked
+        if ($LASTEXITCODE -ne 0) { throw "Window Topmost cargo test failed with exit code $LASTEXITCODE" }
+        & $cargoPath clippy --locked --all-targets -- -D warnings
+        if ($LASTEXITCODE -ne 0) { throw "Window Topmost cargo clippy failed with exit code $LASTEXITCODE" }
     } finally {
         Pop-Location
     }
