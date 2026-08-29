@@ -118,10 +118,37 @@ fn update_settings(
         code: "stateUnavailable",
         message: "工具箱设置状态不可用。".to_string(),
     })?;
-    settings.update(update).map_err(|error| CommandError {
-        code: error.code,
-        message: error.message,
-    })
+    let previous = settings.snapshot();
+    let requested_launch_at_login = update.launch_at_login.unwrap_or(previous.launch_at_login);
+    let launch_at_login_changed = requested_launch_at_login != previous.launch_at_login;
+
+    // Register the OS startup entry before committing the preference. If the
+    // registration fails, the JSON document remains truthful and the user can
+    // keep using the rest of the host. Debug builds intentionally skip this
+    // side effect unless explicitly enabled for an integration test.
+    if launch_at_login_changed && autostart_sync_enabled() {
+        sync_launch_at_login(window.app_handle(), requested_launch_at_login).map_err(
+            |message| CommandError {
+                code: "autostartUnavailable",
+                message,
+            },
+        )?;
+    }
+
+    match settings.update(update) {
+        Ok(snapshot) => Ok(snapshot),
+        Err(error) => {
+            // The settings write can still fail after an OS registration. Try
+            // to restore the previous registration so a retry is safe.
+            if launch_at_login_changed && autostart_sync_enabled() {
+                let _ = sync_launch_at_login(window.app_handle(), previous.launch_at_login);
+            }
+            Err(CommandError {
+                code: error.code,
+                message: error.message,
+            })
+        }
+    }
 }
 
 /// Import a user-selected `.qmod` package. The path is accepted only for this
@@ -589,6 +616,10 @@ pub fn run() {
     #[cfg(desktop)]
     {
         builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+        builder = builder.plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ));
     }
     // Desktop smoke tests may run alongside the user's installed QingToolbox.
     // Keep the production single-instance behavior by default, while allowing
@@ -626,6 +657,7 @@ pub fn run() {
             start_runtime_supervisor(app.handle().clone());
 
             register_toggle_hotkey(app);
+            sync_persisted_autostart(app);
 
             let menu = MenuBuilder::new(app)
                 .text("open", "打开工具箱")
@@ -664,6 +696,59 @@ pub fn run() {
                 stop_all_modules(app);
             }
         });
+}
+
+fn autostart_sync_enabled() -> bool {
+    // A normal release build owns its registration. Development and smoke
+    // processes must not unexpectedly edit the user's Run key or launch agent;
+    // set this switch only when an integration test explicitly opts in.
+    !cfg!(debug_assertions)
+        || std::env::var("QING_TAURI_ENABLE_AUTOSTART_SYNC")
+            .ok()
+            .as_deref()
+            == Some("1")
+}
+
+#[cfg(desktop)]
+fn sync_launch_at_login<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    enabled: bool,
+) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable().map_err(|error| error.to_string())
+    } else {
+        manager.disable().map_err(|error| error.to_string())
+    }
+}
+
+#[cfg(not(desktop))]
+fn sync_launch_at_login<R: tauri::Runtime>(
+    _app: &tauri::AppHandle<R>,
+    _enabled: bool,
+) -> Result<(), String> {
+    Ok(())
+}
+
+fn sync_persisted_autostart<R: tauri::Runtime>(app: &mut tauri::App<R>) {
+    if !autostart_sync_enabled() {
+        return;
+    }
+    let enabled = app
+        .try_state::<HostState>()
+        .and_then(|state| {
+            state
+                .settings
+                .lock()
+                .ok()
+                .map(|settings| settings.snapshot().launch_at_login)
+        })
+        .unwrap_or(false);
+    if let Err(error) = sync_launch_at_login(app.handle(), enabled) {
+        eprintln!("QingToolbox autostart synchronization failed: {error}");
+    }
 }
 
 #[cfg(desktop)]

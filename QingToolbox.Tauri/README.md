@@ -75,6 +75,9 @@ pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop
 - 宿主通过固定版本的 global-shortcut 插件在 Rust setup 阶段注册持久化的
   `Ctrl+Alt+Space`（可在设置中修改，重启后生效）；回调只切换主窗口显示状态，
   页面不会直接持有全局键盘监听。
+- 登录启动由固定版本的 autostart 插件在 Rust 宿主侧同步。发布版启动时会校正
+  当前用户的启动项；开发/烟测默认不改注册表，只有显式设置
+  `QING_TAURI_ENABLE_AUTOSTART_SYNC=1` 才会启用该副作用。
 - 应用退出事件会先请求所有由本宿主创建的模块进程优雅关闭，超时后由
   Rust runtime supervisor 强制收拢，不会触碰用户自行启动的同名进程。
 - 已实现版本化 envelope、单行 JSON frame 限制（1 MiB）、nonce-bound hello

@@ -380,7 +380,7 @@ onBeforeUnmount(() => {
       <div class="settings-toggles">
         <label class="setting-toggle">
           <input type="checkbox" :checked="settings.launchAtLogin" :disabled="settingsBusy" @change="toggleSetting('launchAtLogin', $event)" />
-          <span><strong>登录时启动</strong><small>保存偏好；启动注册接入将在后续迁移阶段启用。</small></span>
+          <span><strong>登录时启动</strong><small>由 Rust 宿主同步当前用户的 Windows 登录启动项。</small></span>
         </label>
         <label class="setting-toggle">
           <input type="checkbox" :checked="settings.showLogsInSidebar" :disabled="settingsBusy" @change="toggleSetting('showLogsInSidebar', $event)" />

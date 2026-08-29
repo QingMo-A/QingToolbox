@@ -117,6 +117,10 @@ the first release.
 - Register the host toggle shortcut in Rust through the fixed Tauri global
   shortcut plugin. The Vue shell only edits the bounded preference; a failed
   registration is diagnostic and does not prevent the host from starting.
+- Synchronize the typed `launchAtLogin` preference through the fixed Tauri
+  autostart plugin. Release builds repair the current-user startup entry during
+  setup; debug/smoke builds require an explicit opt-in environment variable so
+  validation never mutates a developer's login configuration accidentally.
 
 ### M2 — first native module (in progress)
 
