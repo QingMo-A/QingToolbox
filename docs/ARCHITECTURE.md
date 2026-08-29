@@ -17,6 +17,11 @@ executable 启动/停止状态管理、官方单实例插件、
 应作为模块自己的固定 sidecar 管理，不进入 Rust Shell 的通用 filesystem
 bridge。
 
+模块窗口的 `invoke_module_window` 会从 `module-<id>` 窗口标签推导模块身份，
+不接受页面提交的模块 id；操作仍必须同时出现在该模块的 `operations` allowlist。
+`get_module_window_context` 只返回模块 id、协议版本和操作名，不返回模块目录、
+可执行文件路径或数据目录。
+
 ## 分层
 
 - **Shell**：WPF 应用入口、窗口、导航和模块页面容器。

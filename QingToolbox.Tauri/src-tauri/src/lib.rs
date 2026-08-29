@@ -81,6 +81,17 @@ struct CommandError {
     message: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModuleWindowContext {
+    module_id: String,
+    name: String,
+    version: String,
+    icon_data_url: Option<String>,
+    protocol_version: u16,
+    operations: Vec<String>,
+}
+
 impl From<RuntimeError> for CommandError {
     fn from(error: RuntimeError) -> Self {
         Self {
@@ -181,7 +192,7 @@ fn start_module(
 /// Start a validated module and open its backend-owned Web surface. The
 /// frontend supplies only the module id; it cannot choose a URL or path.
 #[tauri::command]
-fn open_module(
+async fn open_module(
     app: tauri::AppHandle,
     state: State<'_, HostState>,
     module_id: String,
@@ -301,6 +312,148 @@ fn invoke_module(
         .map_err(CommandError::from)
 }
 
+/// Invoke an operation from a module-owned Web window. The module id is
+/// derived from the window label (`module-<id>`) instead of being accepted
+/// from the Web UI. This prevents a compromised module page from reaching a
+/// different module's process while keeping the payload JSON-only.
+#[tauri::command]
+fn invoke_module_window(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+    method: String,
+    payload: Value,
+) -> Result<Value, CommandError> {
+    let module_id = module_id_for_window(&window).ok_or_else(|| CommandError {
+        code: "moduleWindowUnauthorized",
+        message: "只有模块窗口可以调用模块操作。".to_string(),
+    })?;
+    if !valid_operation_name(&method) {
+        return Err(CommandError {
+            code: "operationInvalid",
+            message: "模块操作名无效。".to_string(),
+        });
+    }
+    let record = state
+        .module_index
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块索引状态不可用。".to_string(),
+        })?
+        .get(&module_id)
+        .cloned()
+        .ok_or_else(|| CommandError {
+            code: "moduleNotFound",
+            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
+        })?;
+    if !record.operations.contains(&method) {
+        return Err(CommandError {
+            code: "operationNotDeclared",
+            message: "该模块未声明此操作。".to_string(),
+        });
+    }
+    let mut runtime = state.runtime.lock().map_err(|_| CommandError {
+        code: "stateUnavailable",
+        message: "模块运行状态不可用。".to_string(),
+    })?;
+    runtime
+        .invoke(&module_id, &record, &method, payload)
+        .map_err(CommandError::from)
+}
+
+/// Return the narrow context a module Web surface needs to initialize its
+/// bridge. It intentionally contains no module directory, executable path or
+/// user-data path; those remain Rust-only values.
+#[tauri::command]
+fn get_module_window_context(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+) -> Result<ModuleWindowContext, CommandError> {
+    let module_id = module_id_for_window(&window).ok_or_else(|| CommandError {
+        code: "moduleWindowUnauthorized",
+        message: "只有模块窗口可以读取模块上下文。".to_string(),
+    })?;
+    let (name, version, icon_data_url, operations) = state
+        .module_index
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块索引状态不可用。".to_string(),
+        })?
+        .get(&module_id)
+        .map(|record| {
+            (
+                record.name.clone(),
+                record.version.clone(),
+                record.icon_data_url.clone(),
+                record.operations.iter().cloned().collect(),
+            )
+        })
+        .ok_or_else(|| CommandError {
+            code: "moduleNotFound",
+            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
+        })?;
+    Ok(ModuleWindowContext {
+        module_id,
+        name,
+        version,
+        icon_data_url,
+        protocol_version: protocol::PROTOCOL_VERSION,
+        operations,
+    })
+}
+
+/// Hide only the module window that issued the request. This is intentionally
+/// narrower than `hide_to_tray`, so a module cannot hide or manipulate the
+/// main shell through its page bridge.
+#[tauri::command]
+fn hide_module_window(window: WebviewWindow) -> Result<(), CommandError> {
+    if module_id_for_window(&window).is_none() {
+        return Err(CommandError {
+            code: "moduleWindowUnauthorized",
+            message: "只有模块窗口可以隐藏自身窗口。".to_string(),
+        });
+    }
+    window.hide().map_err(|error| CommandError {
+        code: "windowUnavailable",
+        message: format!("无法隐藏模块窗口：{error}"),
+    })
+}
+
+fn module_id_for_window(window: &WebviewWindow) -> Option<String> {
+    module_id_from_window_label(window.label())
+}
+
+/// Tauri window labels intentionally have a smaller alphabet than manifest
+/// ids (for example, `qing.launcher` contains a dot). Encode the id before it
+/// becomes a label instead of replacing characters and introducing collisions.
+/// Hex keeps the label deterministic, ASCII-only, and reversible without
+/// consulting mutable process state from the window command boundary.
+fn module_window_label(module_id: &str) -> String {
+    let encoded: String = module_id
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("module-{encoded}")
+}
+
+fn module_id_from_window_label(label: &str) -> Option<String> {
+    let encoded = label.strip_prefix("module-")?;
+    if encoded.is_empty()
+        || encoded.len() % 2 != 0
+        || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    let bytes = (0..encoded.len())
+        .step_by(2)
+        .map(|offset| u8::from_str_radix(&encoded[offset..offset + 2], 16).ok())
+        .collect::<Option<Vec<_>>>()?;
+    let id = String::from_utf8(bytes).ok()?;
+    valid_module_id(&id).then_some(id)
+}
+
 #[tauri::command]
 fn get_module_runtime(
     state: State<'_, HostState>,
@@ -331,10 +484,18 @@ fn get_all_module_runtime(
 }
 
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+    let mut builder = tauri::Builder::default();
+    // Desktop smoke tests may run alongside the user's installed QingToolbox.
+    // Keep the production single-instance behavior by default, while allowing
+    // an explicitly opted-in debug test process to use its own host instance.
+    let disable_single_instance =
+        cfg!(debug_assertions) && std::env::var_os("QING_TAURI_DISABLE_SINGLE_INSTANCE").is_some();
+    if !disable_single_instance {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
-        }))
+        }));
+    }
+    builder
         .register_uri_scheme_protocol("qmod", |context, request| {
             serve_module_asset(context.app_handle(), request)
         })
@@ -347,6 +508,9 @@ pub fn run() {
             open_module,
             stop_module,
             invoke_module,
+            invoke_module_window,
+            get_module_window_context,
+            hide_module_window,
             get_module_runtime,
             get_all_module_runtime
         ])
@@ -379,8 +543,16 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running QingToolbox Tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building QingToolbox Tauri application")
+        .run(|app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+            ) {
+                stop_all_modules(app);
+            }
+        });
 }
 
 /// Enforce process exits and hello deadlines in Rust. Runtime correctness must
@@ -406,6 +578,14 @@ fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+fn stop_all_modules<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(state) = app.try_state::<HostState>() {
+        if let Ok(mut runtime) = state.runtime.lock() {
+            runtime.stop_all();
+        }
+    }
+}
+
 fn install_close_to_tray_behavior(window: &WebviewWindow) {
     let window_for_handler = window.clone();
     window.on_window_event(move |event| {
@@ -414,4 +594,22 @@ fn install_close_to_tray_behavior(window: &WebviewWindow) {
             let _ = window_for_handler.hide();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{module_id_from_window_label, module_window_label};
+
+    #[test]
+    fn module_window_label_is_the_only_authorized_shape() {
+        let label = module_window_label("qing.launcher");
+        assert_eq!(label, "module-71696e672e6c61756e63686572");
+        assert_eq!(
+            module_id_from_window_label(&label).as_deref(),
+            Some("qing.launcher")
+        );
+        assert!(module_id_from_window_label("main").is_none());
+        assert!(module_id_from_window_label("module-2e2e2f2f657363617065").is_none());
+        assert!(module_id_from_window_label("module-").is_none());
+    }
 }

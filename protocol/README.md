@@ -82,3 +82,32 @@ The manifest may declare an `operations` array. The host forwards only an
 operation present in that list; an omitted or empty list exposes no invoke
 surface. Each request uses a fresh host-owned `requestId`, and the host waits
 for the matching `module.invoke.response` before returning to the Web UI.
+
+## Module Web window bridge
+
+Web UI loaded from `qmod://` runs in a separate Tauri window labelled
+`module-<moduleId>`. The page may call the host commands
+`get_module_window_context`, `invoke_module_window` and
+`hide_module_window` through the official Tauri API. The latter two commands
+derive the module id from the window label; a page never supplies an arbitrary
+module id or filesystem path. `invoke_module_window` still applies the
+manifest `operations` allowlist before the Rust runtime forwards the JSON
+request to the child process.
+
+The context may include the validated manifest icon as a bounded `iconDataUrl`
+for in-module branding. It never includes the module directory, executable
+path or data directory.
+
+Minimal TypeScript bridge:
+
+```ts
+import { invoke } from '@tauri-apps/api/core'
+
+export const context = () => invoke('get_module_window_context')
+export const call = (method: string, payload: Record<string, unknown> = {}) =>
+  invoke('invoke_module_window', { method, payload })
+```
+
+The module window capability is scoped to the `module-*` label pattern. It
+contains only Tauri core IPC; filesystem and process permissions remain
+module-owned and are not granted to Vue.

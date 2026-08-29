@@ -31,6 +31,6 @@
     "active": false,
     "targets": "all",
     "icon": ["icons/icon.ico"],
-    "resources": ["resources/modules/**/*"]
+    "resources": ["resources/modules"]
   }
 }

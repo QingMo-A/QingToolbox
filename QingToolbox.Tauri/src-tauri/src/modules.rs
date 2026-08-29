@@ -62,6 +62,12 @@ pub struct ModuleListPayload {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct ModuleRecord {
+    pub name: String,
+    pub version: String,
+    /// Safe presentation data copied from the validated manifest icon. The
+    /// backend keeps the source path private while module Web windows may
+    /// render the same icon as the host module card.
+    pub icon_data_url: Option<String>,
     pub directory: PathBuf,
     pub entry: PathBuf,
     /// Manifest-relative entry route for a validated `uiKind=Web` module. The
@@ -188,9 +194,17 @@ pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
                     .unwrap_or_default()
                     .into_iter()
                     .collect::<BTreeSet<_>>();
+                let icon_data_url = summary.icon_data_url.clone();
+                let record_id = id.clone();
                 records.insert(
                     id,
                     ModuleRecord {
+                        name: manifest.name.clone().unwrap_or(record_id),
+                        version: manifest
+                            .version
+                            .clone()
+                            .unwrap_or_else(|| "0.0.0".to_string()),
+                        icon_data_url,
                         directory,
                         entry,
                         web_entry,

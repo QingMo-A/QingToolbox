@@ -848,6 +848,9 @@ mod tests {
         }
         let directory = entry.parent().expect("canary directory").to_path_buf();
         let record = ModuleRecord {
+            name: "Canary".to_string(),
+            version: "0.1.0".to_string(),
+            icon_data_url: None,
             directory,
             entry,
             web_entry: None,

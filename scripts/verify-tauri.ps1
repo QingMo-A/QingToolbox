@@ -18,20 +18,6 @@ if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'package.json'))) {
     throw "Tauri app was not found: $appRoot"
 }
 
-$canaryExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.canary/bin/qing-module-canary.exe'
-if (-not $SkipCanary) {
-    & (Join-Path $repoRoot 'scripts/build-tauri-canary.ps1')
-    & (Join-Path $repoRoot 'scripts/smoke-tauri-canary.ps1') -ExecutablePath $canaryExecutable
-}
-
-Push-Location $appRoot
-try {
-    npm run typecheck
-    npm run build
-} finally {
-    Pop-Location
-}
-
 $cargoCommand = Get-Command cargo -ErrorAction SilentlyContinue
 if ($cargoCommand) {
     $cargoPath = $cargoCommand.Source
@@ -40,6 +26,37 @@ if ($cargoCommand) {
 }
 if (-not (Test-Path -LiteralPath $cargoPath)) {
     throw 'cargo was not found. Install Rust stable before running the Tauri verification.'
+}
+
+$canaryExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.canary/bin/qing-module-canary.exe'
+$launcherExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.launcher/bin/qing-launcher-module.exe'
+$launcherRoot = Join-Path $appRoot 'native-launcher'
+if (-not $SkipCanary) {
+    & (Join-Path $repoRoot 'scripts/build-tauri-canary.ps1')
+    & (Join-Path $repoRoot 'scripts/smoke-tauri-canary.ps1') -ExecutablePath $canaryExecutable
+}
+
+& (Join-Path $repoRoot 'scripts/build-tauri-launcher.ps1')
+& (Join-Path $repoRoot 'scripts/smoke-tauri-launcher.ps1') -ExecutablePath $launcherExecutable
+
+Push-Location $launcherRoot
+try {
+    & $cargoPath fmt -- --check
+    if ($LASTEXITCODE -ne 0) { throw "Launcher cargo fmt check failed with exit code $LASTEXITCODE" }
+    & $cargoPath test --locked
+    if ($LASTEXITCODE -ne 0) { throw "Launcher cargo test failed with exit code $LASTEXITCODE" }
+    & $cargoPath clippy --locked --all-targets -- -D warnings
+    if ($LASTEXITCODE -ne 0) { throw "Launcher cargo clippy failed with exit code $LASTEXITCODE" }
+} finally {
+    Pop-Location
+}
+
+Push-Location $appRoot
+try {
+    npm run typecheck
+    npm run build
+} finally {
+    Pop-Location
 }
 
 Push-Location $rustRoot
@@ -79,6 +96,14 @@ if ($SmokeDesktop) {
         throw "Tauri desktop executable was not found: $desktopExecutable"
     }
     & (Join-Path $repoRoot 'scripts/smoke-tauri-host.ps1') -ExecutablePath $desktopExecutable
+    if ($LASTEXITCODE -ne 0) { throw "Tauri host smoke failed with exit code $LASTEXITCODE" }
+
+    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $nodeCommand) {
+        throw 'node was not found. Install Node.js before running the module-window smoke test.'
+    }
+    & $nodeCommand.Source (Join-Path $repoRoot 'scripts/smoke-tauri-module-window.mjs') $desktopExecutable
+    if ($LASTEXITCODE -ne 0) { throw "Tauri module-window smoke failed with exit code $LASTEXITCODE" }
 }
 
 Write-Host 'Tauri verification passed.'

@@ -2,6 +2,11 @@
 
 > Status: foundation baseline running (2026-08-29)
 
+This document records the user-directed Tauri rewrite track. It supersedes the
+"no Tauri rewrite" non-goal in the earlier hybrid UI planning document; that
+plan remains the historical design record for the WPF/WebView2 production
+track, which is intentionally kept intact until this migration reaches parity.
+
 ## Goal
 
 QingToolbox is moving to a small Rust/Tauri host with a Vue front end. The
@@ -101,12 +106,19 @@ the first release.
 - Add capability files; no filesystem, shell or dialog plugin is exposed to
   the Vue window. Settings migration and activation delivery remain next.
 
-### M2 — first native module
+### M2 — first native module (in progress)
 
-- Rewrite Qing Launcher against the protocol.
-- Reuse its Vue interaction model where it remains useful, but move all
-  launching, Desktop/Recent data and Everything result maps to Rust.
-- Keep drag ordering, overlay and hotkey behavior as acceptance tests.
+- `native-launcher/` now provides the first Rust process profile and a Vue
+  surface. Its state store, Desktop projection, custom/alphabetical/desktop
+  ordering (including order retention across Desktop refreshes) and
+  launch-by-id path map are module-owned.
+- The host exposes only `get_module_window_context`,
+  `invoke_module_window` and `hide_module_window` to a `module-*` window. The
+  window label supplies the module identity; a page cannot select another
+  module or submit an executable path.
+- Remaining Launcher parity is deliberately staged: icon extraction, Explorer
+  drop, global hotkey, Everything and the full overlay interaction model are
+  next protocol operations. The old WPF Launcher is not loaded by this host.
 
 ### M3 — remaining modules
 
@@ -139,4 +151,9 @@ true:
 4. An invalid or oversized frame is rejected and does not crash the host.
 5. Vue cannot invoke an arbitrary path or executable; only backend-issued IDs
    are accepted.
-6. Existing settings and `.qmod` files remain readable.
+6. Existing settings and `.qmod` files remain readable by the legacy host; the
+   new host accepts only the validated Tauri process profile and does not load
+   legacy DLLs.
+7. A real Tauri desktop smoke opens the module Web window through `qmod://`,
+   completes the Vue-to-Rust module invoke, and closes the child window without
+   requiring a second host instance.

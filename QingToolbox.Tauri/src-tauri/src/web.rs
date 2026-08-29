@@ -5,7 +5,11 @@ use tauri::{
     AppHandle, Manager, Runtime, Url, WebviewUrl, WebviewWindowBuilder,
 };
 
-use crate::{paths::resolve_existing_asset, HostState};
+use crate::{
+    module_window_label,
+    paths::{module_data_directory, resolve_existing_asset},
+    HostState,
+};
 
 const MAX_ASSET_BYTES: u64 = 8 * 1024 * 1024;
 
@@ -105,7 +109,7 @@ pub fn open_module_window<R: Runtime>(
     }
     let url = Url::parse(&format!("qmod://localhost/{module_id}/{route}"))
         .map_err(|_| "模块 Web 入口不是有效 URL。".to_string())?;
-    let label = format!("module-{module_id}");
+    let label = module_window_label(module_id);
     if let Some(window) = app.get_webview_window(&label) {
         let _ = window.show();
         let _ = window.unminimize();
@@ -115,10 +119,14 @@ pub fn open_module_window<R: Runtime>(
 
     let module_id_for_close = module_id.to_string();
     let app_for_close = app.clone();
+    let webview_data_directory = module_data_directory(module_id)
+        .map_err(|_| "模块 WebView 数据目录不可用。".to_string())?
+        .join("tauri-webview");
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::CustomProtocol(url))
-        .title(format!("QingToolbox · {module_id}"))
+        .title(format!("QingToolbox · {}", record.name))
         .inner_size(960.0, 680.0)
         .resizable(true)
+        .data_directory(webview_data_directory)
         .build()
         .map_err(|error| format!("无法打开模块窗口：{error}"))?;
     window.on_window_event(move |event| {
@@ -165,7 +173,10 @@ fn route_is_allowed(route: &str, entry: &str) -> bool {
         return true;
     }
     let Some((parent, _)) = entry.rsplit_once('/') else {
-        return true;
+        // A root-level entry has no safe sibling directory to expose. Keep
+        // the exact entry reachable, but fail closed for any other package
+        // asset (including bin/ and module data files).
+        return false;
     };
     route.starts_with(parent) && route.as_bytes().get(parent.len()) == Some(&b'/')
 }
@@ -222,5 +233,6 @@ mod tests {
         assert!(super::route_is_allowed("ui/assets/app.js", "ui/index.html"));
         assert!(!super::route_is_allowed("secret/data.txt", "ui/index.html"));
         assert!(super::route_is_allowed("index.html", "index.html"));
+        assert!(!super::route_is_allowed("secret/data.txt", "index.html"));
     }
 }

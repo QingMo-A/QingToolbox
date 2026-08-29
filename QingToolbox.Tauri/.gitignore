@@ -4,3 +4,7 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/resources/modules/qing.canary/
 native-module-canary/target/
+native-launcher/target/
+native-launcher/ui-src/node_modules/
+native-launcher/ui-src/dist/
+src-tauri/resources/modules/qing.launcher/

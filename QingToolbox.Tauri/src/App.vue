@@ -29,7 +29,14 @@ const statusLabel = computed(() => {
 })
 
 function reasonMessage(reason: unknown): string {
-  return reason instanceof Error ? reason.message : String(reason)
+  if (reason instanceof Error) return reason.message
+  if (typeof reason === 'object' && reason !== null) {
+    const value = reason as { message?: unknown; error?: unknown }
+    if (typeof value.message === 'string' && value.message) return value.message
+    if (typeof value.error === 'string' && value.error) return value.error
+    try { return JSON.stringify(reason) } catch { /* fall through */ }
+  }
+  return String(reason)
 }
 
 async function loadHostInfo(): Promise<void> {
