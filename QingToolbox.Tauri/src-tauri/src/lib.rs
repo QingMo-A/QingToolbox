@@ -1760,10 +1760,16 @@ fn handle_window_drop<R: tauri::Runtime + 'static>(
                     .map_err(|error| error.message)
             });
         if result.is_ok() {
+            let payload = serde_json::json!({ "reason": "externalDrop" });
             let _ = app.emit_to(
                 EventTarget::webview_window(label),
                 MODULE_STATE_CHANGED_EVENT,
-                serde_json::json!({ "reason": "externalDrop" }),
+                payload.clone(),
+            );
+            let _ = app.emit_to(
+                EventTarget::webview_window("main"),
+                MODULE_STATE_CHANGED_EVENT,
+                payload,
             );
         } else if let Err(error) = result {
             eprintln!("Qing Launcher external drop was rejected: {error}");
