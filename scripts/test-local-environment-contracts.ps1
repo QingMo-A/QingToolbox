@@ -8,9 +8,11 @@ $reset = Join-Path $PSScriptRoot 'reset-local-profile.ps1'
 $dev = Join-Path $PSScriptRoot 'start-dev-host.ps1'
 $moduleTest = Join-Path $PSScriptRoot 'start-module-test-host.ps1'
 $runLatest = Join-Path (Split-Path $PSScriptRoot -Parent) 'run-latest.bat'
+$stopLatest = Join-Path (Split-Path $PSScriptRoot -Parent) 'stop-qingtoolbox.bat'
 $legacyLatest = Join-Path (Split-Path $PSScriptRoot -Parent) 'run-legacy-wpf.bat'
 $runLatestScript = Join-Path $PSScriptRoot 'run-latest.ps1'
 $tauriLatestScript = Join-Path $PSScriptRoot 'run-tauri-latest.ps1'
+$tauriStopScript = Join-Path $PSScriptRoot 'stop-tauri-host.ps1'
 $suffix = [Guid]::NewGuid().ToString('N')
 $developmentProfile = "Contract-$suffix"
 $junctionProfile = "Junction-$suffix"
@@ -72,6 +74,16 @@ if ($runLatestContent.IndexOf('scripts\run-latest.ps1', [StringComparison]::Ordi
 $legacyLatestContent = [IO.File]::ReadAllText($legacyLatest)
 if ($legacyLatestContent.IndexOf('scripts\run-latest.ps1', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
     throw 'run-legacy-wpf.bat does not preserve the explicit legacy WPF launcher.'
+}
+if (-not (Test-Path -LiteralPath $tauriStopScript -PathType Leaf)) {
+    throw 'The Tauri stop PowerShell script is missing.'
+}
+$stopLatestContent = [IO.File]::ReadAllText($stopLatest)
+if ($stopLatestContent.IndexOf('scripts\stop-tauri-host.ps1', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+    throw 'stop-qingtoolbox.bat does not delegate to the Tauri stop script.'
+}
+if ($stopLatestContent.IndexOf('scripts\stop-dev-host.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+    throw 'stop-qingtoolbox.bat still targets only the legacy WPF host.'
 }
 if (-not (Test-Path -LiteralPath $tauriLatestScript -PathType Leaf)) {
     throw 'The Tauri PowerShell launcher is missing.'
