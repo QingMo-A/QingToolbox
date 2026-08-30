@@ -35,3 +35,14 @@ pwsh ./scripts/build-tauri-production.ps1 -SkipModuleBuild -Smoke
 
 输出位于 `artifacts/tauri-production/QingToolbox/`，其中 manifest 会记录
 `distribution=production`、Release 构建和源码是否干净。
+
+如需验证安装器候选（仍不覆盖旧 WPF 安装），运行：
+
+```powershell
+pwsh ./scripts/build-tauri-installer.ps1 -SkipBuild -Smoke
+```
+
+脚本会校验 production manifest 的逐文件 SHA256、`resources/modules` 的完整层级、
+Everything/qpdf 许可文件，然后用仓库现有 Inno Setup 编译每用户安装器并执行静默
+安装/卸载 smoke。输出位于 `artifacts/tauri-installer/output/`；该候选使用独立迁移
+AppId，正式切换前不会与旧 WPF 安装记录互相覆盖。

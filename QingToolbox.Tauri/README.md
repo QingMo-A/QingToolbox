@@ -65,7 +65,10 @@ pwsh ../scripts/build-tauri-portable.ps1 -Smoke -Zip
 Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost、PowerGuard
 和 Screen Pin。需要生产候选目录时使用 `pwsh ../scripts/build-tauri-production.ps1`
 （输出到 `artifacts/tauri-production/`）；该入口与 portable 预览共用同一套构建和
-校验逻辑，不会把旧 WPF 模块混入新宿主。
+校验逻辑，不会把旧 WPF 模块混入新宿主。需要验证可安装候选时使用
+`pwsh ../scripts/build-tauri-installer.ps1 -Smoke`；它复用仓库固定的 Inno Setup
+链路，输出到 `artifacts/tauri-installer/output/`，并使用独立的迁移 AppId，不会覆盖
+旧 WPF 安装。`run-tauri-installer.bat` 是同一流程的便捷入口。
 
 没有 Tauri 环境时仍可使用 `npm run dev` 在浏览器中预览；前端会显示
 `浏览器预览` 状态，而不会伪装成 Rust 后端。
@@ -131,7 +134,8 @@ Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost
   的模块发送事件；快捷键由 Rust global-shortcut 插件注册，页面只能录入模块自己
   的组合键。更新器、签名和完整设置迁移仍是后续工作。Everything、qpdf 和局域网
   发现都是模块内受控 runtime/资源，不建立旧 ABI 兼容层。
-- `bundle.active` 暂时关闭，避免在品牌图标和签名资产就绪前生成安装包。
+- `bundle.active` 暂时关闭，避免 Tauri bundler 自动下载 NSIS 工具链；当前安装器候选
+  使用仓库现有的固定 Inno Setup 供应链，并在切换正式 AppId 前保留独立迁移 AppId。
 - capability 当前只授予 Tauri core 默认能力和主窗口显式的 dialog 文件选择器权限；
   模块窗口不继承文件选择器、文件系统或进程权限。新增系统能力必须显式增加权限，
   Vue 仍不能直接读写文件系统或启动进程。

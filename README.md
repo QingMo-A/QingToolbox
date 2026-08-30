@@ -24,6 +24,11 @@ Tauri 宿主，不会替换或改写现有 WPF 安装。需要构建并启动 Re
 目录时运行 `run-tauri-production.bat`；该脚本输出固定在
 `artifacts/tauri-production/QingToolbox/`，不会写入用户安装目录。
 
+需要验证可安装的 Tauri 候选时运行 `run-tauri-installer.bat`，或执行
+`pwsh ./scripts/build-tauri-installer.ps1 -SkipBuild -Smoke`。它复用已经校验的
+Release 目录，用独立迁移 AppId 安装/卸载，不会覆盖旧 WPF 安装记录；正式签名、
+更新器和 AppId 切换仍待完成。
+
 需要体验可交付的 Tauri 预览目录时，可运行
 `pwsh ./scripts/build-tauri-portable.ps1 -Smoke -Zip`，或使用
 `run-tauri-portable.bat`。该目录包含 Rust 宿主、已迁移的原生模块、逐文件

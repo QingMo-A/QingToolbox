@@ -15,7 +15,9 @@ pwsh ./scripts/verify-tauri.ps1
 
 交互式开发可运行根目录的 `run-tauri-dev.bat`；Release 便携候选可运行
 `run-tauri-production.bat`。生产脚本只写入 `artifacts/tauri-production/`，
-不会覆盖现有 WPF 安装。
+不会覆盖现有 WPF 安装。需要验证安装器候选时运行
+`pwsh ./scripts/build-tauri-installer.ps1 -SkipBuild -Smoke`；它复用该目录，
+使用独立迁移 AppId 执行安装/卸载 smoke，不会覆盖旧 WPF 安装。
 
 旧 WPF 章节仅用于维护历史宿主和尚未切换的安装器；它不是 Tauri 开发的
 默认入口。
@@ -153,3 +155,8 @@ Formal Windows distribution is installer-only. Build the supported `win-x64`
 installer with `./scripts/build-installer.ps1`; it retains an internal publish
 directory, payload audit, Host Payload Manifest, and Web asset binding check.
 No portable ZIP is produced. `artifacts/` remains ignored by Git.
+
+The Tauri migration installer is a separate candidate while the AppId and
+signed-release audit are pending. Build it with
+`./scripts/build-tauri-installer.ps1 -Smoke`; it packages the validated
+`artifacts/tauri-production/QingToolbox` directory and writes a SHA256 sidecar.

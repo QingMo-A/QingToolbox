@@ -3,6 +3,25 @@
 The Preview installer is built with Inno Setup 6. Install Inno Setup locally;
 the compiler is not downloaded or committed to this repository.
 
+## Tauri migration installer candidate
+
+The Rust/Tauri host has a separate candidate installer while the production
+AppId, signing and updater cut-over are still under audit. Build and smoke it
+with:
+
+```powershell
+./scripts/build-tauri-installer.ps1 -Smoke
+```
+
+The script consumes the validated `artifacts/tauri-production/QingToolbox`
+directory, checks its portable manifest and staged module tree, then compiles
+`QingToolbox.Tauri.iss` with the existing Inno Setup toolchain. It writes the
+installer and SHA256 sidecar to `artifacts/tauri-installer/output`. The script
+uses a migration-only AppId and a `QingToolbox-Tauri` default directory, so it
+cannot silently replace the legacy WPF installation. The smoke test performs a
+per-user silent install, validates the Rust host plus bundled module/license
+files, runs the host single-instance check, and uninstalls the candidate.
+
 Build the x64 self-contained installer:
 
 ```powershell

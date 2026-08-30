@@ -186,6 +186,12 @@ the first release.
 
 ### M3 — production hardening remaining
 
+- A reproducible unsigned Inno Setup installer candidate now consumes the same
+  production directory and manifest as the portable path. It has an isolated
+  migration AppId, preserves user data outside the install directory, verifies
+  every staged file and runs an install/uninstall smoke. It is intentionally not
+  the public installer yet: signed installer/bundle, updater integration, AppId
+  cut-over and the production parity checklist remain.
 - Complete signed installer/bundle and updater integration, then run the
   production parity checklist on every official module. Portable and production
   directory builders already use the same release executable and resource

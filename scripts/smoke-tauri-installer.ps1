@@ -1,0 +1,70 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$InstallerPath,
+    [string]$TestRoot,
+    [switch]$KeepTestFiles
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$installer = (Resolve-Path -LiteralPath $InstallerPath).Path
+if ([IO.Path]::GetExtension($installer) -ine '.exe') { throw 'InstallerPath must point to an .exe.' }
+$root = if ([string]::IsNullOrWhiteSpace($TestRoot)) {
+    Join-Path ([IO.Path]::GetTempPath()) "QingToolbox-Tauri-InstallerSmoke-$PID"
+} else { [IO.Path]::GetFullPath($TestRoot) }
+$installRoot = Join-Path $root 'install'
+$sentinelRoot = Join-Path $root 'profile'
+$installedExe = Join-Path $installRoot 'QingToolbox.exe'
+$uninstaller = Join-Path $installRoot 'unins000.exe'
+
+function Invoke-Installer {
+    param([string]$Path, [string[]]$Arguments)
+    $process = Start-Process -FilePath $Path -ArgumentList $Arguments -Wait -PassThru
+    if ($process.ExitCode -ne 0) { throw "Installer command failed ($($process.ExitCode)): $Path" }
+}
+
+if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $root, $sentinelRoot | Out-Null
+try {
+    Invoke-Installer -Path $installer -Arguments @(
+        '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOICONS',
+        "/DIR=$installRoot"
+    )
+    if (-not (Test-Path -LiteralPath $installedExe -PathType Leaf)) {
+        throw "Tauri installer did not create the host executable: $installedExe"
+    }
+    foreach ($relative in @(
+        'resources/modules/qing.launcher/module.json',
+        'resources/modules/qing.pdf/module.json',
+        'resources/modules/qing.qingtransfer/module.json',
+        'resources/modules/qing.launcher/third-party/Everything/LICENSE.txt',
+        'resources/modules/qing.launcher/third-party/Everything/NOTICE.md',
+        'resources/modules/qing.pdf/third-party/qpdf/LICENSE.txt',
+        'resources/modules/qing.pdf/third-party/qpdf/NOTICE.md',
+        'THIRD_PARTY_NOTICES.md',
+        'LICENSE'
+    )) {
+        if (-not (Test-Path -LiteralPath (Join-Path $installRoot $relative) -PathType Leaf)) {
+            throw "Installed Tauri payload is missing $relative"
+        }
+    }
+    & (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts/smoke-tauri-host.ps1') -ExecutablePath $installedExe
+    if ($LASTEXITCODE -ne 0) { throw 'Installed Tauri host smoke failed.' }
+    if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
+        throw "Tauri uninstaller was not created: $uninstaller"
+    }
+    Invoke-Installer -Path $uninstaller -Arguments @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
+    if (Test-Path -LiteralPath $installedExe -PathType Leaf) {
+        throw 'Tauri uninstaller left the host executable behind.'
+    }
+    Write-Host 'Tauri installer install/uninstall smoke test passed.'
+}
+finally {
+    if (-not $KeepTestFiles -and (Test-Path -LiteralPath $root)) {
+        Remove-Item -LiteralPath $root -Recurse -Force
+    } elseif ($KeepTestFiles) {
+        Write-Host "Installer smoke files: $root"
+    }
+}
