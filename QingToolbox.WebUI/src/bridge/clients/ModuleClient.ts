@@ -9,6 +9,11 @@ export class ModuleClient {
     if (!isModuleImportResult(value)) throw new Error('Module import result validation failed.')
     return value
   }
+  async replaceFromPicker(moduleId: string): Promise<ModuleImportResult> {
+    const value = await this.requests.request<unknown>('modules.updateFromPicker', { moduleId })
+    if (!isModuleImportResult(value)) throw new Error('Module replacement result validation failed.')
+    return value
+  }
   load(moduleId: string) { return this.requestSnapshot('modules.load', { moduleId }) }
   activate(moduleId: string) { return this.requestSnapshot('modules.activate', { moduleId }) }
   open(moduleId: string) { return this.requestSnapshot('modules.open', { moduleId }) }

@@ -33,6 +33,8 @@ const store = useModuleStore()
 const toast = useToastStore()
 const { t } = useLocalization()
 const isImporting = ref(false)
+const replacingModuleId = ref<string | null>(null)
+const isTauriFrontend = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 const removeConfirmationModuleId = ref<string|null>(null)
 const installConfirmationModuleId = ref<string|null>(null)
 type AnimatedLifecycleSuccess = 'load' | 'unload'
@@ -152,6 +154,23 @@ async function openModuleDirectory(module: ModuleSnapshotItem) {
     toast.show(t('modules.management.openFailed'), 'error')
   } finally {
     store.endOperation(module.id)
+  }
+}
+
+async function replaceModuleFromPicker(module: ModuleSnapshotItem) {
+  if (!isTauriFrontend || !hostOperationsAvailable.value || replacingModuleId.value || !module.isUserInstalled || module.isBusy) return
+  replacingModuleId.value = module.id
+  try {
+    const result = await client.replaceFromPicker(module.id)
+    if (result.disposition === 'Cancelled') return
+    store.complete(result.snapshot)
+    store.selectedModuleId = module.id
+    toast.show(t('modules.management.updated', { name: module.displayName }), 'success')
+  } catch {
+    toast.show(t('modules.management.updateFailed', { name: module.displayName }), 'error')
+    await resyncAfterOperationFailure()
+  } finally {
+    replacingModuleId.value = null
   }
 }
 
@@ -492,6 +511,7 @@ onBeforeUnmount(() => {
           <p>{{ t('modules.management.description') }}</p>
           <div class="module-management-actions">
             <QButton class="module-open-directory" variant="secondary" :aria-busy="store.operations[store.selectedModule.id] === 'openDirectory'" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="openModuleDirectory(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'openDirectory'" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="folder" />{{ t(store.operations[store.selectedModule.id] === 'openDirectory' ? 'modules.management.opening' : 'modules.management.openFolder') }}</QButton>
+            <QButton v-if="isTauriFrontend && store.selectedModule.isUserInstalled" class="module-replace-entry" variant="secondary" :aria-busy="replacingModuleId === store.selectedModule.id" :disabled="!hostOperationsAvailable || replacingModuleId !== null || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="replaceModuleFromPicker(store.selectedModule)"><span v-if="replacingModuleId === store.selectedModule.id" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="import" />{{ t(replacingModuleId === store.selectedModule.id ? 'modules.management.updating' : 'modules.management.updateModule') }}</QButton>
             <QButton v-if="store.selectedModule.isUserInstalled" class="module-remove-entry" variant="ghost" :aria-expanded="removeConfirmationModuleId === store.selectedModule.id" aria-controls="module-remove-confirmation" :disabled="!hostOperationsAvailable || !store.selectedModule.canRemove || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="openRemoveConfirmation(store.selectedModule.id)"><QIcon name="remove" />{{ t('modules.management.removeModule') }}</QButton>
           </div>
           <div v-if="removeConfirmationModuleId === store.selectedModule.id" id="module-remove-confirmation" class="module-remove-confirmation" role="group" aria-labelledby="module-remove-confirmation-title">

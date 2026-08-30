@@ -48,6 +48,7 @@ export class TauriTransport implements Transport {
       }
       case 'modules.getSnapshot': return this.moduleSnapshot()
       case 'modules.import': return this.importModule()
+      case 'modules.updateFromPicker': return this.updateModuleFromPicker(requiredString(message.payload.moduleId))
       case 'modules.load':
       case 'modules.activate': await invoke('start_module', { moduleId: requiredString(message.payload.moduleId) }); return this.moduleSnapshot()
       case 'modules.open': await invoke('open_module', { moduleId: requiredString(message.payload.moduleId) }); return this.moduleSnapshot()
@@ -95,6 +96,13 @@ export class TauriTransport implements Transport {
     if (!selected || Array.isArray(selected)) return { disposition: 'Cancelled', importedModuleId: null, snapshot: await this.moduleSnapshot() }
     const imported = await invoke<{ id: string }>('import_module', { sourcePath: selected })
     return { disposition: 'Imported', importedModuleId: imported.id, snapshot: await this.moduleSnapshot() }
+  }
+
+  private async updateModuleFromPicker(moduleId: string) {
+    const selected = await open({ title: '选择模块更新包', multiple: false, directory: false, filters: [{ name: 'QingToolbox module', extensions: ['qmod'] }] })
+    if (!selected || Array.isArray(selected)) return { disposition: 'Cancelled', importedModuleId: null, snapshot: await this.moduleSnapshot() }
+    const updated = await invoke<{ id: string }>('update_module', { moduleId, sourcePath: selected })
+    return { disposition: 'Imported', importedModuleId: updated.id, snapshot: await this.moduleSnapshot() }
   }
 
   private async updateSettings(update: Record<string, unknown>) { return toWebSettings(await invoke<TauriSettingsSnapshot>('update_settings', { update })) }
