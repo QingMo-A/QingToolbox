@@ -1,18 +1,23 @@
 import { spawn } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
-import { resolve } from 'node:path'
+import { createServer } from 'node:net'
+import { dirname, resolve } from 'node:path'
 
 const executable = process.argv[2]
 if (!executable) throw new Error('usage: node smoke-tauri-module-window.mjs <tauri-executable>')
 const executablePath = resolve(executable)
 
-const port = Number(process.env.QING_TAURI_DEBUG_PORT ?? 9237)
+// A fixed WebView2 debugging port can still be owned by a previous smoke
+// process whose renderer is shutting down. Pick an ephemeral free port for
+// each run unless CI explicitly supplies one, and use a matching isolated
+// browser profile so a stale target can never satisfy this smoke test.
+const port = Number(process.env.QING_TAURI_DEBUG_PORT ?? await findFreePort())
+const userDataFolder = `${process.env.TEMP ?? process.env.TMP ?? '.'}\\qingtoolbox-tauri-window-smoke-${port}-${process.pid}`
 const host = spawn(executablePath, [], {
-  cwd: fileURLToPath(new URL('../QingToolbox.Tauri/src-tauri/target/debug/', import.meta.url)),
+  cwd: dirname(executablePath),
   env: {
     ...process.env,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
-    WEBVIEW2_USER_DATA_FOLDER: `${process.env.TEMP ?? process.env.TMP ?? '.'}\\qingtoolbox-tauri-window-smoke-${port}`,
+    WEBVIEW2_USER_DATA_FOLDER: userDataFolder,
     QING_TAURI_DISABLE_SINGLE_INSTANCE: '1',
     QING_TAURI_DISABLE_AUTOSTART_SYNC: '1',
     QING_TAURI_STARTUP_PRESENTATION: 'main',
@@ -238,3 +243,15 @@ async function terminate(process) {
 }
 
 function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)) }
+
+async function findFreePort() {
+  const server = createServer()
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address()
+  await new Promise((resolve) => server.close(resolve))
+  if (!address || typeof address === 'string') throw new Error('Unable to allocate a WebView2 debugging port')
+  return address.port
+}

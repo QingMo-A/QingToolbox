@@ -1498,9 +1498,10 @@ pub fn run() {
     }
     // Desktop smoke tests may run alongside the user's installed QingToolbox.
     // Keep the production single-instance behavior by default, while allowing
-    // an explicitly opted-in debug test process to use its own host instance.
-    let disable_single_instance =
-        cfg!(debug_assertions) && std::env::var_os("QING_TAURI_DISABLE_SINGLE_INSTANCE").is_some();
+    // an explicitly opted-in test process to use its own host instance. The
+    // environment variable is only set by local/CI smoke tooling; it is not
+    // part of the normal user-facing launch path.
+    let disable_single_instance = std::env::var_os("QING_TAURI_DISABLE_SINGLE_INSTANCE").is_some();
     if !disable_single_instance {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
