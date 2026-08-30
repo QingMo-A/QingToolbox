@@ -8,7 +8,9 @@ $reset = Join-Path $PSScriptRoot 'reset-local-profile.ps1'
 $dev = Join-Path $PSScriptRoot 'start-dev-host.ps1'
 $moduleTest = Join-Path $PSScriptRoot 'start-module-test-host.ps1'
 $runLatest = Join-Path (Split-Path $PSScriptRoot -Parent) 'run-latest.bat'
+$legacyLatest = Join-Path (Split-Path $PSScriptRoot -Parent) 'run-legacy-wpf.bat'
 $runLatestScript = Join-Path $PSScriptRoot 'run-latest.ps1'
+$tauriLatestScript = Join-Path $PSScriptRoot 'run-tauri-latest.ps1'
 $suffix = [Guid]::NewGuid().ToString('N')
 $developmentProfile = "Contract-$suffix"
 $junctionProfile = "Junction-$suffix"
@@ -61,8 +63,25 @@ catch { $fakeRejected = $true }
 if (-not $fakeRejected) { throw 'Repository root without required markers was accepted.' }
 
 $runLatestContent = [IO.File]::ReadAllText($runLatest)
-if ($runLatestContent.IndexOf('scripts\run-latest.ps1', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
-    throw 'run-latest.bat does not delegate to the repairable PowerShell launcher.'
+if ($runLatestContent.IndexOf('scripts\run-tauri-latest.ps1', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+    throw 'run-latest.bat does not delegate to the Tauri PowerShell launcher.'
+}
+if ($runLatestContent.IndexOf('scripts\run-latest.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+    throw 'run-latest.bat still references the legacy WPF launcher.'
+}
+$legacyLatestContent = [IO.File]::ReadAllText($legacyLatest)
+if ($legacyLatestContent.IndexOf('scripts\run-latest.ps1', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+    throw 'run-legacy-wpf.bat does not preserve the explicit legacy WPF launcher.'
+}
+if (-not (Test-Path -LiteralPath $tauriLatestScript -PathType Leaf)) {
+    throw 'The Tauri PowerShell launcher is missing.'
+}
+$tauriLatestContent = [IO.File]::ReadAllText($tauriLatestScript)
+foreach ($tauriContract in @('Assert-TauriCheckout', 'build-tauri-production.ps1',
+        "[ValidateSet('Debug', 'Release')]", 'QingToolbox.Tauri/src-tauri/Cargo.toml')) {
+    if ($tauriLatestContent.IndexOf($tauriContract, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw "run-tauri-latest.ps1 lost its Tauri launch contract: $tauriContract"
+    }
 }
 $runLatestScriptContent = [IO.File]::ReadAllText($runLatestScript)
 foreach ($requiredArgument in @('--environment', 'Development', '--profile', 'Shell', '--repo-root')) {
