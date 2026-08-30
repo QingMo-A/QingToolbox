@@ -5,7 +5,8 @@ param(
     [switch]$SkipUpdate,
     [switch]$NoLaunch,
     [switch]$SkipModuleBuild,
-    [switch]$Smoke
+    [switch]$Smoke,
+    [switch]$ForceRebuild
 )
 
 Set-StrictMode -Version Latest
@@ -102,6 +103,27 @@ function Resolve-Cargo {
     throw 'cargo was not found. Install Rust stable before starting the Tauri host.'
 }
 
+function Test-ProductionCandidateCurrent {
+    if (-not (Test-Path -LiteralPath $artifactExe -PathType Leaf)) { return $false }
+    $manifestPath = Join-Path (Split-Path -Parent $artifactExe) 'portable-manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $false }
+    try {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $commit = (& git -C $repoRoot rev-parse HEAD).Trim()
+        $changes = @(& git -C $repoRoot status --porcelain --untracked-files=normal)
+        return $manifest.sourceCommit -eq $commit -and
+            $manifest.sourceDirty -eq $false -and
+            $changes.Count -eq 0 -and
+            $manifest.backend -eq 'rust' -and
+            $manifest.framework -eq 'tauri-2' -and
+            $manifest.frontend -eq 'vue-3' -and
+            $manifest.buildProfile -eq 'release'
+    }
+    catch {
+        return $false
+    }
+}
+
 Assert-TauriCheckout
 Update-TauriCheckoutIfSafe
 $nodePath = Resolve-Node
@@ -109,11 +131,24 @@ $cargoPath = Resolve-Cargo
 $env:Path = "$(Split-Path -Parent $cargoPath);$(Split-Path -Parent $nodePath);$env:Path"
 
 if ($Configuration -eq 'Release') {
-    $arguments = @{}
-    if ($SkipModuleBuild) { $arguments.SkipModuleBuild = $true }
-    if ($Smoke) { $arguments.Smoke = $true }
-    Invoke-Checked -Label 'Build Tauri production candidate' -Action {
-        & (Join-Path $PSScriptRoot 'build-tauri-production.ps1') @arguments
+    $candidateCurrent = -not $ForceRebuild -and (Test-ProductionCandidateCurrent)
+    if ($candidateCurrent) {
+        Write-Host "Reusing current Tauri production candidate: $artifactExe"
+        if ($Smoke) {
+            Invoke-Checked -Label 'Smoke cached Tauri host' -Action {
+                & (Join-Path $PSScriptRoot 'smoke-tauri-host.ps1') -ExecutablePath $artifactExe
+            }
+            Invoke-Checked -Label 'Smoke cached Tauri module window' -Action {
+                & $nodePath (Join-Path $PSScriptRoot 'smoke-tauri-module-window.mjs') $artifactExe
+            }
+        }
+    } else {
+        $arguments = @{}
+        if ($SkipModuleBuild) { $arguments.SkipModuleBuild = $true }
+        if ($Smoke) { $arguments.Smoke = $true }
+        Invoke-Checked -Label 'Build Tauri production candidate' -Action {
+            & (Join-Path $PSScriptRoot 'build-tauri-production.ps1') @arguments
+        }
     }
     if ($NoLaunch) {
         Write-Host "Release candidate prepared: $artifactExe"

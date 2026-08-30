@@ -90,7 +90,8 @@ if (-not (Test-Path -LiteralPath $tauriLatestScript -PathType Leaf)) {
 }
 $tauriLatestContent = [IO.File]::ReadAllText($tauriLatestScript)
 foreach ($tauriContract in @('Assert-TauriCheckout', 'build-tauri-production.ps1',
-        "[ValidateSet('Debug', 'Release')]", 'QingToolbox.Tauri/src-tauri/Cargo.toml')) {
+        'Test-ProductionCandidateCurrent', "[ValidateSet('Debug', 'Release')]",
+        'QingToolbox.Tauri/src-tauri/Cargo.toml')) {
     if ($tauriLatestContent.IndexOf($tauriContract, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
         throw "run-tauri-latest.ps1 lost its Tauri launch contract: $tauriContract"
     }

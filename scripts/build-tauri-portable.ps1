@@ -60,6 +60,30 @@ function Invoke-Checked {
     }
 }
 
+function Stop-WorkspaceTauriHosts {
+    # A running portable executable keeps its image locked on Windows. Stop
+    # only hosts produced by this checkout before replacing generated stages;
+    # installed/user copies are deliberately outside these exact paths.
+    $candidatePaths = @(
+        (Join-Path $repoRoot 'QingToolbox.Tauri\src-tauri\target\debug\qingtoolbox-tauri.exe'),
+        (Join-Path $repoRoot 'QingToolbox.Tauri\src-tauri\target\release\qingtoolbox-tauri.exe'),
+        (Join-Path $repoRoot 'artifacts\tauri-production\QingToolbox\QingToolbox.exe'),
+        (Join-Path $repoRoot 'artifacts\tauri-portable\QingToolbox\QingToolbox.exe')
+    ) | ForEach-Object { [IO.Path]::GetFullPath($_) }
+    $candidateSet = @{}
+    foreach ($path in $candidatePaths) { $candidateSet[$path] = $true }
+    foreach ($process in @(Get-CimInstance Win32_Process | Where-Object {
+        $path = $_.ExecutablePath
+        if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+        try { $candidateSet.ContainsKey([IO.Path]::GetFullPath($path)) }
+        catch { $false }
+    })) {
+        Write-Host "Stopping workspace Tauri host PID $($process.ProcessId) before rebuilding..."
+        & taskkill.exe /PID $process.ProcessId /T /F | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "Failed to stop workspace Tauri host PID $($process.ProcessId)." }
+    }
+}
+
 function Resolve-Cargo {
     $cargo = Get-Command cargo.exe -ErrorAction SilentlyContinue
     if ($cargo) { return $cargo.Source }
@@ -142,6 +166,7 @@ try {
     if ([IO.Path]::GetFullPath($builtResources) -ne $expectedReleaseResources) {
         throw "Refusing to clean an unexpected Tauri release resource path: $builtResources"
     }
+    Stop-WorkspaceTauriHosts
     if (Test-Path -LiteralPath $expectedReleaseResources -PathType Container) {
         Remove-Item -LiteralPath $expectedReleaseResources -Recurse -Force
     }
@@ -183,6 +208,7 @@ $resolvedStage = Assert-ArtifactPath $stageRoot
 if (Test-Path -LiteralPath $resolvedStage) {
     # The stage is generated output. Its resolved path was checked above and
     # is kept below the repository's ignored artifacts directory.
+    Stop-WorkspaceTauriHosts
     Remove-Item -LiteralPath $resolvedStage -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $resolvedStage | Out-Null
