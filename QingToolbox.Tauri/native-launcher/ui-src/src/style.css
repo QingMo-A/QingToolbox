@@ -13,6 +13,8 @@ button { cursor: pointer; }
 h1 { margin: 0; font-size: 25px; letter-spacing: -.04em; }
 .top-actions { gap: 12px; }
 .version { color: #7890ad; font-size: 11px; }
+.hotkey-toggle { padding: 8px 11px; border: 1px solid #c8daf2; border-radius: 10px; color: #2869be; background: rgba(255,255,255,.72); font-size: 11px; }
+.hotkey-toggle:hover, .hotkey-toggle[aria-expanded="true"] { border-color: #82afe8; color: #1756a8; background: #fff; }
 .refresh { width: 36px; height: 36px; border: 1px solid #c8daf3; border-radius: 11px; color: #2869be; background: rgba(255,255,255,.78); font-size: 20px; line-height: 1; }
 .refresh:hover:not(:disabled) { border-color: #82afe8; background: #fff; }
 .refresh:disabled { cursor: wait; opacity: .55; }
@@ -29,6 +31,18 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.04em; }
 .folder-add { margin-left: 8px; padding: 7px 11px; border: 1px solid #c8daf2; border-radius: 10px; color: #2869be; background: rgba(255,255,255,.72); font-size: 11px; }
 .folder-add:hover:not(:disabled) { border-color: #82afe8; background: #fff; }
 .folder-add:disabled { cursor: wait; opacity: .55; }
+.hotkey-panel { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 13px 20px; align-items: center; margin-top: 14px; padding: 14px 16px; border: 1px solid #c8dbf2; border-radius: 15px; background: rgba(255,255,255,.72); box-shadow: 0 7px 20px rgba(37,92,156,.06); }
+.hotkey-panel h2 { margin: 0; color: #193a68; font-size: 15px; }
+.hotkey-panel small { display: block; margin-top: 5px; color: #7b94b2; font-size: 10px; }
+.hotkey-controls { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.hotkey-input { width: 150px; padding: 8px 10px; border: 1px solid #bcd4f0; border-radius: 9px; outline: 0; color: #214d81; background: #f5faff; font-size: 12px; font-weight: 700; text-align: center; }
+.hotkey-input:focus { border-color: #4b98df; box-shadow: 0 0 0 3px rgba(61,145,223,.14); }
+.hotkey-action { padding: 8px 10px; border: 1px solid #bdd6f1; border-radius: 9px; color: #1f66b6; background: #eaf4ff; font-size: 11px; }
+.hotkey-action:hover:not(:disabled) { border-color: #76abe1; background: #fff; }
+.hotkey-action.secondary { color: #5c789e; background: rgba(255,255,255,.74); }
+.hotkey-action:disabled { cursor: wait; opacity: .5; }
+.hotkey-error { grid-column: 1 / -1; margin: 0; color: #b54152; font-size: 11px; }
+.hotkey-current { grid-column: 1 / -1; margin: 0; color: #7b94b2; font-size: 10px; }
 .error { margin: 14px 0 0; padding: 10px 12px; border: 1px solid #f2c8ce; border-radius: 10px; color: #b54152; background: #fff5f6; font-size: 12px; }
 .content { flex: 1; min-height: 300px; margin-top: 17px; }
 .loading-card, .empty { min-height: 240px; display: flex; align-items: center; justify-content: center; gap: 13px; border: 1px dashed #c9dbf2; border-radius: 20px; color: #6180a6; background: rgba(255,255,255,.55); }
@@ -94,7 +108,7 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.04em; }
 footer { justify-content: space-between; margin-top: 28px; color: #8aa0bb; font-size: 10px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes drop-pulse { from { opacity: .55; transform: scaleY(.82); } to { opacity: 1; transform: scaleY(1); } }
-@media (max-width: 680px) { .launcher-shell { width: calc(100% - 28px); padding-top: 22px; } .version { display: none; } .app-grid, .folder-grid { grid-template-columns: repeat(auto-fill, minmax(96px,1fr)); gap: 8px; } .folder-add { margin-left: auto; } }
+@media (max-width: 680px) { .launcher-shell { width: calc(100% - 28px); padding-top: 22px; } .version { display: none; } .app-grid, .folder-grid { grid-template-columns: repeat(auto-fill, minmax(96px,1fr)); gap: 8px; } .folder-add { margin-left: auto; } .hotkey-panel { grid-template-columns: 1fr; } .hotkey-controls { justify-content: flex-start; flex-wrap: wrap; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 
 /* Everything mode deliberately uses a separate result surface.  Keeping it

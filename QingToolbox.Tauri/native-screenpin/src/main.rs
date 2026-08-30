@@ -4,8 +4,8 @@
 //!
 //! Capture stays inside the Rust process. The Vue surface receives bounded
 //! data URLs and opaque pin IDs only; it cannot request a file path or call a
-//! screen API directly. A later slice can attach these captures to dedicated
-//! native floating windows without changing this protocol boundary.
+//! screen API directly. The host can attach these captures to dedicated native
+//! floating windows without changing this protocol boundary.
 
 use std::{
     io::{self, BufRead, BufReader, BufWriter, Cursor, Write},
@@ -121,6 +121,23 @@ impl PinApp {
         match method {
             "getState" => Ok(self.snapshot()),
             "getDisplayBounds" => Ok(json!({ "displayBounds": display_bounds() })),
+            "getPin" => {
+                let id = payload
+                    .get("pinId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ModuleError::new("invalid_payload", "pinId 必须是字符串。"))?;
+                if !valid_pin_id(id) {
+                    return Err(ModuleError::new("invalid_payload", "pinId 无效。"));
+                }
+                let state = self.lock();
+                let pin = state
+                    .pins
+                    .iter()
+                    .find(|pin| pin.id == id)
+                    .cloned()
+                    .ok_or_else(|| ModuleError::new("pin_unavailable", "截图已不存在。"))?;
+                Ok(json!({ "pin": pin }))
+            }
             "captureRegion" => {
                 let x = required_i32(payload, "x")?;
                 let y = required_i32(payload, "y")?;

@@ -2,7 +2,10 @@
 param(
     [switch]$SkipModuleBuild,
     [switch]$Smoke,
-    [switch]$Zip
+    [switch]$Zip,
+    [string]$OutputDirectory,
+    [ValidateSet('portable-preview', 'production')]
+    [string]$Distribution = 'portable-preview'
 )
 
 Set-StrictMode -Version Latest
@@ -12,7 +15,12 @@ $repoRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $appRoot = Join-Path $repoRoot 'QingToolbox.Tauri'
 $rustRoot = Join-Path $appRoot 'src-tauri'
 $releaseRoot = Join-Path $rustRoot 'target\release'
-$artifactRoot = Join-Path $repoRoot 'artifacts\tauri-portable'
+$artifactsDirectory = [IO.Path]::GetFullPath((Join-Path $repoRoot 'artifacts'))
+$artifactRoot = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    Join-Path $artifactsDirectory 'tauri-portable'
+} else {
+    [IO.Path]::GetFullPath($OutputDirectory)
+}
 $stageRoot = Join-Path $artifactRoot 'QingToolbox'
 $outputExe = Join-Path $stageRoot 'QingToolbox.exe'
 $builtExe = Join-Path $releaseRoot 'qingtoolbox-tauri.exe'
@@ -26,9 +34,15 @@ function Assert-ArtifactPath {
     $prefix = $root + [IO.Path]::DirectorySeparatorChar
     if (-not $resolved.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -and
         $resolved -ne $root) {
-        throw "Refusing to modify a path outside artifacts/tauri-portable: $resolved"
+        throw "Refusing to modify a path outside the selected Tauri artifact root: $resolved"
     }
     return $resolved
+}
+
+$artifactsPrefix = $artifactsDirectory.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+if (-not $artifactRoot.StartsWith($artifactsPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+    $artifactRoot -eq $artifactsDirectory) {
+    throw "Refusing to write outside the repository artifacts directory: $artifactRoot"
 }
 
 function Invoke-Checked {
@@ -118,6 +132,17 @@ Push-Location $appRoot
 try {
     Invoke-Checked -Label 'Typecheck Tauri Vue frontend' -Action { npm run typecheck }
     Invoke-Checked -Label 'Build Tauri Vue frontend' -Action { npm run build }
+    # Tauri copies resource files into target/release but does not prune old
+    # hashed Vite assets on every incremental build. Clear only this exact,
+    # generated resource directory so the production package stays small and
+    # cannot carry an unreachable UI bundle from an older module build.
+    $expectedReleaseResources = [IO.Path]::GetFullPath((Join-Path $rustRoot 'target\release\resources'))
+    if ([IO.Path]::GetFullPath($builtResources) -ne $expectedReleaseResources) {
+        throw "Refusing to clean an unexpected Tauri release resource path: $builtResources"
+    }
+    if (Test-Path -LiteralPath $expectedReleaseResources -PathType Container) {
+        Remove-Item -LiteralPath $expectedReleaseResources -Recurse -Force
+    }
     Invoke-Checked -Label 'Build Tauri release executable' -Action {
         npm run tauri -- build --no-bundle
     }
@@ -141,7 +166,17 @@ if (Test-Path -LiteralPath $resolvedStage) {
 }
 New-Item -ItemType Directory -Force -Path $resolvedStage | Out-Null
 Copy-Item -LiteralPath $builtExe -Destination $outputExe -Force
-Copy-Item -Path (Join-Path $builtResources '*') -Destination (Join-Path $stageRoot 'resources') -Recurse -Force
+$stageResources = Join-Path $stageRoot 'resources'
+New-Item -ItemType Directory -Force -Path $stageResources | Out-Null
+# Keep the resource root shape intact. Copying `resources\*` into a newly
+# created directory can flatten the `modules` child on Windows PowerShell,
+# which makes the portable host fall back to user-installed (legacy) modules.
+# The bundled host must always see resources/modules/<module-id>.
+$bundledModules = Join-Path $builtResources 'modules'
+if (-not (Test-Path -LiteralPath $bundledModules -PathType Container)) {
+    throw "Tauri release resources are missing the modules directory: $bundledModules"
+}
+Copy-Item -LiteralPath $bundledModules -Destination $stageResources -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $appRoot 'THIRD_PARTY_NOTICES.md') -Destination $stageRoot -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $stageRoot -Force
 
@@ -149,16 +184,20 @@ $sourceCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sourceCommit)) {
     throw 'Unable to resolve the source commit for the portable manifest.'
 }
+$sourceDirty = @(& git -C $repoRoot status --porcelain --untracked-files=normal).Count -gt 0
 $manifest = [ordered]@{
     schemaVersion = 1
     productName = 'QingToolbox'
+    distribution = $Distribution
     version = $version
     backend = 'rust'
     framework = 'tauri-2'
     frontend = 'vue-3'
+    buildProfile = 'release'
     target = 'x86_64-pc-windows-msvc'
     runtime = 'WebView2 (system)'
     sourceCommit = $sourceCommit
+    sourceDirty = $sourceDirty
     executable = 'QingToolbox.exe'
     files = @(Get-PortableFiles -Root $stageRoot)
     generatedAtUtc = [DateTime]::UtcNow.ToString('o')

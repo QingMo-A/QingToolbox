@@ -1,4 +1,7 @@
 use std::{
+    collections::BTreeSet,
+    fs,
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex,
@@ -10,7 +13,8 @@ use std::{
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{
-    menu::MenuBuilder, tray::TrayIconBuilder, webview::WebviewWindow, Manager, State, WindowEvent,
+    menu::MenuBuilder, tray::TrayIconBuilder, webview::WebviewWindow, DragDropEvent, Emitter,
+    EventTarget, Manager, State, WindowEvent,
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
@@ -28,7 +32,12 @@ use paths::{resolve_module_roots, ModuleRoot};
 use protocol::ProtocolEnvelope;
 use runtime::{ModuleRuntimeManager, ModuleRuntimeSnapshot, RuntimeError};
 use settings::{SettingsSnapshot, SettingsStore, SettingsUpdate};
-use web::{open_module_window, serve_module_asset};
+use web::{open_module_window, serve_module_asset, serve_screenpin_asset, ScreenPinWindowRecord};
+
+const MAX_EXTERNAL_DROP_PATHS: usize = 32;
+const MAX_EXTERNAL_DROP_PATH_LENGTH: usize = 32 * 1024;
+const MODULE_STATE_CHANGED_EVENT: &str = "qmod:module-state-changed";
+const DEFAULT_LAUNCHER_HOTKEY: &str = "Ctrl+Alt+L";
 
 /// Process-wide state owned by the Rust host. Paths and module records stay on
 /// this side of the IPC boundary; the Vue layer only receives stable ids and
@@ -39,6 +48,8 @@ pub struct HostState {
     scan_gate: Mutex<()>,
     runtime: Mutex<ModuleRuntimeManager>,
     settings: Mutex<SettingsStore>,
+    module_hotkeys: Mutex<std::collections::BTreeMap<String, String>>,
+    screenpin_windows: Mutex<std::collections::BTreeMap<String, ScreenPinWindowRecord>>,
     close_prompt_active: AtomicBool,
 }
 
@@ -50,6 +61,8 @@ impl HostState {
             scan_gate: Mutex::new(()),
             runtime: Mutex::new(ModuleRuntimeManager::new()),
             settings: Mutex::new(SettingsStore::new()),
+            module_hotkeys: Mutex::new(std::collections::BTreeMap::new()),
+            screenpin_windows: Mutex::new(std::collections::BTreeMap::new()),
             close_prompt_active: AtomicBool::new(false),
         }
     }
@@ -359,6 +372,30 @@ async fn open_module(
             message,
         });
     }
+    if module_id == "qing.launcher" {
+        let requested = launcher_hotkey_from_state(&state, &module_id, &record)
+            .unwrap_or_else(|| DEFAULT_LAUNCHER_HOTKEY.to_string());
+        if let Err(error) = register_module_hotkey_binding(&app, &state, &module_id, &requested) {
+            // A shortcut conflict must not prevent the module itself from
+            // opening; the Launcher UI remains usable and can request a
+            // different binding through set_module_hotkey.
+            if requested != DEFAULT_LAUNCHER_HOTKEY {
+                if let Err(fallback) = register_module_hotkey_binding(
+                    &app,
+                    &state,
+                    &module_id,
+                    DEFAULT_LAUNCHER_HOTKEY,
+                ) {
+                    eprintln!(
+                        "Qing Launcher module hotkey unavailable: {}; fallback failed: {}",
+                        error.message, fallback.message
+                    );
+                }
+            } else {
+                eprintln!("Qing Launcher module hotkey unavailable: {}", error.message);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -379,7 +416,13 @@ fn stop_module(
         code: "stateUnavailable",
         message: "模块运行状态不可用。".to_string(),
     })?;
-    Ok(runtime.stop(&module_id))
+    let snapshot = runtime.stop(&module_id);
+    drop(runtime);
+    let _ = clear_module_hotkey_binding(window.app_handle(), &state, &module_id);
+    if module_id == "qing.screenpin" {
+        close_screenpin_windows(window.app_handle(), &state);
+    }
+    Ok(snapshot)
 }
 
 /// Forward a module-specific operation only when the module declared it in
@@ -426,13 +469,31 @@ fn invoke_module(
             message: "该模块未声明此操作。".to_string(),
         });
     }
+    let removed_pin = (module_id == "qing.screenpin" && method == "removePin")
+        .then(|| {
+            payload
+                .get("pinId")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .flatten();
+    let clear_pins = module_id == "qing.screenpin" && method == "clearPins";
     let mut runtime = state.runtime.lock().map_err(|_| CommandError {
         code: "stateUnavailable",
         message: "模块运行状态不可用。".to_string(),
     })?;
-    runtime
+    let result = runtime
         .invoke(&module_id, &record, &method, payload)
-        .map_err(CommandError::from)
+        .map_err(CommandError::from);
+    drop(runtime);
+    if result.is_ok() {
+        if clear_pins {
+            close_screenpin_windows(window.app_handle(), &state);
+        } else if let Some(pin_id) = removed_pin {
+            close_screenpin_pin_window(window.app_handle(), &state, &pin_id);
+        }
+    }
+    result
 }
 
 /// Invoke an operation from a module-owned Web window. The module id is
@@ -475,13 +536,31 @@ fn invoke_module_window(
             message: "该模块未声明此操作。".to_string(),
         });
     }
+    let removed_pin = (module_id == "qing.screenpin" && method == "removePin")
+        .then(|| {
+            payload
+                .get("pinId")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .flatten();
+    let clear_pins = module_id == "qing.screenpin" && method == "clearPins";
     let mut runtime = state.runtime.lock().map_err(|_| CommandError {
         code: "stateUnavailable",
         message: "模块运行状态不可用。".to_string(),
     })?;
-    runtime
+    let result = runtime
         .invoke(&module_id, &record, &method, payload)
-        .map_err(CommandError::from)
+        .map_err(CommandError::from);
+    drop(runtime);
+    if result.is_ok() {
+        if clear_pins {
+            close_screenpin_windows(window.app_handle(), &state);
+        } else if let Some(pin_id) = removed_pin {
+            close_screenpin_pin_window(window.app_handle(), &state, &pin_id);
+        }
+    }
+    result
 }
 
 /// Return the narrow context a module Web surface needs to initialize its
@@ -543,6 +622,621 @@ fn hide_module_window(window: WebviewWindow) -> Result<(), CommandError> {
     })
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModuleHotkeySnapshot {
+    module_id: String,
+    hotkey: Option<String>,
+    status: &'static str,
+}
+
+fn launcher_hotkey_from_state(
+    state: &HostState,
+    module_id: &str,
+    record: &modules::ModuleRecord,
+) -> Option<String> {
+    if !record.operations.contains("getState") {
+        return None;
+    }
+    let value = state
+        .runtime
+        .lock()
+        .ok()?
+        .invoke(
+            module_id,
+            record,
+            "getState",
+            Value::Object(Default::default()),
+        )
+        .ok()?;
+    let hotkey = value.get("hotkey")?.as_object()?;
+    let key = hotkey.get("keyLabel")?.as_str()?.trim();
+    if key.is_empty() || key.chars().count() > 32 {
+        return None;
+    }
+    let mut parts = Vec::new();
+    for (field, label) in [
+        ("ctrl", "Ctrl"),
+        ("alt", "Alt"),
+        ("shift", "Shift"),
+        ("win", "Super"),
+    ] {
+        if hotkey.get(field).and_then(Value::as_bool).unwrap_or(false) {
+            parts.push(label);
+        }
+    }
+    if parts.is_empty() || !key.bytes().all(|byte| !byte.is_ascii_control()) {
+        return None;
+    }
+    parts.push(key);
+    Some(parts.join("+"))
+}
+
+/// Register a module-owned shortcut through the host's native global-shortcut
+/// backend. The module page may request only its own binding (derived from the
+/// window label), and an empty value explicitly releases it. No arbitrary
+/// callback or window target crosses the WebView boundary.
+#[tauri::command]
+fn set_module_hotkey(
+    app: tauri::AppHandle,
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+    hotkey: String,
+) -> Result<ModuleHotkeySnapshot, CommandError> {
+    let module_id = module_id_for_window(&window).ok_or_else(|| CommandError {
+        code: "moduleWindowUnauthorized",
+        message: "只有模块窗口可以设置模块快捷键。".to_string(),
+    })?;
+    if hotkey.chars().count() > 64 {
+        return Err(CommandError {
+            code: "hotkeyInvalid",
+            message: "快捷键长度超过限制。".to_string(),
+        });
+    }
+    let declared = state
+        .module_index
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块索引状态不可用。".to_string(),
+        })?
+        .get(&module_id)
+        .is_some_and(|record| record.operations.contains("setHotkey"));
+    if !declared {
+        return Err(CommandError {
+            code: "operationNotDeclared",
+            message: "该模块未声明快捷键设置能力。".to_string(),
+        });
+    }
+
+    let requested = hotkey.trim().to_string();
+    if requested.is_empty() {
+        clear_module_hotkey_binding(&app, &state, &module_id)?;
+        return Ok(ModuleHotkeySnapshot {
+            module_id,
+            hotkey: None,
+            status: "inactive",
+        });
+    }
+    register_module_hotkey_binding(&app, &state, &module_id, &requested)?;
+    Ok(ModuleHotkeySnapshot {
+        module_id,
+        hotkey: Some(requested),
+        status: "registered",
+    })
+}
+
+#[tauri::command]
+fn clear_module_hotkey(
+    app: tauri::AppHandle,
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+) -> Result<ModuleHotkeySnapshot, CommandError> {
+    let module_id = module_id_for_window(&window).ok_or_else(|| CommandError {
+        code: "moduleWindowUnauthorized",
+        message: "只有模块窗口可以清理模块快捷键。".to_string(),
+    })?;
+    clear_module_hotkey_binding(&app, &state, &module_id)?;
+    Ok(ModuleHotkeySnapshot {
+        module_id,
+        hotkey: None,
+        status: "inactive",
+    })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScreenPinWindowSnapshot {
+    pin_id: String,
+    window_label: String,
+}
+
+/// Open a Screen Pin as a real top-level, always-on-top Tauri window. The
+/// caller supplies only an opaque pin id; the image bytes are fetched from
+/// the trusted Screen Pin process and kept in a host-side token map.
+#[tauri::command]
+fn open_screenpin_pin(
+    app: tauri::AppHandle,
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+    pin_id: String,
+) -> Result<ScreenPinWindowSnapshot, CommandError> {
+    let module_id = module_id_for_window(&window).ok_or_else(|| CommandError {
+        code: "moduleWindowUnauthorized",
+        message: "只有模块窗口可以打开浮窗。".to_string(),
+    })?;
+    if module_id != "qing.screenpin" || !valid_screenpin_pin_id(&pin_id) {
+        return Err(CommandError {
+            code: "pinIdInvalid",
+            message: "截图 id 无效。".to_string(),
+        });
+    }
+    let record = state
+        .module_index
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块索引状态不可用。".to_string(),
+        })?
+        .get(&module_id)
+        .cloned()
+        .ok_or_else(|| CommandError {
+            code: "moduleNotFound",
+            message: "Screen Pin 模块尚未发现。".to_string(),
+        })?;
+    if !record.operations.contains("getPin") {
+        return Err(CommandError {
+            code: "operationNotDeclared",
+            message: "Screen Pin 模块未声明浮窗读取能力。".to_string(),
+        });
+    }
+
+    if let Ok(records) = state.screenpin_windows.lock() {
+        if let Some((label, _)) = records.iter().find(|(_, value)| value.pin_id == pin_id) {
+            if let Some(existing) = app.get_webview_window(label) {
+                let _ = existing.show();
+                let _ = existing.unminimize();
+                let _ = existing.set_focus();
+                return Ok(ScreenPinWindowSnapshot {
+                    pin_id,
+                    window_label: label.clone(),
+                });
+            }
+        }
+    }
+
+    let value = state
+        .runtime
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块运行状态不可用。".to_string(),
+        })?
+        .invoke(
+            &module_id,
+            &record,
+            "getPin",
+            serde_json::json!({ "pinId": pin_id }),
+        )
+        .map_err(CommandError::from)?;
+    let pin = value.get("pin").unwrap_or(&value);
+    let data_url = pin
+        .get("dataUrl")
+        .and_then(Value::as_str)
+        .filter(|value| value.starts_with("data:image/png;base64,"))
+        .ok_or_else(|| CommandError {
+            code: "pinDataInvalid",
+            message: "截图数据不可用。".to_string(),
+        })?
+        .to_string();
+    if data_url.len() > web::MAX_PIN_DATA_URL_BYTES {
+        return Err(CommandError {
+            code: "pinDataTooLarge",
+            message: "截图数据超过浮窗限制。".to_string(),
+        });
+    }
+    let encoded = data_url
+        .strip_prefix("data:image/png;base64,")
+        .ok_or_else(|| CommandError {
+            code: "pinDataInvalid",
+            message: "截图编码格式不可用。".to_string(),
+        })?;
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    let decoded = BASE64.decode(encoded).map_err(|_| CommandError {
+        code: "pinDataInvalid",
+        message: "截图编码格式不可用。".to_string(),
+    })?;
+    if decoded.is_empty() || decoded.len() > 700 * 1024 {
+        return Err(CommandError {
+            code: "pinDataTooLarge",
+            message: "截图数据超过浮窗限制。".to_string(),
+        });
+    }
+    let x = bounded_i32(pin.get("x"), -32_000, 32_000).unwrap_or(0);
+    let y = bounded_i32(pin.get("y"), -32_000, 32_000).unwrap_or(0);
+    let width = bounded_i32(pin.get("width"), 160, 2_048).unwrap_or(640);
+    let height = bounded_i32(pin.get("height"), 120, 2_048).unwrap_or(360);
+    let token = new_nonce_for_window().map_err(|message| CommandError {
+        code: "windowTokenUnavailable",
+        message,
+    })?;
+    let label = format!("screenpin-{token}");
+    let pin_record = ScreenPinWindowRecord {
+        pin_id: pin_id.clone(),
+        data_url,
+    };
+    state
+        .screenpin_windows
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "浮窗状态不可用。".to_string(),
+        })?
+        .insert(token.clone(), pin_record);
+    // Wry/WebView2 can deadlock when a WebviewWindowBuilder is used directly
+    // from a synchronous invoke handler. Build the window on a detached
+    // worker, as recommended by Tauri's Windows guidance, and return the
+    // opaque handle immediately. The token map keeps the image available until
+    // the worker finishes creating the window.
+    let app_for_window = app.clone();
+    let label_for_window = label.clone();
+    let token_for_window = token.clone();
+    let queued = thread::Builder::new()
+        .name("qing-screenpin-window".to_string())
+        .spawn(move || {
+            let url = match tauri::Url::parse(&format!("qpin://localhost/{token_for_window}")) {
+                Ok(url) => url,
+                Err(error) => {
+                    eprintln!("Screen Pin window URL unavailable: {error}");
+                    remove_screenpin_window_record(&app_for_window, &token_for_window);
+                    return;
+                }
+            };
+            let built = tauri::WebviewWindowBuilder::new(
+                &app_for_window,
+                label_for_window.clone(),
+                tauri::WebviewUrl::CustomProtocol(url),
+            )
+            .title("Screen Pin")
+            .inner_size(width as f64, height as f64)
+            .min_inner_size(160.0, 120.0)
+            .position(x as f64, y as f64)
+            .resizable(true)
+            .always_on_top(true)
+            .build();
+            let pin_window = match built {
+                Ok(window) => window,
+                Err(error) => {
+                    eprintln!("Screen Pin window unavailable: {error}");
+                    remove_screenpin_window_record(&app_for_window, &token_for_window);
+                    return;
+                }
+            };
+            let app_for_close = app_for_window.clone();
+            let token_for_close = token_for_window.clone();
+            pin_window.on_window_event(move |event| {
+                if matches!(
+                    event,
+                    tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
+                ) {
+                    remove_screenpin_window_record(&app_for_close, &token_for_close);
+                }
+            });
+        });
+    if let Err(error) = queued {
+        remove_screenpin_window_record(&app, &token);
+        return Err(CommandError {
+            code: "windowUnavailable",
+            message: format!("无法排队打开截图浮窗：{error}"),
+        });
+    }
+    Ok(ScreenPinWindowSnapshot {
+        pin_id,
+        window_label: label,
+    })
+}
+
+fn valid_screenpin_pin_id(value: &str) -> bool {
+    value.len() >= 5
+        && value.len() <= 24
+        && value.starts_with("pin-")
+        && value[4..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn bounded_i32(value: Option<&Value>, minimum: i32, maximum: i32) -> Option<i32> {
+    value
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+        .map(|value| value.clamp(minimum, maximum))
+}
+
+fn new_nonce_for_window() -> Result<String, String> {
+    let mut bytes = [0_u8; 12];
+    getrandom::fill(&mut bytes).map_err(|error| format!("无法生成浮窗 token：{error}"))?;
+    let mut token = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut token, "{byte:02x}");
+    }
+    Ok(token)
+}
+
+fn close_screenpin_windows<R: tauri::Runtime>(app: &tauri::AppHandle<R>, state: &HostState) {
+    let labels = state
+        .screenpin_windows
+        .lock()
+        .ok()
+        .map(|mut records| {
+            let labels = records
+                .keys()
+                .map(|token| format!("screenpin-{token}"))
+                .collect::<Vec<_>>();
+            records.clear();
+            labels
+        })
+        .unwrap_or_default();
+    for label in labels {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.close();
+        }
+    }
+}
+
+fn remove_screenpin_window_record<R: tauri::Runtime>(app: &tauri::AppHandle<R>, token: &str) {
+    if let Some(state) = app.try_state::<HostState>() {
+        if let Ok(mut records) = state.screenpin_windows.lock() {
+            records.remove(token);
+        }
+    }
+}
+
+fn close_screenpin_pin_window<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    state: &HostState,
+    pin_id: &str,
+) {
+    let labels = state
+        .screenpin_windows
+        .lock()
+        .ok()
+        .map(|mut records| {
+            let labels = records
+                .iter()
+                .filter(|(_, record)| record.pin_id == pin_id)
+                .map(|(token, _)| format!("screenpin-{token}"))
+                .collect::<Vec<_>>();
+            records.retain(|_, record| record.pin_id != pin_id);
+            labels
+        })
+        .unwrap_or_default();
+    for label in labels {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.close();
+        }
+    }
+}
+
+#[cfg(desktop)]
+fn register_module_hotkey_binding<R: tauri::Runtime + 'static>(
+    app: &tauri::AppHandle<R>,
+    state: &HostState,
+    module_id: &str,
+    requested: &str,
+) -> Result<(), CommandError> {
+    use std::str::FromStr;
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+
+    let shortcut = Shortcut::from_str(requested).map_err(|error| CommandError {
+        code: "hotkeyInvalid",
+        message: format!("快捷键格式无效：{error}"),
+    })?;
+    let main_hotkey = state
+        .settings
+        .lock()
+        .ok()
+        .map(|settings| settings.snapshot().toggle_hotkey);
+    if main_hotkey
+        .as_deref()
+        .and_then(|value| Shortcut::from_str(value).ok())
+        .is_some_and(|value| value.id() == shortcut.id())
+    {
+        return Err(CommandError {
+            code: "hotkeyConflict",
+            message: "模块快捷键不能与工具箱主窗口快捷键相同。".to_string(),
+        });
+    }
+
+    let previous = state
+        .module_hotkeys
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块快捷键状态不可用。".to_string(),
+        })?
+        .get(module_id)
+        .cloned();
+    if previous.as_deref() == Some(requested) {
+        return Ok(());
+    }
+    {
+        let bindings = state.module_hotkeys.lock().map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块快捷键状态不可用。".to_string(),
+        })?;
+        let duplicate = bindings
+            .iter()
+            .filter(|(id, _)| id.as_str() != module_id)
+            .any(|(_, value)| {
+                Shortcut::from_str(value)
+                    .ok()
+                    .is_some_and(|candidate| candidate.id() == shortcut.id())
+            });
+        if duplicate {
+            return Err(CommandError {
+                code: "hotkeyConflict",
+                message: "该快捷键已被另一个模块占用。".to_string(),
+            });
+        }
+    }
+
+    // Release the old registration before claiming the new one. If the new
+    // registration fails, restore the old binding so the in-memory map and
+    // the OS registration never disagree.
+    let previous_shortcut = previous
+        .as_deref()
+        .map(Shortcut::from_str)
+        .transpose()
+        .map_err(|error| CommandError {
+            code: "hotkeyInvalid",
+            message: format!("已保存的模块快捷键格式无效：{error}"),
+        })?;
+    if let Some(old) = previous_shortcut {
+        app.global_shortcut()
+            .unregister(old)
+            .map_err(|error| CommandError {
+                code: "hotkeyUnavailable",
+                message: format!("无法更新旧模块快捷键：{error}"),
+            })?;
+    }
+
+    if let Err(error) = register_native_module_shortcut(app, shortcut, module_id) {
+        if let Some(old) = previous_shortcut {
+            let _ = register_native_module_shortcut(app, old, module_id);
+        }
+        return Err(error);
+    }
+
+    let mut bindings = match state.module_hotkeys.lock() {
+        Ok(bindings) => bindings,
+        Err(_) => {
+            // The OS registration succeeded, but the host state could not be
+            // committed. Roll the native registration back so a later retry
+            // cannot observe a shortcut that the map does not describe.
+            let _ = app.global_shortcut().unregister(shortcut);
+            if let Some(old) = previous_shortcut {
+                if let Err(error) = register_native_module_shortcut(app, old, module_id) {
+                    eprintln!(
+                        "QingToolbox could not restore module hotkey after state lock failure: {}",
+                        error.message
+                    );
+                }
+            }
+            return Err(CommandError {
+                code: "stateUnavailable",
+                message: "模块快捷键状态不可用。".to_string(),
+            });
+        }
+    };
+    bindings.insert(module_id.to_string(), requested.to_string());
+    Ok(())
+}
+
+#[cfg(desktop)]
+fn register_native_module_shortcut<R: tauri::Runtime + 'static>(
+    app: &tauri::AppHandle<R>,
+    shortcut: tauri_plugin_global_shortcut::Shortcut,
+    module_id: &str,
+) -> Result<(), CommandError> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+    let module_id_for_callback = module_id.to_string();
+    app.global_shortcut()
+        .on_shortcut(shortcut, move |app, _shortcut, event| {
+            if event.state() == ShortcutState::Pressed {
+                toggle_module_window(app, &module_id_for_callback);
+            }
+        })
+        .map_err(|error| CommandError {
+            code: "hotkeyUnavailable",
+            message: format!("无法注册模块快捷键：{error}"),
+        })
+}
+
+#[cfg(not(desktop))]
+fn register_module_hotkey_binding<R: tauri::Runtime + 'static>(
+    _app: &tauri::AppHandle<R>,
+    _state: &HostState,
+    _module_id: &str,
+    _requested: &str,
+) -> Result<(), CommandError> {
+    Err(CommandError {
+        code: "hotkeyUnavailable",
+        message: "当前平台不支持全局模块快捷键。".to_string(),
+    })
+}
+
+#[cfg(desktop)]
+fn clear_module_hotkey_binding<R: tauri::Runtime + 'static>(
+    app: &tauri::AppHandle<R>,
+    state: &HostState,
+    module_id: &str,
+) -> Result<(), CommandError> {
+    use std::str::FromStr;
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+
+    let previous_value = state
+        .module_hotkeys
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块快捷键状态不可用。".to_string(),
+        })?
+        .get(module_id)
+        .cloned();
+    let previous_shortcut = previous_value
+        .as_deref()
+        .map(Shortcut::from_str)
+        .transpose()
+        .map_err(|error| CommandError {
+            code: "hotkeyInvalid",
+            message: format!("已保存的模块快捷键格式无效：{error}"),
+        })?;
+    if let Some(previous) = previous_shortcut {
+        app.global_shortcut()
+            .unregister(previous)
+            .map_err(|error| CommandError {
+                code: "hotkeyUnavailable",
+                message: format!("无法注销模块快捷键：{error}"),
+            })?;
+    }
+    match state.module_hotkeys.lock() {
+        Ok(mut bindings) => {
+            bindings.remove(module_id);
+            Ok(())
+        }
+        Err(_) => {
+            // Keep the native registration and the in-memory map consistent
+            // if the map becomes poisoned while clearing a shortcut.
+            if let Some(previous) = previous_value {
+                if let Ok(previous) = Shortcut::from_str(&previous) {
+                    if let Err(error) = register_native_module_shortcut(app, previous, module_id) {
+                        eprintln!(
+                            "QingToolbox could not restore module hotkey after state lock failure: {}",
+                            error.message
+                        );
+                    }
+                }
+            }
+            Err(CommandError {
+                code: "stateUnavailable",
+                message: "模块快捷键状态不可用。".to_string(),
+            })
+        }
+    }
+}
+
+#[cfg(not(desktop))]
+fn clear_module_hotkey_binding<R: tauri::Runtime + 'static>(
+    _app: &tauri::AppHandle<R>,
+    state: &HostState,
+    module_id: &str,
+) -> Result<(), CommandError> {
+    if let Ok(mut bindings) = state.module_hotkeys.lock() {
+        bindings.remove(module_id);
+    }
+    Ok(())
+}
+
 fn module_id_for_window(window: &WebviewWindow) -> Option<String> {
     module_id_from_window_label(window.label())
 }
@@ -575,6 +1269,99 @@ fn module_id_from_window_label(label: &str) -> Option<String> {
         .collect::<Option<Vec<_>>>()?;
     let id = String::from_utf8(bytes).ok()?;
     valid_module_id(&id).then_some(id)
+}
+
+/// Tauri receives OS file drops at the native window boundary. Keep the
+/// paths out of Vue entirely: canonicalize and constrain them here, then
+/// deliver them as a manifest-declared module event. This is deliberately
+/// limited to launcher entries that Windows can execute/open directly.
+fn sanitize_launcher_drop_paths(paths: &[PathBuf]) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    paths
+        .iter()
+        .take(MAX_EXTERNAL_DROP_PATHS)
+        .filter(|path| path.is_absolute())
+        .filter_map(|path| {
+            let canonical = fs::canonicalize(path).ok()?;
+            if !canonical.is_file() {
+                return None;
+            }
+            let extension = canonical
+                .extension()
+                .and_then(|value| value.to_str())
+                .map(|value| value.to_ascii_lowercase())?;
+            if !matches!(extension.as_str(), "exe" | "lnk" | "url") {
+                return None;
+            }
+            let value = canonical.to_string_lossy().to_string();
+            if value.chars().count() > MAX_EXTERNAL_DROP_PATH_LENGTH {
+                return None;
+            }
+            let key = value.replace('/', "\\").to_ascii_lowercase();
+            seen.insert(key).then_some(value)
+        })
+        .collect()
+}
+
+/// Handle a native drop asynchronously so a slow module or a first-start
+/// handshake never stalls Tauri's window event loop. A successful dispatch
+/// emits only a path-free invalidation signal; the launcher Web UI then asks
+/// its own module for a fresh, backend-projected state snapshot.
+fn handle_window_drop<R: tauri::Runtime + 'static>(
+    app: &tauri::AppHandle<R>,
+    window_label: &str,
+    paths: &[PathBuf],
+) {
+    let Some(module_id) = module_id_from_window_label(window_label) else {
+        return;
+    };
+    if module_id != "qing.launcher" {
+        return;
+    }
+    let paths = sanitize_launcher_drop_paths(paths);
+    if paths.is_empty() {
+        return;
+    }
+    let app = app.clone();
+    let label = window_label.to_string();
+    thread::spawn(move || {
+        let Some(state) = app.try_state::<HostState>() else {
+            return;
+        };
+        let record = match state.module_index.lock() {
+            Ok(index) => index.get(&module_id).cloned(),
+            Err(_) => None,
+        };
+        let Some(record) = record else {
+            return;
+        };
+        if !record.events.contains("launcher.externalDrop") {
+            return;
+        }
+        let result = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime state unavailable".to_string())
+            .and_then(|mut runtime| {
+                runtime
+                    .send_event(
+                        &module_id,
+                        &record,
+                        "launcher.externalDrop",
+                        serde_json::json!({ "paths": paths }),
+                    )
+                    .map_err(|error| error.message)
+            });
+        if result.is_ok() {
+            let _ = app.emit_to(
+                EventTarget::webview_window(label),
+                MODULE_STATE_CHANGED_EVENT,
+                serde_json::json!({ "reason": "externalDrop" }),
+            );
+        } else if let Err(error) = result {
+            eprintln!("Qing Launcher external drop was rejected: {error}");
+        }
+    });
 }
 
 #[tauri::command]
@@ -632,8 +1419,16 @@ pub fn run() {
         }));
     }
     builder
+        .on_window_event(|window, event| {
+            if let WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) = event {
+                handle_window_drop(window.app_handle(), window.label(), paths);
+            }
+        })
         .register_uri_scheme_protocol("qmod", |context, request| {
             serve_module_asset(context.app_handle(), request)
+        })
+        .register_uri_scheme_protocol("qpin", |context, request| {
+            serve_screenpin_asset(context.app_handle(), request)
         })
         .manage(HostState::new())
         .invoke_handler(tauri::generate_handler![
@@ -650,6 +1445,9 @@ pub fn run() {
             invoke_module_window,
             get_module_window_context,
             hide_module_window,
+            set_module_hotkey,
+            clear_module_hotkey,
+            open_screenpin_pin,
             get_module_runtime,
             get_all_module_runtime
         ])
@@ -830,8 +1628,32 @@ fn toggle_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+fn toggle_module_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>, module_id: &str) {
+    let label = module_window_label(module_id);
+    let Some(window) = app.get_webview_window(&label) else {
+        return;
+    };
+    if window.is_visible().unwrap_or(false) {
+        let _ = window.hide();
+    } else {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 fn stop_all_modules<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(state) = app.try_state::<HostState>() {
+        let ids = state
+            .module_hotkeys
+            .lock()
+            .ok()
+            .map(|bindings| bindings.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for id in ids {
+            let _ = clear_module_hotkey_binding(app, &state, &id);
+        }
+        close_screenpin_windows(app, &state);
         if let Ok(mut runtime) = state.runtime.lock() {
             runtime.stop_all();
         }
@@ -936,7 +1758,11 @@ fn install_close_behavior(window: &WebviewWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::{module_id_from_window_label, module_window_label};
+    use super::{module_id_from_window_label, module_window_label, sanitize_launcher_drop_paths};
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     #[test]
     fn module_window_label_is_the_only_authorized_shape() {
@@ -949,5 +1775,46 @@ mod tests {
         assert!(module_id_from_window_label("main").is_none());
         assert!(module_id_from_window_label("module-2e2e2f2f657363617065").is_none());
         assert!(module_id_from_window_label("module-").is_none());
+    }
+
+    #[test]
+    fn launcher_drop_boundary_accepts_only_existing_shortcuts_and_executables() {
+        let root = std::env::temp_dir().join(format!(
+            "qingtoolbox-drop-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("drop test directory");
+        let exe = root.join("Demo.EXE");
+        let shortcut = root.join("Demo.lnk");
+        let url = root.join("Demo.url");
+        let text = root.join("Demo.txt");
+        fs::write(&exe, b"exe").expect("exe");
+        fs::write(&shortcut, b"shortcut").expect("shortcut");
+        fs::write(&url, b"url").expect("url");
+        fs::write(&text, b"text").expect("text");
+
+        let accepted = sanitize_launcher_drop_paths(&[
+            exe.clone(),
+            exe.clone(),
+            shortcut.clone(),
+            url.clone(),
+            text,
+            root.join("missing.exe"),
+        ]);
+        assert_eq!(accepted.len(), 3);
+        assert!(accepted
+            .iter()
+            .any(|value| value.to_ascii_lowercase().ends_with("demo.exe")));
+        assert!(accepted
+            .iter()
+            .any(|value| value.to_ascii_lowercase().ends_with("demo.lnk")));
+        assert!(accepted
+            .iter()
+            .any(|value| value.to_ascii_lowercase().ends_with("demo.url")));
+        let _ = fs::remove_dir_all(root);
     }
 }

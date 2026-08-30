@@ -25,6 +25,7 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 // allowing that setup to finish without turning a healthy module into a
 // spurious timeout.
 const INVOKE_TIMEOUT: Duration = Duration::from_secs(75);
+const EVENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,6 +134,11 @@ impl ModuleRuntimeManager {
             .env("QINGTOOLBOX_MODULE_PROTOCOL", "qing.module/1")
             .env("QINGTOOLBOX_MODULE_ID", module_id)
             .env("QINGTOOLBOX_MODULE_NONCE", &nonce)
+            // Keep the module root explicit instead of relying on the child
+            // process' current directory.  A module may need to resolve
+            // bundled sidecars/assets while still being unable to choose its
+            // own executable path.
+            .env("QINGTOOLBOX_MODULE_DIRECTORY", &record.directory)
             .env("QINGTOOLBOX_MODULE_DATA_DIR", &data_directory);
         apply_hidden_process_flags(&mut command);
 
@@ -221,42 +227,14 @@ impl ModuleRuntimeManager {
                 message: "模块操作名无效。".to_string(),
             });
         }
-        let initial = self.start(module_id, record)?;
-        if matches!(
-            initial.state,
-            ModuleRuntimeState::Starting | ModuleRuntimeState::Running
-        ) {
-            let deadline = Instant::now() + HANDSHAKE_TIMEOUT;
-            loop {
-                let snapshot = self.snapshot(module_id);
-                match snapshot.state {
-                    ModuleRuntimeState::Running => break,
-                    ModuleRuntimeState::Failed => {
-                        return Err(RuntimeError {
-                            code: "moduleHandshakeFailed",
-                            message: snapshot
-                                .last_error
-                                .unwrap_or_else(|| "模块 hello 握手失败。".to_string()),
-                        });
-                    }
-                    ModuleRuntimeState::Starting if Instant::now() < deadline => {
-                        thread::sleep(Duration::from_millis(10));
-                    }
-                    ModuleRuntimeState::Starting => {
-                        return Err(RuntimeError {
-                            code: "moduleHandshakeTimeout",
-                            message: "模块 hello 握手超时。".to_string(),
-                        });
-                    }
-                    _ => {
-                        return Err(RuntimeError {
-                            code: "moduleNotRunning",
-                            message: "模块没有处于运行状态。".to_string(),
-                        });
-                    }
-                }
-            }
+        if !record.operations.contains(method) {
+            return Err(RuntimeError {
+                code: "operationNotDeclared",
+                message: "该模块未声明此操作。".to_string(),
+            });
         }
+        let initial = self.start(module_id, record)?;
+        self.wait_until_running(module_id, initial.state)?;
 
         self.next_request_id = self.next_request_id.saturating_add(1);
         let request_id = format!("invoke-{}-{}", initial.generation, self.next_request_id);
@@ -283,7 +261,10 @@ impl ModuleRuntimeManager {
                     message: "模块 hello 尚未完成。".to_string(),
                 });
             }
-            write_frame(&mut running.stdin, &request)?;
+            if let Err(error) = write_frame(&mut running.stdin, &request) {
+                self.fail_running(module_id, error.message.clone());
+                return Err(error);
+            }
         }
 
         let deadline = Instant::now() + INVOKE_TIMEOUT;
@@ -330,7 +311,14 @@ impl ModuleRuntimeManager {
                             });
                             break;
                         }
-                        Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Disconnected) => {
+                            failure = Some(RuntimeError {
+                                code: "moduleProtocolFailed",
+                                message: "模块 stdout 在 invoke 期间断开。".to_string(),
+                            });
+                            break;
+                        }
                     }
                 }
                 if failure.is_none() && response.is_none() {
@@ -370,6 +358,205 @@ impl ModuleRuntimeManager {
                 return Err(failure);
             }
             thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Deliver a host-owned event to a running module without exposing a
+    /// general-purpose event pipe to the Web UI. Events are still framed and
+    /// bounded by the same protocol as normal invokes. The module acknowledges
+    /// the event so callers can safely invalidate a Web surface only after the
+    /// module has applied its state change.
+    pub fn send_event(
+        &mut self,
+        module_id: &str,
+        record: &ModuleRecord,
+        event_type: &str,
+        payload: Value,
+    ) -> Result<(), RuntimeError> {
+        if !crate::valid_operation_name(event_type) {
+            return Err(RuntimeError {
+                code: "eventInvalid",
+                message: "模块事件名无效。".to_string(),
+            });
+        }
+        if !record.events.contains(event_type) {
+            return Err(RuntimeError {
+                code: "eventNotDeclared",
+                message: "该模块未声明此事件。".to_string(),
+            });
+        }
+        let initial = self.start(module_id, record)?;
+        self.wait_until_running(module_id, initial.state)?;
+
+        self.next_request_id = self.next_request_id.saturating_add(1);
+        let event = ProtocolEnvelope::new(
+            "module.event",
+            format!("event-{}-{}", initial.generation, self.next_request_id),
+            serde_json::json!({
+                "eventType": event_type,
+                "payload": payload,
+            }),
+        );
+        let result = self
+            .running
+            .get_mut(module_id)
+            .ok_or_else(|| RuntimeError {
+                code: "moduleNotRunning",
+                message: "模块没有处于运行状态。".to_string(),
+            })
+            .and_then(|running| {
+                if !running.handshake_complete {
+                    return Err(RuntimeError {
+                        code: "moduleNotRunning",
+                        message: "模块 hello 尚未完成。".to_string(),
+                    });
+                }
+                write_frame(&mut running.stdin, &event)
+            });
+        if let Err(error) = result {
+            self.fail_running(module_id, error.message.clone());
+            return Err(error);
+        }
+
+        let deadline = Instant::now() + EVENT_TIMEOUT;
+        loop {
+            let mut acknowledged = false;
+            let mut failure = None;
+            {
+                let running = self
+                    .running
+                    .get_mut(module_id)
+                    .ok_or_else(|| RuntimeError {
+                        code: "moduleNotRunning",
+                        message: "模块在事件处理期间退出。".to_string(),
+                    })?;
+                loop {
+                    match running.messages.try_recv() {
+                        Ok(RuntimeMessage::Frame(frame))
+                            if frame.request_id == event.request_id =>
+                        {
+                            if frame.message_type != "module.event.response" {
+                                failure = Some(RuntimeError {
+                                    code: "moduleEventResponseInvalid",
+                                    message: format!(
+                                        "模块返回了意外的 event 消息类型：{}",
+                                        frame.message_type
+                                    ),
+                                });
+                            } else if let Some(error) = frame.error {
+                                failure = Some(RuntimeError {
+                                    code: "moduleEventFailed",
+                                    message: format!("{} ({})", error.message, error.code),
+                                });
+                            } else {
+                                acknowledged = true;
+                            }
+                            break;
+                        }
+                        Ok(RuntimeMessage::Frame(_)) => {
+                            // A state event or a late response for another
+                            // request cannot acknowledge this host event.
+                        }
+                        Ok(RuntimeMessage::Invalid(error)) | Ok(RuntimeMessage::Io(error)) => {
+                            failure = Some(RuntimeError {
+                                code: "moduleProtocolFailed",
+                                message: error,
+                            });
+                            break;
+                        }
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Disconnected) => {
+                            failure = Some(RuntimeError {
+                                code: "moduleProtocolFailed",
+                                message: "模块 stdout 在事件处理期间断开。".to_string(),
+                            });
+                            break;
+                        }
+                    }
+                }
+                if !acknowledged && failure.is_none() {
+                    match running.child.try_wait() {
+                        Ok(Some(status)) => {
+                            failure = Some(RuntimeError {
+                                code: "moduleExited",
+                                message: format!("模块进程已退出：{status}"),
+                            });
+                        }
+                        Err(error) => {
+                            failure = Some(RuntimeError {
+                                code: "moduleStatusUnavailable",
+                                message: format!("无法读取模块进程状态：{error}"),
+                            });
+                        }
+                        Ok(None) => {}
+                    }
+                }
+            }
+
+            if acknowledged {
+                return Ok(());
+            }
+            if let Some(failure) = failure {
+                if failure.code != "moduleEventFailed" {
+                    self.fail_running(module_id, failure.message.clone());
+                }
+                return Err(failure);
+            }
+            if Instant::now() >= deadline {
+                let failure = RuntimeError {
+                    code: "moduleEventTimeout",
+                    message: "模块事件响应超时。".to_string(),
+                };
+                self.fail_running(module_id, failure.message.clone());
+                return Err(failure);
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn wait_until_running(
+        &mut self,
+        module_id: &str,
+        initial_state: ModuleRuntimeState,
+    ) -> Result<(), RuntimeError> {
+        if !matches!(
+            initial_state,
+            ModuleRuntimeState::Starting | ModuleRuntimeState::Running
+        ) {
+            return Err(RuntimeError {
+                code: "moduleNotRunning",
+                message: "模块没有处于运行状态。".to_string(),
+            });
+        }
+        let deadline = Instant::now() + HANDSHAKE_TIMEOUT;
+        loop {
+            let snapshot = self.snapshot(module_id);
+            match snapshot.state {
+                ModuleRuntimeState::Running => return Ok(()),
+                ModuleRuntimeState::Failed => {
+                    return Err(RuntimeError {
+                        code: "moduleHandshakeFailed",
+                        message: snapshot
+                            .last_error
+                            .unwrap_or_else(|| "模块 hello 握手失败。".to_string()),
+                    });
+                }
+                ModuleRuntimeState::Starting if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                ModuleRuntimeState::Starting => {
+                    return Err(RuntimeError {
+                        code: "moduleHandshakeTimeout",
+                        message: "模块 hello 握手超时。".to_string(),
+                    });
+                }
+                _ => {
+                    return Err(RuntimeError {
+                        code: "moduleNotRunning",
+                        message: "模块没有处于运行状态。".to_string(),
+                    });
+                }
+            }
         }
     }
 
@@ -486,10 +673,13 @@ impl ModuleRuntimeManager {
                         handshake_error = Some(error);
                     }
                     Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) if !running.handshake_complete => {
-                        handshake_error = Some("模块 stdout 在 hello 完成前断开。".to_string());
+                    Err(TryRecvError::Disconnected) => {
+                        handshake_error = Some(if running.handshake_complete {
+                            "模块 stdout 在运行期间断开。".to_string()
+                        } else {
+                            "模块 stdout 在 hello 完成前断开。".to_string()
+                        });
                     }
-                    Err(TryRecvError::Disconnected) => break,
                 }
             }
 
@@ -804,6 +994,48 @@ mod tests {
     }
 
     #[test]
+    fn invoke_rejects_an_operation_not_declared_by_the_manifest() {
+        let directory = env::temp_dir();
+        let entry = directory.join("qing-runtime-operation-test.exe");
+        let record = ModuleRecord {
+            name: "Operation test".to_string(),
+            version: "1.0.0".to_string(),
+            icon_data_url: None,
+            directory,
+            entry,
+            web_entry: None,
+            operations: BTreeSet::from(["allowed".to_string()]),
+            events: BTreeSet::new(),
+            source: ModuleSource::Bundled,
+        };
+        let error = ModuleRuntimeManager::new()
+            .invoke("demo.operation", &record, "notAllowed", Value::Null)
+            .expect_err("undeclared operation must fail before spawn");
+        assert_eq!(error.code, "operationNotDeclared");
+    }
+
+    #[test]
+    fn send_event_rejects_an_event_not_declared_by_the_manifest() {
+        let directory = env::temp_dir();
+        let entry = directory.join("qing-runtime-event-test.exe");
+        let record = ModuleRecord {
+            name: "Event test".to_string(),
+            version: "1.0.0".to_string(),
+            icon_data_url: None,
+            directory,
+            entry,
+            web_entry: None,
+            operations: BTreeSet::new(),
+            events: BTreeSet::from(["allowed.event".to_string()]),
+            source: ModuleSource::Bundled,
+        };
+        let error = ModuleRuntimeManager::new()
+            .send_event("demo.event", &record, "notAllowed.event", Value::Null)
+            .expect_err("undeclared event must fail before spawn");
+        assert_eq!(error.code, "eventNotDeclared");
+    }
+
+    #[test]
     fn unknown_module_starts_as_not_started() {
         let mut manager = ModuleRuntimeManager::new();
         let snapshot = manager.snapshot("missing.module");
@@ -860,6 +1092,7 @@ mod tests {
             entry,
             web_entry: None,
             operations: BTreeSet::from(["ping".to_string()]),
+            events: BTreeSet::new(),
             source: ModuleSource::Bundled,
         };
         let mut manager = ModuleRuntimeManager::new();

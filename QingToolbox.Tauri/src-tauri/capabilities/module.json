@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "module-capability",
   "description": "Core IPC for validated QingToolbox module windows; application commands enforce the owning module label.",
-  "windows": ["module-*"],
-  "permissions": ["core:default", "dialog:default"]
+  "windows": ["module-*", "screenpin-*"],
+  "permissions": ["core:default"]
 }

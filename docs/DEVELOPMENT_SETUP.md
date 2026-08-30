@@ -1,5 +1,27 @@
 # 开发环境
 
+## 当前主线：Rust + Tauri 2 + Vue 3
+
+工具箱本体的新开发环境位于 `QingToolbox.Tauri`。它使用 Rust/Tauri 2
+承载窗口、托盘、设置和模块进程监督，Vue 3 负责页面；新模块必须使用
+`protocol/` 中的进程协议，不再引用旧 .NET/WPF ABI。
+
+在 Windows 上安装 Rust stable、Node.js、WebView2 和 Tauri 所需的 C++
+构建工具后，先运行完整门禁：
+
+```powershell
+pwsh ./scripts/verify-tauri.ps1
+```
+
+交互式开发可运行根目录的 `run-tauri-dev.bat`；Release 便携候选可运行
+`run-tauri-production.bat`。生产脚本只写入 `artifacts/tauri-production/`，
+不会覆盖现有 WPF 安装。
+
+旧 WPF 章节仅用于维护历史宿主和尚未切换的安装器；它不是 Tauri 开发的
+默认入口。
+
+## 旧 WPF 宿主维护环境
+
 - Visual Studio 2026
 - .NET 10 SDK
 - WPF

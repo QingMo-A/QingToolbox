@@ -22,6 +22,8 @@ const MAX_VERSION_LENGTH: usize = 64;
 const MAX_AUTHOR_LENGTH: usize = 256;
 const MAX_OPERATION_LENGTH: usize = 64;
 const MAX_OPERATIONS: usize = 64;
+const MAX_EVENT_LENGTH: usize = 64;
+const MAX_EVENTS: usize = 64;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,6 +78,9 @@ pub struct ModuleRecord {
     /// Operations the module explicitly exposes through `module.invoke`.
     /// An omitted/empty list means that the module has no host-call surface.
     pub operations: BTreeSet<String>,
+    /// Host-originated events the module explicitly accepts. This keeps the
+    /// event pipe capability-scoped instead of ambient for every module.
+    pub events: BTreeSet<String>,
     pub source: ModuleSource,
 }
 
@@ -102,6 +107,7 @@ struct RawManifest {
     load_mode: Option<String>,
     permissions: Option<Vec<serde_json::Value>>,
     operations: Option<Vec<String>>,
+    events: Option<Vec<String>>,
     #[allow(dead_code)]
     minimum_host_version: Option<String>,
     #[allow(dead_code)]
@@ -194,6 +200,12 @@ pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
                     .unwrap_or_default()
                     .into_iter()
                     .collect::<BTreeSet<_>>();
+                let events = manifest
+                    .events
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect::<BTreeSet<_>>();
                 let icon_data_url = summary.icon_data_url.clone();
                 let record_id = id.clone();
                 records.insert(
@@ -209,6 +221,7 @@ pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
                         entry,
                         web_entry,
                         operations,
+                        events,
                         source: root.source,
                     },
                 );
@@ -349,6 +362,7 @@ fn validate_manifest(
 
     validate_permissions(manifest.permissions.as_deref(), &mut issues);
     validate_operations(manifest.operations.as_deref(), &mut issues);
+    validate_events(manifest.events.as_deref(), &mut issues);
 
     match manifest.entry.as_deref() {
         Some(entry)
@@ -522,6 +536,38 @@ fn validate_operations(operations: Option<&[String]>, issues: &mut Vec<ModuleIss
             issues.push(issue(
                 "operationInvalid",
                 format!("模块 operation 无效或重复：{operation}"),
+            ));
+        }
+    }
+}
+
+fn validate_events(events: Option<&[String]>, issues: &mut Vec<ModuleIssue>) {
+    let Some(events) = events else {
+        return;
+    };
+    if events.len() > MAX_EVENTS {
+        issues.push(issue(
+            "eventsTooMany",
+            format!("模块 events 不得超过 {MAX_EVENTS} 项。"),
+        ));
+        return;
+    }
+    let mut seen = BTreeSet::new();
+    for event in events {
+        if event.is_empty()
+            || event.len() > MAX_EVENT_LENGTH
+            || !event
+                .bytes()
+                .next()
+                .is_some_and(|byte| byte.is_ascii_alphanumeric())
+            || !event.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b':')
+            })
+            || !seen.insert(event)
+        {
+            issues.push(issue(
+                "eventInvalid",
+                format!("模块 event 无效或重复：{event}"),
             ));
         }
     }
@@ -733,6 +779,36 @@ mod tests {
         assert!(!serde_json::to_string(&result.payload.modules[0])
             .expect("summary")
             .contains("getState"));
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn declared_events_are_kept_backend_only_and_invalid_events_fail_closed() {
+        let (temp, root) = temp_module(
+            "events",
+            r#"{"id":"demo.events","name":"Events","version":"1.0.0","entry":"entry.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual","events":["launcher.externalDrop"]}"#,
+        );
+        let result = discover_modules(&[root]);
+        assert!(result.payload.modules[0].valid);
+        assert!(result.records["demo.events"]
+            .events
+            .contains("launcher.externalDrop"));
+        assert!(!serde_json::to_string(&result.payload.modules[0])
+            .expect("summary")
+            .contains("launcher.externalDrop"));
+        let _ = fs::remove_dir_all(temp);
+
+        let (temp, root) = temp_module(
+            "bad-events",
+            r#"{"id":"demo.badevents","name":"Bad Events","version":"1.0.0","entry":"entry.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual","events":["../escape"]}"#,
+        );
+        let result = discover_modules(&[root]);
+        assert!(!result.payload.modules[0].valid);
+        assert!(result.payload.modules[0]
+            .issues
+            .iter()
+            .any(|issue| issue.code == "eventInvalid"));
+        assert!(result.records.is_empty());
         let _ = fs::remove_dir_all(temp);
     }
 

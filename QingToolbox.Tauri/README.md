@@ -1,8 +1,8 @@
 # QingToolbox.Tauri
 
-QingToolbox 新宿主的 Tauri 2 + Vue foundation。它与现有 WPF 宿主并行存在，
-当前阶段用于验证 Rust 核心、进程模块协议和窗口/托盘基线；迁移完成前不会
-自动替换现有生产启动入口。
+QingToolbox 新宿主的 Tauri 2 + Vue 实现。Rust Core 是新开发和生产候选的默认
+宿主；现有 WPF 宿主仅作为尚未切换安装器的历史路径保留。新宿主不加载旧 DLL，
+模块通过版本化进程协议运行。
 
 ## 目录
 
@@ -62,8 +62,10 @@ pwsh ../scripts/build-tauri-portable.ps1 -Smoke -Zip
 
 脚本会把 Tauri executable、`resources/modules`、逐文件 SHA256 manifest 和许可
 文件放到 `artifacts/tauri-portable/`。当前 portable 目录已包含原生 Launcher、
-Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost、PowerGuard 和 Screen Pin；这条路径与现有 WPF/Inno 发布链
-并行，直到所有官方模块迁移完成后才考虑替换正式安装入口。
+Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost、PowerGuard
+和 Screen Pin。需要生产候选目录时使用 `pwsh ../scripts/build-tauri-production.ps1`
+（输出到 `artifacts/tauri-production/`）；该入口与 portable 预览共用同一套构建和
+校验逻辑，不会把旧 WPF 模块混入新宿主。
 
 没有 Tauri 环境时仍可使用 `npm run dev` 在浏览器中预览；前端会显示
 `浏览器预览` 状态，而不会伪装成 Rust 后端。
@@ -124,12 +126,15 @@ Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost
   Vue 只接收受协议帧限制的会话内截图和不透明 pin ID；关闭模块时截图立即释放。
 - `scripts/build-tauri-canary.ps1` 和 `scripts/smoke-tauri-canary.ps1` 提供
   一个真实子进程的 hello、invoke、shutdown 协议验证闭环。
-- 尚未接入 Explorer 拖入、更新器和完整设置迁移；Launcher 的 Explorer 拖入、
-  全局模块快捷键和 overlay 细节仍在后续切片。Everything、qpdf 和局域网发现
-  都是模块内受控 runtime/资源，不建立旧 ABI 兼容层。
+- Launcher 已接入受控 Explorer 拖入和模块级全局快捷键：宿主在原生窗口边界
+  canonicalize 并限制 `.exe`、`.lnk`、`.url`，只向声明了 `launcher.externalDrop`
+  的模块发送事件；快捷键由 Rust global-shortcut 插件注册，页面只能录入模块自己
+  的组合键。更新器、签名和完整设置迁移仍是后续工作。Everything、qpdf 和局域网
+  发现都是模块内受控 runtime/资源，不建立旧 ABI 兼容层。
 - `bundle.active` 暂时关闭，避免在品牌图标和签名资产就绪前生成安装包。
-- capability 当前只授予 Tauri core 默认能力和显式的 dialog 文件选择器权限；新增系统能力必须
-  显式增加权限。Vue 仍不能直接读写文件系统或启动进程。
+- capability 当前只授予 Tauri core 默认能力和主窗口显式的 dialog 文件选择器权限；
+  模块窗口不继承文件选择器、文件系统或进程权限。新增系统能力必须显式增加权限，
+  Vue 仍不能直接读写文件系统或启动进程。
 - 新宿主首次启动默认显示主窗口；之后读取共享设置中的启动显示模式。开发/烟测可用
   `QING_TAURI_STARTUP_PRESENTATION=main|minimized|tray` 临时覆盖，而不会写入用户设置。
 - 主窗口关闭行为由设置控制：`tray` 隐藏到托盘，`exit` 走 Tauri 正常退出清理，`ask`

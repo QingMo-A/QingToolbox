@@ -84,3 +84,11 @@ export function invokeModule<T>(method: string, payload: Record<string, unknown>
 export function hideModuleWindow() {
   return tauriInvoke<void>('hide_module_window')
 }
+
+export function setModuleHotkey(hotkey: string) {
+  return tauriInvoke<{ moduleId: string; hotkey: string | null; status: string }>('set_module_hotkey', { hotkey })
+}
+
+export function clearModuleHotkey() {
+  return tauriInvoke<{ moduleId: string; hotkey: string | null; status: string }>('clear_module_hotkey')
+}

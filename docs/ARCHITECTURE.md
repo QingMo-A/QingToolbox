@@ -1,13 +1,13 @@
 # 架构
 
-## Tauri 新宿主（迁移中）
+## Tauri 新宿主（当前开发主线）
 
 新宿主位于 `QingToolbox.Tauri`，以 Tauri 2 的 Rust Core 取代 WPF Shell，
 以 Vue 页面作为唯一界面。Rust 负责模块发现、路径/权限边界、窗口托盘和
 模块进程生命周期；前端只调用窄 typed commands 并消费序列化快照。新模块
 通过 [`../protocol/README.md`](../protocol/README.md) 的版本化 JSON 协议运行，
-不再直接加载 .NET DLL。迁移阶段 WPF 宿主仍保留，但不会被新宿主引用或作为
-兼容层嵌入。
+不再直接加载 .NET DLL。旧 WPF 宿主仍保留在仓库中作为尚未切换安装器的历史
+路径，但不会被新宿主引用、加载或作为兼容层嵌入。
 
 当前已落地：固定模块根扫描、清单和图标资源校验、1 MiB 单行协议帧限制、
 nonce-bound hello 握手（每次启动使用系统 RNG nonce）、Rust 后台监督的新模块
@@ -18,6 +18,16 @@ Qing Launcher、Qing PDF、QingTransfer、Text Tools、Window Topmost、PowerGua
 Everything runtime，PDF 管理固定 qpdf runtime，Transfer 管理 DNS-SD/握手/文件流，
 其余模块各自拥有受限的系统能力；这些重型能力不会进入 Rust Shell 的通用
 filesystem bridge。
+
+开发和生产候选均从 `QingToolbox.Tauri` 入口启动：
+
+```powershell
+pwsh ./scripts/verify-tauri.ps1
+pwsh ./scripts/build-tauri-production.ps1 -Smoke
+```
+
+后一个命令只生成 `artifacts/tauri-production/QingToolbox/` 下的便携式候选目录，
+不会覆盖当前用户安装，也不会自动改写旧 WPF 安装器。
 
 模块窗口的 `invoke_module_window` 会从 `module-<id>` 窗口标签推导模块身份，
 不接受页面提交的模块 id；操作仍必须同时出现在该模块的 `operations` allowlist。
@@ -35,7 +45,7 @@ filesystem bridge。
 - **Native process modules**：每个模块拥有自己的 Rust 状态机和协议边界；重型
   第三方 runtime 与许可证只随所属模块交付。
 
-### Legacy WPF 分层（迁移完成前保留）
+### Legacy WPF 分层（安装器切换前保留）
 
 - **Shell**：旧 WPF 应用入口、窗口、导航和模块页面容器。
 - **Abstractions**：旧 Shell 与模块共享的接口、模型和契约。
@@ -43,18 +53,20 @@ filesystem bridge。
 
 新 Tauri 宿主不会引用这些旧项目，也不会尝试加载旧 DLL。
 
-## 模块契约
+## 历史 WPF 模块契约
 
-`QingToolbox.Abstractions/Modules` 定义模块契约：
+`QingToolbox.Abstractions/Modules` 定义旧宿主模块契约。它只服务于历史 WPF
+路径；Tauri 模块使用 `protocol/` 中的进程协议，不引用这些 .NET 接口：
 
 - `IToolModule` 是模块生命周期接口，包含加载、激活、停用、卸载和异步释放。
 - `ModuleContext` 提供模块目录、数据目录和轻量属性。
 - `ModuleManifest` 对应模块的 `module.json` 清单。
 - 枚举类型描述模块运行方式、加载策略、状态和声明权限。
 
-## 模块清单发现
+## 历史 WPF 模块清单发现
 
-第三阶段提供轻量的模块清单发现流程：
+下面是旧宿主的清单发现流程。Tauri 宿主拥有独立的 Rust 清单解析器，见
+`QingToolbox.Tauri/src-tauri/src/modules.rs`：
 
 - `ModuleManifestReader` 读取 `module.json`，并支持字符串形式的枚举值。
 - `ModuleManifestValidator` 验证必要字段和清单声明的入口文件。

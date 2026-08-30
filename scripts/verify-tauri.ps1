@@ -214,7 +214,11 @@ try {
 if ($BuildDesktop) {
     Push-Location $appRoot
     try {
-        npm run tauri -- build --debug
+        # Desktop smoke must exercise the same packaged URL/resource layout
+        # that users receive. A debug Tauri build points at localhost:1420
+        # when no Vite server is running, so it cannot validate the embedded
+        # module WebViews and can report a false failure.
+        npm run tauri -- build --no-bundle
         if ($LASTEXITCODE -ne 0) { throw "tauri build failed with exit code $LASTEXITCODE" }
     } finally {
         Pop-Location
@@ -222,7 +226,7 @@ if ($BuildDesktop) {
 }
 
 if ($SmokeDesktop) {
-    $desktopExecutable = Join-Path $rustRoot 'target/debug/qingtoolbox-tauri.exe'
+    $desktopExecutable = Join-Path $rustRoot 'target/release/qingtoolbox-tauri.exe'
     if (-not (Test-Path -LiteralPath $desktopExecutable)) {
         throw "Tauri desktop executable was not found: $desktopExecutable"
     }

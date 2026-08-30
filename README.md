@@ -4,9 +4,9 @@
 
 新一代工具箱宿主位于 [`QingToolbox.Tauri`](QingToolbox.Tauri/)，采用 Rust
 核心、Tauri 2 和 Vue 3。当前原生迁移已覆盖 Qing Launcher、Qing PDF、
-QingTransfer、Text Tools、Window Topmost、PowerGuard 和 Screen Pin，旧 WPF 宿主仍并行保留，直到剩余
-模块完成验收；新宿主不会自动
-替换现有生产启动入口。迁移边界、数据保留策略和分阶段验收见
+QingTransfer、Text Tools、Window Topmost、PowerGuard 和 Screen Pin。新开发和
+生产候选包应从这条 Tauri 路径开始；旧 WPF 宿主仅作为尚未切换安装器的兼容路径
+保留，不会被 Tauri 自动加载。迁移边界、数据保留策略和分阶段验收见
 [`docs/TAURI_MIGRATION.md`](docs/TAURI_MIGRATION.md)；协议定义见
 [`protocol/README.md`](protocol/README.md)。
 
@@ -20,7 +20,9 @@ pwsh ./scripts/verify-tauri.ps1
 `pwsh ./scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop`。
 
 交互式开发启动可直接运行仓库根目录的 `run-tauri-dev.bat`；它只启动新
-Tauri 宿主，不会替换或改写现有 WPF 安装。
+Tauri 宿主，不会替换或改写现有 WPF 安装。需要构建并启动 Release 生产候选
+目录时运行 `run-tauri-production.bat`；该脚本输出固定在
+`artifacts/tauri-production/QingToolbox/`，不会写入用户安装目录。
 
 需要体验可交付的 Tauri 预览目录时，可运行
 `pwsh ./scripts/build-tauri-portable.ps1 -Smoke -Zip`，或使用

@@ -128,6 +128,16 @@ try {
   if (!String(screenPinSnapshot?.text).includes('Screen Pin') || !String(screenPinSnapshot?.text).includes('截取区域')) {
     throw new Error('Screen Pin UI did not finish rendering')
   }
+  // Exercise the native floating-window path with a small, valid region. The
+  // screenshot remains module-owned; the host only receives the opaque pin id.
+  await evaluate(moduleTarget, `document.querySelector('button.capture')?.click()`)
+  await waitFor(() => evaluate(moduleTarget, `Boolean(document.querySelector('.pin'))`), 10000)
+  await evaluate(moduleTarget, `document.querySelector('.float-button')?.click()`)
+  await delay(500)
+  const pinTarget = await waitForTarget((value) => value.url.includes('qpin') || (value.title === 'Screen Pin' && !value.url.includes('qmod')), 10000)
+  const pinSnapshot = await evaluate(pinTarget, `({ image: Boolean(document.querySelector('img[src^="data:image/png;base64,"]')), body: document.body.innerText })`)
+  if (!pinSnapshot?.image) throw new Error('Screen Pin floating window did not render its bounded image')
+  await closeTarget(pinTarget)
   console.log('Tauri module window IPC smoke passed.')
 } finally {
   if (moduleTarget) await closeTarget(moduleTarget).catch(() => {})

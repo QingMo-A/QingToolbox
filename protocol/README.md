@@ -64,6 +64,13 @@ Invoke request/response:
 {"protocolVersion":1,"messageType":"module.invoke.response","requestId":"invoke-4","payload":{"ok":true}}
 ```
 
+Host-originated event:
+
+```json
+{"protocolVersion":1,"messageType":"module.event","requestId":"event-5","payload":{"eventType":"launcher.externalDrop","payload":{"paths":["C:\\Tools\\Demo.lnk"]}}}
+{"protocolVersion":1,"messageType":"module.event.response","requestId":"event-5","payload":{"ok":true}}
+```
+
 ## Lifecycle
 
 The host owns the lifecycle. It sends `module.hello.request` first and only
@@ -82,6 +89,15 @@ The manifest may declare an `operations` array. The host forwards only an
 operation present in that list; an omitted or empty list exposes no invoke
 surface. Each request uses a fresh host-owned `requestId`, and the host waits
 for the matching `module.invoke.response` before returning to the Web UI.
+
+The manifest may also declare an `events` array. The host sends a
+`module.event` only when its event name is present in that allowlist. Event
+payloads are generated from a host-owned OS event (for example, a sanitized
+Explorer drop); a WebView cannot submit an event or a filesystem path directly.
+The module validates the payload again, applies it transactionally, and returns
+`module.event.response` with the same request id. A failed event does not
+silently invalidate the host state. Events must never become a general-purpose
+command or filesystem bridge.
 
 ## Module Web window bridge
 

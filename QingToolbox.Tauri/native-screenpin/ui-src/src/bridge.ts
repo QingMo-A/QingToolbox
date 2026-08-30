@@ -5,3 +5,6 @@ export function invokeModule<T>(method: string, payload: Record<string, unknown>
 export function getContext(): Promise<ModuleContext> { return tauriInvoke<ModuleContext>('get_module_window_context') }
 export function hideModuleWindow(): Promise<void> { return tauriInvoke<void>('hide_module_window') }
 export function getState(): Promise<PinState> { return invokeModule<PinState>('getState') }
+export function openPinWindow(pinId: string): Promise<{ pinId: string; windowLabel: string }> {
+  return tauriInvoke<{ pinId: string; windowLabel: string }>('open_screenpin_pin', { pinId })
+}

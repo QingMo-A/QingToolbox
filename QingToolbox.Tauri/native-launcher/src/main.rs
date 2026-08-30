@@ -25,6 +25,8 @@ const MAX_ORDER_IDS: usize = 512;
 const MAX_FOLDERS: usize = 128;
 const MAX_FOLDER_ITEMS: usize = 512;
 const MAX_FOLDER_NAME_LENGTH: usize = 40;
+const MAX_EXTERNAL_DROP_PATHS: usize = 32;
+const MAX_EXTERNAL_DROP_PATH_LENGTH: usize = 32 * 1024;
 // State snapshots are exchanged over a 1 MiB line-delimited protocol. Keep a
 // conservative aggregate budget for presentation-only icon data so a large
 // launcher cannot make an otherwise valid getState response disappear at the
@@ -83,6 +85,48 @@ struct LauncherFolder {
     item_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HotkeySpec {
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    win: bool,
+    virtual_key: u32,
+    key_label: String,
+}
+
+impl Default for HotkeySpec {
+    fn default() -> Self {
+        Self {
+            ctrl: true,
+            alt: true,
+            shift: false,
+            win: false,
+            virtual_key: 0x4c,
+            key_label: "L".to_string(),
+        }
+    }
+}
+
+impl HotkeySpec {
+    fn normalized(mut self) -> Self {
+        self.virtual_key = self.virtual_key.clamp(1, 0xff);
+        self.key_label = self.key_label.trim().chars().take(32).collect();
+        if !valid_key_label(&self.key_label) {
+            self.key_label = "L".to_string();
+            self.virtual_key = 0x4c;
+        }
+        self
+    }
+
+    fn valid(&self) -> bool {
+        self.virtual_key > 0
+            && self.virtual_key <= 0xff
+            && (self.ctrl || self.alt || self.shift || self.win)
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StoreDocument {
@@ -91,6 +135,7 @@ struct StoreDocument {
     desktop_items: Option<Vec<LauncherItem>>,
     folders: Option<Vec<LauncherFolder>>,
     custom_order: Option<Vec<String>>,
+    hotkey: Option<HotkeySpec>,
 }
 
 #[derive(Debug)]
@@ -101,6 +146,7 @@ struct LauncherStore {
     desktop_items: Vec<LauncherItem>,
     folders: Vec<LauncherFolder>,
     custom_order: Vec<String>,
+    hotkey: HotkeySpec,
 }
 
 #[derive(Debug, Serialize)]
@@ -130,7 +176,7 @@ struct LauncherState {
     custom_order: Vec<String>,
     recent: Vec<ItemView>,
     hotkey: HotkeyView,
-    hotkey_status: &'static str,
+    hotkey_status: String,
     active: bool,
 }
 
@@ -142,7 +188,7 @@ struct HotkeyView {
     shift: bool,
     win: bool,
     virtual_key: u32,
-    key_label: &'static str,
+    key_label: String,
 }
 
 impl LauncherStore {
@@ -160,6 +206,7 @@ impl LauncherStore {
             desktop_items: normalize_items(document.desktop_items.unwrap_or_default(), "desktop"),
             folders: document.folders.unwrap_or_default(),
             custom_order: document.custom_order.unwrap_or_default(),
+            hotkey: document.hotkey.unwrap_or_default().normalized(),
         };
         store.normalize_folders();
         store.normalize_order();
@@ -173,6 +220,7 @@ impl LauncherStore {
             desktop_items: Some(self.desktop_items.clone()),
             folders: Some(self.folders.clone()),
             custom_order: Some(self.custom_order.clone()),
+            hotkey: Some(self.hotkey.clone()),
         };
         let bytes = serde_json::to_vec_pretty(&document)
             .map_err(|error| io::Error::other(error.to_string()))?;
@@ -498,6 +546,93 @@ impl LauncherStore {
         self.save().map_err(|_| "launcher state could not be saved")
     }
 
+    fn set_hotkey(&mut self, hotkey: HotkeySpec) -> Result<(), &'static str> {
+        let hotkey = hotkey.normalized();
+        if !hotkey.valid() {
+            return Err("hotkey must contain a modifier and a valid key");
+        }
+        self.hotkey = hotkey;
+        self.save().map_err(|_| "launcher state could not be saved")
+    }
+
+    /// Add paths delivered by the host's native Explorer drop boundary. The
+    /// module validates them again because process events are an untrusted
+    /// input even though the host already canonicalizes the OS payload.
+    fn add_external_paths(&mut self, paths: &[String]) -> Result<usize, &'static str> {
+        let previous_items = self.items.clone();
+        let previous_order = self.custom_order.clone();
+        let mut existing = self
+            .items
+            .iter()
+            .map(|item| identity_key(&item.target))
+            .collect::<BTreeSet<_>>();
+        let mut added = 0;
+        for raw in paths.iter().take(MAX_EXTERNAL_DROP_PATHS) {
+            if raw.chars().count() > MAX_EXTERNAL_DROP_PATH_LENGTH {
+                continue;
+            }
+            let path = PathBuf::from(raw);
+            if !path.is_absolute() || !path.is_file() {
+                continue;
+            }
+            let Some(extension) = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .map(|value| value.to_ascii_lowercase())
+            else {
+                continue;
+            };
+            if !matches!(extension.as_str(), "exe" | "lnk" | "url") {
+                continue;
+            }
+            let Ok(canonical) = fs::canonicalize(&path) else {
+                continue;
+            };
+            let target = canonical.to_string_lossy().to_string();
+            let key = identity_key(&target);
+            if !existing.insert(key) {
+                continue;
+            }
+            if self.items.len() >= MAX_ITEMS {
+                break;
+            }
+            let name = canonical
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("Application")
+                .trim()
+                .chars()
+                .take(256)
+                .collect::<String>();
+            let id = custom_stable_id(&target);
+            if self.items.iter().any(|item| item.id == id) {
+                continue;
+            }
+            self.items.push(LauncherItem {
+                id: id.clone(),
+                name,
+                target: target.clone(),
+                arguments: String::new(),
+                working_directory: canonical.parent().map(normalize_path).unwrap_or_default(),
+                last_launched_at: None,
+                source: "custom".to_string(),
+                icon_data_url: icon_data_url(&canonical),
+            });
+            self.custom_order.push(id);
+            added += 1;
+        }
+        if added > 0 {
+            self.normalize_order();
+            if self.save().is_err() {
+                self.items = previous_items;
+                self.custom_order = previous_order;
+                return Err("launcher state could not be saved");
+            }
+        }
+        Ok(added)
+    }
+
     fn state(&self) -> LauncherState {
         let source = if self.sort_mode == "desktop" {
             self.desktop_items.clone()
@@ -570,14 +705,14 @@ impl LauncherStore {
             },
             recent,
             hotkey: HotkeyView {
-                ctrl: true,
-                alt: true,
-                shift: false,
-                win: false,
-                virtual_key: 32,
-                key_label: "Space",
+                ctrl: self.hotkey.ctrl,
+                alt: self.hotkey.alt,
+                shift: self.hotkey.shift,
+                win: self.hotkey.win,
+                virtual_key: self.hotkey.virtual_key,
+                key_label: self.hotkey.key_label.clone(),
             },
-            hotkey_status: "Inactive",
+            hotkey_status: "HostManaged".to_string(),
             active: true,
         }
     }
@@ -687,6 +822,39 @@ fn main() {
                     ),
                 }
             }
+            "module.event" => {
+                let Some(object) = envelope.payload.as_object() else {
+                    eprintln!("Qing Launcher ignored an event with a non-object payload");
+                    continue;
+                };
+                let Some(event_type) = object.get("eventType").and_then(Value::as_str) else {
+                    eprintln!("Qing Launcher ignored an event without eventType");
+                    continue;
+                };
+                let payload = object.get("payload").cloned().unwrap_or(Value::Null);
+                match handle_event(event_type, payload, &mut store, &mut desktop_loaded) {
+                    Ok(()) => write_response(
+                        &mut stdout,
+                        Response {
+                            protocol_version: PROTOCOL_VERSION,
+                            message_type: "module.event.response",
+                            request_id: &envelope.request_id,
+                            payload: json!({ "ok": true }),
+                            error: None,
+                        },
+                    ),
+                    Err(error) => {
+                        eprintln!("Qing Launcher rejected host event {event_type}: {error}");
+                        write_error(
+                            &mut stdout,
+                            "module.event.response",
+                            &envelope.request_id,
+                            "event_rejected",
+                            error,
+                        );
+                    }
+                }
+            }
             "module.shutdown.request" => {
                 write_response(
                     &mut stdout,
@@ -710,6 +878,40 @@ fn main() {
         }
     }
     everything.shutdown();
+}
+
+fn handle_event(
+    event_type: &str,
+    payload: Value,
+    store: &mut LauncherStore,
+    _desktop_loaded: &mut bool,
+) -> Result<(), String> {
+    match event_type {
+        "launcher.externalDrop" => {
+            let paths = payload
+                .get("paths")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "paths must be an array".to_string())?;
+            if paths.len() > MAX_EXTERNAL_DROP_PATHS {
+                return Err("too many dropped paths".to_string());
+            }
+            let paths = paths
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|path| !path.trim().is_empty())
+                        .map(str::to_string)
+                        .ok_or_else(|| "paths must contain strings".to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            store
+                .add_external_paths(&paths)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        _ => Err("event is not declared by the launcher".to_string()),
+    }
 }
 
 fn handle_method(
@@ -766,6 +968,18 @@ fn handle_method(
                     "order must contain every active item exactly once".to_string(),
                 ));
             }
+            serde_json::to_value(store.state()).map_err(|_| {
+                (
+                    "serialization_failed",
+                    "state could not be serialized".to_string(),
+                )
+            })
+        }
+        "setHotkey" => {
+            let hotkey = parse_hotkey_payload(&payload)?;
+            store
+                .set_hotkey(hotkey)
+                .map_err(|message| ("invalid_hotkey", message.to_string()))?;
             serde_json::to_value(store.state()).map_err(|_| {
                 (
                     "serialization_failed",
@@ -1350,6 +1564,49 @@ fn required_string_array(
         .collect()
 }
 
+fn parse_hotkey_payload(payload: &Value) -> Result<HotkeySpec, (&'static str, String)> {
+    let object = payload.as_object().ok_or((
+        "invalid_payload",
+        "hotkey payload must be an object".to_string(),
+    ))?;
+    let bool_value = |name: &str, fallback: bool| {
+        object
+            .get(name)
+            .and_then(Value::as_bool)
+            .unwrap_or(fallback)
+    };
+    let virtual_key = object
+        .get("virtualKey")
+        .and_then(Value::as_u64)
+        .unwrap_or(0x4c);
+    if virtual_key > 0xff {
+        return Err((
+            "invalid_payload",
+            "virtualKey must be between 1 and 255".to_string(),
+        ));
+    }
+    let key_label = object
+        .get("keyLabel")
+        .and_then(Value::as_str)
+        .unwrap_or("L")
+        .trim()
+        .to_string();
+    if !valid_key_label(&key_label) {
+        return Err((
+            "invalid_payload",
+            "keyLabel is not a supported keyboard key".to_string(),
+        ));
+    }
+    Ok(HotkeySpec {
+        ctrl: bool_value("ctrl", true),
+        alt: bool_value("alt", true),
+        shift: bool_value("shift", false),
+        win: bool_value("win", false),
+        virtual_key: virtual_key as u32,
+        key_label,
+    })
+}
+
 fn same_ids<'a>(left: &[String], right: impl Iterator<Item = &'a String>) -> bool {
     let values = right.cloned().collect::<Vec<_>>();
     left.len() == values.len()
@@ -1392,6 +1649,72 @@ fn valid_local_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
+fn valid_key_label(value: &str) -> bool {
+    if value.is_empty() || value.chars().count() > 32 {
+        return false;
+    }
+    if value.len() == 1
+        && (value.as_bytes()[0].is_ascii_uppercase() || value.as_bytes()[0].is_ascii_digit())
+    {
+        return true;
+    }
+    if value.len() == 4 && value.starts_with("Key") && value.as_bytes()[3].is_ascii_uppercase() {
+        return true;
+    }
+    if value.len() == 6 && value.starts_with("Digit") && value.as_bytes()[5].is_ascii_digit() {
+        return true;
+    }
+    if let Some(number) = value
+        .strip_prefix('F')
+        .and_then(|value| value.parse::<u8>().ok())
+    {
+        if (1..=24).contains(&number) {
+            return true;
+        }
+    }
+    matches!(
+        value,
+        "Space"
+            | "Enter"
+            | "Escape"
+            | "Esc"
+            | "Tab"
+            | "Backspace"
+            | "Delete"
+            | "Insert"
+            | "Home"
+            | "End"
+            | "PageUp"
+            | "PageDown"
+            | "ArrowUp"
+            | "ArrowDown"
+            | "ArrowLeft"
+            | "ArrowRight"
+            | "Backquote"
+            | "Minus"
+            | "Equal"
+            | "BracketLeft"
+            | "BracketRight"
+            | "Backslash"
+            | "Semicolon"
+            | "Quote"
+            | "Comma"
+            | "Period"
+            | "Slash"
+            | "`"
+            | "-"
+            | "="
+            | "["
+            | "]"
+            | "\\"
+            | ";"
+            | "'"
+            | ","
+            | "."
+            | "/"
+    )
+}
+
 fn normalize_folder_name(value: &str) -> String {
     let normalized = value.trim();
     if normalized.is_empty() {
@@ -1409,6 +1732,13 @@ fn stable_id(value: &str) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     identity_key(value).hash(&mut hasher);
     format!("desktop-{:016x}", hasher.finish())
+}
+
+fn custom_stable_id(value: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    identity_key(value).hash(&mut hasher);
+    format!("custom-{:016x}", hasher.finish())
 }
 
 fn normalize_path(path: &Path) -> String {
@@ -1502,6 +1832,7 @@ mod tests {
             desktop_items: Vec::new(),
             folders: Vec::new(),
             custom_order: vec!["one".to_string()],
+            hotkey: HotkeySpec::default(),
         }
     }
 
@@ -1557,6 +1888,45 @@ mod tests {
         assert!(valid_hello(&payload, "qing.launcher", "abc"));
         assert!(!valid_hello(&payload, "other", "abc"));
         assert!(!valid_hello(&payload, "qing.launcher", "def"));
+    }
+
+    #[test]
+    fn hotkey_payload_accepts_alt_space_and_rejects_unbounded_key_names() {
+        let parsed = parse_hotkey_payload(&json!({
+            "ctrl": false,
+            "alt": true,
+            "shift": false,
+            "win": false,
+            "virtualKey": 0x20,
+            "keyLabel": "Space"
+        }))
+        .expect("Alt+Space should be representable");
+        assert!(parsed.alt);
+        assert_eq!(parsed.virtual_key, 0x20);
+        assert_eq!(parsed.key_label, "Space");
+
+        let error = parse_hotkey_payload(&json!({
+            "ctrl": true,
+            "keyLabel": "not-a-key"
+        }))
+        .expect_err("arbitrary key labels must fail closed");
+        assert_eq!(error.0, "invalid_payload");
+    }
+
+    #[test]
+    fn hotkey_normalization_recovers_invalid_persisted_values() {
+        let normalized = HotkeySpec {
+            ctrl: false,
+            alt: false,
+            shift: false,
+            win: false,
+            virtual_key: 0,
+            key_label: "../../command".to_string(),
+        }
+        .normalized();
+        assert_eq!(normalized.key_label, "L");
+        assert_eq!(normalized.virtual_key, 0x4c);
+        assert!(!normalized.valid());
     }
 
     #[test]

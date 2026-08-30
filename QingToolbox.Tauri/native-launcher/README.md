@@ -31,8 +31,11 @@ turn an arbitrary web-provided path into a process or shell operation. If the
 runtime, index or IPC is unavailable, the UI shows a contained error and the
 ordinary Launcher search remains usable. Windows Shell icons are extracted
 into a bounded session-local PNG and are not persisted in launcher state. The
-old WPF Launcher remains a separate legacy package while the remaining hotkey
-and Explorer-drop parity are migrated onto this protocol.
+old WPF Launcher remains a separate legacy package and is never loaded by the
+Tauri host. Explorer drops are accepted only by the native Tauri window
+boundary, canonicalized there, and delivered as the manifest-declared
+`launcher.externalDrop` event. The module hotkey is persisted here while its
+global registration and window toggle stay owned by the Rust host.
 
 The bounded integration smoke uses `-Everything` with a temporary indexed
 folder. On a machine where the dedicated service has already been authorized,

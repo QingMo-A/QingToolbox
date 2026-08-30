@@ -1,8 +1,8 @@
 # Tauri portable preview
 
 `QingToolbox.Tauri` 现在可以生成一个可验证的 Windows portable 目录，用来
-体验 Rust + Tauri 2 + Vue 3 宿主和当前已迁移的原生模块。它是迁移阶段的
-预览交付物，不会替换现有 WPF 安装器，也不会写入安装目录。
+体验 Rust + Tauri 2 + Vue 3 宿主和当前已迁移的原生模块。它不会写入用户安装
+目录；旧 WPF 安装器仍保留到签名安装链切换完成为止。
 
 在仓库根目录执行：
 
@@ -25,6 +25,13 @@ pwsh ./scripts/build-tauri-portable.ps1 -Smoke -Zip
 当前 portable 预览依赖系统已安装的 Windows WebView2。Qing Launcher 自带固定版本
 Everything runtime 和许可证，首次使用 Everything 搜索时按需准备独立客户端/服务；
 不会调用用户自己安装的实例，也不会弹出 Everything 界面。Qing PDF 自带固定版本
-qpdf 运行时及许可证；其余模块均为独立 Rust 进程。正式替换 WPF 安装链前，仍需
-完成 Screen Pin 浮动窗口、Launcher 的 Explorer 拖入/模块快捷键、更新器和完整
-生产入口验收；这些缺口不会被此脚本隐藏。
+qpdf 运行时及许可证；其余模块均为独立 Rust 进程。Screen Pin 浮动窗口、
+Launcher 的 Explorer 拖入和模块快捷键已经走 Rust 宿主边界；仍需完成签名安装器、
+更新器和完整生产验收。生产候选使用：
+
+```powershell
+pwsh ./scripts/build-tauri-production.ps1 -SkipModuleBuild -Smoke
+```
+
+输出位于 `artifacts/tauri-production/QingToolbox/`，其中 manifest 会记录
+`distribution=production`、Release 构建和源码是否干净。

@@ -1,6 +1,6 @@
 # QingToolbox Tauri migration
 
-> Status: foundation baseline running (2026-08-29)
+> Status: native host and official module slices running (2026-08-29)
 
 This document records the user-directed Tauri rewrite track. It supersedes the
 "no Tauri rewrite" non-goal in the earlier hybrid UI planning document; that
@@ -142,9 +142,14 @@ the first release.
   Launcher/Desktop/Recent projections; stale Vue requests are ignored. Runtime
   or IPC failure is contained in the Everything result surface and does not
   change normal Launcher search. Windows Shell icons are projected as bounded,
-  session-local PNG data URLs with a frame-level aggregate budget. Explorer
-  drop, the module hotkey and the full overlay interaction model remain staged
-  next. The old WPF Launcher is not loaded by this host.
+  session-local PNG data URLs with a frame-level aggregate budget. Explorer drop
+  is canonicalized at the Tauri native window boundary and delivered only as the
+  declared `launcher.externalDrop` event; the module hotkey is registered by the
+  Rust host and can be edited from the module page without a browser key hook.
+  Drop events receive a correlated module acknowledgement before the host emits
+  the path-free WebView invalidation event, so a refresh cannot race the module's
+  atomic state write.
+  The old WPF Launcher is not loaded by this host.
 
 - `native-pdf/` is a Rust process module with a Vue surface. It keeps qpdf
   12.4.1 in a checked-in, hash-pinned module-owned runtime and performs merge,
@@ -175,14 +180,17 @@ the first release.
 
 - `native-screenpin/` owns bounded Windows GDI capture and PNG encoding. The
   WebView receives only session-scoped data URLs and opaque pin IDs; it cannot
-  invoke a screen API or supply a filesystem path. Dedicated desktop floating
-  pin windows remain a follow-up UI slice on the same backend contract.
+  invoke a screen API or supply a filesystem path. A pin can be promoted to a
+  dedicated always-on-top Tauri window through a host-issued token URL; the host
+  closes and releases those windows when the pin or module is removed.
 
-### M3 — remaining modules
+### M3 — production hardening remaining
 
-- Add the dedicated floating-window presentation for Screen Pin, then add
-  parity-specific host integrations such as Explorer drag
-  and module hotkeys.
+- Complete signed installer/bundle and updater integration, then run the
+  production parity checklist on every official module. Portable and production
+  directory builders already use the same release executable and resource
+  manifest, so this phase is packaging and trust hardening rather than another
+  host rewrite.
 - Run heavy runtimes (Everything/qpdf) as module-owned child processes or
   sidecars and close only instances created by the module. Qing Launcher now
   follows this rule for its private Everything client; its dedicated service

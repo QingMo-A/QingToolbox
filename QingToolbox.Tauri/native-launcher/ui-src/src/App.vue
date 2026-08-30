@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   getContext,
   hideModuleWindow,
   invokeModule,
   parseSearchMode,
+  setModuleHotkey,
   type EverythingResult,
   type EverythingSearchMode,
   type EverythingSearchResponse,
@@ -13,19 +15,26 @@ import {
   type ModuleContext,
 } from './bridge'
 
+const DEFAULT_HOTKEY = 'Ctrl+Alt+L'
+
 const emptyState: LauncherState = {
   sortMode: 'custom',
   items: [],
   folders: [],
   customOrder: [],
   recent: [],
-  hotkey: { ctrl: true, alt: true, shift: false, win: false, virtualKey: 32, keyLabel: 'Space' },
-  hotkeyStatus: 'Inactive',
+  hotkey: { ctrl: true, alt: true, shift: false, win: false, virtualKey: 76, keyLabel: 'L' },
+  hotkeyStatus: 'HostManaged',
   active: true,
 }
 
 const context = ref<ModuleContext | null>(null)
 const state = ref<LauncherState>(structuredClone(emptyState))
+// Keep the initial value independent from the mapping helpers below. In a
+// production module bundle, setup code runs before later const declarations;
+// calling formatHotkey here would read namedHotkeys while it is still in the
+// temporal dead zone and leave Vue with an empty root.
+const hotkeyDraft = ref(DEFAULT_HOTKEY)
 const query = ref('')
 const loading = ref(true)
 const busy = ref(false)
@@ -39,9 +48,57 @@ const draggedId = ref<string | null>(null)
 const dropIndex = ref<number | null>(null)
 const draggedClickGuard = ref(false)
 const openFolderId = ref<string | null>(null)
+const hotkeyPanelOpen = ref(false)
+const recordingHotkey = ref(false)
+const hotkeySaving = ref(false)
+const hotkeyError = ref('')
+const hotkeyInput = ref<HTMLInputElement | null>(null)
 let draggedClickGuardTimer: number | undefined
 let everythingDebounceTimer: number | undefined
 let everythingRequestSerial = 0
+let unlistenStateChanged: UnlistenFn | undefined
+
+const namedHotkeys: Record<string, { token: string; label: string; virtualKey: number }> = {
+  Space: { token: 'Space', label: 'Space', virtualKey: 0x20 },
+  Enter: { token: 'Enter', label: 'Enter', virtualKey: 0x0d },
+  Escape: { token: 'Escape', label: 'Esc', virtualKey: 0x1b },
+  Tab: { token: 'Tab', label: 'Tab', virtualKey: 0x09 },
+  Backspace: { token: 'Backspace', label: 'Backspace', virtualKey: 0x08 },
+  Delete: { token: 'Delete', label: 'Delete', virtualKey: 0x2e },
+  Insert: { token: 'Insert', label: 'Insert', virtualKey: 0x2d },
+  Home: { token: 'Home', label: 'Home', virtualKey: 0x24 },
+  End: { token: 'End', label: 'End', virtualKey: 0x23 },
+  PageUp: { token: 'PageUp', label: 'Page Up', virtualKey: 0x21 },
+  PageDown: { token: 'PageDown', label: 'Page Down', virtualKey: 0x22 },
+  ArrowUp: { token: 'ArrowUp', label: '↑', virtualKey: 0x26 },
+  ArrowDown: { token: 'ArrowDown', label: '↓', virtualKey: 0x28 },
+  ArrowLeft: { token: 'ArrowLeft', label: '←', virtualKey: 0x25 },
+  ArrowRight: { token: 'ArrowRight', label: '→', virtualKey: 0x27 },
+  Backquote: { token: 'Backquote', label: '`', virtualKey: 0xc0 },
+  Minus: { token: 'Minus', label: '-', virtualKey: 0xbd },
+  Equal: { token: 'Equal', label: '=', virtualKey: 0xbb },
+  BracketLeft: { token: 'BracketLeft', label: '[', virtualKey: 0xdb },
+  BracketRight: { token: 'BracketRight', label: ']', virtualKey: 0xdd },
+  Backslash: { token: 'Backslash', label: '\\', virtualKey: 0xdc },
+  Semicolon: { token: 'Semicolon', label: ';', virtualKey: 0xba },
+  Quote: { token: 'Quote', label: "'", virtualKey: 0xde },
+  Comma: { token: 'Comma', label: ',', virtualKey: 0xbc },
+  Period: { token: 'Period', label: '.', virtualKey: 0xbe },
+  Slash: { token: 'Slash', label: '/', virtualKey: 0xbf },
+}
+
+const namedHotkeyAliases: Record<string, string> = {
+  esc: 'Escape',
+  escape: 'Escape',
+  'page up': 'PageUp',
+  'page down': 'PageDown',
+  up: 'ArrowUp',
+  down: 'ArrowDown',
+  left: 'ArrowLeft',
+  right: 'ArrowRight',
+  super: 'Super',
+  win: 'Super',
+}
 
 const search = computed(() => parseSearchMode(query.value))
 const everythingActive = computed(() => search.value.mode !== 'normal')
@@ -50,6 +107,176 @@ const everythingBadge = computed(() => ({
   'everything-file': 'Everything · 文件',
   'everything-directory': 'Everything · 文件夹',
 }[search.value.mode as Exclude<EverythingSearchMode, 'normal'>] ?? 'Everything'))
+
+function displayKeyLabel(value: string): string {
+  if (value.startsWith('Key') && value.length === 4) return value.slice(3)
+  if (value.startsWith('Digit') && value.length === 6) return value.slice(5)
+  return namedHotkeys[value]?.label ?? value
+}
+
+function keyDescriptor(value: string): { token: string; label: string; virtualKey: number } | null {
+  const raw = value.trim()
+  const trimmed = raw.length === 1 ? raw.toUpperCase() : raw
+  if (/^Key[A-Z]$/.test(trimmed)) {
+    return { token: trimmed, label: trimmed.slice(3), virtualKey: trimmed.charCodeAt(3) }
+  }
+  if (/^Digit[0-9]$/.test(trimmed)) {
+    return { token: trimmed, label: trimmed.slice(5), virtualKey: trimmed.charCodeAt(5) }
+  }
+  if (/^F(?:[1-9]|1[0-2])$/.test(trimmed)) {
+    return { token: trimmed, label: trimmed, virtualKey: 0x6f + Number(trimmed.slice(1)) }
+  }
+  const canonical = namedHotkeys[trimmed]
+    ? trimmed
+    : namedHotkeyAliases[trimmed.toLowerCase()]
+  if (canonical && namedHotkeys[canonical]) return namedHotkeys[canonical]
+  if (/^[A-Z]$/.test(trimmed)) {
+    return { token: `Key${trimmed}`, label: trimmed, virtualKey: trimmed.charCodeAt(0) }
+  }
+  if (/^[0-9]$/.test(trimmed)) {
+    return { token: `Digit${trimmed}`, label: trimmed, virtualKey: trimmed.charCodeAt(0) }
+  }
+  return null
+}
+
+function formatHotkey(value: LauncherState['hotkey']): string {
+  const parts: string[] = []
+  if (value.ctrl) parts.push('Ctrl')
+  if (value.alt) parts.push('Alt')
+  if (value.shift) parts.push('Shift')
+  if (value.win) parts.push('Win')
+  parts.push(displayKeyLabel(value.keyLabel))
+  return parts.join('+')
+}
+
+function hotkeyTokenFromEvent(event: KeyboardEvent): { token: string; label: string; virtualKey: number } | null {
+  const code = event.code
+  if (/^Key[A-Z]$/.test(code)) return { token: code, label: code.slice(3), virtualKey: code.charCodeAt(3) }
+  if (/^Digit[0-9]$/.test(code)) return { token: code, label: code.slice(5), virtualKey: code.charCodeAt(5) }
+  if (/^F(?:[1-9]|1[0-2])$/.test(code)) {
+    const number = Number(code.slice(1))
+    return { token: code, label: code, virtualKey: 0x6f + number }
+  }
+  return namedHotkeys[code] ?? namedHotkeys[event.key] ?? null
+}
+
+function hotkeySpecFromText(value: string): LauncherState['hotkey'] {
+  const tokens = value.split('+').map((token) => token.trim()).filter(Boolean)
+  const key = keyDescriptor(tokens.pop() ?? '')
+  if (!key) throw new Error('请选择一个有效的主按键。')
+  const modifiers = new Set<string>()
+  for (const token of tokens) {
+    const normalized = token.toLowerCase()
+    if (['ctrl', 'control'].includes(normalized)) modifiers.add('ctrl')
+    else if (['alt', 'option'].includes(normalized)) modifiers.add('alt')
+    else if (normalized === 'shift') modifiers.add('shift')
+    else if (['super', 'win', 'command', 'cmd'].includes(normalized)) modifiers.add('win')
+    else throw new Error(`不支持的修饰键：${token}`)
+  }
+  if (!modifiers.size) {
+    throw new Error('快捷键至少需要 Ctrl、Alt、Shift 或 Win 中的一个修饰键。')
+  }
+  return {
+    ctrl: modifiers.has('ctrl'),
+    alt: modifiers.has('alt'),
+    shift: modifiers.has('shift'),
+    win: modifiers.has('win'),
+    virtualKey: key.virtualKey,
+    keyLabel: key.token,
+  }
+}
+
+function hotkeyText(value: LauncherState['hotkey']): string {
+  return [
+    value.ctrl ? 'Ctrl' : '',
+    value.alt ? 'Alt' : '',
+    value.shift ? 'Shift' : '',
+    value.win ? 'Super' : '',
+    value.keyLabel,
+  ].filter(Boolean).join('+')
+}
+
+function stopHotkeyRecording(): void {
+  if (!recordingHotkey.value) return
+  recordingHotkey.value = false
+  window.removeEventListener('keydown', captureHotkey, true)
+}
+
+function captureHotkey(event: KeyboardEvent): void {
+  if (!recordingHotkey.value) return
+  if (event.key === 'Escape' && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    stopHotkeyRecording()
+    return
+  }
+  // Capture at the window boundary so Alt+Space never reaches the WebView's
+  // default context/system-menu handling while the recorder is active.
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) return
+  const key = hotkeyTokenFromEvent(event)
+  if (!key) {
+    hotkeyError.value = '这个按键暂不支持，请换一个主按键。'
+    return
+  }
+  const modifiers = [
+    event.ctrlKey ? 'Ctrl' : '',
+    event.altKey ? 'Alt' : '',
+    event.shiftKey ? 'Shift' : '',
+    event.metaKey ? 'Super' : '',
+  ].filter(Boolean)
+  if (!modifiers.length) {
+    hotkeyError.value = '快捷键至少需要一个修饰键。'
+    return
+  }
+  hotkeyDraft.value = `${modifiers.join('+')}+${key.token}`
+  hotkeyError.value = ''
+  stopHotkeyRecording()
+}
+
+async function startHotkeyRecording(): Promise<void> {
+  hotkeyError.value = ''
+  if (recordingHotkey.value) {
+    stopHotkeyRecording()
+    return
+  }
+  recordingHotkey.value = true
+  window.addEventListener('keydown', captureHotkey, true)
+  await nextTick()
+  hotkeyInput.value?.focus()
+}
+
+async function saveHotkey(): Promise<void> {
+  if (hotkeySaving.value || !hotkeyDraft.value) return
+  let next: LauncherState['hotkey']
+  try {
+    next = hotkeySpecFromText(hotkeyDraft.value)
+  } catch (reason) {
+    hotkeyError.value = messageOf(reason)
+    return
+  }
+  const previousText = state.value.hotkey ? hotkeyText(state.value.hotkey) : DEFAULT_HOTKEY
+  hotkeySaving.value = true
+  hotkeyError.value = ''
+  try {
+    // Register first so an unavailable OS shortcut cannot leave the module
+    // claiming a binding that the host could not actually own.
+    await setModuleHotkey(hotkeyText(next))
+    state.value = await invokeModule<LauncherState>('setHotkey', next)
+    hotkeyDraft.value = hotkeyText(next)
+  } catch (reason) {
+    try { await setModuleHotkey(previousText) } catch { /* keep the diagnostic below */ }
+    hotkeyError.value = messageOf(reason)
+  } finally {
+    hotkeySaving.value = false
+  }
+}
+
+async function resetHotkey(): Promise<void> {
+  hotkeyDraft.value = DEFAULT_HOTKEY
+  await saveHotkey()
+}
 
 const filteredItems = computed(() => {
   if (everythingActive.value) return []
@@ -250,11 +477,24 @@ async function load(): Promise<void> {
   try {
     context.value = await getContext()
     state.value = await invokeModule<LauncherState>('getState')
+    hotkeyDraft.value = formatHotkey(state.value.hotkey)
   } catch (reason) {
     error.value = messageOf(reason)
   } finally {
     loading.value = false
     if (everythingActive.value) scheduleEverythingSearch()
+  }
+}
+
+async function reloadStateAfterHostEvent(): Promise<void> {
+  // The event carries no filesystem data. Ask the module for its normal
+  // backend-owned projection so dropped paths never become a WebView input.
+  if (loading.value || busy.value || everythingActive.value || draggedId.value) return
+  try {
+    state.value = await invokeModule<LauncherState>('getState')
+    if (!recordingHotkey.value && !hotkeySaving.value) hotkeyDraft.value = formatHotkey(state.value.hotkey)
+  } catch (reason) {
+    error.value = messageOf(reason)
   }
 }
 
@@ -484,14 +724,28 @@ function cancelDrag(): void {
 }
 
 watch(query, () => scheduleEverythingSearch())
+watch(() => state.value.hotkey, (value) => {
+  if (!recordingHotkey.value && !hotkeySaving.value) hotkeyDraft.value = formatHotkey(value)
+}, { deep: true })
 
 onMounted(() => {
   window.addEventListener('keydown', onWindowKeydown)
   void load()
+  void listen('qmod:module-state-changed', () => {
+    void reloadStateAfterHostEvent()
+  }).then((unlisten) => {
+    unlistenStateChanged = unlisten
+  }).catch(() => {
+    // Browser preview and older hosts do not expose the optional event bridge;
+    // the rest of the launcher remains fully usable there.
+  })
 })
 onBeforeUnmount(() => {
+  stopHotkeyRecording()
   if (draggedClickGuardTimer !== undefined) window.clearTimeout(draggedClickGuardTimer)
   if (everythingDebounceTimer !== undefined) window.clearTimeout(everythingDebounceTimer)
+  unlistenStateChanged?.()
+  unlistenStateChanged = undefined
   window.removeEventListener('keydown', onWindowKeydown)
 })
 </script>
@@ -511,6 +765,9 @@ onBeforeUnmount(() => {
       </div>
       <div class="top-actions">
         <span class="version">Rust module · v{{ context?.version ?? '—' }}</span>
+        <button class="hotkey-toggle" type="button" :aria-expanded="hotkeyPanelOpen" @click="hotkeyPanelOpen = !hotkeyPanelOpen">
+          {{ hotkeyPanelOpen ? '收起快捷键' : '快捷键' }}
+        </button>
         <button class="refresh" type="button" :disabled="busy || loading" @click="refresh">↻</button>
       </div>
     </header>
@@ -532,6 +789,32 @@ onBeforeUnmount(() => {
         ＋ 文件夹
       </button>
     </nav>
+
+    <section v-if="hotkeyPanelOpen" class="hotkey-panel" aria-labelledby="hotkey-title">
+      <div>
+        <p class="eyebrow">宿主全局快捷键</p>
+        <h2 id="hotkey-title">快速显示启动台</h2>
+        <small>快捷键由 Rust/Tauri 注册；录入时支持 Alt+Space，不会打开系统菜单。</small>
+      </div>
+      <div class="hotkey-controls">
+        <input
+          ref="hotkeyInput"
+          class="hotkey-input"
+          :value="recordingHotkey ? '请按下组合键…' : (hotkeyDraft || formatHotkey(state.hotkey))"
+          readonly
+          aria-label="启动台快捷键"
+          @click="startHotkeyRecording"
+          @keydown="captureHotkey"
+        />
+        <button type="button" class="hotkey-action" :disabled="hotkeySaving" @click="startHotkeyRecording">
+          {{ recordingHotkey ? '取消录入' : '重新录入' }}
+        </button>
+        <button type="button" class="hotkey-action secondary" :disabled="hotkeySaving || !hotkeyDraft" @click="saveHotkey">保存</button>
+        <button type="button" class="hotkey-action secondary" :disabled="hotkeySaving" @click="resetHotkey">恢复默认</button>
+      </div>
+      <p v-if="hotkeyError" class="hotkey-error" role="alert">{{ hotkeyError }}</p>
+      <p class="hotkey-current">当前：{{ formatHotkey(state.hotkey) }} · {{ state.hotkeyStatus === 'HostManaged' ? '宿主已接管' : state.hotkeyStatus }}</p>
+    </section>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="everythingActive && everythingError" class="error everything-error" role="alert">{{ everythingError }}</p>

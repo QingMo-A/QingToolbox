@@ -16,6 +16,7 @@
     "refreshDesktop",
     "setSortMode",
     "setCustomOrder",
+    "setHotkey",
     "launchItem",
     "removeItem",
     "createFolder",
@@ -28,6 +29,9 @@
     "openEverythingResult",
     "openEverythingResultFolder",
     "copyEverythingResultPath"
+  ],
+  "events": [
+    "launcher.externalDrop"
   ],
   "icon": "icon.svg"
 }
