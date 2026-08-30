@@ -1,6 +1,7 @@
 # QingToolbox Tauri migration
 
-> Status: native host and official module slices running (2026-08-29)
+> Status: native host and official module slices validated; production cut-over
+> gates remain (2026-08-30)
 
 This document records the user-directed Tauri rewrite track. It supersedes the
 "no Tauri rewrite" non-goal in the earlier hybrid UI planning document; that
@@ -125,7 +126,7 @@ the first release.
   `QING_TAURI_DISABLE_AUTOSTART_SYNC=1`, including when it exercises a Release
   executable.
 
-### M2 — native product modules (in progress)
+### M2 — native product modules (validated migration slice)
 
 - `native-launcher/` now provides the first Rust process profile and a Vue
   surface. Its state store, Desktop projection, custom/alphabetical/desktop
@@ -206,6 +207,13 @@ the first release.
 - The repository's default `run-latest.bat` now launches the Tauri Release
   candidate. The legacy WPF maintenance path is explicit (`run-legacy-wpf.bat`)
   and is not referenced by the Tauri host or its module packages.
+
+The current migration slice has passed the repository's full Windows validation
+command (`scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop
+-SmokeEverything`), including all eight native module smoke suites, host Rust
+tests, Vue typecheck/build, Release resource staging and the module-window IPC
+smoke. This is a validated engineering candidate, not yet the signed public
+installer described in M3.
 
 ### M4 — retire WPF
 

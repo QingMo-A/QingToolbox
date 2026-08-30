@@ -10,6 +10,10 @@ QingTransfer、Text Tools、Window Topmost、PowerGuard 和 Screen Pin。新开�
 [`docs/TAURI_MIGRATION.md`](docs/TAURI_MIGRATION.md)；协议定义见
 [`protocol/README.md`](protocol/README.md)。
 
+当前 Tauri 工程版本为 `0.1.0`（迁移候选）。可交付的 portable 目录、模块包和
+安装器候选都由 Rust/Tauri/Vue 同一条 Release 构建链生成；它们不会覆盖旧 WPF
+安装。签名、正式 AppId 切换和 updater 接入完成前，请把这些产物视为工程验证候选。
+
 在已安装 Rust stable、Node.js 和 Windows WebView2 的开发机上，可运行：
 
 ```powershell
@@ -65,7 +69,12 @@ QingToolbox 以当前 Windows 用户为范围保持单实例运行。Pipe Server
 QingToolbox 是面向 Windows 的轻量模块化工具箱。Shell 提供现代化界面、
 模块发现和生命周期管理，实际工具功能由独立模块按需提供。
 
-当前 Alpha：**0.2.5-alpha**（发布 Tag：`v0.2.5-alpha`）。该版本新增可组合外观预设、受控字体选择与导入，并让 Vue 工作区和原生标题栏共享一致的字体与主题表现，同时延续宿主安全更新、
+## 历史 WPF 发行线（不适用于 Tauri 宿主）
+
+以下内容记录旧 WPF 发行线，供维护历史安装和数据迁移时参考；运行
+`run-latest.bat` 或使用 Tauri 候选安装器时不会进入这条路径。
+
+历史 Alpha：**0.2.5-alpha**（发布 Tag：`v0.2.5-alpha`）。该版本新增可组合外观预设、受控字体选择与导入，并让 Vue 工作区和原生标题栏共享一致的字体和主题表现，同时延续宿主安全更新、
 真正的最近使用模块和一键启动体验，但仍不是正式稳定版，也不代表生产环境可用。
 正式下载仅提供 `QingToolbox-0.2.5-alpha-win-x64-setup.exe` 及其同名 SHA256；安装器
 尚未数字签名。TextTools、PowerGuard 和 WindowTopmost 继续独立交付，不随安装器提供。
@@ -75,7 +84,7 @@ QingToolbox 是面向 Windows 的轻量模块化工具箱。Shell 提供现代�
 - 扫描模块清单但不在启动或刷新时加载 DLL。
 - 模块导入后默认由用户手动加载、启用、停用和卸载；只有明确授权“随工具箱启动”的完整载荷匹配模块才会在启动阶段恢复。
 - 使用 collectible `AssemblyLoadContext` 支持进程内模块卸载。
-- 在独立窗口中承载模块提供的 WPF View。
+- 在独立窗口中承载模块提供的 WPF View（仅历史 WPF 宿主）。
 - Shell 与模块支持简体中文和英文。
 - 从 `.qmod` 包导入用户模块（Preview）。
 - 对已下载并校验的官方 `.qmod` 执行稳定句柄离线验证，并原子发布到环境隔离的 Verified Staging；候选目录在 Incoming 中完成全部认证，`Directory.Move` 与 committed 状态构成线性化提交点，提交后的 Caller 取消不能改写成功。完整 Release 身份控制共享，绑定物理 Staging 根的崩溃可恢复文件句柄锁保证 module/version 唯一发布；诊断 marker 清理失败不会改写已提交成功。暂存不等于安装，不接触用户模块目录，也不加载 DLL。
@@ -85,9 +94,9 @@ QingToolbox 是面向 Windows 的轻量模块化工具箱。Shell 提供现代�
 - B1 的安全关键目录替换使用源目录句柄、目标父目录句柄和相对叶名执行 native rename，不再通过路径 `Directory.Move`；Journal temp 也由同一文件句柄通过 Namespace Handle 原子替换。双遍快照后的 `SecureTreeLease` 绑定文件身份、Hash 与 Manifest 同一次读取，最终 rename 后立即复核完整树。Runtime Restore 已开始后，即使返回 false、抛异常或 Progress Journal 写入失败，回滚仍查询并卸载实际 v2，再恢复 v1。当前 Journal 为 schema 4，真实旧 schema 3 按严格布局和现场迁移，否则保留为恢复现场。
 - B1 现为 **Engineering Complete — Frozen**，且仍仅限 Development/ModuleTest。B2.1 已接入真实 Shell 生命周期适配器、启动恢复执行门禁和固定来源的 Development/ModuleTest TextTools 金丝雀；Production 模块自动安装仍未开放。宿主自更新 Plan 013 已在原生 Production 工作区完成并冻结。Preview 2 未执行人工验收仍为 `Not Run`。详见 [`docs/MODULE_UPDATE_RUNTIME_ADAPTER.md`](docs/MODULE_UPDATE_RUNTIME_ADAPTER.md) 与 [`docs/TEXTTOOLS_UPDATE_CANARY.md`](docs/TEXTTOOLS_UPDATE_CANARY.md)。
 
-## 运行 Preview
+## 历史 WPF Preview 参考
 
-### 当前用户安装版
+### 历史 WPF 用户安装版
 
 当前发布使用 `QingToolbox-0.2.5-alpha-win-x64-setup.exe`。安装器基于 Inno Setup，
 只为当前用户安装，不需要管理员权限，也不会触发 UAC。默认目录为：

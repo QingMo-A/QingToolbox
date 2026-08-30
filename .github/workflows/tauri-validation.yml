@@ -14,7 +14,9 @@ on:
       - 'scripts/smoke-tauri-*.mjs'
       - 'scripts/verify-tauri.ps1'
       - 'scripts/run-tauri-latest.ps1'
+      - 'scripts/test-local-environment-contracts.ps1'
       - 'run-latest.bat'
+      - 'run-legacy-wpf.bat'
       - 'installer/QingToolbox.Tauri.iss'
       - '.github/workflows/tauri-validation.yml'
   push:
@@ -29,7 +31,9 @@ on:
       - 'scripts/smoke-tauri-*.mjs'
       - 'scripts/verify-tauri.ps1'
       - 'scripts/run-tauri-latest.ps1'
+      - 'scripts/test-local-environment-contracts.ps1'
       - 'run-latest.bat'
+      - 'run-legacy-wpf.bat'
       - 'installer/QingToolbox.Tauri.iss'
       - '.github/workflows/tauri-validation.yml'
 
@@ -72,6 +76,10 @@ jobs:
       - name: Package all Tauri modules
         shell: pwsh
         run: ./scripts/package-tauri-modules.ps1 -SkipBuild -Smoke
+
+      - name: Check default and legacy launch entry contracts
+        shell: pwsh
+        run: ./scripts/test-local-environment-contracts.ps1
 
       - name: Build production candidate
         shell: pwsh
