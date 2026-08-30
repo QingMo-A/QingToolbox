@@ -5,10 +5,10 @@
   "type": "module",
   "description": "QingToolbox's lightweight Rust/Tauri host with Vue surfaces.",
   "scripts": {
-    "dev": "vite",
-    "build": "npm run typecheck && vite build",
+    "dev": "npm --prefix ../QingToolbox.WebUI run dev:webview -- --port 1420",
+    "build": "npm --prefix ../QingToolbox.WebUI run build",
     "preview": "vite preview",
-    "typecheck": "vue-tsc --noEmit",
+    "typecheck": "npm --prefix ../QingToolbox.WebUI run typecheck",
     "tauri": "tauri"
   },
   "dependencies": {

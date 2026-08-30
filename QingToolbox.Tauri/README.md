@@ -8,7 +8,7 @@ QingToolbox 新宿主的 Tauri 2 + Vue 实现。Rust Core 是新开发和生产�
 
 ```text
 QingToolbox.Tauri/
-├─ src/                         # Vue 3 + Vite 前端
+├─ src/                         # 仅保留早期壳的兼容源码（不再作为正式前端入口）
 ├─ src-tauri/
 │  ├─ src/main.rs               # Windows 入口
 │  ├─ src/lib.rs                # Tauri Builder 与 typed command
@@ -26,6 +26,12 @@ QingToolbox.Tauri/
 │  └─ tauri.conf.json
 ├─ package.json
 └─ vite.config.ts
+
+正式主界面位于仓库根的 `QingToolbox.WebUI/`。Tauri 的 `beforeBuildCommand`
+和 `frontendDist` 已直接指向该 Vue 3 工作区，包含首页、模块管理、运行中、日志、
+设置、命令面板和完整设计系统。`QingToolbox.WebUI/src/bridge/transport/TauriTransport.ts`
+把这些页面接到 Rust/Tauri typed commands；浏览器预览和旧 WebView 桥仍使用各自的
+transport，不会被这次接入破坏。
 ```
 
 `native-module-canary/` 是一个可复现的 Rust 进程模块样例，用于验证
