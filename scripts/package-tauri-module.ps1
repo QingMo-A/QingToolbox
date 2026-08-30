@@ -9,6 +9,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'tauri-packaging-path.ps1')
 
 $repoRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $tauriRoot = Join-Path $repoRoot 'QingToolbox.Tauri'
@@ -108,7 +109,7 @@ foreach ($file in $files) {
     if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw "Refusing to package a reparse-point file: $($file.FullName)"
     }
-    $relative = [IO.Path]::GetRelativePath($sourceRoot, $file.FullName).Replace('\', '/')
+    $relative = (Get-TauriRelativePath -Root $sourceRoot -Path $file.FullName).Replace('\', '/')
     if ($relative -eq 'qmod.json') {
         throw 'The generated qmod.json must be the only package metadata file.'
     }
@@ -145,7 +146,7 @@ try {
     try { $metadataOutput.Write($metadataBytes, 0, $metadataBytes.Length) } finally { $metadataOutput.Dispose() }
 
     foreach ($file in $files) {
-        $relative = [IO.Path]::GetRelativePath($sourceRoot, $file.FullName).Replace('\', '/')
+        $relative = (Get-TauriRelativePath -Root $sourceRoot -Path $file.FullName).Replace('\', '/')
         $entry = $archive.CreateEntry($relative, [IO.Compression.CompressionLevel]::Optimal)
         $entry.LastWriteTime = [DateTimeOffset]::new(1980, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
         $input = [IO.File]::OpenRead($file.FullName)

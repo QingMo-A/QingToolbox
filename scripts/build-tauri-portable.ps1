@@ -10,6 +10,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'tauri-packaging-path.ps1')
 
 $repoRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $appRoot = Join-Path $repoRoot 'QingToolbox.Tauri'
@@ -82,7 +83,7 @@ function Get-PortableFiles {
             Where-Object { $_.Name -notin @('portable-manifest.json') }
     )
     return @($files | ForEach-Object {
-        $relative = [IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/')
+        $relative = (Get-TauriRelativePath -Root $Root -Path $_.FullName).Replace('\', '/')
         [ordered]@{
             path = $relative
             size = $_.Length
