@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import type { BridgeEvent, BridgeRequest, BridgeResponse } from '../../contracts/app'
 import type { Transport } from './Transport'
-import type { ModuleListPayload, ModuleRuntimeSnapshot, ModuleSummary, SettingsSnapshot as TauriSettingsSnapshot } from './tauriTypes'
+import type { ModuleListPayload, ModuleRuntimeSnapshot, ModuleSummary, SessionLogSnapshot, SettingsSnapshot as TauriSettingsSnapshot } from './tauriTypes'
 
 /** Adapts the migrated Rust/Tauri commands to the existing full Vue shell. */
 export class TauriTransport implements Transport {
@@ -78,7 +78,7 @@ export class TauriTransport implements Transport {
       case 'settings.refreshFonts': return toWebSettings(await invoke<TauriSettingsSnapshot>('get_settings'))
       case 'settings.setFont':
       case 'settings.importFont': throw new Error('UnsupportedInTauri: custom fonts are not exposed by the migrated Rust host yet.')
-      case 'logs.getSnapshot': return { generatedAt: new Date().toISOString(), entries: [] }
+      case 'logs.getSnapshot': return invoke<SessionLogSnapshot>('get_session_logs')
       case 'hostUpdate.getSnapshot':
       case 'hostUpdate.check':
       case 'hostUpdate.download':

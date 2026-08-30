@@ -8,7 +8,7 @@ use std::{
         Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use serde::Serialize;
@@ -37,6 +37,7 @@ use web::{open_module_window, serve_module_asset, serve_screenpin_asset, ScreenP
 
 const MAX_EXTERNAL_DROP_PATHS: usize = 32;
 const MAX_EXTERNAL_DROP_PATH_LENGTH: usize = 32 * 1024;
+const MAX_SESSION_LOG_ENTRIES: usize = 256;
 const MODULE_STATE_CHANGED_EVENT: &str = "qmod:module-state-changed";
 const DEFAULT_LAUNCHER_HOTKEY: &str = "Ctrl+Alt+L";
 
@@ -51,6 +52,7 @@ pub struct HostState {
     settings: Mutex<SettingsStore>,
     module_hotkeys: Mutex<std::collections::BTreeMap<String, String>>,
     screenpin_windows: Mutex<std::collections::BTreeMap<String, ScreenPinWindowRecord>>,
+    session_logs: Mutex<Vec<SessionLogEntry>>,
     close_prompt_active: AtomicBool,
 }
 
@@ -64,6 +66,7 @@ impl HostState {
             settings: Mutex::new(SettingsStore::new()),
             module_hotkeys: Mutex::new(std::collections::BTreeMap::new()),
             screenpin_windows: Mutex::new(std::collections::BTreeMap::new()),
+            session_logs: Mutex::new(Vec::new()),
             close_prompt_active: AtomicBool::new(false),
         }
     }
@@ -82,6 +85,72 @@ struct HostInfo {
     version: &'static str,
     backend: &'static str,
     protocol_version: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionLogEntry {
+    timestamp: String,
+    level: String,
+    category: String,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionLogSnapshot {
+    generated_at: String,
+    entries: Vec<SessionLogEntry>,
+}
+
+fn record_log(state: &HostState, level: &str, category: &str, message: impl Into<String>) {
+    let Ok(mut entries) = state.session_logs.lock() else {
+        return;
+    };
+    entries.push(SessionLogEntry {
+        timestamp: now_rfc3339(),
+        level: level.to_string(),
+        category: category.to_string(),
+        message: message.into(),
+    });
+    let excess = entries.len().saturating_sub(MAX_SESSION_LOG_ENTRIES);
+    if excess > 0 {
+        entries.drain(..excess);
+    }
+}
+
+/// Keep the log contract independent from a third-party time crate. This is
+/// UTC with millisecond precision, which is directly consumable by Date.parse
+/// in the existing Vue log store.
+fn now_rfc3339() -> String {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let total_seconds = elapsed.as_secs() as i64;
+    let days = total_seconds.div_euclid(86_400);
+    let day_seconds = total_seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_date_from_days(days);
+    let hour = day_seconds / 3_600;
+    let minute = day_seconds.rem_euclid(3_600) / 60;
+    let second = day_seconds.rem_euclid(60);
+    let millis = elapsed.subsec_millis();
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
+}
+
+fn civil_date_from_days(days_since_unix_epoch: i64) -> (i64, i64, i64) {
+    // Howard Hinnant's proleptic Gregorian conversion, valid for the range
+    // relevant to system timestamps and avoiding locale/time-zone APIs.
+    let z = days_since_unix_epoch + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }).div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096).div_euclid(365);
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let month_part = (5 * doy + 2).div_euclid(153);
+    let day = doy - (153 * month_part + 2).div_euclid(5) + 1;
+    let month = month_part + if month_part < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    (year, month, day)
 }
 
 /// The first command in the new host contract. Keep commands narrow and typed;
@@ -118,6 +187,24 @@ fn get_settings(
     Ok(settings.snapshot())
 }
 
+/// Return the bounded in-memory event history for the current host session.
+/// Paths and process handles are never exposed through this DTO.
+#[tauri::command]
+fn get_session_logs(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+) -> Result<SessionLogSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    let entries = state.session_logs.lock().map_err(|_| CommandError {
+        code: "stateUnavailable",
+        message: "会话日志状态不可用。".to_string(),
+    })?;
+    Ok(SessionLogSnapshot {
+        generated_at: now_rfc3339(),
+        entries: entries.clone(),
+    })
+}
+
 /// Apply a bounded, typed settings patch. The frontend cannot provide a
 /// destination path or arbitrary JSON document; Rust keeps the canonical file
 /// location and performs an atomic replacement.
@@ -150,7 +237,10 @@ fn update_settings(
     }
 
     match settings.update(update) {
-        Ok(snapshot) => Ok(snapshot),
+        Ok(snapshot) => {
+            record_log(&state, "Information", "Settings", "Settings updated.");
+            Ok(snapshot)
+        }
         Err(error) => {
             // The settings write can still fail after an OS registration. Try
             // to restore the previous registration so a retry is safe.
@@ -206,9 +296,9 @@ fn set_module_startup_authorization(
     let mut ids = settings.snapshot().startup_module_ids;
     ids.retain(|value| value != &module_id);
     if enabled {
-        ids.push(module_id);
+        ids.push(module_id.clone());
     }
-    settings
+    let snapshot = settings
         .update(SettingsUpdate {
             startup_module_ids: Some(ids),
             ..SettingsUpdate::default()
@@ -216,7 +306,18 @@ fn set_module_startup_authorization(
         .map_err(|error| CommandError {
             code: error.code,
             message: error.message,
-        })
+        })?;
+    drop(settings);
+    record_log(
+        &state,
+        "Information",
+        "Modules",
+        format!(
+            "Startup authorization {} for {module_id}.",
+            if enabled { "enabled" } else { "disabled" }
+        ),
+    );
+    Ok(snapshot)
 }
 
 /// Import a user-selected `.qmod` package. The path is accepted only for this
@@ -241,6 +342,12 @@ fn import_module(
     if let Ok(mut index) = state.module_index.lock() {
         *index = discovery.records;
     }
+    record_log(
+        &state,
+        "Information",
+        "Modules",
+        format!("Imported module {} v{}.", result.name, result.version),
+    );
     Ok(result)
 }
 
@@ -281,7 +388,14 @@ fn open_module_directory(
     Command::new("explorer.exe")
         .arg(&directory)
         .spawn()
-        .map(|_| ())
+        .map(|_| {
+            record_log(
+                &state,
+                "Information",
+                "Modules",
+                format!("Opened module directory for {module_id}."),
+            );
+        })
         .map_err(|error| CommandError {
             code: "openDirectoryFailed",
             message: format!("无法打开模块目录：{error}"),
@@ -359,6 +473,12 @@ fn remove_module(
     if let Ok(mut index) = state.module_index.lock() {
         *index = discovery.records;
     }
+    record_log(
+        &state,
+        "Information",
+        "Modules",
+        format!("Removed module {module_id}."),
+    );
     Ok(())
 }
 
@@ -447,6 +567,12 @@ fn update_module(
     if let Ok(mut index) = state.module_index.lock() {
         *index = discovery.records;
     }
+    record_log(
+        &state,
+        "Information",
+        "Modules",
+        format!("Updated module {} to v{}.", result.id, result.version),
+    );
     Ok(result)
 }
 
@@ -575,9 +701,17 @@ fn start_module(
         code: "stateUnavailable",
         message: "模块运行状态不可用。".to_string(),
     })?;
-    runtime
+    let snapshot = runtime
         .start(&module_id, &record)
-        .map_err(CommandError::from)
+        .map_err(CommandError::from)?;
+    drop(runtime);
+    record_log(
+        &state,
+        "Information",
+        "Runtime",
+        format!("Started module {module_id}."),
+    );
+    Ok(snapshot)
 }
 
 /// Start a validated module and open its backend-owned Web surface. The
@@ -657,6 +791,12 @@ async fn open_module(
             }
         }
     }
+    record_log(
+        &state,
+        "Information",
+        "Runtime",
+        format!("Opened module {module_id}."),
+    );
     Ok(())
 }
 
@@ -683,6 +823,12 @@ fn stop_module(
     if module_id == "qing.screenpin" {
         close_screenpin_windows(window.app_handle(), &state);
     }
+    record_log(
+        &state,
+        "Information",
+        "Runtime",
+        format!("Stopped module {module_id}."),
+    );
     Ok(snapshot)
 }
 
@@ -1696,6 +1842,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_host_info,
             get_settings,
+            get_session_logs,
             update_settings,
             set_module_startup_authorization,
             import_module,
@@ -1720,6 +1867,12 @@ pub fn run() {
         .setup(|app| {
             start_runtime_supervisor(app.handle().clone());
             start_authorized_modules(&app.state::<HostState>());
+            record_log(
+                &app.state::<HostState>(),
+                "Information",
+                "Application",
+                "QingToolbox session started.",
+            );
 
             register_toggle_hotkey(app);
             sync_persisted_autostart(app);
@@ -1926,11 +2079,29 @@ fn start_authorized_modules(state: &HostState) {
     let Ok(mut runtime) = state.runtime.lock() else {
         return;
     };
+    let mut started = 0_usize;
+    let mut failed = 0_usize;
     for module_id in ids {
         if let Some(record) = index.get(&module_id) {
-            let _ = runtime.start(&module_id, record);
+            if runtime.start(&module_id, record).is_ok() {
+                started += 1;
+            } else {
+                failed += 1;
+            }
         }
     }
+    drop(runtime);
+    drop(index);
+    record_log(
+        state,
+        if failed == 0 {
+            "Information"
+        } else {
+            "Warning"
+        },
+        "Runtime",
+        format!("Startup authorization processed: {started} started, {failed} failed."),
+    );
 }
 
 fn stop_all_modules<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
@@ -2049,7 +2220,10 @@ fn install_close_behavior(window: &WebviewWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::{module_id_from_window_label, module_window_label, sanitize_launcher_drop_paths};
+    use super::{
+        civil_date_from_days, module_id_from_window_label, module_window_label, now_rfc3339,
+        record_log, sanitize_launcher_drop_paths, HostState, MAX_SESSION_LOG_ENTRIES,
+    };
     use std::{
         fs,
         time::{SystemTime, UNIX_EPOCH},
@@ -2107,5 +2281,28 @@ mod tests {
             .iter()
             .any(|value| value.to_ascii_lowercase().ends_with("demo.url")));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn session_logs_are_timestamped_and_bounded() {
+        assert_eq!(civil_date_from_days(0), (1970, 1, 1));
+        let timestamp = now_rfc3339();
+        assert!(timestamp.ends_with('Z'));
+        assert_eq!(timestamp.len(), 24);
+
+        let state = HostState::new();
+        for index in 0..(MAX_SESSION_LOG_ENTRIES + 3) {
+            record_log(&state, "Information", "Test", format!("event-{index}"));
+        }
+        let entries = state.session_logs.lock().expect("session logs");
+        assert_eq!(entries.len(), MAX_SESSION_LOG_ENTRIES);
+        assert_eq!(
+            entries.first().map(|entry| entry.message.as_str()),
+            Some("event-3")
+        );
+        assert_eq!(
+            entries.last().map(|entry| entry.message.as_str()),
+            Some("event-258")
+        );
     }
 }

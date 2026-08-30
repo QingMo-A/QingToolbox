@@ -3,3 +3,5 @@ export type ModuleSummary = { id: string; name: string; description: string | nu
 export type ModuleListPayload = { modules: ModuleSummary[]; roots: unknown[]; scannedAtUnixMs: number }
 export type ModuleRuntimeSnapshot = { moduleId: string; state: 'notStarted' | 'starting' | 'running' | 'stopped' | 'failed'; generation: number; lastError: string | null }
 export type SettingsSnapshot = { language: string; appearancePresetId: string; closeBehavior: string; startupPresentation: string; toggleHotkey: string; launchAtLogin: boolean; showLogsInSidebar: boolean; recentModuleIds: string[]; startupModuleIds: string[]; settingsSchemaVersion: number }
+export type SessionLogEntry = { timestamp: string; level: 'Information' | 'Warning' | 'Error'; category: string; message: string }
+export type SessionLogSnapshot = { generatedAt: string; entries: SessionLogEntry[] }
