@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import type { BridgeEvent, BridgeRequest, BridgeResponse } from '../../contracts/app'
 import type { Transport } from './Transport'
@@ -10,6 +11,7 @@ export class TauriTransport implements Transport {
   private disposed = false
   private sessionToken: string | null = null
   private activationNonce: string | null = null
+  private readonly eventCleanups = new Set<() => void>()
 
   static isAvailable(): boolean {
     return typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
@@ -21,8 +23,36 @@ export class TauriTransport implements Transport {
     catch (error) { return this.fail(message, error) }
   }
 
-  subscribe(_listener: (event: BridgeEvent) => void): () => void { return () => undefined }
-  dispose(): void { this.disposed = true; this.sessionToken = null; this.activationNonce = null }
+  subscribe(listener: (event: BridgeEvent) => void): () => void {
+    if (this.disposed) return () => undefined
+    let cleanedUp = false
+    let unlisten: UnlistenFn | null = null
+    let cleanup: () => void
+    cleanup = () => {
+      if (cleanedUp) return
+      cleanedUp = true
+      unlisten?.()
+      this.eventCleanups.delete(cleanup)
+    }
+    this.eventCleanups.add(cleanup)
+    void listen<{ reason?: unknown }>('qmod:module-state-changed', event => {
+      if (cleanedUp || this.disposed) return
+      const reason = typeof event.payload?.reason === 'string' ? event.payload.reason : 'module-state-changed'
+      listener({ protocolVersion: 4, event: 'app.hostEvent', payload: { name: 'module.changed', reason } })
+    }).then(value => {
+      unlisten = value
+      if (cleanedUp || this.disposed) value()
+    }).catch(() => {
+      this.eventCleanups.delete(cleanup)
+    })
+    return cleanup
+  }
+  dispose(): void {
+    this.disposed = true
+    this.sessionToken = null
+    this.activationNonce = null
+    for (const cleanup of [...this.eventCleanups]) cleanup()
+  }
 
   private async dispatch(message: BridgeRequest): Promise<unknown> {
     switch (message.command) {
