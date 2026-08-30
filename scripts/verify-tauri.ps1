@@ -223,6 +223,29 @@ if ($BuildDesktop) {
     } finally {
         Pop-Location
     }
+
+    # The host intentionally keeps Tauri's bundler inactive for the portable
+    # distribution. Materialize the same repository-owned module resources in
+    # target/release so the desktop smoke exercises the real packaged layout,
+    # not a stale directory left by an earlier build.
+    $releaseResources = Join-Path $rustRoot 'target/release/resources'
+    $sourceModules = Join-Path $rustRoot 'resources/modules'
+    if (-not (Test-Path -LiteralPath $sourceModules -PathType Container)) {
+        throw "Bundled module resources were not produced: $sourceModules"
+    }
+    $resolvedReleaseResources = [IO.Path]::GetFullPath($releaseResources)
+    $expectedReleaseResources = [IO.Path]::GetFullPath((Join-Path $rustRoot 'target/release/resources'))
+    if ($resolvedReleaseResources -ne $expectedReleaseResources) {
+        throw "Refusing to stage an unexpected Tauri release resource path: $resolvedReleaseResources"
+    }
+    if (Test-Path -LiteralPath $resolvedReleaseResources) {
+        Remove-Item -LiteralPath $resolvedReleaseResources -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $resolvedReleaseResources | Out-Null
+    Copy-Item -LiteralPath $sourceModules -Destination $resolvedReleaseResources -Recurse -Force
+    if (-not (Test-Path -LiteralPath (Join-Path $resolvedReleaseResources 'modules') -PathType Container)) {
+        throw "Failed to stage bundled module resources for desktop smoke."
+    }
 }
 
 if ($SmokeDesktop) {

@@ -25,6 +25,7 @@ $stageRoot = Join-Path $artifactRoot 'QingToolbox'
 $outputExe = Join-Path $stageRoot 'QingToolbox.exe'
 $builtExe = Join-Path $releaseRoot 'qingtoolbox-tauri.exe'
 $builtResources = Join-Path $releaseRoot 'resources'
+$sourceBundledModules = Join-Path $rustRoot 'resources\modules'
 
 function Assert-ArtifactPath {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -154,8 +155,27 @@ finally {
 if (-not (Test-Path -LiteralPath $builtExe -PathType Leaf)) {
     throw "Tauri release executable was not produced: $builtExe"
 }
-if (-not (Test-Path -LiteralPath $builtResources -PathType Container)) {
-    throw "Tauri release resources were not produced: $builtResources"
+# `bundle.active=false` keeps the portable build independent from Tauri's
+# platform bundler (and avoids downloading installer toolchains), so
+# `tauri build --no-bundle` is not required to materialize bundle resources.
+# The module build scripts already publish validated binaries/assets into this
+# repository-owned source root; copy that exact root into the release layout
+# explicitly instead of relying on an incidental bundler side effect.
+if (-not (Test-Path -LiteralPath $sourceBundledModules -PathType Container)) {
+    throw "Bundled module resources were not produced: $sourceBundledModules"
+}
+$expectedReleaseResources = [IO.Path]::GetFullPath((Join-Path $rustRoot 'target\release\resources'))
+if ([IO.Path]::GetFullPath($builtResources) -ne $expectedReleaseResources) {
+    throw "Refusing to stage an unexpected Tauri release resource path: $builtResources"
+}
+if (Test-Path -LiteralPath $builtResources) {
+    Remove-Item -LiteralPath $builtResources -Recurse -Force
+}
+New-Item -ItemType Directory -Force -Path $builtResources | Out-Null
+Copy-Item -LiteralPath $sourceBundledModules -Destination $builtResources -Recurse -Force
+$bundledModules = Join-Path $builtResources 'modules'
+if (-not (Test-Path -LiteralPath $bundledModules -PathType Container)) {
+    throw "Failed to stage bundled modules into the release layout: $bundledModules"
 }
 
 $resolvedStage = Assert-ArtifactPath $stageRoot
@@ -172,10 +192,6 @@ New-Item -ItemType Directory -Force -Path $stageResources | Out-Null
 # created directory can flatten the `modules` child on Windows PowerShell,
 # which makes the portable host fall back to user-installed (legacy) modules.
 # The bundled host must always see resources/modules/<module-id>.
-$bundledModules = Join-Path $builtResources 'modules'
-if (-not (Test-Path -LiteralPath $bundledModules -PathType Container)) {
-    throw "Tauri release resources are missing the modules directory: $bundledModules"
-}
 Copy-Item -LiteralPath $bundledModules -Destination $stageResources -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $appRoot 'THIRD_PARTY_NOTICES.md') -Destination $stageRoot -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $stageRoot -Force
