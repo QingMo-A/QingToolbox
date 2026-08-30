@@ -128,6 +128,9 @@ the first release.
 - Persist a bounded list of module IDs authorized to start with the host. The
   module page can toggle only a discovered manifest ID; startup initialization
   re-discovers the backend-owned module index and starts only those records.
+- Expose a bounded, in-memory session log snapshot from Rust. The existing Vue
+  logs page now reads `get_session_logs`; operational events are recorded without
+  returning backend paths, process handles, or arbitrary frontend data.
 
 ### M2 — native product modules (validated migration slice)
 
