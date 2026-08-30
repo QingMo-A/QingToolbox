@@ -31,8 +31,9 @@ pwsh ./scripts/build-tauri-production.ps1 -Smoke
 
 模块窗口的 `invoke_module_window` 会从 `module-<id>` 窗口标签推导模块身份，
 不接受页面提交的模块 id；操作仍必须同时出现在该模块的 `operations` allowlist。
-`get_module_window_context` 只返回模块 id、协议版本和操作名，不返回模块目录、
-可执行文件路径或数据目录。
+`get_module_window_context` 只返回模块 id、名称、版本、受控图标数据、协议版本和
+操作名，不返回模块目录、可执行文件路径或数据目录。图标是经过大小限制的
+data URL，不能被页面转换成宿主路径。
 
 ## 分层
 
