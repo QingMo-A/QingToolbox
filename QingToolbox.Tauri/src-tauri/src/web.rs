@@ -2,6 +2,7 @@ use std::{fs, path::Path};
 
 use tauri::{
     http::{Request, Response, StatusCode},
+    webview::PageLoadEvent,
     AppHandle, Manager, Runtime, Url, WebviewUrl, WebviewWindowBuilder,
 };
 
@@ -127,6 +128,18 @@ pub fn open_module_window<R: Runtime>(
         .inner_size(960.0, 680.0)
         .resizable(true)
         .data_directory(webview_data_directory)
+        // Do not expose the blank WebView2 surface while the module's HTML,
+        // CSS and bridge are still loading. The page-load callback reveals the
+        // window only after the first document has finished, which avoids the
+        // white flash users otherwise see when opening a cold module.
+        .visible(false)
+        .on_page_load(|window, payload| {
+            if matches!(payload.event(), PageLoadEvent::Finished) {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        })
         .build()
         .map_err(|error| format!("无法打开模块窗口：{error}"))?;
     window.on_window_event(move |event| {

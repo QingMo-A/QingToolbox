@@ -24,3 +24,11 @@ native-windowtopmost/target/
 native-windowtopmost/ui-src/node_modules/
 native-windowtopmost/ui-src/dist/
 src-tauri/resources/modules/qing.windowtopmost/
+native-powerguard/target/
+native-powerguard/ui-src/node_modules/
+native-powerguard/ui-src/dist/
+src-tauri/resources/modules/qing.powerguard/
+native-screenpin/target/
+native-screenpin/ui-src/node_modules/
+native-screenpin/ui-src/dist/
+src-tauri/resources/modules/qing.screenpin/

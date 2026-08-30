@@ -589,7 +589,10 @@ onBeforeUnmount(() => {
           @drop="dropIntoFolder($event, folder)"
         >
           <div class="folder-preview" aria-hidden="true">
-            <span v-for="item in folder.items.slice(0, 4)" :key="item.id">{{ item.name.slice(0, 1).toUpperCase() }}</span>
+            <span v-for="item in folder.items.slice(0, 4)" :key="item.id" class="folder-preview-icon">
+              <img v-if="item.iconKey" :src="item.iconKey" alt="" draggable="false" />
+              <span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span>
+            </span>
             <span v-if="!folder.items.length" class="folder-empty-mark">＋</span>
           </div>
           <strong :title="folder.name">{{ folder.name }}</strong>
@@ -611,7 +614,10 @@ onBeforeUnmount(() => {
           @dragover="dragOver($event, index)"
           @click="clickItem(item)"
         >
-          <div class="app-icon" aria-hidden="true"><span>{{ item.name.slice(0, 1).toUpperCase() }}</span></div>
+          <div class="app-icon" :class="{ fallback: !item.iconKey }" aria-hidden="true">
+            <img v-if="item.iconKey" :src="item.iconKey" alt="" draggable="false" />
+            <span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span>
+          </div>
           <strong :title="item.name">{{ item.name }}</strong>
           <small>{{ item.source === 'desktop' ? '桌面' : '自定义' }}</small>
         </article>
@@ -629,7 +635,10 @@ onBeforeUnmount(() => {
           <div class="folder-items">
             <div v-for="(item, index) in state.folders.find((folder) => folder.id === openFolderId)?.items" :key="item.id" class="folder-item">
               <button type="button" class="folder-item-main" @click="clickItem(item)">
-                <span class="recent-icon">{{ item.name.slice(0, 1).toUpperCase() }}</span>
+                <span class="recent-icon" :class="{ fallback: !item.iconKey }">
+                  <img v-if="item.iconKey" :src="item.iconKey" alt="" draggable="false" />
+                  <span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span>
+                </span>
                 <span>{{ item.name }}</span>
               </button>
               <div class="folder-item-actions">
@@ -647,7 +656,10 @@ onBeforeUnmount(() => {
         <div class="section-title"><span>最近启动</span><small>最近 10 项</small></div>
         <div class="recent-list">
           <button v-for="item in state.recent" :key="item.id" type="button" class="recent-item" @click="launch(item)">
-            <span class="recent-icon">{{ item.name.slice(0, 1).toUpperCase() }}</span><span>{{ item.name }}</span>
+            <span class="recent-icon" :class="{ fallback: !item.iconKey }">
+              <img v-if="item.iconKey" :src="item.iconKey" alt="" draggable="false" />
+              <span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span>
+            </span><span>{{ item.name }}</span>
           </button>
         </div>
       </section>

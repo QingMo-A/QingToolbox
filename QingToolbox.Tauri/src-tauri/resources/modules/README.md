@@ -17,6 +17,8 @@ the current native product modules here after checking their fixed inputs:
 - `qing.qingtransfer` — local-network discovery and verified file transfer.
 - `qing.texttools` — bounded local text conversion and backend-owned clipboard writes.
 - `qing.windowtopmost` — visible-window enumeration and opaque-ID topmost control.
+- `qing.powerguard` — bounded connectivity monitoring with guarded shutdown actions.
+- `qing.screenpin` — bounded native screen capture with an in-session pin board.
 
 Each module remains an independent `Process`/`OutOfProcess` package. The host
 does not load legacy .NET DLLs from this directory.

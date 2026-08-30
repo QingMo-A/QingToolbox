@@ -45,6 +45,8 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.04em; }
 .folder-tile.folder-drop-target:hover { border-color: #2c80e6; background: #e4f0ff; }
 .folder-preview { width: 76px; height: 58px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; padding: 7px; border: 1px solid rgba(83,145,213,.28); border-radius: 13px; background: rgba(255,255,255,.68); }
 .folder-preview span { display: grid; place-items: center; min-width: 0; border-radius: 6px; color: #fff; background: linear-gradient(145deg,#65b7fb,#337ce0); font-size: 11px; font-weight: 700; }
+.folder-preview .folder-preview-icon { overflow: hidden; background: transparent; }
+.folder-preview .folder-preview-icon img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .folder-preview .folder-empty-mark { grid-column: 1 / -1; color: #6d9ed4; background: transparent; font-size: 22px; }
 .folder-tile strong { max-width: 100%; margin-top: 9px; overflow: hidden; color: #193a68; font-size: 12px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .folder-tile small { margin-top: 3px; color: #8499b5; font-size: 10px; }
@@ -61,8 +63,10 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.04em; }
 .app-tile.drop-before::before, .app-tile.drop-after::after { content: ""; position: absolute; top: 18px; bottom: 18px; width: 3px; border-radius: 3px; background: #2c80e6; box-shadow: 0 0 0 4px rgba(44,128,230,.12); animation: drop-pulse .8s ease-in-out infinite alternate; }
 .app-tile.drop-before::before { left: -8px; }
 .app-tile.drop-after::after { right: -8px; }
-.app-icon, .recent-icon { display: grid; place-items: center; color: #fff; background: linear-gradient(145deg,#61b4fa,#2874e0); box-shadow: 0 9px 18px rgba(41,112,219,.2); }
+.app-icon, .recent-icon { display: grid; place-items: center; color: #fff; background: transparent; box-shadow: none; }
 .app-icon { width: 68px; height: 68px; border-radius: 20px; font-size: 26px; font-weight: 800; }
+.app-icon.fallback { background: linear-gradient(145deg,#61b4fa,#2874e0); box-shadow: 0 9px 18px rgba(41,112,219,.2); }
+.app-icon img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .app-tile strong { max-width: 100%; margin-top: 9px; overflow: hidden; color: #193a68; font-size: 12px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .app-tile small { margin-top: 3px; color: #8499b5; font-size: 10px; }
 .recent { margin-top: 28px; padding-top: 17px; border-top: 1px solid #cfdef1; }
@@ -72,6 +76,8 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -.04em; }
 .recent-item { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; border: 1px solid transparent; border-radius: 11px; color: #284d7b; background: rgba(255,255,255,.58); font-size: 11px; }
 .recent-item:hover { border-color: #c7dcf5; background: #fff; }
 .recent-icon { width: 25px; height: 25px; border-radius: 8px; font-size: 11px; font-weight: 700; }
+.recent-icon.fallback { background: linear-gradient(145deg,#61b4fa,#2874e0); box-shadow: 0 4px 9px rgba(41,112,219,.16); }
+.recent-icon img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .folder-panel { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 26px; background: rgba(26,57,95,.18); backdrop-filter: blur(3px); }
 .folder-panel-card { width: min(560px, 100%); max-height: min(620px, 90vh); overflow: auto; padding: 22px; border: 1px solid #c8dbf2; border-radius: 22px; background: rgba(255,255,255,.98); box-shadow: 0 24px 70px rgba(30,74,128,.22); }
 .folder-panel-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }

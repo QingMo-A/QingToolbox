@@ -4,7 +4,7 @@
 
 新一代工具箱宿主位于 [`QingToolbox.Tauri`](QingToolbox.Tauri/)，采用 Rust
 核心、Tauri 2 和 Vue 3。当前原生迁移已覆盖 Qing Launcher、Qing PDF、
-QingTransfer、Text Tools 和 Window Topmost，旧 WPF 宿主仍并行保留，直到剩余
+QingTransfer、Text Tools、Window Topmost、PowerGuard 和 Screen Pin，旧 WPF 宿主仍并行保留，直到剩余
 模块完成验收；新宿主不会自动
 替换现有生产启动入口。迁移边界、数据保留策略和分阶段验收见
 [`docs/TAURI_MIGRATION.md`](docs/TAURI_MIGRATION.md)；协议定义见

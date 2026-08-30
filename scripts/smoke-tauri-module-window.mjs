@@ -102,6 +102,32 @@ try {
   if (!String(topmostSnapshot?.text).includes('Window Topmost') || !String(topmostSnapshot?.text).includes('拾取窗口')) {
     throw new Error('Window Topmost UI did not finish rendering')
   }
+  await closeTarget(moduleTarget)
+  moduleTarget = undefined
+
+  moduleTarget = await openModuleCard('PowerGuard', 'qing.powerguard')
+  await waitFor(() => evaluate(moduleTarget, `({
+    shell: Boolean(document.querySelector('.shell')),
+    loading: document.body.innerText.includes('正在准备断网守护'),
+    error: document.querySelector('.alert.danger')?.textContent ?? '',
+  })`).then((value) => value.shell && !value.loading && !value.error), 10000)
+  const powerGuardSnapshot = await evaluate(moduleTarget, `({ text: document.body.innerText })`)
+  if (!String(powerGuardSnapshot?.text).includes('PowerGuard') || !String(powerGuardSnapshot?.text).includes('监测设置')) {
+    throw new Error('PowerGuard UI did not finish rendering')
+  }
+  await closeTarget(moduleTarget)
+  moduleTarget = undefined
+
+  moduleTarget = await openModuleCard('Screen Pin', 'qing.screenpin')
+  await waitFor(() => evaluate(moduleTarget, `({
+    shell: Boolean(document.querySelector('.shell')),
+    loading: document.body.innerText.includes('正在准备屏幕钉住'),
+    error: document.querySelector('.alert.danger')?.textContent ?? '',
+  })`).then((value) => value.shell && !value.loading && !value.error), 10000)
+  const screenPinSnapshot = await evaluate(moduleTarget, `({ text: document.body.innerText })`)
+  if (!String(screenPinSnapshot?.text).includes('Screen Pin') || !String(screenPinSnapshot?.text).includes('截取区域')) {
+    throw new Error('Screen Pin UI did not finish rendering')
+  }
   console.log('Tauri module window IPC smoke passed.')
 } finally {
   if (moduleTarget) await closeTarget(moduleTarget).catch(() => {})

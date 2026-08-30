@@ -25,6 +25,11 @@ const MAX_ORDER_IDS: usize = 512;
 const MAX_FOLDERS: usize = 128;
 const MAX_FOLDER_ITEMS: usize = 512;
 const MAX_FOLDER_NAME_LENGTH: usize = 40;
+// State snapshots are exchanged over a 1 MiB line-delimited protocol. Keep a
+// conservative aggregate budget for presentation-only icon data so a large
+// launcher cannot make an otherwise valid getState response disappear at the
+// transport boundary.
+const MAX_STATE_ICON_BYTES: usize = 384 * 1024;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,6 +68,11 @@ struct LauncherItem {
     working_directory: String,
     last_launched_at: Option<String>,
     source: String,
+    /// A bounded, session-local presentation asset. It is intentionally not
+    /// persisted in launcher.json; icons are re-read from the trusted target
+    /// when a module process starts or the Desktop projection refreshes.
+    #[serde(skip)]
+    icon_data_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -506,6 +516,11 @@ impl LauncherStore {
                 .filter_map(|id| self.items.iter().find(|item| &item.id == id).cloned())
                 .collect()
         };
+        let mut icon_budget = MAX_STATE_ICON_BYTES;
+        let items = source
+            .iter()
+            .map(|item| item_view(item, &mut icon_budget))
+            .collect();
         let folders = if self.sort_mode == "custom" {
             self.custom_order
                 .iter()
@@ -517,7 +532,7 @@ impl LauncherStore {
                         .item_ids
                         .iter()
                         .filter_map(|id| self.items.iter().find(|item| &item.id == id))
-                        .map(|item| item_view(item.clone()))
+                        .map(|item| item_view(item, &mut icon_budget))
                         .collect(),
                 })
                 .collect()
@@ -542,11 +557,11 @@ impl LauncherStore {
             .into_iter()
             .filter(|item| recent_ids.insert(identity_key(&item.target)))
             .take(10)
-            .map(item_view)
+            .map(|item| item_view(&item, &mut icon_budget))
             .collect();
         LauncherState {
             sort_mode: self.sort_mode.clone(),
-            items: source.into_iter().map(item_view).collect(),
+            items,
             folders,
             custom_order: if self.sort_mode == "custom" {
                 self.custom_order.clone()
@@ -1004,6 +1019,7 @@ fn scan_desktop() -> Vec<LauncherItem> {
                 working_directory: path.parent().map(normalize_path).unwrap_or_default(),
                 last_launched_at: None,
                 source: "desktop".to_string(),
+                icon_data_url: icon_data_url(&path),
             });
         }
     }
@@ -1080,19 +1096,225 @@ fn normalize_items(items: Vec<LauncherItem>, source: &str) -> Vec<LauncherItem> 
                 normalize_path(Path::new(&item.working_directory))
             };
             item.source = source.to_string();
+            item.icon_data_url = icon_data_url(Path::new(&item.target));
             seen.insert(item.id.clone()).then_some(item)
         })
         .take(MAX_ITEMS)
         .collect()
 }
 
-fn item_view(item: LauncherItem) -> ItemView {
+/// Resolve a trusted launcher target to a small, session-local PNG data URL.
+///
+/// The launcher deliberately does not persist icon bytes: targets can move or
+/// be replaced while the app is not running, and re-reading them on startup
+/// keeps the persisted document limited to user state.  Shell extraction also
+/// means `.lnk` and `.url` entries receive the same icon Windows shows for
+/// them, rather than a synthetic tile background.
+#[cfg(windows)]
+fn icon_data_url(path: &Path) -> Option<String> {
+    use std::{mem, os::windows::ffi::OsStrExt};
+    use windows_sys::Win32::UI::{
+        Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON},
+        WindowsAndMessaging::DestroyIcon,
+    };
+
+    if !path.exists() {
+        return None;
+    }
+    let mut wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    wide.push(0);
+    let mut file_info = unsafe { mem::zeroed::<SHFILEINFOW>() };
+    let flags = SHGFI_ICON | SHGFI_LARGEICON;
+    let found = unsafe {
+        SHGetFileInfoW(
+            wide.as_ptr(),
+            0,
+            &mut file_info,
+            mem::size_of::<SHFILEINFOW>() as u32,
+            flags,
+        )
+    };
+    if found == 0 || file_info.hIcon.is_null() {
+        return None;
+    }
+
+    let png = render_shell_icon(file_info.hIcon);
+    unsafe {
+        DestroyIcon(file_info.hIcon);
+    }
+    png.filter(|bytes| !bytes.is_empty() && bytes.len() <= MAX_ICON_PNG_BYTES)
+        .map(|bytes| format!("data:image/png;base64,{}", base64_encode(&bytes)))
+}
+
+#[cfg(not(windows))]
+fn icon_data_url(_path: &Path) -> Option<String> {
+    None
+}
+
+#[cfg(windows)]
+const LAUNCHER_ICON_SIZE: i32 = 64;
+
+#[cfg(windows)]
+const MAX_ICON_PNG_BYTES: usize = 96 * 1024;
+
+#[cfg(windows)]
+fn render_shell_icon(icon: windows_sys::Win32::UI::WindowsAndMessaging::HICON) -> Option<Vec<u8>> {
+    use std::{mem, ptr, slice};
+    use windows_sys::Win32::{
+        Graphics::Gdi::{
+            CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, SelectObject,
+            BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ, RGBQUAD,
+        },
+        UI::WindowsAndMessaging::{DrawIconEx, DI_NORMAL},
+    };
+
+    let screen = unsafe { GetDC(ptr::null_mut()) };
+    if screen.is_null() {
+        return None;
+    }
+    let memory = unsafe { CreateCompatibleDC(screen) };
+    if memory.is_null() {
+        unsafe {
+            windows_sys::Win32::Graphics::Gdi::ReleaseDC(ptr::null_mut(), screen);
+        }
+        return None;
+    }
+
+    let pixel_count = (LAUNCHER_ICON_SIZE as usize) * (LAUNCHER_ICON_SIZE as usize);
+    let byte_count = pixel_count.checked_mul(4)?;
+    let mut bits = ptr::null_mut();
+    let bitmap_info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: LAUNCHER_ICON_SIZE,
+            // A negative height requests a top-down DIB, so the byte order in
+            // the mapped buffer already matches the visual row order.
+            biHeight: -LAUNCHER_ICON_SIZE,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            biSizeImage: byte_count as u32,
+            ..Default::default()
+        },
+        bmiColors: [RGBQUAD::default()],
+    };
+    let bitmap = unsafe {
+        CreateDIBSection(
+            screen,
+            &bitmap_info,
+            DIB_RGB_COLORS,
+            &mut bits,
+            ptr::null_mut(),
+            0,
+        )
+    };
+    if bitmap.is_null() || bits.is_null() {
+        if !bitmap.is_null() {
+            unsafe { DeleteObject(bitmap as HGDIOBJ) };
+        }
+        unsafe {
+            DeleteDC(memory);
+            windows_sys::Win32::Graphics::Gdi::ReleaseDC(ptr::null_mut(), screen);
+        }
+        return None;
+    }
+
+    let previous = unsafe { SelectObject(memory, bitmap as HGDIOBJ) };
+    let drawn = unsafe {
+        DrawIconEx(
+            memory,
+            0,
+            0,
+            icon,
+            LAUNCHER_ICON_SIZE,
+            LAUNCHER_ICON_SIZE,
+            0,
+            ptr::null_mut(),
+            DI_NORMAL,
+        )
+    } != 0;
+
+    let rgba = if drawn {
+        let bgra = unsafe { slice::from_raw_parts(bits as *const u8, byte_count) };
+        let mut rgba = vec![0u8; byte_count];
+        for (source, target) in bgra.chunks_exact(4).zip(rgba.chunks_exact_mut(4)) {
+            let alpha = if source[3] == 0 && (source[0] | source[1] | source[2]) != 0 {
+                // Some classic GDI icons leave alpha at zero for opaque
+                // pixels.  Preserve real transparency while making those
+                // pixels visible in a browser-rendered PNG.
+                255
+            } else {
+                source[3]
+            };
+            target.copy_from_slice(&[source[2], source[1], source[0], alpha]);
+        }
+        Some(rgba)
+    } else {
+        None
+    };
+
+    unsafe {
+        if !previous.is_null() {
+            SelectObject(memory, previous);
+        }
+        DeleteObject(bitmap as HGDIOBJ);
+        DeleteDC(memory);
+        windows_sys::Win32::Graphics::Gdi::ReleaseDC(ptr::null_mut(), screen);
+    }
+
+    let rgba = rgba?;
+    let mut bytes = Vec::new();
+    {
+        let cursor = std::io::Cursor::new(&mut bytes);
+        let mut encoder =
+            png::Encoder::new(cursor, LAUNCHER_ICON_SIZE as u32, LAUNCHER_ICON_SIZE as u32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_compression(png::Compression::Fast);
+        let mut writer = encoder.write_header().ok()?;
+        writer.write_image_data(&rgba).ok()?;
+        writer.finish().ok()?;
+    }
+    Some(bytes)
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let a = chunk[0] as u32;
+        let b = chunk.get(1).copied().unwrap_or_default() as u32;
+        let c = chunk.get(2).copied().unwrap_or_default() as u32;
+        output.push(TABLE[((a >> 2) & 0x3f) as usize] as char);
+        output.push(TABLE[(((a << 4) | (b >> 4)) & 0x3f) as usize] as char);
+        output.push(if chunk.len() > 1 {
+            TABLE[(((b << 2) | (c >> 6)) & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+        output.push(if chunk.len() > 2 {
+            TABLE[(c & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    output
+}
+
+fn item_view(item: &LauncherItem, icon_budget: &mut usize) -> ItemView {
+    let icon_key = item.icon_data_url.as_ref().and_then(|value| {
+        if value.len() > *icon_budget {
+            return None;
+        }
+        *icon_budget -= value.len();
+        Some(value.clone())
+    });
     ItemView {
-        id: item.id,
-        name: item.name,
-        icon_key: None,
-        last_launched_at: item.last_launched_at,
-        source: item.source,
+        id: item.id.clone(),
+        name: item.name.clone(),
+        icon_key,
+        last_launched_at: item.last_launched_at.clone(),
+        source: item.source.clone(),
     }
 }
 
@@ -1275,6 +1497,7 @@ mod tests {
                 working_directory: "C:\\".to_string(),
                 last_launched_at: None,
                 source: "custom".to_string(),
+                icon_data_url: None,
             }],
             desktop_items: Vec::new(),
             folders: Vec::new(),
@@ -1296,6 +1519,36 @@ mod tests {
         let state = serde_json::to_value(store.state()).expect("state JSON");
         assert!(state.get("items").unwrap()[0].get("target").is_none());
         assert!(state.get("items").unwrap()[0].get("id").is_some());
+    }
+
+    #[test]
+    fn state_icon_projection_stays_inside_frame_budget() {
+        let mut store = test_store();
+        let icon = format!("data:image/png;base64,{}", "A".repeat(5_000));
+        store.items = (0..MAX_ITEMS)
+            .map(|index| LauncherItem {
+                id: format!("item-{index}"),
+                name: format!("Item {index}"),
+                target: format!("C:\\Item{index}.exe"),
+                arguments: String::new(),
+                working_directory: "C:\\".to_string(),
+                last_launched_at: None,
+                source: "custom".to_string(),
+                icon_data_url: Some(icon.clone()),
+            })
+            .collect();
+        store.custom_order = store.items.iter().map(|item| item.id.clone()).collect();
+
+        let state = store.state();
+        let bytes = serde_json::to_vec(&state).expect("state JSON");
+        let icon_bytes = state
+            .items
+            .iter()
+            .filter_map(|item| item.icon_key.as_ref())
+            .map(String::len)
+            .sum::<usize>();
+        assert!(icon_bytes <= MAX_STATE_ICON_BYTES);
+        assert!(bytes.len() < MAX_FRAME_BYTES);
     }
 
     #[test]
@@ -1330,6 +1583,7 @@ mod tests {
                 working_directory: "C:\\".to_string(),
                 last_launched_at: Some("00000000000000000001".to_string()),
                 source: "desktop".to_string(),
+                icon_data_url: None,
             },
             LauncherItem {
                 id: "desktop-a".to_string(),
@@ -1339,6 +1593,7 @@ mod tests {
                 working_directory: "C:\\".to_string(),
                 last_launched_at: None,
                 source: "desktop".to_string(),
+                icon_data_url: None,
             },
         ];
         let discovered = vec![
@@ -1350,6 +1605,7 @@ mod tests {
                 working_directory: "C:\\".to_string(),
                 last_launched_at: None,
                 source: "desktop".to_string(),
+                icon_data_url: None,
             },
             LauncherItem {
                 id: "new-b".to_string(),
@@ -1359,6 +1615,7 @@ mod tests {
                 working_directory: "C:\\".to_string(),
                 last_launched_at: None,
                 source: "desktop".to_string(),
+                icon_data_url: None,
             },
             LauncherItem {
                 id: "new-c".to_string(),
@@ -1368,6 +1625,7 @@ mod tests {
                 working_directory: "C:\\".to_string(),
                 last_launched_at: None,
                 source: "desktop".to_string(),
+                icon_data_url: None,
             },
         ];
         let path = store.path.clone();
@@ -1399,6 +1657,7 @@ mod tests {
             working_directory: "C:\\".to_string(),
             last_launched_at: None,
             source: "custom".to_string(),
+            icon_data_url: None,
         });
         store.custom_order.push("two".to_string());
 
@@ -1445,6 +1704,7 @@ mod tests {
             working_directory: "C:\\".to_string(),
             last_launched_at: None,
             source: "custom".to_string(),
+            icon_data_url: None,
         });
         store.create_folder("Folder").expect("folder created");
         let folder_id = store.folders[0].id.clone();
@@ -1470,6 +1730,7 @@ mod tests {
             working_directory: "C:\\".to_string(),
             last_launched_at: None,
             source: "custom".to_string(),
+            icon_data_url: None,
         });
         store.folders = vec![
             LauncherFolder {

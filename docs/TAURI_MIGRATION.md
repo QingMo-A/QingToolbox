@@ -141,9 +141,10 @@ the first release.
   open/copy actions. `/e`, `/e:f` and `/e:d` are mutually exclusive with the
   Launcher/Desktop/Recent projections; stale Vue requests are ignored. Runtime
   or IPC failure is contained in the Everything result surface and does not
-  change normal Launcher search. Icon extraction, Explorer drop, the module
-  hotkey and the full overlay interaction model remain staged next. The old
-  WPF Launcher is not loaded by this host.
+  change normal Launcher search. Windows Shell icons are projected as bounded,
+  session-local PNG data URLs with a frame-level aggregate budget. Explorer
+  drop, the module hotkey and the full overlay interaction model remain staged
+  next. The old WPF Launcher is not loaded by this host.
 
 - `native-pdf/` is a Rust process module with a Vue surface. It keeps qpdf
   12.4.1 in a checked-in, hash-pinned module-owned runtime and performs merge,
@@ -167,9 +168,19 @@ the first release.
   exposes only short-lived opaque IDs to Vue. HWND values are retained in the
   module process and revalidated immediately before `SetWindowPos`.
 
+- `native-powerguard/` owns bounded connectivity probes, outage/recovery state,
+  countdown timing and settings persistence. The guard is disabled by default;
+  the shutdown operation is confirmation-gated and no arbitrary command or
+  network target is accepted from Vue.
+
+- `native-screenpin/` owns bounded Windows GDI capture and PNG encoding. The
+  WebView receives only session-scoped data URLs and opaque pin IDs; it cannot
+  invoke a screen API or supply a filesystem path. Dedicated desktop floating
+  pin windows remain a follow-up UI slice on the same backend contract.
+
 ### M3 — remaining modules
 
-- Rewrite the remaining utility modules (PowerGuard and ScreenPin), then add
+- Add the dedicated floating-window presentation for Screen Pin, then add
   parity-specific host integrations such as Explorer drag
   and module hotkeys.
 - Run heavy runtimes (Everything/qpdf) as module-owned child processes or

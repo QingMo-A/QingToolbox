@@ -706,7 +706,7 @@ fn validate_query(query: &str) -> Result<(), EverythingError> {
 }
 
 fn parse_export(bytes: &[u8]) -> Vec<PathBuf> {
-    let text = String::from_utf8_lossy(bytes);
+    let text = decode_export_text(bytes);
     let mut seen = std::collections::HashSet::new();
     text.lines()
         .map(|line| line.trim_start_matches('\u{feff}').trim())
@@ -720,6 +720,88 @@ fn parse_export(bytes: &[u8]) -> Vec<PathBuf> {
         })
         .take(MAX_RESULTS)
         .collect()
+}
+
+/// Everything's text exporter normally emits UTF-8 when `-utf8-bom` is
+/// supplied, but older clients and user-specific settings can still produce
+/// UTF-16 or the active Windows code page. Decode those forms before turning
+/// paths into `PathBuf`s; otherwise a perfectly valid Chinese path becomes a
+/// string of replacement characters and cannot be opened later.
+fn decode_export_text(bytes: &[u8]) -> String {
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        return decode_utf16(&bytes[2..], true);
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        return decode_utf16(&bytes[2..], false);
+    }
+    let utf8 = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+    if let Ok(text) = std::str::from_utf8(utf8) {
+        return text.to_string();
+    }
+
+    // A BOM-less UTF-16 export is easy to recognize because one byte in most
+    // code units is zero for ordinary path text. Keep the heuristic strict so
+    // arbitrary malformed UTF-8 is not accidentally reinterpreted.
+    if utf8.len() >= 4 && utf8.len() % 2 == 0 {
+        let pairs = utf8.chunks_exact(2);
+        let zero_low = pairs.clone().filter(|pair| pair[1] == 0).count();
+        let zero_high = pairs.filter(|pair| pair[0] == 0).count();
+        let threshold = utf8.len() / 4;
+        if zero_low >= threshold {
+            return decode_utf16(utf8, true);
+        }
+        if zero_high >= threshold {
+            return decode_utf16(utf8, false);
+        }
+    }
+
+    #[cfg(windows)]
+    if let Some(text) = decode_active_code_page(utf8) {
+        return text;
+    }
+    String::from_utf8_lossy(utf8).into_owned()
+}
+
+fn decode_utf16(bytes: &[u8], little_endian: bool) -> String {
+    let units = bytes
+        .chunks_exact(2)
+        .map(|pair| {
+            if little_endian {
+                u16::from_le_bytes([pair[0], pair[1]])
+            } else {
+                u16::from_be_bytes([pair[0], pair[1]])
+            }
+        })
+        .collect::<Vec<_>>();
+    String::from_utf16_lossy(&units)
+}
+
+#[cfg(windows)]
+fn decode_active_code_page(bytes: &[u8]) -> Option<String> {
+    use std::ptr;
+    use windows_sys::Win32::Globalization::{MultiByteToWideChar, CP_ACP};
+
+    if bytes.is_empty() {
+        return Some(String::new());
+    }
+    let length = i32::try_from(bytes.len()).ok()?;
+    let required =
+        unsafe { MultiByteToWideChar(CP_ACP, 0, bytes.as_ptr(), length, ptr::null_mut(), 0) };
+    if required <= 0 {
+        return None;
+    }
+    let mut wide = vec![0u16; required as usize];
+    let written = unsafe {
+        MultiByteToWideChar(
+            CP_ACP,
+            0,
+            bytes.as_ptr(),
+            length,
+            wide.as_mut_ptr(),
+            required,
+        )
+    };
+    (written == required).then(|| String::from_utf16_lossy(&wide))
 }
 
 fn valid_result_id(value: &str) -> bool {
@@ -1091,6 +1173,30 @@ mod tests {
     fn export_parser_is_bounded_and_does_not_accept_relative_paths() {
         let parsed = parse_export("\u{feff}C:\\one.txt\r\nrelative.txt\nC:\\one.txt\n".as_bytes());
         assert_eq!(parsed, vec![PathBuf::from("C:\\one.txt")]);
+    }
+
+    #[test]
+    fn export_decoder_handles_utf16_and_utf8_bom() {
+        let utf16 = "C:\\资料\\报告.xlsx\r\n"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let mut utf16_bom = vec![0xFF, 0xFE];
+        utf16_bom.extend(utf16);
+        assert_eq!(decode_export_text(&utf16_bom), "C:\\资料\\报告.xlsx\r\n");
+
+        let mut utf8_bom = vec![0xEF, 0xBB, 0xBF];
+        utf8_bom.extend_from_slice("C:\\资料\\报告.xlsx\r\n".as_bytes());
+        assert_eq!(decode_export_text(&utf8_bom), "C:\\资料\\报告.xlsx\r\n");
+    }
+
+    #[test]
+    fn export_decoder_recognizes_bomless_utf16() {
+        let bytes = "C:\\资料\\报告.xlsx\n"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(decode_export_text(&bytes), "C:\\资料\\报告.xlsx\n");
     }
 
     #[test]

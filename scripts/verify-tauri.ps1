@@ -7,7 +7,9 @@ param(
     [switch]$SkipPdf,
     [switch]$SkipTransfer,
     [switch]$SkipTextTools,
-    [switch]$SkipWindowTopmost
+    [switch]$SkipWindowTopmost,
+    [switch]$SkipPowerGuard,
+    [switch]$SkipScreenPin
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,11 +41,15 @@ $pdfExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.pdf/bin/qi
 $transferExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.qingtransfer/bin/qing-transfer-module.exe'
 $textToolsExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.texttools/bin/qing-texttools-module.exe'
 $windowTopmostExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.windowtopmost/bin/qing-windowtopmost-module.exe'
+$powerGuardExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.powerguard/bin/qing-powerguard-module.exe'
+$screenPinExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.screenpin/bin/qing-screenpin-module.exe'
 $launcherRoot = Join-Path $appRoot 'native-launcher'
 $pdfRoot = Join-Path $appRoot 'native-pdf'
 $transferRoot = Join-Path $appRoot 'native-transfer'
 $textToolsRoot = Join-Path $appRoot 'native-texttools'
 $windowTopmostRoot = Join-Path $appRoot 'native-windowtopmost'
+$powerGuardRoot = Join-Path $appRoot 'native-powerguard'
+$screenPinRoot = Join-Path $appRoot 'native-screenpin'
 if (-not $SkipCanary) {
     & (Join-Path $repoRoot 'scripts/build-tauri-canary.ps1')
     & (Join-Path $repoRoot 'scripts/smoke-tauri-canary.ps1') -ExecutablePath $canaryExecutable
@@ -65,6 +71,14 @@ if (-not $SkipTextTools) {
 if (-not $SkipWindowTopmost) {
     & (Join-Path $repoRoot 'scripts/build-tauri-windowtopmost.ps1')
     & (Join-Path $repoRoot 'scripts/smoke-tauri-windowtopmost.ps1') -ExecutablePath $windowTopmostExecutable
+}
+if (-not $SkipPowerGuard) {
+    & (Join-Path $repoRoot 'scripts/build-tauri-powerguard.ps1')
+    & (Join-Path $repoRoot 'scripts/smoke-tauri-powerguard.ps1') -ExecutablePath $powerGuardExecutable
+}
+if (-not $SkipScreenPin) {
+    & (Join-Path $repoRoot 'scripts/build-tauri-screenpin.ps1')
+    & (Join-Path $repoRoot 'scripts/smoke-tauri-screenpin.ps1') -ExecutablePath $screenPinExecutable
 }
 if ($SmokeEverything) {
     & (Join-Path $repoRoot 'scripts/smoke-tauri-launcher.ps1') -ExecutablePath $launcherExecutable -Everything
@@ -135,6 +149,34 @@ if (-not $SkipWindowTopmost) {
         if ($LASTEXITCODE -ne 0) { throw "Window Topmost cargo test failed with exit code $LASTEXITCODE" }
         & $cargoPath clippy --locked --all-targets -- -D warnings
         if ($LASTEXITCODE -ne 0) { throw "Window Topmost cargo clippy failed with exit code $LASTEXITCODE" }
+    } finally {
+        Pop-Location
+    }
+}
+
+if (-not $SkipPowerGuard) {
+    Push-Location $powerGuardRoot
+    try {
+        & $cargoPath fmt -- --check
+        if ($LASTEXITCODE -ne 0) { throw "PowerGuard cargo fmt check failed with exit code $LASTEXITCODE" }
+        & $cargoPath test --locked
+        if ($LASTEXITCODE -ne 0) { throw "PowerGuard cargo test failed with exit code $LASTEXITCODE" }
+        & $cargoPath clippy --locked --all-targets -- -D warnings
+        if ($LASTEXITCODE -ne 0) { throw "PowerGuard cargo clippy failed with exit code $LASTEXITCODE" }
+    } finally {
+        Pop-Location
+    }
+}
+
+if (-not $SkipScreenPin) {
+    Push-Location $screenPinRoot
+    try {
+        & $cargoPath fmt -- --check
+        if ($LASTEXITCODE -ne 0) { throw "Screen Pin cargo fmt check failed with exit code $LASTEXITCODE" }
+        & $cargoPath test --locked
+        if ($LASTEXITCODE -ne 0) { throw "Screen Pin cargo test failed with exit code $LASTEXITCODE" }
+        & $cargoPath clippy --locked --all-targets -- -D warnings
+        if ($LASTEXITCODE -ne 0) { throw "Screen Pin cargo clippy failed with exit code $LASTEXITCODE" }
     } finally {
         Pop-Location
     }

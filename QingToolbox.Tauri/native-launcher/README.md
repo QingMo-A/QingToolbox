@@ -29,9 +29,10 @@ Everything result paths stay in a backend-only id map. The Vue page can request
 open/open-folder/copy-path only with a current opaque `resultId`, so it cannot
 turn an arbitrary web-provided path into a process or shell operation. If the
 runtime, index or IPC is unavailable, the UI shows a contained error and the
-ordinary Launcher search remains usable. The old WPF Launcher remains a
-separate legacy package while the remaining hotkey, icon extraction and
-Explorer-drop parity are migrated onto this protocol.
+ordinary Launcher search remains usable. Windows Shell icons are extracted
+into a bounded session-local PNG and are not persisted in launcher state. The
+old WPF Launcher remains a separate legacy package while the remaining hotkey
+and Explorer-drop parity are migrated onto this protocol.
 
 The bounded integration smoke uses `-Everything` with a temporary indexed
 folder. On a machine where the dedicated service has already been authorized,

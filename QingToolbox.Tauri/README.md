@@ -30,7 +30,7 @@ QingToolbox.Tauri/
 
 `native-module-canary/` 是一个可复现的 Rust 进程模块样例，用于验证
 nonce-bound hello、invoke 和有界 shutdown。`native-launcher/`、`native-pdf/`、
-`native-transfer/`、`native-texttools/` 和 `native-windowtopmost/` 是当前产品迁移切片：各自的状态、系统能力、文件边界和重型运行时
+`native-transfer/`、`native-texttools/`、`native-windowtopmost/`、`native-powerguard/` 和 `native-screenpin/` 是当前产品迁移切片：各自的状态、系统能力、文件边界和重型运行时
 都在独立 Rust 进程中，Vue 只通过模块窗口 IPC 调用，不接收可直接执行的路径。
 
 ## 本地运行
@@ -62,7 +62,7 @@ pwsh ../scripts/build-tauri-portable.ps1 -Smoke -Zip
 
 脚本会把 Tauri executable、`resources/modules`、逐文件 SHA256 manifest 和许可
 文件放到 `artifacts/tauri-portable/`。当前 portable 目录已包含原生 Launcher、
-Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools 和 Window Topmost；这条路径与现有 WPF/Inno 发布链
+Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost、PowerGuard 和 Screen Pin；这条路径与现有 WPF/Inno 发布链
 并行，直到所有官方模块迁移完成后才考虑替换正式安装入口。
 
 没有 Tauri 环境时仍可使用 `npm run dev` 在浏览器中预览；前端会显示
@@ -118,6 +118,10 @@ Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools 和 Window Topmo
 - Window Topmost 已迁移为 Rust 进程模块：后端枚举当前桌面的普通可见窗口，
   仅向 Vue 发放短期 `windowId`；真实 HWND 保留在进程内并在每次置顶操作前重新
   校验，不提供通用 Win32 调用桥。
+- PowerGuard 已迁移为 Rust 进程模块：网络探测、状态机、倒计时、设置原子保存
+  和关机动作均由后端拥有；默认关闭守护，立即关机必须提交后端确认令牌。
+- Screen Pin 已迁移为 Rust 进程模块：后端读取有界虚拟屏幕区域并编码为 PNG，
+  Vue 只接收受协议帧限制的会话内截图和不透明 pin ID；关闭模块时截图立即释放。
 - `scripts/build-tauri-canary.ps1` 和 `scripts/smoke-tauri-canary.ps1` 提供
   一个真实子进程的 hello、invoke、shutdown 协议验证闭环。
 - 尚未接入 Explorer 拖入、更新器和完整设置迁移；Launcher 的 Explorer 拖入、

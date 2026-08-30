@@ -56,3 +56,15 @@ coverage/
 /QingToolbox.Tauri/native-windowtopmost/ui-src/node_modules/
 /QingToolbox.Tauri/native-windowtopmost/ui-src/dist/
 /QingToolbox.Tauri/src-tauri/resources/modules/qing.windowtopmost/
+
+# PowerGuard generated Rust/UI output and staged module resources.
+/QingToolbox.Tauri/native-powerguard/target/
+/QingToolbox.Tauri/native-powerguard/ui-src/node_modules/
+/QingToolbox.Tauri/native-powerguard/ui-src/dist/
+/QingToolbox.Tauri/src-tauri/resources/modules/qing.powerguard/
+
+# Screen Pin generated Rust/UI output and staged module resources.
+/QingToolbox.Tauri/native-screenpin/target/
+/QingToolbox.Tauri/native-screenpin/ui-src/node_modules/
+/QingToolbox.Tauri/native-screenpin/ui-src/dist/
+/QingToolbox.Tauri/src-tauri/resources/modules/qing.screenpin/

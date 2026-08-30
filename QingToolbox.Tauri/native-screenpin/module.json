@@ -1,0 +1,25 @@
+{
+  "id": "qing.screenpin",
+  "name": "Screen Pin",
+  "description": "Capture bounded screen regions and keep them in a local pin board.",
+  "version": "0.2.0",
+  "author": "QingMo-A",
+  "minimumHostVersion": "0.1.0",
+  "entry": "bin/qing-screenpin-module.exe",
+  "runtimeType": "Process",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
+  "loadMode": "Manual",
+  "permissions": ["WindowControl"],
+  "icon": "icon.svg",
+  "defaultLanguage": "zh-CN",
+  "localization": {
+    "basePath": "i18n",
+    "resources": {
+      "en-US": "i18n/en-US.json",
+      "zh-CN": "i18n/zh-CN.json"
+    }
+  },
+  "operations": ["getState", "getDisplayBounds", "captureRegion", "removePin", "clearPins"]
+}

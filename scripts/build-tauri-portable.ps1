@@ -106,6 +106,12 @@ if (-not $SkipModuleBuild) {
     Invoke-Checked -Label 'Build Window Topmost module' -Action {
         & (Join-Path $repoRoot 'scripts\build-tauri-windowtopmost.ps1')
     }
+    Invoke-Checked -Label 'Build PowerGuard module' -Action {
+        & (Join-Path $repoRoot 'scripts\build-tauri-powerguard.ps1')
+    }
+    Invoke-Checked -Label 'Build Screen Pin module' -Action {
+        & (Join-Path $repoRoot 'scripts\build-tauri-screenpin.ps1')
+    }
 }
 
 Push-Location $appRoot

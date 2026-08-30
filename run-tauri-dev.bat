@@ -17,6 +17,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
+for %%M in (pdf transfer texttools windowtopmost powerguard screenpin) do (
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build-tauri-%%M.ps1"
+  if errorlevel 1 (
+    echo Failed to build the Rust %%M module. >&2
+    pause
+    exit /b 1
+  )
+)
+
 npm run tauri -- dev
 set "QING_TAURI_EXIT_CODE=%ERRORLEVEL%"
 if not "%QING_TAURI_EXIT_CODE%"=="0" pause
