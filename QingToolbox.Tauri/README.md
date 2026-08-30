@@ -156,6 +156,8 @@ Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost
   `QING_TAURI_STARTUP_PRESENTATION=main|minimized|tray` 临时覆盖，而不会写入用户设置。
 - 主窗口关闭行为由设置控制：`tray` 隐藏到托盘，`exit` 走 Tauri 正常退出清理，`ask`
   使用原生确认对话框让用户选择。本体退出时只收拢本宿主创建的模块进程。
+- 完整 Vue 模块管理页的“打开目录”和“删除用户模块”已接入 Rust；删除前会关闭
+  模块窗口、停止对应进程并再次校验用户模块根目录边界，内置模块保持只读。
 - 不修改、不加载现有 WPF 项目；旧模块迁移将在协议确定后单独进行。
 
 ## 版本策略

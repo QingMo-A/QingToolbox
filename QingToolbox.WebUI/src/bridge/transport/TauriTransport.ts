@@ -54,7 +54,11 @@ export class TauriTransport implements Transport {
       case 'modules.deactivate':
       case 'modules.unload': await invoke('stop_module', { moduleId: requiredString(message.payload.moduleId) }); return this.moduleSnapshot()
       case 'modules.openDirectory':
+        await invoke('open_module_directory', { moduleId: requiredString(message.payload.moduleId) })
+        return { disposition: 'Succeeded', snapshot: await this.moduleSnapshot() }
       case 'modules.remove':
+        await invoke('remove_module', { moduleId: requiredString(message.payload.moduleId) })
+        return { disposition: 'Succeeded', snapshot: await this.moduleSnapshot() }
       case 'modules.checkUpdate':
       case 'modules.downloadUpdate':
       case 'modules.installVerifiedUpdate':

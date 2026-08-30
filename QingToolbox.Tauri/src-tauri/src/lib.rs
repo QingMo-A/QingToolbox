@@ -2,6 +2,7 @@ use std::{
     collections::BTreeSet,
     fs,
     path::PathBuf,
+    process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex,
@@ -28,7 +29,7 @@ mod web;
 
 use importer::{import_qmod, update_qmod, ModuleImportResult};
 use modules::{discover_modules, ModuleListPayload};
-use paths::{resolve_module_roots, ModuleRoot, ModuleSource};
+use paths::{resolve_module_roots, user_modules_root, ModuleRoot, ModuleSource};
 use protocol::ProtocolEnvelope;
 use runtime::{ModuleRuntimeManager, ModuleRuntimeSnapshot, RuntimeError};
 use settings::{SettingsSnapshot, SettingsStore, SettingsUpdate};
@@ -187,6 +188,124 @@ fn import_module(
         *index = discovery.records;
     }
     Ok(result)
+}
+
+/// Open a discovered module directory using Explorer. The frontend supplies
+/// only the validated module id; the directory itself remains backend-owned.
+#[tauri::command]
+fn open_module_directory(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+    module_id: String,
+) -> Result<(), CommandError> {
+    ensure_main_window(&window)?;
+    if !valid_module_id(&module_id) {
+        return Err(CommandError {
+            code: "moduleIdInvalid",
+            message: "模块 id 无效。".to_string(),
+        });
+    }
+    let directory = state
+        .module_index
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块索引状态不可用。".to_string(),
+        })?
+        .get(&module_id)
+        .map(|record| record.directory.clone())
+        .ok_or_else(|| CommandError {
+            code: "moduleNotFound",
+            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
+        })?;
+    if !directory.is_dir() {
+        return Err(CommandError {
+            code: "moduleDirectoryMissing",
+            message: "模块目录不存在。".to_string(),
+        });
+    }
+    Command::new("explorer.exe")
+        .arg(&directory)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| CommandError {
+            code: "openDirectoryFailed",
+            message: format!("无法打开模块目录：{error}"),
+        })
+}
+
+/// Remove a user-installed module after stopping its process and closing its
+/// window. Bundled modules are immutable and can never be removed here.
+#[tauri::command]
+fn remove_module(
+    app: tauri::AppHandle,
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+    module_id: String,
+) -> Result<(), CommandError> {
+    ensure_main_window(&window)?;
+    if !valid_module_id(&module_id) {
+        return Err(CommandError {
+            code: "moduleIdInvalid",
+            message: "模块 id 无效。".to_string(),
+        });
+    }
+    let record = state
+        .module_index
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块索引状态不可用。".to_string(),
+        })?
+        .get(&module_id)
+        .cloned()
+        .ok_or_else(|| CommandError {
+            code: "moduleNotFound",
+            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
+        })?;
+    if record.source != ModuleSource::User {
+        return Err(CommandError {
+            code: "moduleRemoveUnsupported",
+            message: "内置模块不能被删除。".to_string(),
+        });
+    }
+    let user_root = user_modules_root().ok_or_else(|| CommandError {
+        code: "moduleRootUnavailable",
+        message: "用户模块目录不可用。".to_string(),
+    })?;
+    let canonical_root = fs::canonicalize(&user_root).map_err(|error| CommandError {
+        code: "moduleRootUnavailable",
+        message: format!("无法验证用户模块目录：{error}"),
+    })?;
+    let canonical_directory =
+        fs::canonicalize(&record.directory).map_err(|error| CommandError {
+            code: "moduleDirectoryMissing",
+            message: format!("无法验证模块目录：{error}"),
+        })?;
+    if !canonical_directory.starts_with(&canonical_root) || canonical_directory == canonical_root {
+        return Err(CommandError {
+            code: "moduleBoundaryViolation",
+            message: "模块目录不在用户模块根目录内。".to_string(),
+        });
+    }
+
+    let label = module_window_label(&module_id);
+    if let Some(module_window) = app.get_webview_window(&label) {
+        let _ = module_window.close();
+    }
+    if let Ok(mut runtime) = state.runtime.lock() {
+        let _ = runtime.stop(&module_id);
+    }
+    let _ = clear_module_hotkey_binding(&app, &state, &module_id);
+    fs::remove_dir_all(&canonical_directory).map_err(|error| CommandError {
+        code: "moduleRemoveFailed",
+        message: format!("无法删除模块目录：{error}"),
+    })?;
+    let discovery = discover_modules(&state.roots);
+    if let Ok(mut index) = state.module_index.lock() {
+        *index = discovery.records;
+    }
+    Ok(())
 }
 
 /// Replace one installed user module from an explicitly selected `.qmod`.
@@ -1526,6 +1645,8 @@ pub fn run() {
             update_settings,
             import_module,
             update_module,
+            open_module_directory,
+            remove_module,
             list_modules,
             hide_to_tray,
             start_module,
