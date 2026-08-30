@@ -125,6 +125,9 @@ the first release.
   smoke process can force-disable synchronization with
   `QING_TAURI_DISABLE_AUTOSTART_SYNC=1`, including when it exercises a Release
   executable.
+- Persist a bounded list of module IDs authorized to start with the host. The
+  module page can toggle only a discovered manifest ID; startup initialization
+  re-discovers the backend-owned module index and starts only those records.
 
 ### M2 — native product modules (validated migration slice)
 

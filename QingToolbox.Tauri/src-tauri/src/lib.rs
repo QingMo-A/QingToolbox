@@ -165,6 +165,60 @@ fn update_settings(
     }
 }
 
+/// Toggle whether a discovered module may be started with the host. The
+/// setting is persisted by Rust and the frontend can only submit a validated
+/// module id plus a boolean preference.
+#[tauri::command]
+fn set_module_startup_authorization(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+    module_id: String,
+    enabled: bool,
+) -> Result<SettingsSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    if !valid_module_id(&module_id) {
+        return Err(CommandError {
+            code: "moduleIdInvalid",
+            message: "模块 id 无效。".to_string(),
+        });
+    }
+    let known = state
+        .module_index
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块索引状态不可用。".to_string(),
+        })?
+        .get(&module_id)
+        .is_some_and(|record| {
+            record.source == ModuleSource::User || record.source == ModuleSource::Bundled
+        });
+    if !known {
+        return Err(CommandError {
+            code: "moduleNotFound",
+            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
+        });
+    }
+    let mut settings = state.settings.lock().map_err(|_| CommandError {
+        code: "stateUnavailable",
+        message: "工具箱设置状态不可用。".to_string(),
+    })?;
+    let mut ids = settings.snapshot().startup_module_ids;
+    ids.retain(|value| value != &module_id);
+    if enabled {
+        ids.push(module_id);
+    }
+    settings
+        .update(SettingsUpdate {
+            startup_module_ids: Some(ids),
+            ..SettingsUpdate::default()
+        })
+        .map_err(|error| CommandError {
+            code: error.code,
+            message: error.message,
+        })
+}
+
 /// Import a user-selected `.qmod` package. The path is accepted only for this
 /// explicit file-import operation; the importer validates the archive and
 /// publishes a new process-profile module without executing it. Module launch
@@ -1643,6 +1697,7 @@ pub fn run() {
             get_host_info,
             get_settings,
             update_settings,
+            set_module_startup_authorization,
             import_module,
             update_module,
             open_module_directory,
@@ -1664,6 +1719,7 @@ pub fn run() {
         ])
         .setup(|app| {
             start_runtime_supervisor(app.handle().clone());
+            start_authorized_modules(&app.state::<HostState>());
 
             register_toggle_hotkey(app);
             sync_persisted_autostart(app);
@@ -1850,6 +1906,30 @@ fn toggle_module_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>, module_id:
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+}
+
+fn start_authorized_modules(state: &HostState) {
+    let discovery = discover_modules(&state.roots);
+    if let Ok(mut index) = state.module_index.lock() {
+        *index = discovery.records;
+    }
+    let ids = state
+        .settings
+        .lock()
+        .ok()
+        .map(|settings| settings.snapshot().startup_module_ids)
+        .unwrap_or_default();
+    let Ok(index) = state.module_index.lock() else {
+        return;
+    };
+    let Ok(mut runtime) = state.runtime.lock() else {
+        return;
+    };
+    for module_id in ids {
+        if let Some(record) = index.get(&module_id) {
+            let _ = runtime.start(&module_id, record);
+        }
     }
 }
 

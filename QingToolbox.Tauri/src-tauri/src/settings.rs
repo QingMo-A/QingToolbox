@@ -13,6 +13,7 @@ use crate::paths::settings_path;
 const SETTINGS_SCHEMA_VERSION: u32 = 1;
 const MAX_SETTINGS_BYTES: u64 = 1024 * 1024;
 const MAX_RECENT_MODULES: usize = 10;
+const MAX_STARTUP_MODULES: usize = 32;
 const MAX_STRING_LENGTH: usize = 128;
 const MAX_HOTKEY_LENGTH: usize = 64;
 const MAX_CORRUPT_BACKUPS: usize = 3;
@@ -33,6 +34,7 @@ pub struct SettingsSnapshot {
     pub launch_at_login: bool,
     pub show_logs_in_sidebar: bool,
     pub recent_module_ids: Vec<String>,
+    pub startup_module_ids: Vec<String>,
 }
 
 /// A partial update accepted by the typed Tauri command. Unknown JSON fields
@@ -49,6 +51,7 @@ pub struct SettingsUpdate {
     pub launch_at_login: Option<bool>,
     pub show_logs_in_sidebar: Option<bool>,
     pub recent_module_ids: Option<Vec<String>>,
+    pub startup_module_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +64,7 @@ struct Settings {
     launch_at_login: bool,
     show_logs_in_sidebar: bool,
     recent_module_ids: Vec<String>,
+    startup_module_ids: Vec<String>,
     /// Preserve settings owned by a newer/legacy host when this migration
     /// writes the shared document. They are never exposed to Vue.
     extra: BTreeMap<String, Value>,
@@ -79,6 +83,7 @@ impl Default for Settings {
             launch_at_login: false,
             show_logs_in_sidebar: false,
             recent_module_ids: Vec::new(),
+            startup_module_ids: Vec::new(),
             extra: BTreeMap::new(),
         }
     }
@@ -105,6 +110,8 @@ struct SettingsDocument {
     show_logs_in_sidebar: Option<bool>,
     #[serde(alias = "RecentModuleIds")]
     recent_module_ids: Option<Vec<String>>,
+    #[serde(alias = "StartupModuleIds")]
+    startup_module_ids: Option<Vec<String>>,
     #[serde(flatten)]
     extra: BTreeMap<String, Value>,
 }
@@ -121,6 +128,7 @@ impl From<&Settings> for SettingsDocument {
             launch_at_login: Some(settings.launch_at_login),
             show_logs_in_sidebar: Some(settings.show_logs_in_sidebar),
             recent_module_ids: Some(settings.recent_module_ids.clone()),
+            startup_module_ids: Some(settings.startup_module_ids.clone()),
             extra: settings.extra.clone(),
         }
     }
@@ -172,6 +180,7 @@ impl SettingsStore {
             launch_at_login: self.settings.launch_at_login,
             show_logs_in_sidebar: self.settings.show_logs_in_sidebar,
             recent_module_ids: self.settings.recent_module_ids.clone(),
+            startup_module_ids: self.settings.startup_module_ids.clone(),
         }
     }
 
@@ -201,6 +210,9 @@ impl SettingsStore {
         }
         if let Some(values) = update.recent_module_ids {
             candidate.recent_module_ids = normalize_recent(values);
+        }
+        if let Some(values) = update.startup_module_ids {
+            candidate.startup_module_ids = normalize_module_ids(values);
         }
 
         if let Some(path) = self.path.as_deref() {
@@ -257,6 +269,9 @@ fn settings_from_document(document: &SettingsDocument) -> Settings {
         launch_at_login: document.launch_at_login.unwrap_or(false),
         show_logs_in_sidebar: document.show_logs_in_sidebar.unwrap_or(false),
         recent_module_ids: normalize_recent(document.recent_module_ids.clone().unwrap_or_default()),
+        startup_module_ids: normalize_module_ids(
+            document.startup_module_ids.clone().unwrap_or_default(),
+        ),
         extra: document.extra.clone(),
     };
     // A future schema may add fields, but old settings remain readable. Keep
@@ -362,6 +377,32 @@ fn normalize_recent(values: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+fn normalize_module_ids(values: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    values
+        .into_iter()
+        .map(|value| {
+            value
+                .trim()
+                .chars()
+                .take(MAX_STRING_LENGTH)
+                .collect::<String>()
+        })
+        .filter(|value| {
+            !value.is_empty()
+                && value
+                    .bytes()
+                    .next()
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric())
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+        })
+        .filter(|value| seen.insert(value.clone()))
+        .take(MAX_STARTUP_MODULES)
+        .collect()
+}
+
 fn truncate(value: String) -> String {
     value.chars().take(MAX_STRING_LENGTH).collect()
 }
@@ -463,6 +504,11 @@ mod tests {
             launch_at_login: Some(true),
             show_logs_in_sidebar: Some(true),
             recent_module_ids: Some(vec!["a".to_string(), "a".to_string(), "b".to_string()]),
+            startup_module_ids: Some(vec![
+                "qing.launcher".to_string(),
+                "qing.launcher".to_string(),
+                "bad/id".to_string(),
+            ]),
             extra: BTreeMap::new(),
         };
         let settings = settings_from_document(&document);
@@ -471,6 +517,7 @@ mod tests {
         assert_eq!(settings.close_behavior, "tray");
         assert_eq!(settings.startup_presentation, "main");
         assert_eq!(settings.recent_module_ids, vec!["a", "b"]);
+        assert_eq!(settings.startup_module_ids, vec!["qing.launcher"]);
     }
 
     #[test]

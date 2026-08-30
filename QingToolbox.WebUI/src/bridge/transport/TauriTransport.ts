@@ -60,10 +60,13 @@ export class TauriTransport implements Transport {
       case 'modules.remove':
         await invoke('remove_module', { moduleId: requiredString(message.payload.moduleId) })
         return { disposition: 'Succeeded', snapshot: await this.moduleSnapshot() }
+      case 'modules.setStartupAuthorization':
+        await invoke('set_module_startup_authorization', { moduleId: requiredString(message.payload.moduleId), enabled: Boolean(message.payload.enabled) })
+        return this.moduleSnapshot()
       case 'modules.checkUpdate':
       case 'modules.downloadUpdate':
       case 'modules.installVerifiedUpdate':
-      case 'modules.setStartupAuthorization': throw new Error('UnsupportedInTauri: this operation is not exposed by the migrated Rust host yet.')
+        throw new Error('UnsupportedInTauri: this operation is not exposed by the migrated Rust host yet.')
       case 'settings.getSnapshot': return toWebSettings(await invoke<TauriSettingsSnapshot>('get_settings'))
       case 'settings.setLanguage': return this.updateSettings({ language: requiredString(message.payload.languageCode) })
       case 'settings.setAppearancePreset': return this.updateSettings({ appearancePresetId: requiredString(message.payload.appearancePresetId) })
@@ -86,9 +89,10 @@ export class TauriTransport implements Transport {
   }
 
   private async moduleSnapshot() {
-    const [listed, runtime] = await Promise.all([invoke<{ payload: ModuleListPayload }>('list_modules'), invoke<ModuleRuntimeSnapshot[]>('get_all_module_runtime')])
+    const [listed, runtime, settings] = await Promise.all([invoke<{ payload: ModuleListPayload }>('list_modules'), invoke<ModuleRuntimeSnapshot[]>('get_all_module_runtime'), invoke<TauriSettingsSnapshot>('get_settings')])
     const runtimeById = new Map(runtime.map(item => [item.moduleId, item]))
-    return { generatedAt: new Date().toISOString(), modules: listed.payload.modules.map(module => toWebModule(module, runtimeById.get(module.id))) }
+    const startupIds = new Set(settings.startupModuleIds)
+    return { generatedAt: new Date().toISOString(), modules: listed.payload.modules.map(module => toWebModule(module, runtimeById.get(module.id), startupIds.has(module.id))) }
   }
 
   private async importModule() {
@@ -115,9 +119,9 @@ export class TauriTransport implements Transport {
 
 function requiredString(value: unknown): string { if (typeof value !== 'string' || !value.trim()) throw new Error('InvalidPayload: a non-empty string is required.'); return value }
 function appSnapshot(version: string, modules: ModuleSummary[]) { return { environmentKind: 'Production', environmentDisplayName: 'Tauri', hostVersion: version, protocolVersion: 4, totalModuleCount: modules.length, validModuleCount: modules.filter(item => item.valid).length, runningModuleCount: 0, generatedAt: new Date().toISOString() } }
-function toWebModule(module: ModuleSummary, runtime?: ModuleRuntimeSnapshot) {
+function toWebModule(module: ModuleSummary, runtime?: ModuleRuntimeSnapshot, startupEnabled = false) {
   const state = runtime?.state === 'running' ? 'Running' : runtime?.state === 'starting' ? 'Starting' : runtime?.state === 'failed' ? 'Failed' : 'NotLoaded'; const valid = module.valid
-  return { id: module.id, displayName: module.name, displayDescription: module.description ?? '', version: module.version, author: module.author ?? '', runtimeType: module.runtimeType ?? 'process', loadMode: 'Process', runtimeState: state, isValid: valid, errorCount: module.issues.length, errors: module.issues.map(issue => issue.message), permissions: [], minimumHostVersion: '', isUserInstalled: module.source === 'user', canRemove: module.source === 'user', canLoad: valid && state !== 'Running', canActivate: valid && state !== 'Running', canOpen: valid && module.uiKind === 'Web', canDeactivate: state === 'Running', canUnload: state === 'Running', isBusy: state === 'Starting', isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'Unavailable', canChangeStartupAuthorization: false, isStartupAuthorizationBusy: false, updateStatus: 'DisabledByEnvironment', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: false, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'DisabledByEnvironment', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0, canInstallVerifiedUpdate: false, iconDataUrl: module.iconDataUrl }
+  return { id: module.id, displayName: module.name, displayDescription: module.description ?? '', version: module.version, author: module.author ?? '', runtimeType: module.runtimeType ?? 'process', loadMode: 'Process', runtimeState: state, isValid: valid, errorCount: module.issues.length, errors: module.issues.map(issue => issue.message), permissions: [], minimumHostVersion: '', isUserInstalled: module.source === 'user', canRemove: module.source === 'user', canLoad: valid && state !== 'Running', canActivate: valid && state !== 'Running', canOpen: valid && module.uiKind === 'Web', canDeactivate: state === 'Running', canUnload: state === 'Running', isBusy: state === 'Starting', isExecutionBlocked: false, isStartupEnabled: startupEnabled, startupAuthorizationState: valid ? startupEnabled ? 'Enabled' : 'NotEnabled' : 'Unavailable', canChangeStartupAuthorization: valid, isStartupAuthorizationBusy: false, updateStatus: 'DisabledByEnvironment', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: false, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'DisabledByEnvironment', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0, canInstallVerifiedUpdate: false, iconDataUrl: module.iconDataUrl }
 }
 function toWebSettings(value: TauriSettingsSnapshot) {
   const code = value.language === 'en-US' ? 'en-US' : value.language === 'zh-CN' ? 'zh-CN' : 'system'
