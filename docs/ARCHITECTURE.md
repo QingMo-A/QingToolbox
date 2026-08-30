@@ -13,9 +13,11 @@
 nonce-bound hello 握手（每次启动使用系统 RNG nonce）、Rust 后台监督的新模块
 executable 启动/停止状态管理、官方单实例插件、受 manifest `operations`
 allowlist 约束的 invoke 通道、受控 `qmod://` Web 资源协议和最小托盘菜单。
-Qing Launcher、Qing PDF、QingTransfer 已按同一边界迁移为独立 Rust 进程模块：
-Launcher 管理私有 Everything runtime，PDF 管理固定 qpdf runtime，Transfer 管理
-DNS-SD/握手/文件流；这些重型能力不会进入 Rust Shell 的通用 filesystem bridge。
+Qing Launcher、Qing PDF、QingTransfer、Text Tools、Window Topmost、PowerGuard
+和 Screen Pin 已按同一边界迁移为独立 Rust 进程模块：Launcher 管理私有
+Everything runtime，PDF 管理固定 qpdf runtime，Transfer 管理 DNS-SD/握手/文件流，
+其余模块各自拥有受限的系统能力；这些重型能力不会进入 Rust Shell 的通用
+filesystem bridge。
 
 模块窗口的 `invoke_module_window` 会从 `module-<id>` 窗口标签推导模块身份，
 不接受页面提交的模块 id；操作仍必须同时出现在该模块的 `operations` allowlist。
