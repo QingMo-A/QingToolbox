@@ -83,20 +83,30 @@ pub fn resolve_module_roots() -> Vec<ModuleRoot> {
         }
     }
 
-    // Development and unpacked previews commonly run with the repository
-    // directory as the current directory. These are still fixed backend roots.
-    if let Ok(current) = env::current_dir() {
-        for relative in [
-            PathBuf::from("resources").join("modules"),
-            PathBuf::from("src-tauri").join("resources").join("modules"),
-        ] {
-            push_unique_root(
-                &mut roots,
-                ModuleRoot {
-                    source: ModuleSource::Bundled,
-                    path: current.join(relative),
-                },
-            );
+    // A release executable must not trust its working directory: launchers,
+    // shortcuts, and shell integrations can choose an arbitrary CWD. Keep
+    // repository-relative roots available for debug development only, or when
+    // an integration test explicitly opts in. The executable-adjacent root
+    // above remains the sole bundled production source.
+    let allow_workspace_roots = cfg!(debug_assertions)
+        || env::var("QING_TAURI_ALLOW_WORKSPACE_RESOURCES")
+            .ok()
+            .as_deref()
+            == Some("1");
+    if allow_workspace_roots {
+        if let Ok(current) = env::current_dir() {
+            for relative in [
+                PathBuf::from("resources").join("modules"),
+                PathBuf::from("src-tauri").join("resources").join("modules"),
+            ] {
+                push_unique_root(
+                    &mut roots,
+                    ModuleRoot {
+                        source: ModuleSource::Bundled,
+                        path: current.join(relative),
+                    },
+                );
+            }
         }
     }
 

@@ -19,15 +19,22 @@ pwsh ./scripts/verify-tauri.ps1
 需要连同桌面可执行文件和单实例启动烟测一起验证时运行
 `pwsh ./scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop`。
 
-交互式开发启动可直接运行仓库根目录的 `run-tauri-dev.bat`；它只启动新
-Tauri 宿主，不会替换或改写现有 WPF 安装。需要构建并启动 Release 生产候选
+根目录的 `run-latest.bat` 现在默认构建并启动新 Tauri Release 宿主；交互式开发
+启动可运行 `run-tauri-dev.bat`。这些入口只启动新 Tauri 宿主，不会替换或改写现有
+WPF 安装。需要构建并启动 Release 生产候选
 目录时运行 `run-tauri-production.bat`；该脚本输出固定在
 `artifacts/tauri-production/QingToolbox/`，不会写入用户安装目录。
+
+旧 WPF 宿主仅用于维护历史安装链；需要显式进入时运行 `run-legacy-wpf.bat`。
 
 需要验证可安装的 Tauri 候选时运行 `run-tauri-installer.bat`，或执行
 `pwsh ./scripts/build-tauri-installer.ps1 -SkipBuild -Smoke`。它复用已经校验的
 Release 目录，用独立迁移 AppId 安装/卸载，不会覆盖旧 WPF 安装记录；正式签名、
 更新器和 AppId 切换仍待完成。
+
+需要准备可导入的模块包时运行 `run-tauri-module-packages.bat`；它只打包已经进入
+`resources/modules` 的固定 Rust 进程模块，并输出逐包 SHA256 校验文件，不会动态
+下载第三方运行时。
 
 需要体验可交付的 Tauri 预览目录时，可运行
 `pwsh ./scripts/build-tauri-portable.ps1 -Smoke -Zip`，或使用

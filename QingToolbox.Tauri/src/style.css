@@ -150,8 +150,11 @@ dd { margin: 5px 0 0; color: #163e74; font-weight: 700; }
 .module-invalid { color: #be4e59; }
 .module-runtime-row { display: flex; align-items: center; gap: 10px; }
 .module-runtime-row .module-ready { min-width: 0; flex: 1; }
+.module-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .module-action { flex: 0 0 auto; padding: 5px 9px; border: 1px solid #c5d9f4; border-radius: 8px; color: #2462b7; background: #fff; cursor: pointer; font-size: 11px; }
 .module-action:hover { border-color: #83afe7; background: #f2f7ff; }
+.module-action.secondary { color: #5d7391; background: transparent; }
+.module-action:disabled { opacity: .55; cursor: wait; }
 
 .settings-card {
   margin-top: 22px;

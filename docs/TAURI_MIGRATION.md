@@ -203,6 +203,10 @@ the first release.
   remains independently named and is never used to terminate a user's own
   Everything instance.
 
+- The repository's default `run-latest.bat` now launches the Tauri Release
+  candidate. The legacy WPF maintenance path is explicit (`run-legacy-wpf.bat`)
+  and is not referenced by the Tauri host or its module packages.
+
 ### M4 — retire WPF
 
 - Compare the baseline metrics with the Tauri build.

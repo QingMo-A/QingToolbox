@@ -26,9 +26,9 @@ mod runtime;
 mod settings;
 mod web;
 
-use importer::{import_qmod, ModuleImportResult};
+use importer::{import_qmod, update_qmod, ModuleImportResult};
 use modules::{discover_modules, ModuleListPayload};
-use paths::{resolve_module_roots, ModuleRoot};
+use paths::{resolve_module_roots, ModuleRoot, ModuleSource};
 use protocol::ProtocolEnvelope;
 use runtime::{ModuleRuntimeManager, ModuleRuntimeSnapshot, RuntimeError};
 use settings::{SettingsSnapshot, SettingsStore, SettingsUpdate};
@@ -182,6 +182,94 @@ fn import_module(
     // Refresh the in-memory discovery index so the newly imported module is
     // immediately visible. A successful package publication remains valid even
     // if this best-effort UI index refresh cannot acquire its mutex.
+    let discovery = discover_modules(&state.roots);
+    if let Ok(mut index) = state.module_index.lock() {
+        *index = discovery.records;
+    }
+    Ok(result)
+}
+
+/// Replace one installed user module from an explicitly selected `.qmod`.
+/// The selected path is used only by the native file-picker flow; the module
+/// id, destination root and executable remain backend-owned. A running module
+/// is stopped and its Web window is closed before the atomic package swap.
+#[tauri::command]
+fn update_module(
+    app: tauri::AppHandle,
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+    module_id: String,
+    source_path: String,
+) -> Result<ModuleImportResult, CommandError> {
+    ensure_main_window(&window)?;
+    if !valid_module_id(&module_id) {
+        return Err(CommandError {
+            code: "moduleIdInvalid",
+            message: "模块 id 无效。".to_string(),
+        });
+    }
+    let record = state
+        .module_index
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块索引状态不可用。".to_string(),
+        })?
+        .get(&module_id)
+        .cloned()
+        .ok_or_else(|| CommandError {
+            code: "moduleNotFound",
+            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
+        })?;
+    if record.source != ModuleSource::User {
+        return Err(CommandError {
+            code: "moduleUpdateUnsupported",
+            message: "内置模块不能从模块窗口覆盖更新。".to_string(),
+        });
+    }
+
+    let was_running = state
+        .runtime
+        .lock()
+        .ok()
+        .map(|mut runtime| {
+            matches!(
+                runtime.snapshot(&module_id).state,
+                runtime::ModuleRuntimeState::Starting | runtime::ModuleRuntimeState::Running
+            )
+        })
+        .unwrap_or(false);
+
+    // Closing a Web window first releases WebView2 file handles and prevents
+    // an old qmod asset tree from remaining visible while it is replaced.
+    let label = module_window_label(&module_id);
+    if let Some(module_window) = app.get_webview_window(&label) {
+        let _ = module_window.close();
+    }
+    if let Ok(mut runtime) = state.runtime.lock() {
+        let _ = runtime.stop(&module_id);
+    }
+    let _ = clear_module_hotkey_binding(&app, &state, &module_id);
+
+    let result = match update_qmod(&source_path, &module_id) {
+        Ok(result) => result,
+        Err(error) => {
+            // An invalid package should not leave a previously running user
+            // module stopped. The old record is still valid whenever the
+            // atomic replacement has not committed; a best-effort restart is
+            // harmless after a committed replacement as well because the
+            // directory identity remains the same.
+            if was_running {
+                if let Ok(mut runtime) = state.runtime.lock() {
+                    let _ = runtime.start(&module_id, &record);
+                }
+            }
+            return Err(CommandError {
+                code: error.code,
+                message: error.message,
+            });
+        }
+    };
     let discovery = discover_modules(&state.roots);
     if let Ok(mut index) = state.module_index.lock() {
         *index = discovery.records;
@@ -1436,6 +1524,7 @@ pub fn run() {
             get_settings,
             update_settings,
             import_module,
+            update_module,
             list_modules,
             hide_to_tray,
             start_module,

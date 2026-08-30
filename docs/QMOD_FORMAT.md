@@ -10,9 +10,9 @@ Version: `0.2.0-alpha` Preview 2
 ## Container
 
 A `.qmod` file is a ZIP archive with a different extension. The archive root
-must contain exactly one `module.json`. Packages intended for the secure
-Verified Staging pipeline must also contain exactly one `qmod.json`. Do not
-wrap the package contents in an extra top-level directory.
+must contain exactly one `module.json`. A Tauri process package also contains
+exactly one `qmod.json` (schema [`qmod.tauri.v1.schema.json`](../protocol/qmod.tauri.v1.schema.json)).
+Do not wrap the package contents in an extra top-level directory.
 
 Secure staging `qmod.json` schema 1 contains `schemaVersion`, `moduleId`,
 `version`, `moduleApiVersion`, and `entryManifest`; `entryManifest` must be the
@@ -70,7 +70,7 @@ are rejected; the importer never replaces or executes a package during import.
 Import and Refresh only read and validate files. They do not load the entry DLL.
 Loading remains an explicit user action.
 
-## Creating a package
+## Creating a legacy package
 
 From a prepared module output directory whose root contains `module.json`:
 
@@ -79,8 +79,9 @@ Compress-Archive -Path .\ModuleOutput\* -DestinationPath .\Example.zip
 Rename-Item .\Example.zip Example.qmod
 ```
 
-Test both a valid package and rejected packages using the manual release
-checklist in [`releases/0.2.0-alpha.md`](releases/0.2.0-alpha.md).
+This command is retained for the legacy WPF profile only. Test both a valid
+package and rejected packages using the manual release checklist in
+[`releases/0.2.0-alpha.md`](releases/0.2.0-alpha.md).
 
 ## Preview security notice
 
@@ -141,3 +142,20 @@ keep its lifecycle under the module process.
 `operations` is an optional allowlist for the versioned `module.invoke` bridge.
 The host rejects calls that are not declared by the manifest; an empty or
 missing list keeps the module UI read-only until a later contract is added.
+
+### Reproducible Tauri package
+
+Build output is packaged by the repository-controlled script; it does not
+download a module or runtime from the network:
+
+```powershell
+pwsh ./scripts/package-tauri-module.ps1 -ModuleId qing.launcher -SkipBuild -Smoke
+pwsh ./scripts/package-tauri-modules.ps1 -SkipBuild -Smoke
+```
+
+The packer reads only `QingToolbox.Tauri/src-tauri/resources/modules/<id>` and
+writes `<id>-<version>-tauri.qmod` plus a SHA-256 sidecar below
+`artifacts/tauri-modules/`. Entries are sorted, timestamps are fixed, and the
+root `qmod.json` binds the package identity to `module.json`. The aggregate
+manifest is `tauri-modules-manifest.json`; it is metadata for release tooling,
+not an instruction for the host to execute arbitrary files.

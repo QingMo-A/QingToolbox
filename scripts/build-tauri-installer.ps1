@@ -119,6 +119,14 @@ if (-not $SkipBuild) {
 }
 
 $manifest = Test-Manifest -Root $sourceRoot
+$currentCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
+if (-not $?) {
+    throw 'Unable to resolve the current source commit before packaging the Tauri installer.'
+}
+if ([string]::IsNullOrWhiteSpace($currentCommit) -or
+    -not [string]::Equals($currentCommit, [string]$manifest.sourceCommit, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "The production directory is stale: it was built from $($manifest.sourceCommit), but HEAD is $currentCommit. Rebuild it before packaging."
+}
 $version = [string]$manifest.version
 $fileVersion = if ($version -match '^([0-9]+)\.([0-9]+)\.([0-9]+)') {
     "$($Matches[1]).$($Matches[2]).$($Matches[3]).0"
@@ -174,4 +182,3 @@ Write-Host "`nTauri installer candidate prepared."
 Write-Host "Installer: $installerPath"
 Write-Host "SHA256:   $hash"
 Write-Host "Source:   $($manifest.sourceCommit)"
-

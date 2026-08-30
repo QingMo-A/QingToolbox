@@ -1,0 +1,86 @@
+name: Tauri validation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - toolbox
+    paths:
+      - 'QingToolbox.Tauri/**'
+      - 'protocol/**'
+      - 'scripts/build-tauri-*.ps1'
+      - 'scripts/package-tauri-*.ps1'
+      - 'scripts/smoke-tauri-*.ps1'
+      - 'scripts/smoke-tauri-*.mjs'
+      - 'scripts/verify-tauri.ps1'
+      - 'scripts/run-tauri-latest.ps1'
+      - 'run-latest.bat'
+      - 'installer/QingToolbox.Tauri.iss'
+      - '.github/workflows/tauri-validation.yml'
+  push:
+    branches:
+      - toolbox
+    paths:
+      - 'QingToolbox.Tauri/**'
+      - 'protocol/**'
+      - 'scripts/build-tauri-*.ps1'
+      - 'scripts/package-tauri-*.ps1'
+      - 'scripts/smoke-tauri-*.ps1'
+      - 'scripts/smoke-tauri-*.mjs'
+      - 'scripts/verify-tauri.ps1'
+      - 'scripts/run-tauri-latest.ps1'
+      - 'run-latest.bat'
+      - 'installer/QingToolbox.Tauri.iss'
+      - '.github/workflows/tauri-validation.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tauri-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Node 24
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: QingToolbox.Tauri/package-lock.json
+
+      - name: Setup Rust stable
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Verify Tauri host and native modules
+        shell: pwsh
+        env:
+          QING_TAURI_DISABLE_AUTOSTART_SYNC: '1'
+        run: ./scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop -SmokeEverything
+
+      - name: Package all Tauri modules
+        shell: pwsh
+        run: ./scripts/package-tauri-modules.ps1 -SkipBuild -Smoke
+
+      - name: Build production candidate
+        shell: pwsh
+        env:
+          QING_TAURI_DISABLE_AUTOSTART_SYNC: '1'
+        run: ./scripts/build-tauri-production.ps1 -SkipModuleBuild -Smoke
+
+      - name: Check formatting and repository diff
+        shell: pwsh
+        run: |
+          cargo fmt --manifest-path QingToolbox.Tauri/src-tauri/Cargo.toml -- --check
+          git diff --check

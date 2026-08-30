@@ -30,6 +30,10 @@ pub struct ModuleImportResult {
     pub id: String,
     pub name: String,
     pub version: String,
+    #[serde(default)]
+    pub replaced: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_version: Option<String>,
 }
 
 #[derive(Debug)]
@@ -50,12 +54,25 @@ impl std::error::Error for ImportError {}
 #[serde(rename_all = "camelCase")]
 struct ManifestIdentity {
     id: Option<String>,
+    version: Option<String>,
 }
 
 #[derive(Debug)]
 struct ArchivePlan {
     module_id: String,
     manifest: Vec<u8>,
+    metadata: Option<PackageMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+struct PackageMetadata {
+    schema_version: Option<u16>,
+    module_id: Option<String>,
+    version: Option<String>,
+    module_api_version: Option<String>,
+    entry_manifest: Option<String>,
 }
 
 /// Import a new Tauri process-profile module into the backend-owned user root.
@@ -67,6 +84,170 @@ pub fn import_qmod(source_path: &str) -> Result<ModuleImportResult, ImportError>
         message: "用户模块目录不可用。".to_string(),
     })?;
     import_qmod_into(source_path, &modules_root)
+}
+
+/// Replace an already-installed user module with a validated package. The
+/// destination must be a direct child of the backend-owned user module root;
+/// bundled modules and reparse-point destinations are never replaced. The
+/// staged tree is atomically swapped into place and the old tree is retained
+/// only until the new rename succeeds, so a failed update can roll back.
+pub fn update_qmod(
+    source_path: &str,
+    expected_module_id: &str,
+) -> Result<ModuleImportResult, ImportError> {
+    if !valid_module_id(expected_module_id) {
+        return Err(ImportError {
+            code: "moduleIdInvalid",
+            message: "模块 id 无效。".to_string(),
+        });
+    }
+    let modules_root = user_modules_root().ok_or_else(|| ImportError {
+        code: "moduleRootUnavailable",
+        message: "用户模块目录不可用。".to_string(),
+    })?;
+    update_qmod_into(source_path, expected_module_id, &modules_root)
+}
+
+fn update_qmod_into(
+    source_path: &str,
+    expected_module_id: &str,
+    modules_root: &Path,
+) -> Result<ModuleImportResult, ImportError> {
+    let source = canonical_source(source_path)?;
+    let plan = inspect_archive(&source)?;
+    let manifest = parse_manifest(&plan.manifest)?;
+    let module_id = manifest
+        .id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| valid_module_id(value))
+        .ok_or_else(|| ImportError {
+            code: "manifestInvalid",
+            message: "模块 manifest 的 id 无效。".to_string(),
+        })?
+        .to_string();
+    if module_id != plan.module_id || module_id != expected_module_id {
+        return Err(ImportError {
+            code: "manifestInvalid",
+            message: "更新包的模块身份与目标不匹配。".to_string(),
+        });
+    }
+    validate_package_metadata(
+        plan.metadata.as_ref(),
+        &module_id,
+        manifest.version.as_deref(),
+    )?;
+
+    fs::create_dir_all(modules_root).map_err(|error| ImportError {
+        code: "moduleRootUnavailable",
+        message: format!("无法创建用户模块目录：{error}"),
+    })?;
+    let canonical_root = fs::canonicalize(modules_root).map_err(|error| ImportError {
+        code: "moduleRootUnavailable",
+        message: format!("无法解析用户模块目录：{error}"),
+    })?;
+    let destination = canonical_root.join(&module_id);
+    let destination_metadata = fs::symlink_metadata(&destination).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            ImportError {
+                code: "moduleNotInstalled",
+                message: "目标模块尚未安装，不能执行覆盖更新。".to_string(),
+            }
+        } else {
+            ImportError {
+                code: "moduleUnavailable",
+                message: format!("无法读取目标模块：{error}"),
+            }
+        }
+    })?;
+    if !destination_metadata.is_dir() || is_reparse_point(&destination_metadata) {
+        return Err(ImportError {
+            code: "moduleDestinationInvalid",
+            message: "目标模块目录不是受控的普通目录。".to_string(),
+        });
+    }
+    let canonical_destination = fs::canonicalize(&destination).map_err(|error| ImportError {
+        code: "moduleDestinationInvalid",
+        message: format!("无法解析目标模块目录：{error}"),
+    })?;
+    if canonical_destination.parent() != Some(canonical_root.as_path())
+        || canonical_destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            != Some(&module_id)
+    {
+        return Err(ImportError {
+            code: "moduleDestinationInvalid",
+            message: "目标模块目录越过了用户模块根。".to_string(),
+        });
+    }
+    let previous_version = read_existing_version(&canonical_destination);
+
+    let staging_parent = canonical_root.join(format!(".qmod-update-{}", unique_suffix()));
+    fs::create_dir(&staging_parent).map_err(|error| ImportError {
+        code: "moduleStagingUnavailable",
+        message: format!("无法创建模块更新临时目录：{error}"),
+    })?;
+    let _cleanup = TempDirGuard::new(staging_parent.clone());
+    let staging_module = staging_parent.join(&module_id);
+    fs::create_dir(&staging_module).map_err(|error| ImportError {
+        code: "moduleStagingUnavailable",
+        message: format!("无法创建模块更新临时目录：{error}"),
+    })?;
+    extract_archive(&source, &staging_module)?;
+    let discovered = discover_modules(&[ModuleRoot {
+        source: ModuleSource::User,
+        path: staging_parent.clone(),
+    }]);
+    let summary = discovered
+        .payload
+        .modules
+        .into_iter()
+        .find(|summary| summary.id == module_id)
+        .ok_or_else(|| ImportError {
+            code: "manifestInvalid",
+            message: "模块清单未能通过新宿主校验。".to_string(),
+        })?;
+    if !summary.valid || !discovered.records.contains_key(&module_id) {
+        let detail = summary
+            .issues
+            .first()
+            .map(|issue| issue.message.clone())
+            .unwrap_or_else(|| "模块清单未能通过新宿主校验。".to_string());
+        return Err(ImportError {
+            code: "manifestInvalid",
+            message: detail,
+        });
+    }
+
+    let backup = canonical_root.join(format!(".qmod-backup-{}", unique_suffix()));
+    fs::rename(&canonical_destination, &backup).map_err(|error| ImportError {
+        code: "moduleUpdateFailed",
+        message: format!("无法暂存旧模块：{error}"),
+    })?;
+    if let Err(error) = fs::rename(&staging_module, &destination) {
+        let _ = fs::rename(&backup, &destination);
+        return Err(ImportError {
+            code: "moduleUpdateFailed",
+            message: format!("无法发布更新后的模块：{error}"),
+        });
+    }
+    if let Err(error) = fs::remove_dir_all(&backup) {
+        // The new module is already atomically visible. Keep it installed and
+        // report the cleanup issue instead of silently deleting the new tree.
+        return Err(ImportError {
+            code: "moduleUpdateCleanupFailed",
+            message: format!("模块已更新，但旧版本清理失败：{error}"),
+        });
+    }
+
+    Ok(ModuleImportResult {
+        id: summary.id,
+        name: summary.name,
+        version: summary.version,
+        replaced: true,
+        previous_version,
+    })
 }
 
 /// Import a package into an explicit module root.  Keeping the root as an
@@ -96,6 +277,11 @@ fn import_qmod_into(
             message: "模块 manifest 身份校验失败。".to_string(),
         });
     }
+    validate_package_metadata(
+        plan.metadata.as_ref(),
+        &module_id,
+        manifest.version.as_deref(),
+    )?;
 
     fs::create_dir_all(modules_root).map_err(|error| ImportError {
         code: "moduleRootUnavailable",
@@ -166,6 +352,8 @@ fn import_qmod_into(
         id: summary.id,
         name: summary.name,
         version: summary.version,
+        replaced: false,
+        previous_version: None,
     })
 }
 
@@ -230,6 +418,7 @@ fn inspect_archive(path: &Path) -> Result<ArchivePlan, ImportError> {
     let mut names = BTreeSet::new();
     let mut total_size = 0_u64;
     let mut manifest = None;
+    let mut metadata = None;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(|error| ImportError {
             code: "packageInvalid",
@@ -280,6 +469,29 @@ fn inspect_archive(path: &Path) -> Result<ArchivePlan, ImportError> {
                     message: "模块包包含多个 module.json。".to_string(),
                 });
             }
+        } else if relative == Path::new("qmod.json") {
+            if entry.size() > 16 * 1024 {
+                return Err(ImportError {
+                    code: "packageMetadataTooLarge",
+                    message: "qmod.json 超过 16 KiB 限制。".to_string(),
+                });
+            }
+            let mut bytes = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut bytes).map_err(|error| ImportError {
+                code: "packageMetadataInvalid",
+                message: format!("无法读取 qmod.json：{error}"),
+            })?;
+            let parsed =
+                serde_json::from_slice::<PackageMetadata>(&bytes).map_err(|error| ImportError {
+                    code: "packageMetadataInvalid",
+                    message: format!("qmod.json 不是有效 JSON：{error}"),
+                })?;
+            if metadata.replace(parsed).is_some() {
+                return Err(ImportError {
+                    code: "packageDuplicateEntry",
+                    message: "模块包包含多个 qmod.json。".to_string(),
+                });
+            }
         }
     }
     let manifest = manifest.ok_or_else(|| ImportError {
@@ -300,7 +512,39 @@ fn inspect_archive(path: &Path) -> Result<ArchivePlan, ImportError> {
     Ok(ArchivePlan {
         module_id,
         manifest,
+        metadata,
     })
+}
+
+fn validate_package_metadata(
+    metadata: Option<&PackageMetadata>,
+    module_id: &str,
+    manifest_version: Option<&str>,
+) -> Result<(), ImportError> {
+    let Some(metadata) = metadata else {
+        // Older process-profile packages did not carry this envelope. The
+        // manifest remains the minimum identity contract, so they can still
+        // be imported; packages produced by the current packer always include
+        // and are checked against it.
+        return Ok(());
+    };
+    let valid = metadata.schema_version == Some(1)
+        && metadata.module_id.as_deref() == Some(module_id)
+        && metadata
+            .version
+            .as_deref()
+            .zip(manifest_version)
+            .is_some_and(|(left, right)| left.trim() == right.trim())
+        && metadata.module_api_version.as_deref() == Some("tauri-process-v1")
+        && metadata.entry_manifest.as_deref() == Some("module.json");
+    if valid {
+        Ok(())
+    } else {
+        Err(ImportError {
+            code: "packageMetadataInvalid",
+            message: "qmod.json 与 Tauri 模块清单不匹配。".to_string(),
+        })
+    }
 }
 
 fn parse_manifest(bytes: &[u8]) -> Result<ManifestIdentity, ImportError> {
@@ -508,6 +752,31 @@ fn is_reserved_device(component: &str) -> bool {
     )
 }
 
+fn is_reparse_point(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // FILE_ATTRIBUTE_REPARSE_POINT. This catches directory junctions as
+        // well as symbolic links, which `FileType::is_symlink` alone misses.
+        metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
+}
+
+fn read_existing_version(directory: &Path) -> Option<String> {
+    let bytes = fs::read(directory.join("module.json")).ok()?;
+    let value = serde_json::from_slice::<serde_json::Value>(&bytes).ok()?;
+    value
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 struct TempDirGuard(Option<PathBuf>);
 
 impl TempDirGuard {
@@ -606,6 +875,78 @@ mod tests {
         assert!(modules_root.join("qing.test/module.json").is_file());
         assert!(modules_root.join("qing.test/bin/test.exe").is_file());
         assert!(!modules_root.join(".qmod-import-").exists());
+    }
+
+    #[test]
+    fn update_replaces_only_the_user_module_and_reports_previous_version() {
+        let sandbox = TestDir::new("qmod-update");
+        let modules_root = sandbox.path().join("modules");
+        let installed = modules_root.join("qing.test");
+        fs::create_dir_all(installed.join("bin")).expect("installed module");
+        fs::write(
+            installed.join("module.json"),
+            br#"{"id":"qing.test","name":"Old","version":"1.0.0","entry":"bin/test.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#,
+        )
+        .expect("old manifest");
+        fs::write(installed.join("bin/test.exe"), b"old").expect("old entry");
+
+        let package = sandbox.path().join("new.qmod");
+        let manifest = br#"{"id":"qing.test","name":"New","version":"2.0.0","entry":"bin/test.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#;
+        let metadata = br#"{"schemaVersion":1,"moduleId":"qing.test","version":"2.0.0","moduleApiVersion":"tauri-process-v1","entryManifest":"module.json"}"#;
+        write_qmod(
+            &package,
+            &[
+                ("qmod.json", metadata),
+                ("module.json", manifest),
+                ("bin/test.exe", b"new"),
+            ],
+        );
+
+        let result = update_qmod_into(&package.to_string_lossy(), "qing.test", &modules_root)
+            .expect("update should succeed");
+        assert!(result.replaced);
+        assert_eq!(result.previous_version.as_deref(), Some("1.0.0"));
+        assert_eq!(result.version, "2.0.0");
+        assert_eq!(fs::read(installed.join("bin/test.exe")).unwrap(), b"new");
+        assert!(!modules_root.join(".qmod-backup-").exists());
+    }
+
+    #[test]
+    fn package_metadata_must_match_the_process_manifest_when_present() {
+        let sandbox = TestDir::new("qmod-metadata");
+        let package = sandbox.path().join("mismatch.qmod");
+        let manifest = br#"{"id":"qing.test","name":"Test","version":"1.0.0","entry":"bin/test.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#;
+        let metadata = br#"{"schemaVersion":1,"moduleId":"qing.other","version":"1.0.0","moduleApiVersion":"tauri-process-v1","entryManifest":"module.json"}"#;
+        write_qmod(
+            &package,
+            &[
+                ("qmod.json", metadata),
+                ("module.json", manifest),
+                ("bin/test.exe", b"x"),
+            ],
+        );
+        let error = import_qmod_into(&package.to_string_lossy(), &sandbox.path().join("modules"))
+            .expect_err("mismatched qmod metadata must fail");
+        assert_eq!(error.code, "packageMetadataInvalid");
+    }
+
+    #[test]
+    fn package_metadata_rejects_unknown_fields() {
+        let sandbox = TestDir::new("qmod-metadata-unknown");
+        let package = sandbox.path().join("unknown.qmod");
+        let manifest = br#"{"id":"qing.test","name":"Test","version":"1.0.0","entry":"bin/test.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#;
+        let metadata = br#"{"schemaVersion":1,"moduleId":"qing.test","version":"1.0.0","moduleApiVersion":"tauri-process-v1","entryManifest":"module.json","unexpected":true}"#;
+        write_qmod(
+            &package,
+            &[
+                ("qmod.json", metadata),
+                ("module.json", manifest),
+                ("bin/test.exe", b"x"),
+            ],
+        );
+        let error = import_qmod_into(&package.to_string_lossy(), &sandbox.path().join("modules"))
+            .expect_err("unknown qmod metadata must fail closed");
+        assert_eq!(error.code, "packageMetadataInvalid");
     }
 
     #[test]

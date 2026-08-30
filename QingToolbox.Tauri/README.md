@@ -54,6 +54,13 @@ Launcher 模块，再启动 Tauri 开发宿主。
 pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop -SmokeEverything
 ```
 
+需要交付可导入的单模块包时，使用 `pwsh ../scripts/package-tauri-module.ps1
+-ModuleId <id> -Smoke`；需要一次生成全部官方模块包时使用
+`pwsh ../scripts/package-tauri-modules.ps1 -SkipBuild -Smoke` 或根目录的
+`run-tauri-module-packages.bat`。包和 SHA256 sidecar 位于
+`artifacts/tauri-modules/`，其根级 `qmod.json` 与 `module.json` 绑定，导入器会在
+发布前重新校验身份、版本和目录边界。
+
 要生成便于手工体验的 Release portable 目录（不生成安装器），运行：
 
 ```powershell

@@ -21,6 +21,7 @@ const settings = ref<SettingsSnapshot | null>(null)
 const settingsExpanded = ref(false)
 const settingsBusy = ref(false)
 const importing = ref(false)
+const updatingModuleId = ref<string | null>(null)
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref<string | null>(null)
@@ -134,6 +135,27 @@ async function importModule(): Promise<void> {
     error.value = reasonMessage(reason)
   } finally {
     importing.value = false
+  }
+}
+
+async function updateModule(module: ModuleSummary): Promise<void> {
+  if (updatingModuleId.value || refreshing.value || hostInfo.value?.backend !== 'rust') return
+  updatingModuleId.value = module.id
+  error.value = null
+  try {
+    const selected = await open({
+      title: `更新 ${module.name}`,
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'QingToolbox module', extensions: ['qmod'] }],
+    })
+    if (!selected || Array.isArray(selected)) return
+    await invoke('update_module', { moduleId: module.id, sourcePath: selected })
+    await refreshModules()
+  } catch (reason) {
+    error.value = reasonMessage(reason)
+  } finally {
+    updatingModuleId.value = null
   }
 }
 
@@ -420,9 +442,20 @@ onBeforeUnmount(() => {
             <p v-if="module.description" class="module-description">{{ module.description }}</p>
             <div v-if="module.valid" class="module-runtime-row">
               <p class="module-ready">清单有效 · {{ runtimeLabel(module) }}</p>
-              <button class="module-action" type="button" @click="toggleModule(module)">
-                {{ module.uiKind === 'Web' ? '打开' : isRunning(module) ? '停止' : '启动' }}
-              </button>
+              <div class="module-actions">
+                <button class="module-action" type="button" @click="toggleModule(module)">
+                  {{ module.uiKind === 'Web' ? '打开' : isRunning(module) ? '停止' : '启动' }}
+                </button>
+                <button
+                  v-if="module.source === 'user'"
+                  class="module-action secondary"
+                  type="button"
+                  :disabled="updatingModuleId !== null"
+                  @click="updateModule(module)"
+                >
+                  {{ updatingModuleId === module.id ? '更新中…' : '覆盖更新' }}
+                </button>
+              </div>
             </div>
             <p v-else class="module-invalid">{{ module.issues[0]?.message ?? '清单无效' }}</p>
           </div>
