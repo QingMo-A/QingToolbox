@@ -27,12 +27,13 @@ export class TauriTransport implements Transport {
   private async dispatch(message: BridgeRequest): Promise<unknown> {
     switch (message.command) {
       case 'web.ready': {
-        const [host, listed] = await Promise.all([
+        const [host, listed, runtime] = await Promise.all([
           invoke<{ version: string }>('get_host_info'),
           invoke<{ payload: ModuleListPayload }>('list_modules'),
+          invoke<ModuleRuntimeSnapshot[]>('get_all_module_runtime'),
         ])
         this.activationNonce = crypto.randomUUID() + crypto.randomUUID()
-        return { activationNonce: this.activationNonce, snapshot: appSnapshot(host.version, listed.payload.modules) }
+        return { activationNonce: this.activationNonce, snapshot: appSnapshot(host.version, listed.payload.modules, runtime) }
       }
       case 'app.ping': {
         if (message.payload.activationNonce === this.activationNonce) {
@@ -43,8 +44,12 @@ export class TauriTransport implements Transport {
         throw new Error('BridgeNotActivated: Tauri session is not activated.')
       }
       case 'app.getSnapshot': {
-        const [host, listed] = await Promise.all([invoke<{ version: string }>('get_host_info'), invoke<{ payload: ModuleListPayload }>('list_modules')])
-        return appSnapshot(host.version, listed.payload.modules)
+        const [host, listed, runtime] = await Promise.all([
+          invoke<{ version: string }>('get_host_info'),
+          invoke<{ payload: ModuleListPayload }>('list_modules'),
+          invoke<ModuleRuntimeSnapshot[]>('get_all_module_runtime'),
+        ])
+        return appSnapshot(host.version, listed.payload.modules, runtime)
       }
       case 'modules.getSnapshot': return this.moduleSnapshot()
       case 'modules.import': return this.importModule()
@@ -118,7 +123,18 @@ export class TauriTransport implements Transport {
 }
 
 function requiredString(value: unknown): string { if (typeof value !== 'string' || !value.trim()) throw new Error('InvalidPayload: a non-empty string is required.'); return value }
-function appSnapshot(version: string, modules: ModuleSummary[]) { return { environmentKind: 'Production', environmentDisplayName: 'Tauri', hostVersion: version, protocolVersion: 4, totalModuleCount: modules.length, validModuleCount: modules.filter(item => item.valid).length, runningModuleCount: 0, generatedAt: new Date().toISOString() } }
+function appSnapshot(version: string, modules: ModuleSummary[], runtime: ModuleRuntimeSnapshot[]) {
+  return {
+    environmentKind: 'Production',
+    environmentDisplayName: 'Tauri',
+    hostVersion: version,
+    protocolVersion: 4,
+    totalModuleCount: modules.length,
+    validModuleCount: modules.filter(item => item.valid).length,
+    runningModuleCount: runtime.filter(item => item.state === 'running').length,
+    generatedAt: new Date().toISOString(),
+  }
+}
 function toWebModule(module: ModuleSummary, runtime?: ModuleRuntimeSnapshot, startupEnabled = false) {
   const state = runtime?.state === 'running' ? 'Running' : runtime?.state === 'starting' ? 'Starting' : runtime?.state === 'failed' ? 'Failed' : 'NotLoaded'; const valid = module.valid
   return { id: module.id, displayName: module.name, displayDescription: module.description ?? '', version: module.version, author: module.author ?? '', runtimeType: module.runtimeType ?? 'process', loadMode: 'Process', runtimeState: state, isValid: valid, errorCount: module.issues.length, errors: module.issues.map(issue => issue.message), permissions: [], minimumHostVersion: '', isUserInstalled: module.source === 'user', canRemove: module.source === 'user', canLoad: valid && state !== 'Running', canActivate: valid && state !== 'Running', canOpen: valid && module.uiKind === 'Web', canDeactivate: state === 'Running', canUnload: state === 'Running', isBusy: state === 'Starting', isExecutionBlocked: false, isStartupEnabled: startupEnabled, startupAuthorizationState: valid ? startupEnabled ? 'Enabled' : 'NotEnabled' : 'Unavailable', canChangeStartupAuthorization: valid, isStartupAuthorizationBusy: false, updateStatus: 'DisabledByEnvironment', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: false, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'DisabledByEnvironment', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0, canInstallVerifiedUpdate: false, iconDataUrl: module.iconDataUrl }
