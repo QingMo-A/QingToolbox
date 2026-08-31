@@ -31,7 +31,7 @@ use importer::{import_qmod, update_qmod, ModuleImportResult};
 use modules::{discover_modules, ModuleListPayload};
 use paths::{resolve_module_roots, user_modules_root, ModuleRoot, ModuleSource};
 use protocol::ProtocolEnvelope;
-use runtime::{ModuleRuntimeManager, ModuleRuntimeSnapshot, RuntimeError};
+use runtime::{ModuleRuntimeManager, ModuleRuntimeSnapshot, ModuleRuntimeState, RuntimeError};
 use settings::{SettingsSnapshot, SettingsStore, SettingsUpdate};
 use web::{open_module_window, serve_module_asset, serve_screenpin_asset, ScreenPinWindowRecord};
 
@@ -2023,15 +2023,46 @@ fn register_toggle_hotkey<R: tauri::Runtime>(_app: &mut tauri::App<R>) {}
 /// Enforce process exits and hello deadlines in Rust. Runtime correctness must
 /// not depend on the Vue page polling status or remaining responsive.
 fn start_runtime_supervisor<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
-    thread::spawn(move || loop {
-        thread::sleep(Duration::from_millis(250));
-        let Some(state) = app.try_state::<HostState>() else {
-            break;
-        };
-        let Ok(mut runtime) = state.runtime.lock() else {
-            break;
-        };
-        let _ = runtime.snapshots();
+    thread::spawn(move || {
+        let mut previous =
+            std::collections::BTreeMap::<String, (ModuleRuntimeState, u64, Option<String>)>::new();
+        loop {
+            thread::sleep(Duration::from_millis(250));
+            let Some(state) = app.try_state::<HostState>() else {
+                break;
+            };
+            let snapshots = {
+                let Ok(mut runtime) = state.runtime.lock() else {
+                    break;
+                };
+                runtime.snapshots()
+            };
+            let mut current = std::collections::BTreeMap::new();
+            let mut changed = Vec::new();
+            for snapshot in snapshots {
+                let signature = (
+                    snapshot.state,
+                    snapshot.generation,
+                    snapshot.last_error.clone(),
+                );
+                if previous.get(&snapshot.module_id) != Some(&signature) {
+                    changed.push(snapshot.clone());
+                }
+                current.insert(snapshot.module_id.clone(), signature);
+            }
+            previous = current;
+            for snapshot in changed {
+                let _ = app.emit_to(
+                    EventTarget::webview_window("main"),
+                    MODULE_STATE_CHANGED_EVENT,
+                    serde_json::json!({
+                        "reason": "runtimeStateChanged",
+                        "moduleId": snapshot.module_id,
+                        "state": snapshot.state,
+                    }),
+                );
+            }
+        }
     });
 }
 

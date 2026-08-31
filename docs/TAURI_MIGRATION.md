@@ -131,6 +131,9 @@ the first release.
 - Expose a bounded, in-memory session log snapshot from Rust. The existing Vue
   logs page now reads `get_session_logs`; operational events are recorded without
   returning backend paths, process handles, or arbitrary frontend data.
+- Broadcast bounded runtime-state changes from the Rust supervisor to the main
+  window. The Vue bridge coalesces overlapping events and re-reads authoritative
+  app/module snapshots, so child exit or failure does not require manual refresh.
 
 ### M2 — native product modules (validated migration slice)
 

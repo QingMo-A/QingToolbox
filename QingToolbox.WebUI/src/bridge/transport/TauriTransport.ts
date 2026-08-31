@@ -35,10 +35,12 @@ export class TauriTransport implements Transport {
       this.eventCleanups.delete(cleanup)
     }
     this.eventCleanups.add(cleanup)
-    void listen<{ reason?: unknown }>('qmod:module-state-changed', event => {
+    void listen<{ reason?: unknown; moduleId?: unknown; state?: unknown }>('qmod:module-state-changed', event => {
       if (cleanedUp || this.disposed) return
       const reason = typeof event.payload?.reason === 'string' ? event.payload.reason : 'module-state-changed'
-      listener({ protocolVersion: 4, event: 'app.hostEvent', payload: { name: 'module.changed', reason } })
+      const moduleId = typeof event.payload?.moduleId === 'string' ? event.payload.moduleId : null
+      const state = typeof event.payload?.state === 'string' ? event.payload.state : null
+      listener({ protocolVersion: 4, event: 'app.hostEvent', payload: { name: 'module.changed', reason, moduleId, state } })
     }).then(value => {
       unlisten = value
       if (cleanedUp || this.disposed) value()
