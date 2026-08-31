@@ -1,10 +1,12 @@
 use std::{
     cmp::Ordering,
     fs,
-    io::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering as AtomicOrdering},
 };
+
+#[cfg(windows)]
+use std::io::Write;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
