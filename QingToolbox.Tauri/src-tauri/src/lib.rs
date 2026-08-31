@@ -5,7 +5,7 @@ use std::{
     process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -56,6 +56,7 @@ pub struct HostState {
     scan_gate: Mutex<()>,
     runtime: Mutex<ModuleRuntimeManager>,
     host_update: Mutex<host_update::HostUpdateState>,
+    host_update_cancel: Mutex<Option<Arc<AtomicBool>>>,
     settings: Mutex<SettingsStore>,
     module_hotkeys: Mutex<std::collections::BTreeMap<String, String>>,
     screenpin_windows: Mutex<std::collections::BTreeMap<String, ScreenPinWindowRecord>>,
@@ -74,6 +75,7 @@ impl HostState {
                 env!("CARGO_PKG_VERSION"),
                 now_rfc3339(),
             )),
+            host_update_cancel: Mutex::new(None),
             settings: Mutex::new(SettingsStore::new()),
             module_hotkeys: Mutex::new(std::collections::BTreeMap::new()),
             screenpin_windows: Mutex::new(std::collections::BTreeMap::new()),
@@ -220,6 +222,11 @@ async fn check_host_update(
     }
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let started_at = now_rfc3339();
+    if let Ok(active) = state.host_update_cancel.lock() {
+        if let Some(cancel) = active.as_ref() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
     let generation = state
         .host_update
         .lock()
@@ -252,6 +259,121 @@ async fn check_host_update(
         checked_at,
         check_result,
     ))
+}
+
+/// Start a backend-owned installer download. The command returns immediately;
+/// the settings page polls the bounded snapshot for progress.
+#[tauri::command]
+fn download_host_update(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+) -> Result<HostUpdateSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    if !host_update_network_enabled() {
+        return state
+            .host_update
+            .lock()
+            .map_err(|_| CommandError {
+                code: "stateUnavailable",
+                message: "宿主更新状态不可用。".to_string(),
+            })
+            .map(|snapshot| snapshot.snapshot());
+    }
+    let cache_root = paths::user_data_root()
+        .ok_or_else(|| CommandError {
+            code: "storageUnavailable",
+            message: "宿主更新缓存目录不可用。".to_string(),
+        })?
+        .join("Updates")
+        .join("Host");
+    let (generation, release) = state
+        .host_update
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "宿主更新状态不可用。".to_string(),
+        })?
+        .begin_download()
+        .ok_or_else(|| CommandError {
+            code: "updateUnavailable",
+            message: "没有可下载的宿主更新。".to_string(),
+        })?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    *state.host_update_cancel.lock().map_err(|_| CommandError {
+        code: "stateUnavailable",
+        message: "宿主更新状态不可用。".to_string(),
+    })? = Some(cancel.clone());
+    let app = window.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let outcome = host_update::download_official_release(
+            &release,
+            &cache_root,
+            &cancel,
+            |bytes| {
+                if let Some(host_state) = app.try_state::<HostState>() {
+                    if let Ok(mut update) = host_state.host_update.lock() {
+                        update.report_download_progress(generation, bytes);
+                    }
+                }
+            },
+            || {
+                if let Some(host_state) = app.try_state::<HostState>() {
+                    if let Ok(mut update) = host_state.host_update.lock() {
+                        update.mark_download_verifying(generation);
+                    }
+                }
+            },
+        )
+        .map(|_| ());
+        if let Some(host_state) = app.try_state::<HostState>() {
+            if let Ok(mut update) = host_state.host_update.lock() {
+                update.finish_download(generation, outcome);
+            }
+            if let Ok(mut active) = host_state.host_update_cancel.lock() {
+                if active
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &cancel))
+                {
+                    *active = None;
+                }
+            }
+            record_log(
+                &host_state,
+                "Information",
+                "Updates",
+                "Host update download completed.".to_string(),
+            );
+        }
+    });
+    state
+        .host_update
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "宿主更新状态不可用。".to_string(),
+        })
+        .map(|snapshot| snapshot.snapshot())
+}
+
+#[tauri::command]
+fn cancel_host_update(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+) -> Result<HostUpdateSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    if let Ok(active) = state.host_update_cancel.lock() {
+        if let Some(cancel) = active.as_ref() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
+    state
+        .host_update
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "宿主更新状态不可用。".to_string(),
+        })
+        .map(|snapshot| snapshot.snapshot())
 }
 
 #[tauri::command]
@@ -2072,6 +2194,8 @@ pub fn run() {
             get_host_info,
             get_host_update_snapshot,
             check_host_update,
+            download_host_update,
+            cancel_host_update,
             get_settings,
             get_startup_registration_status,
             repair_startup_registration,

@@ -213,13 +213,14 @@ the first release.
   every staged file and runs an install/uninstall smoke. It is intentionally not
   the public installer yet: signed installer/bundle, updater integration, AppId
   cut-over and the production parity checklist remain.
-- Complete signed installer/bundle, updater download/verification/handoff and
-  then run the production parity checklist on every official module. Rust now
-  owns the read-only official Release check through system WinHTTP with bounded
-  SemVer/asset validation; portable and production directory builders already
-  use the same release executable and resource manifest, so the remaining work
-  is packaging, download trust and installation handoff rather than another
-  host rewrite.
+- Complete signed installer/bundle, updater installation handoff and then run
+  the production parity checklist on every official module. Rust now owns the
+  official Release check and installer download through system WinHTTP with
+  bounded SemVer/asset validation, trusted redirects, an isolated cache and
+  sidecar/SHA256 verification; Vue receives only progress snapshots. Portable
+  and production directory builders already use the same release executable
+  and resource manifest, so the remaining work is signed packaging, install
+  identity/handoff and production trust rather than another host rewrite.
 - Run heavy runtimes (Everything/qpdf) as module-owned child processes or
   sidecars and close only instances created by the module. Qing Launcher now
   follows this rule for its private Everything client; its dedicated service

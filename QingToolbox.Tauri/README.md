@@ -120,11 +120,13 @@ Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost
 - 已实现版本化 envelope、单行 JSON frame 限制（1 MiB）、nonce-bound hello
   握手（每次启动使用系统 RNG nonce）、Rust 后台监督、单实例锁，以及模块根路径
   和资源路径校验。
-- 宿主更新快照和官方 Release 检查由 Rust 提供：Release 构建通过系统 WinHTTP
-  请求固定的 QingMo-A/QingToolbox API，严格限制 SemVer 通道、响应大小和安装器/
-  SHA256 资产身份；Vue 不会接收下载 URL。Debug/烟测默认关闭联网检查，可显式设置
-  `QING_TAURI_ENABLE_UPDATE_CHECK=1` 进行集成验证；原生安装器下载、校验落盘和安装
-  交接尚未启用时，相关能力会明确保持 Disabled，不会让 Vue 侧执行安装器。
+- 宿主更新快照、官方 Release 检查和安装器下载由 Rust 提供：Release 构建通过系统
+  WinHTTP 请求固定的 QingMo-A/QingToolbox API，严格限制 SemVer 通道、响应大小和
+  安装器/SHA256 资产身份；下载只允许受控的 GitHub 重定向，写入用户数据下的
+  `Updates/Host` 缓存并在原子改名之前校验 sidecar、大小和 SHA256。Vue 不会接收
+  下载 URL 或本地路径，只轮询字节进度和 ReadyToInstall 状态。Debug/烟测默认关闭
+  联网检查，可显式设置 `QING_TAURI_ENABLE_UPDATE_CHECK=1` 进行集成验证；安装器
+  交接仍未启用，已校验包不会被 Vue 或宿主自动执行。
 - Web 模块使用后端注册的 `qmod://` 资源协议打开独立窗口；资源每次请求
   都重新做模块目录边界检查，Vue 不会得到绝对路径。
 - 新宿主只接受 `runtimeType=Process`、`runtimeIsolation=OutOfProcess` 的
