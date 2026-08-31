@@ -191,6 +191,47 @@ fn get_settings(
     Ok(settings.snapshot())
 }
 
+/// Reconcile the persisted launch-at-login preference with the Tauri
+/// autostart registration. The frontend can request this repair, but it never
+/// receives a registry path or gets to choose the executable being registered.
+#[tauri::command]
+fn repair_startup_registration(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+) -> Result<SettingsSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    if !autostart_sync_enabled() {
+        return Err(CommandError {
+            code: "autostartUnavailable",
+            message: "当前开发/烟测环境已禁用登录启动同步。".to_string(),
+        });
+    }
+    let enabled = state
+        .settings
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "工具箱设置状态不可用。".to_string(),
+        })?
+        .snapshot()
+        .launch_at_login;
+    sync_launch_at_login(window.app_handle(), enabled).map_err(|message| CommandError {
+        code: "autostartUnavailable",
+        message,
+    })?;
+    record_log(
+        &state,
+        "Information",
+        "Settings",
+        "Repaired launch-at-login registration.".to_string(),
+    );
+    let settings = state.settings.lock().map_err(|_| CommandError {
+        code: "stateUnavailable",
+        message: "工具箱设置状态不可用。".to_string(),
+    })?;
+    Ok(settings.snapshot())
+}
+
 /// Return the bounded in-memory event history for the current host session.
 /// Paths and process handles are never exposed through this DTO.
 #[tauri::command]
@@ -1925,6 +1966,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_host_info,
             get_settings,
+            repair_startup_registration,
             get_session_logs,
             set_font,
             import_font,

@@ -111,7 +111,7 @@ export class TauriTransport implements Transport {
       case 'settings.setStartupPresentationMode': return this.updateSettings({ startupPresentation: startupToRust(requiredString(message.payload.startupPresentationMode)) })
       case 'settings.setShowLogsInSidebar': return this.updateSettings({ showLogsInSidebar: Boolean(message.payload.showLogsInSidebar) })
       case 'settings.setLaunchAtLogin': return this.updateSettings({ launchAtLogin: Boolean(message.payload.enabled) })
-      case 'settings.repairStartupRegistration':
+      case 'settings.repairStartupRegistration': return toWebSettings(await invoke<TauriSettingsSnapshot>('repair_startup_registration'))
       case 'settings.refreshFonts': return toWebSettings(await invoke<TauriSettingsSnapshot>('get_settings'))
       case 'settings.setFont': return toWebSettings(await invoke<TauriSettingsSnapshot>('set_font', { fontId: requiredString(message.payload.fontId) }))
       case 'settings.importFont': return this.importFont()
