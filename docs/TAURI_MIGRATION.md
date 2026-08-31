@@ -124,7 +124,9 @@ the first release.
   validation never mutates a developer's login configuration accidentally. A
   smoke process can force-disable synchronization with
   `QING_TAURI_DISABLE_AUTOSTART_SYNC=1`, including when it exercises a Release
-  executable.
+  executable. The settings bridge reads the plugin's actual registration state
+  and projects only a bounded Healthy/Degraded/Unavailable/Disabled status;
+  repair continues to use the same Rust-owned reconciliation path.
 - Own font selection and import in Rust. The host exposes a fixed, safe system
   font catalog plus hash-addressed user font records, persists only the selected
   opaque ID, and serves verified `.ttf`/`.otf`/`.ttc` bytes through the private

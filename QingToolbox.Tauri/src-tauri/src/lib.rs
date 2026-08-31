@@ -93,6 +93,16 @@ struct HostInfo {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct StartupRegistrationSnapshot {
+    can_configure: bool,
+    registered: bool,
+    can_repair: bool,
+    status: String,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SessionLogEntry {
     timestamp: String,
     level: String,
@@ -189,6 +199,26 @@ fn get_settings(
         message: "工具箱设置状态不可用。".to_string(),
     })?;
     Ok(settings.snapshot())
+}
+
+/// Read the actual Tauri autostart registration without exposing an OS
+/// registry path, executable path, or third-party error detail to Vue.
+#[tauri::command]
+fn get_startup_registration_status(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+) -> Result<StartupRegistrationSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    let desired = state
+        .settings
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "工具箱设置状态不可用。".to_string(),
+        })?
+        .snapshot()
+        .launch_at_login;
+    Ok(startup_registration_status(window.app_handle(), desired))
 }
 
 /// Reconcile the persisted launch-at-login preference with the Tauri
@@ -1966,6 +1996,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_host_info,
             get_settings,
+            get_startup_registration_status,
             repair_startup_registration,
             get_session_logs,
             set_font,
@@ -2059,6 +2090,78 @@ fn autostart_sync_enabled() -> bool {
             .ok()
             .as_deref()
             == Some("1")
+}
+
+fn startup_status_for(
+    sync_enabled: bool,
+    desired: bool,
+    registered: Result<bool, String>,
+) -> StartupRegistrationSnapshot {
+    if !sync_enabled {
+        return StartupRegistrationSnapshot {
+            can_configure: false,
+            registered: false,
+            can_repair: false,
+            status: "Disabled".to_string(),
+            message: "当前开发/烟测环境已禁用登录启动同步。".to_string(),
+        };
+    }
+
+    match registered {
+        Ok(actual) if actual == desired => StartupRegistrationSnapshot {
+            can_configure: true,
+            registered: actual,
+            can_repair: false,
+            status: "Healthy".to_string(),
+            message: if desired {
+                "登录启动已注册。".to_string()
+            } else {
+                "登录启动未启用。".to_string()
+            },
+        },
+        Ok(actual) => StartupRegistrationSnapshot {
+            can_configure: true,
+            registered: actual,
+            can_repair: true,
+            status: "Degraded".to_string(),
+            message: "登录启动状态与已保存偏好不一致。".to_string(),
+        },
+        Err(_) => StartupRegistrationSnapshot {
+            can_configure: true,
+            registered: false,
+            can_repair: true,
+            status: "Unavailable".to_string(),
+            message: "无法读取登录启动注册状态。".to_string(),
+        },
+    }
+}
+
+fn startup_registration_status<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    desired: bool,
+) -> StartupRegistrationSnapshot {
+    if !autostart_sync_enabled() {
+        return startup_status_for(false, desired, Err(String::new()));
+    }
+    startup_status_for(true, desired, query_startup_registration(app))
+}
+
+#[cfg(desktop)]
+fn query_startup_registration<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(desktop))]
+fn query_startup_registration<R: tauri::Runtime>(
+    _app: &tauri::AppHandle<R>,
+) -> Result<bool, String> {
+    Err("autostart is unavailable on this target".to_string())
 }
 
 #[cfg(desktop)]
@@ -2380,7 +2483,8 @@ fn install_close_behavior(window: &WebviewWindow) {
 mod tests {
     use super::{
         civil_date_from_days, module_id_from_window_label, module_window_label, now_rfc3339,
-        record_log, sanitize_launcher_drop_paths, HostState, MAX_SESSION_LOG_ENTRIES,
+        record_log, sanitize_launcher_drop_paths, startup_status_for, HostState,
+        MAX_SESSION_LOG_ENTRIES,
     };
     use std::{
         fs,
@@ -2462,5 +2566,30 @@ mod tests {
             entries.last().map(|entry| entry.message.as_str()),
             Some("event-258")
         );
+    }
+
+    #[test]
+    fn startup_status_reports_registration_health_without_sensitive_details() {
+        let healthy = startup_status_for(true, true, Ok(true));
+        assert_eq!(healthy.status, "Healthy");
+        assert!(healthy.can_configure);
+        assert!(!healthy.can_repair);
+        assert!(healthy.registered);
+
+        let degraded = startup_status_for(true, true, Ok(false));
+        assert_eq!(degraded.status, "Degraded");
+        assert!(degraded.can_repair);
+        assert!(!degraded.message.contains("HKCU"));
+
+        let unavailable = startup_status_for(true, false, Err("private registry path".to_string()));
+        assert_eq!(unavailable.status, "Unavailable");
+        assert!(unavailable.can_repair);
+        assert_eq!(unavailable.message, "无法读取登录启动注册状态。");
+
+        let disabled = startup_status_for(false, true, Ok(true));
+        assert_eq!(disabled.status, "Disabled");
+        assert!(!disabled.can_configure);
+        assert!(!disabled.can_repair);
+        assert!(!disabled.registered);
     }
 }

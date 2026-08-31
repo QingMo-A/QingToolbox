@@ -112,8 +112,9 @@ Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost
   当前用户的启动项；开发/烟测默认不改注册表，只有显式设置
   `QING_TAURI_ENABLE_AUTOSTART_SYNC=1` 才会启用该副作用；烟测统一设置
   `QING_TAURI_DISABLE_AUTOSTART_SYNC=1`，即使指向 Release 可执行文件也不会改动登录项。
-  设置页的“修复启动项”也会复用同一条 Rust 校正路径，不会把注册表位置或可执行文件
-  路径暴露给 Vue；被禁用的开发/烟测环境会明确返回不可用错误。
+  设置页会通过同一插件读取实际注册状态并显示 Healthy/Degraded/Unavailable；“修复启动项”
+  也会复用同一条 Rust 校正路径，不会把注册表位置或可执行文件路径暴露给 Vue；被禁用的
+  开发/烟测环境会明确显示 Disabled 并拒绝副作用。
 - 应用退出事件会先请求所有由本宿主创建的模块进程优雅关闭，超时后由
   Rust runtime supervisor 强制收拢，不会触碰用户自行启动的同名进程。
 - 已实现版本化 envelope、单行 JSON frame 限制（1 MiB）、nonce-bound hello

@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import type { BridgeEvent, BridgeRequest, BridgeResponse } from '../../contracts/app'
 import type { Transport } from './Transport'
-import type { FontOption, ModuleListPayload, ModuleRuntimeSnapshot, ModuleSummary, SessionLogSnapshot, SettingsSnapshot as TauriSettingsSnapshot } from './tauriTypes'
+import type { FontOption, ModuleListPayload, ModuleRuntimeSnapshot, ModuleSummary, SessionLogSnapshot, SettingsSnapshot as TauriSettingsSnapshot, StartupRegistrationSnapshot } from './tauriTypes'
 
 /** Adapts the migrated Rust/Tauri commands to the existing full Vue shell. */
 export class TauriTransport implements Transport {
@@ -104,16 +104,16 @@ export class TauriTransport implements Transport {
       case 'modules.downloadUpdate':
       case 'modules.installVerifiedUpdate':
         throw new Error('UnsupportedInTauri: this operation is not exposed by the migrated Rust host yet.')
-      case 'settings.getSnapshot': return toWebSettings(await invoke<TauriSettingsSnapshot>('get_settings'))
+      case 'settings.getSnapshot': return this.settingsSnapshot()
       case 'settings.setLanguage': return this.updateSettings({ language: requiredString(message.payload.languageCode) })
       case 'settings.setAppearancePreset': return this.updateSettings({ appearancePresetId: requiredString(message.payload.appearancePresetId) })
       case 'settings.setMainWindowCloseBehavior': return this.updateSettings({ closeBehavior: closeBehaviorToRust(requiredString(message.payload.mainWindowCloseBehavior)) })
       case 'settings.setStartupPresentationMode': return this.updateSettings({ startupPresentation: startupToRust(requiredString(message.payload.startupPresentationMode)) })
       case 'settings.setShowLogsInSidebar': return this.updateSettings({ showLogsInSidebar: Boolean(message.payload.showLogsInSidebar) })
       case 'settings.setLaunchAtLogin': return this.updateSettings({ launchAtLogin: Boolean(message.payload.enabled) })
-      case 'settings.repairStartupRegistration': return toWebSettings(await invoke<TauriSettingsSnapshot>('repair_startup_registration'))
-      case 'settings.refreshFonts': return toWebSettings(await invoke<TauriSettingsSnapshot>('get_settings'))
-      case 'settings.setFont': return toWebSettings(await invoke<TauriSettingsSnapshot>('set_font', { fontId: requiredString(message.payload.fontId) }))
+      case 'settings.repairStartupRegistration': await invoke('repair_startup_registration'); return this.settingsSnapshot()
+      case 'settings.refreshFonts': return this.settingsSnapshot()
+      case 'settings.setFont': return this.withStartupStatus(invoke<TauriSettingsSnapshot>('set_font', { fontId: requiredString(message.payload.fontId) }))
       case 'settings.importFont': return this.importFont()
       case 'logs.getSnapshot': return invoke<SessionLogSnapshot>('get_session_logs')
       case 'hostUpdate.getSnapshot':
@@ -148,12 +148,26 @@ export class TauriTransport implements Transport {
 
   private async importFont() {
     const selected = await open({ title: '导入字体', multiple: false, directory: false, filters: [{ name: 'Font files', extensions: ['ttf', 'otf', 'ttc'] }] })
-    if (!selected || Array.isArray(selected)) return { disposition: 'Cancelled', snapshot: toWebSettings(await invoke<TauriSettingsSnapshot>('get_settings')) }
+    if (!selected || Array.isArray(selected)) return { disposition: 'Cancelled', snapshot: await this.settingsSnapshot() }
     const imported = await invoke<TauriSettingsSnapshot>('import_font', { sourcePath: selected })
-    return { disposition: 'Imported', snapshot: toWebSettings(imported) }
+    return { disposition: 'Imported', snapshot: await this.withStartupStatus(Promise.resolve(imported)) }
   }
 
-  private async updateSettings(update: Record<string, unknown>) { return toWebSettings(await invoke<TauriSettingsSnapshot>('update_settings', { update })) }
+  private async settingsSnapshot() {
+    const [settings, startup] = await Promise.all([invoke<TauriSettingsSnapshot>('get_settings'), this.startupStatus()])
+    return toWebSettings(settings, startup)
+  }
+
+  private async withStartupStatus(settingsPromise: Promise<TauriSettingsSnapshot>) {
+    const [settings, startup] = await Promise.all([settingsPromise, this.startupStatus()])
+    return toWebSettings(settings, startup)
+  }
+
+  private async startupStatus(): Promise<StartupRegistrationSnapshot | null> {
+    try { return await invoke<StartupRegistrationSnapshot>('get_startup_registration_status') } catch { return null }
+  }
+
+  private async updateSettings(update: Record<string, unknown>) { return this.withStartupStatus(invoke<TauriSettingsSnapshot>('update_settings', { update })) }
   private ok(message: BridgeRequest, payload: unknown): BridgeResponse { return { protocolVersion: message.protocolVersion, requestId: message.requestId, success: true, payload, error: null } }
   private fail(message: BridgeRequest, error: unknown): BridgeResponse {
     const text = error instanceof Error ? error.message : String(error); const separator = text.indexOf(':')
@@ -178,13 +192,14 @@ function toWebModule(module: ModuleSummary, runtime?: ModuleRuntimeSnapshot, sta
   const state = runtime?.state === 'running' ? 'Running' : runtime?.state === 'starting' ? 'Starting' : runtime?.state === 'failed' ? 'Failed' : 'NotLoaded'; const valid = module.valid
   return { id: module.id, displayName: module.name, displayDescription: module.description ?? '', version: module.version, author: module.author ?? '', runtimeType: module.runtimeType ?? 'process', loadMode: 'Process', runtimeState: state, isValid: valid, errorCount: module.issues.length, errors: module.issues.map(issue => issue.message), permissions: [], minimumHostVersion: '', isUserInstalled: module.source === 'user', canRemove: module.source === 'user', canLoad: valid && state !== 'Running', canActivate: valid && state !== 'Running', canOpen: valid && module.uiKind === 'Web', canDeactivate: state === 'Running', canUnload: state === 'Running', isBusy: state === 'Starting', isExecutionBlocked: false, isStartupEnabled: startupEnabled, startupAuthorizationState: valid ? startupEnabled ? 'Enabled' : 'NotEnabled' : 'Unavailable', canChangeStartupAuthorization: valid, isStartupAuthorizationBusy: false, updateStatus: 'DisabledByEnvironment', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: false, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'DisabledByEnvironment', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0, canInstallVerifiedUpdate: false, iconDataUrl: module.iconDataUrl }
 }
-function toWebSettings(value: TauriSettingsSnapshot) {
+function toWebSettings(value: TauriSettingsSnapshot, startup?: StartupRegistrationSnapshot | null) {
   const code = value.language === 'en-US' ? 'en-US' : value.language === 'zh-CN' ? 'zh-CN' : 'system'
   const fonts = (Array.isArray(value.fonts) ? value.fonts : []).map(toWebFont)
   const defaultFont: FontOption = { id: 'Default', source: 'default', displayName: 'Default', familyName: null, resourceUrl: null }
   const current = fonts.find(font => font.id === value.fontId) ?? defaultFont
   if (!fonts.some(font => font.id === defaultFont.id)) fonts.unshift(defaultFont)
-  return { generatedAt: new Date().toISOString(), appearancePresetId: value.appearancePresetId, font: current, fonts, language: { code, effectiveCode: code === 'en-US' ? 'en-US' : 'zh-CN', displayName: code === 'en-US' ? 'English' : '系统默认', options: [{ code: 'system', displayName: 'System', nativeName: '系统默认' }, { code: 'zh-CN', displayName: 'Chinese', nativeName: '简体中文' }, { code: 'en-US', displayName: 'English', nativeName: 'English' }] }, showLogsInSidebar: value.showLogsInSidebar, mainWindowCloseBehavior: value.closeBehavior === 'exit' ? 'ExitApplication' : value.closeBehavior === 'tray' ? 'MinimizeToNotificationArea' : 'Ask', closeBehaviorMessage: '', launchAtLogin: value.launchAtLogin, canConfigureLaunchAtLogin: true, canRepairStartup: true, startupPresentationMode: value.startupPresentation === 'tray' ? 'FloatingBadge' : value.startupPresentation === 'minimized' ? 'Minimized' : 'MainWindow', startupBackend: 'Tauri', startupStatus: 'Ready', startupMessage: '' }
+  const registration = startup ?? { canConfigure: true, registered: value.launchAtLogin, canRepair: false, status: 'Unavailable', message: '无法读取登录启动注册状态。' }
+  return { generatedAt: new Date().toISOString(), appearancePresetId: value.appearancePresetId, font: current, fonts, language: { code, effectiveCode: code === 'en-US' ? 'en-US' : 'zh-CN', displayName: code === 'en-US' ? 'English' : '系统默认', options: [{ code: 'system', displayName: 'System', nativeName: '系统默认' }, { code: 'zh-CN', displayName: 'Chinese', nativeName: '简体中文' }, { code: 'en-US', displayName: 'English', nativeName: 'English' }] }, showLogsInSidebar: value.showLogsInSidebar, mainWindowCloseBehavior: value.closeBehavior === 'exit' ? 'ExitApplication' : value.closeBehavior === 'tray' ? 'MinimizeToNotificationArea' : 'Ask', closeBehaviorMessage: '', launchAtLogin: value.launchAtLogin, canConfigureLaunchAtLogin: registration.canConfigure, canRepairStartup: registration.canRepair, startupPresentationMode: value.startupPresentation === 'tray' ? 'FloatingBadge' : value.startupPresentation === 'minimized' ? 'Minimized' : 'MainWindow', startupBackend: 'Tauri autostart', startupStatus: registration.status, startupMessage: registration.message }
 }
 function toWebFont(font: FontOption): FontOption { return { id: font.id, source: font.source, displayName: font.displayName, familyName: font.familyName ?? null, resourceUrl: font.resourceUrl ?? null } }
 function closeBehaviorToRust(value: string) { return value === 'ExitApplication' ? 'exit' : value === 'MinimizeToNotificationArea' ? 'tray' : 'ask' }

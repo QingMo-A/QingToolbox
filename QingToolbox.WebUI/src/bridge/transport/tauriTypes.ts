@@ -4,5 +4,6 @@ export type ModuleListPayload = { modules: ModuleSummary[]; roots: unknown[]; sc
 export type ModuleRuntimeSnapshot = { moduleId: string; state: 'notStarted' | 'starting' | 'running' | 'stopped' | 'failed'; generation: number; lastError: string | null }
 export type FontOption = { id: string; source: 'default' | 'system' | 'imported'; displayName: string; familyName: string | null; resourceUrl: string | null }
 export type SettingsSnapshot = { language: string; appearancePresetId: string; fontId: string; fontSource: 'default' | 'system' | 'imported'; fontFamilyName: string | null; fonts: FontOption[]; closeBehavior: string; startupPresentation: string; toggleHotkey: string; launchAtLogin: boolean; showLogsInSidebar: boolean; recentModuleIds: string[]; startupModuleIds: string[]; settingsSchemaVersion: number }
+export type StartupRegistrationSnapshot = { canConfigure: boolean; registered: boolean; canRepair: boolean; status: string; message: string }
 export type SessionLogEntry = { timestamp: string; level: 'Information' | 'Warning' | 'Error'; category: string; message: string }
 export type SessionLogSnapshot = { generatedAt: string; entries: SessionLogEntry[] }
