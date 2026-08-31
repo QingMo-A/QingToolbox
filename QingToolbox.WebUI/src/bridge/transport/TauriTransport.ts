@@ -120,7 +120,7 @@ export class TauriTransport implements Transport {
       case 'hostUpdate.check':
       case 'hostUpdate.download':
       case 'hostUpdate.cancel':
-      case 'hostUpdate.install': return unavailableUpdateSnapshot()
+      case 'hostUpdate.install': return this.hostUpdateSnapshot()
       default: throw new Error(`UnsupportedCommand: ${message.command}`)
     }
   }
@@ -167,6 +167,11 @@ export class TauriTransport implements Transport {
     try { return await invoke<StartupRegistrationSnapshot>('get_startup_registration_status') } catch { return null }
   }
 
+  private async hostUpdateSnapshot() {
+    const host = await invoke<{ version: string }>('get_host_info')
+    return unavailableUpdateSnapshot(host.version)
+  }
+
   private async updateSettings(update: Record<string, unknown>) { return this.withStartupStatus(invoke<TauriSettingsSnapshot>('update_settings', { update })) }
   private ok(message: BridgeRequest, payload: unknown): BridgeResponse { return { protocolVersion: message.protocolVersion, requestId: message.requestId, success: true, payload, error: null } }
   private fail(message: BridgeRequest, error: unknown): BridgeResponse {
@@ -204,4 +209,4 @@ function toWebSettings(value: TauriSettingsSnapshot, startup?: StartupRegistrati
 function toWebFont(font: FontOption): FontOption { return { id: font.id, source: font.source, displayName: font.displayName, familyName: font.familyName ?? null, resourceUrl: font.resourceUrl ?? null } }
 function closeBehaviorToRust(value: string) { return value === 'ExitApplication' ? 'exit' : value === 'MinimizeToNotificationArea' ? 'tray' : 'ask' }
 function startupToRust(value: string) { return value === 'FloatingBadge' ? 'tray' : value === 'Minimized' ? 'minimized' : 'main' }
-function unavailableUpdateSnapshot() { const now = new Date().toISOString(); return { generatedAt: now, state: 'DisabledByEnvironment', currentVersion: '0.1.0', latestVersion: '', publishedAt: '', lastChecked: now, summary: 'Tauri updater integration is not enabled yet.', showBanner: false, downloadState: 'DisabledByEnvironment', bytesReceived: 0, expectedBytes: 0, downloadError: '', canCheck: false, canDownload: false, canCancelDownload: false, canInstall: false, installationSupported: false, installMessage: '' } }
+function unavailableUpdateSnapshot(currentVersion: string) { const now = new Date().toISOString(); return { generatedAt: now, state: 'DisabledByEnvironment', currentVersion, latestVersion: '', publishedAt: '', lastChecked: now, summary: 'Tauri updater integration is not enabled yet.', showBanner: false, downloadState: 'DisabledByEnvironment', bytesReceived: 0, expectedBytes: 0, downloadError: '', canCheck: false, canDownload: false, canCancelDownload: false, canInstall: false, installationSupported: false, installMessage: '' } }
