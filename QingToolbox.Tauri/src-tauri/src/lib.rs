@@ -55,6 +55,7 @@ pub struct HostState {
     module_index: Mutex<std::collections::BTreeMap<String, modules::ModuleRecord>>,
     scan_gate: Mutex<()>,
     runtime: Mutex<ModuleRuntimeManager>,
+    host_update: Mutex<host_update::HostUpdateState>,
     settings: Mutex<SettingsStore>,
     module_hotkeys: Mutex<std::collections::BTreeMap<String, String>>,
     screenpin_windows: Mutex<std::collections::BTreeMap<String, ScreenPinWindowRecord>>,
@@ -69,6 +70,10 @@ impl HostState {
             module_index: Mutex::new(std::collections::BTreeMap::new()),
             scan_gate: Mutex::new(()),
             runtime: Mutex::new(ModuleRuntimeManager::new()),
+            host_update: Mutex::new(host_update::HostUpdateState::new(
+                env!("CARGO_PKG_VERSION"),
+                now_rfc3339(),
+            )),
             settings: Mutex::new(SettingsStore::new()),
             module_hotkeys: Mutex::new(std::collections::BTreeMap::new()),
             screenpin_windows: Mutex::new(std::collections::BTreeMap::new()),
@@ -182,11 +187,70 @@ fn get_host_info() -> HostInfo {
 }
 
 #[tauri::command]
-fn get_host_update_snapshot(window: WebviewWindow) -> Result<HostUpdateSnapshot, CommandError> {
+fn get_host_update_snapshot(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+) -> Result<HostUpdateSnapshot, CommandError> {
     ensure_main_window(&window)?;
-    Ok(HostUpdateSnapshot::unavailable(
+    state
+        .host_update
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "宿主更新状态不可用。".to_string(),
+        })
+        .map(|snapshot| snapshot.snapshot())
+}
+
+#[tauri::command]
+async fn check_host_update(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+) -> Result<HostUpdateSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    if !host_update_network_enabled() {
+        return state
+            .host_update
+            .lock()
+            .map_err(|_| CommandError {
+                code: "stateUnavailable",
+                message: "宿主更新状态不可用。".to_string(),
+            })
+            .map(|snapshot| snapshot.snapshot());
+    }
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let started_at = now_rfc3339();
+    let generation = state
+        .host_update
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "宿主更新状态不可用。".to_string(),
+        })?
+        .begin_check(started_at.clone());
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        host_update::check_official_release(&current_version, started_at)
+    })
+    .await;
+    let checked_at = result
+        .as_ref()
+        .ok()
+        .and_then(|value| value.as_ref().ok())
+        .map(|value| value.checked_at.clone())
+        .unwrap_or_else(now_rfc3339);
+    let check_result = match result {
+        Ok(Ok(value)) => Ok(value.release),
+        Ok(Err(_)) | Err(_) => Err("official update check failed".to_string()),
+    };
+    let mut snapshot = state.host_update.lock().map_err(|_| CommandError {
+        code: "stateUnavailable",
+        message: "宿主更新状态不可用。".to_string(),
+    })?;
+    Ok(snapshot.finish_check(
+        generation,
         env!("CARGO_PKG_VERSION"),
-        now_rfc3339(),
+        checked_at,
+        check_result,
     ))
 }
 
@@ -2007,6 +2071,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_host_info,
             get_host_update_snapshot,
+            check_host_update,
             get_settings,
             get_startup_registration_status,
             repair_startup_registration,
@@ -2099,6 +2164,21 @@ fn autostart_sync_enabled() -> bool {
     }
     !cfg!(debug_assertions)
         || std::env::var("QING_TAURI_ENABLE_AUTOSTART_SYNC")
+            .ok()
+            .as_deref()
+            == Some("1")
+}
+
+fn host_update_network_enabled() -> bool {
+    if std::env::var("QING_TAURI_DISABLE_UPDATE_CHECK")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        return false;
+    }
+    !cfg!(debug_assertions)
+        || std::env::var("QING_TAURI_ENABLE_UPDATE_CHECK")
             .ok()
             .as_deref()
             == Some("1")
