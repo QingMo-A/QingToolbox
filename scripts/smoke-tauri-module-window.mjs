@@ -38,11 +38,19 @@ void spawnExit.catch(() => {})
 
 try {
   target = await Promise.race([
-    waitForTarget((value) => value.title === 'QingToolbox'),
+    // The Vue shell localizes the document title after startup (for example
+    // "首页 · QingToolbox"). Match the stable product suffix instead of the
+    // initial index.html title so the smoke remains valid in every locale.
+    waitForTarget((value) => typeof value.title === 'string' && value.title.includes('QingToolbox')),
     spawnError,
     spawnExit,
   ])
   await waitFor(async () => Boolean(await evaluate(target, `!document.querySelector('.empty-state')?.textContent?.includes('正在读取') && !document.querySelector('.status-label')?.textContent?.includes('扫描模块')`)), 10000)
+  // The current shell keeps module cards in the Modules workspace rather
+  // than duplicating them on the dashboard. Navigate through the rendered
+  // router link so the smoke follows the same user path as the UI.
+  await evaluate(target, `document.querySelector('a[href="#/modules"]')?.click(); true`)
+  await waitFor(async () => Boolean(await evaluate(target, `location.hash === '#/modules' && document.querySelector('.wpf-module-card')`)), 12000)
   moduleTarget = await openModuleCard('Qing Launcher', 'qing.launcher')
   await waitFor(() => evaluate(moduleTarget, `({
     shell: Boolean(document.querySelector('.launcher-shell')),
@@ -150,13 +158,14 @@ try {
 }
 
 async function openModuleCard(name, moduleId) {
-  await waitFor(async () => Boolean(await evaluate(target, `Boolean([...document.querySelectorAll('.module-card')]
+  await waitFor(async () => Boolean(await evaluate(target, `Boolean([...document.querySelectorAll('.wpf-module-card')]
     .find((node) => node.textContent?.includes(${JSON.stringify(name)}))
-    ?.querySelector('button.module-action'))`)), 12000)
+    ?.querySelector('.module-card-actions .q-button'))`)), 12000)
   await evaluate(target, `(() => {
-    const card = [...document.querySelectorAll('.module-card')]
+    const card = [...document.querySelectorAll('.wpf-module-card')]
       .find((node) => node.textContent?.includes(${JSON.stringify(name)}))
-    const button = card?.querySelector('button.module-action')
+    const button = [...(card?.querySelectorAll('.module-card-actions .q-button') ?? [])]
+      .find((candidate) => /^(打开|Open)$/.test(candidate.textContent?.trim() ?? ''))
     if (!button) throw new Error(${JSON.stringify(`${name} card/button was not rendered`)})
     button.click()
     return true
