@@ -139,6 +139,9 @@ the first release.
 - Expose a bounded, in-memory session log snapshot from Rust. The existing Vue
   logs page now reads `get_session_logs`; operational events are recorded without
   returning backend paths, process handles, or arbitrary frontend data.
+- Move the host-update snapshot boundary into Rust. `get_host_update_snapshot`
+  reports the Cargo host version and an explicit disabled state; the Vue shell
+  no longer fabricates an updater version or performs network/install work.
 - Broadcast bounded runtime-state changes from the Rust supervisor to the main
   window. The Vue bridge coalesces overlapping events and re-reads authoritative
   app/module snapshots, so child exit or failure does not require manual refresh.

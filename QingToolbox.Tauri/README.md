@@ -120,6 +120,9 @@ Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost
 - 已实现版本化 envelope、单行 JSON frame 限制（1 MiB）、nonce-bound hello
   握手（每次启动使用系统 RNG nonce）、Rust 后台监督、单实例锁，以及模块根路径
   和资源路径校验。
+- 宿主更新面板的基础快照已由 Rust `get_host_update_snapshot` 提供，当前版本
+  来自 Tauri Cargo 构建版本；在原生 updater 尚未启用前，检查、下载和安装能力会
+  明确保持 Disabled，不会让 Vue 侧自行访问 Release 或执行安装器。
 - Web 模块使用后端注册的 `qmod://` 资源协议打开独立窗口；资源每次请求
   都重新做模块目录边界检查，Vue 不会得到绝对路径。
 - 新宿主只接受 `runtimeType=Process`、`runtimeIsolation=OutOfProcess` 的

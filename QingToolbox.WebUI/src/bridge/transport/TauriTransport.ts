@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import type { BridgeEvent, BridgeRequest, BridgeResponse } from '../../contracts/app'
 import type { Transport } from './Transport'
-import type { FontOption, ModuleListPayload, ModuleRuntimeSnapshot, ModuleSummary, SessionLogSnapshot, SettingsSnapshot as TauriSettingsSnapshot, StartupRegistrationSnapshot } from './tauriTypes'
+import type { FontOption, HostUpdateSnapshot as TauriHostUpdateSnapshot, ModuleListPayload, ModuleRuntimeSnapshot, ModuleSummary, SessionLogSnapshot, SettingsSnapshot as TauriSettingsSnapshot, StartupRegistrationSnapshot } from './tauriTypes'
 
 /** Adapts the migrated Rust/Tauri commands to the existing full Vue shell. */
 export class TauriTransport implements Transport {
@@ -120,7 +120,7 @@ export class TauriTransport implements Transport {
       case 'hostUpdate.check':
       case 'hostUpdate.download':
       case 'hostUpdate.cancel':
-      case 'hostUpdate.install': return this.hostUpdateSnapshot()
+      case 'hostUpdate.install': return invoke<TauriHostUpdateSnapshot>('get_host_update_snapshot')
       default: throw new Error(`UnsupportedCommand: ${message.command}`)
     }
   }
@@ -167,11 +167,6 @@ export class TauriTransport implements Transport {
     try { return await invoke<StartupRegistrationSnapshot>('get_startup_registration_status') } catch { return null }
   }
 
-  private async hostUpdateSnapshot() {
-    const host = await invoke<{ version: string }>('get_host_info')
-    return unavailableUpdateSnapshot(host.version)
-  }
-
   private async updateSettings(update: Record<string, unknown>) { return this.withStartupStatus(invoke<TauriSettingsSnapshot>('update_settings', { update })) }
   private ok(message: BridgeRequest, payload: unknown): BridgeResponse { return { protocolVersion: message.protocolVersion, requestId: message.requestId, success: true, payload, error: null } }
   private fail(message: BridgeRequest, error: unknown): BridgeResponse {
@@ -209,4 +204,3 @@ function toWebSettings(value: TauriSettingsSnapshot, startup?: StartupRegistrati
 function toWebFont(font: FontOption): FontOption { return { id: font.id, source: font.source, displayName: font.displayName, familyName: font.familyName ?? null, resourceUrl: font.resourceUrl ?? null } }
 function closeBehaviorToRust(value: string) { return value === 'ExitApplication' ? 'exit' : value === 'MinimizeToNotificationArea' ? 'tray' : 'ask' }
 function startupToRust(value: string) { return value === 'FloatingBadge' ? 'tray' : value === 'Minimized' ? 'minimized' : 'main' }
-function unavailableUpdateSnapshot(currentVersion: string) { const now = new Date().toISOString(); return { generatedAt: now, state: 'DisabledByEnvironment', currentVersion, latestVersion: '', publishedAt: '', lastChecked: now, summary: 'Tauri updater integration is not enabled yet.', showBanner: false, downloadState: 'DisabledByEnvironment', bytesReceived: 0, expectedBytes: 0, downloadError: '', canCheck: false, canDownload: false, canCancelDownload: false, canInstall: false, installationSupported: false, installMessage: '' } }

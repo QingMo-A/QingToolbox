@@ -20,6 +20,7 @@ use tauri::{
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 mod fonts;
+mod host_update;
 mod importer;
 mod modules;
 mod paths;
@@ -28,6 +29,7 @@ mod runtime;
 mod settings;
 mod web;
 
+use host_update::HostUpdateSnapshot;
 use importer::{import_qmod, update_qmod, ModuleImportResult};
 use modules::{discover_modules, ModuleListPayload};
 use paths::{resolve_module_roots, user_modules_root, ModuleRoot, ModuleSource};
@@ -177,6 +179,15 @@ fn get_host_info() -> HostInfo {
         backend: "rust",
         protocol_version: "1",
     }
+}
+
+#[tauri::command]
+fn get_host_update_snapshot(window: WebviewWindow) -> Result<HostUpdateSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    Ok(HostUpdateSnapshot::unavailable(
+        env!("CARGO_PKG_VERSION"),
+        now_rfc3339(),
+    ))
 }
 
 #[tauri::command]
@@ -1995,6 +2006,7 @@ pub fn run() {
         .manage(HostState::new())
         .invoke_handler(tauri::generate_handler![
             get_host_info,
+            get_host_update_snapshot,
             get_settings,
             get_startup_registration_status,
             repair_startup_registration,
