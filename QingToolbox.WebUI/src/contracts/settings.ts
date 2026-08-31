@@ -87,7 +87,9 @@ const safeFontResource = (value: string|null|undefined): string|null => {
   if (!value) return null
   try {
     const url = new URL(value)
-    if (url.origin !== 'https://app.qingtoolbox.local' || !/^\/user-fonts\/[0-9a-f]{64}\.(ttf|otf|ttc)$/i.test(url.pathname)) return null
+    const isLegacyWebResource = url.origin === 'https://app.qingtoolbox.local'
+    const isTauriResource = url.protocol === 'qfont:' && url.hostname === 'localhost'
+    if ((!isLegacyWebResource && !isTauriResource) || !/^\/user-fonts\/(?:font-)?[0-9a-f]{64}\.(ttf|otf|ttc)$/i.test(url.pathname)) return null
     return url.href
   } catch { return null }
 }
@@ -97,8 +99,10 @@ export const normalizeFont = (value: SettingsFont|undefined|null): SettingsFont 
     return { id: DEFAULT_FONT_ID, source: 'default', displayName: 'Default', familyName: null, resourceUrl: null }
   if (value.source === 'system' && value.id.startsWith('system:') && value.familyName)
     return { ...value, familyName: value.familyName.slice(0, 128), resourceUrl: null }
-  if (value.source === 'imported' && /^imported:[0-9a-f]{64}$/i.test(value.id) && value.resourceUrl)
-    return { ...value, resourceUrl: safeFontResource(value.resourceUrl) }
+  if (value.source === 'imported' && /^imported:[0-9a-f]{64}$/i.test(value.id) && value.resourceUrl) {
+    const resourceUrl = safeFontResource(value.resourceUrl)
+    return resourceUrl ? { ...value, resourceUrl } : { id: DEFAULT_FONT_ID, source: 'default', displayName: 'Default', familyName: null, resourceUrl: null }
+  }
   return { id: DEFAULT_FONT_ID, source: 'default', displayName: 'Default', familyName: null, resourceUrl: null }
 }
 

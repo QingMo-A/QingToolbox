@@ -26,8 +26,10 @@ const resourceUrlFor = (value: SettingsFont) => {
   if (value.source !== 'imported' || !value.resourceUrl) return null
   try {
     const url = new URL(value.resourceUrl)
-    return url.origin === 'https://app.qingtoolbox.local' &&
-      /^\/user-fonts\/[0-9a-f]{64}\.(ttf|otf|ttc)$/i.test(url.pathname) ? url.href : null
+    const validPath = /^\/user-fonts\/(?:font-)?[0-9a-f]{64}\.(ttf|otf|ttc)$/i.test(url.pathname)
+    const legacyHost = url.origin === 'https://app.qingtoolbox.local'
+    const tauriHost = url.protocol === 'qfont:' && url.hostname === 'localhost'
+    return validPath && (legacyHost || tauriHost) ? url.href : null
   } catch { return null }
 }
 

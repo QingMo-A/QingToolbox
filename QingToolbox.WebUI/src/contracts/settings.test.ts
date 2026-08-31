@@ -44,6 +44,12 @@ describe('settings snapshot contract', () => {
     expect(normalizeFont({ id: 'imported:../../private', source: 'imported', displayName: 'bad', resourceUrl: 'file:///C:/private.ttf' }).id).toBe(DEFAULT_FONT_ID)
     expect(normalizeSettingsSnapshot({ ...valid, font: { id: 'future-font', source: 'system', displayName: 'Future', familyName: 'Future' } } as any).font?.id).toBe(DEFAULT_FONT_ID)
   })
+  it('accepts the Tauri qfont resource while keeping the hash boundary', () => {
+    const imported = { id: `imported:${'b'.repeat(64)}`, source: 'imported' as const, displayName: 'Imported Sans', familyName: null, resourceUrl: `qfont://localhost/user-fonts/font-${'b'.repeat(64)}.otf` }
+    const normalized = normalizeSettingsSnapshot({ ...valid, font: imported, fonts: [imported] } as any)
+    expect(normalized.font?.resourceUrl).toBe(imported.resourceUrl)
+    expect(normalizeSettingsSnapshot({ ...valid, font: { ...imported, resourceUrl: `qfont://evil/user-fonts/font-${'b'.repeat(64)}.otf` } } as any).font?.id).toBe(DEFAULT_FONT_ID)
+  })
   it('rejects font DTOs that carry non-string fields', () => {
     expect(isSettingsSnapshot({ ...valid, font: { id: 'Default', source: 'default', displayName: 42 } })).toBe(false)
   })

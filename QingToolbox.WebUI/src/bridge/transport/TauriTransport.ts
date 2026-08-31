@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import type { BridgeEvent, BridgeRequest, BridgeResponse } from '../../contracts/app'
 import type { Transport } from './Transport'
-import type { ModuleListPayload, ModuleRuntimeSnapshot, ModuleSummary, SessionLogSnapshot, SettingsSnapshot as TauriSettingsSnapshot } from './tauriTypes'
+import type { FontOption, ModuleListPayload, ModuleRuntimeSnapshot, ModuleSummary, SessionLogSnapshot, SettingsSnapshot as TauriSettingsSnapshot } from './tauriTypes'
 
 /** Adapts the migrated Rust/Tauri commands to the existing full Vue shell. */
 export class TauriTransport implements Transport {
@@ -113,8 +113,8 @@ export class TauriTransport implements Transport {
       case 'settings.setLaunchAtLogin': return this.updateSettings({ launchAtLogin: Boolean(message.payload.enabled) })
       case 'settings.repairStartupRegistration':
       case 'settings.refreshFonts': return toWebSettings(await invoke<TauriSettingsSnapshot>('get_settings'))
-      case 'settings.setFont':
-      case 'settings.importFont': throw new Error('UnsupportedInTauri: custom fonts are not exposed by the migrated Rust host yet.')
+      case 'settings.setFont': return toWebSettings(await invoke<TauriSettingsSnapshot>('set_font', { fontId: requiredString(message.payload.fontId) }))
+      case 'settings.importFont': return this.importFont()
       case 'logs.getSnapshot': return invoke<SessionLogSnapshot>('get_session_logs')
       case 'hostUpdate.getSnapshot':
       case 'hostUpdate.check':
@@ -146,6 +146,13 @@ export class TauriTransport implements Transport {
     return { disposition: 'Imported', importedModuleId: updated.id, snapshot: await this.moduleSnapshot() }
   }
 
+  private async importFont() {
+    const selected = await open({ title: '导入字体', multiple: false, directory: false, filters: [{ name: 'Font files', extensions: ['ttf', 'otf', 'ttc'] }] })
+    if (!selected || Array.isArray(selected)) return { disposition: 'Cancelled', snapshot: toWebSettings(await invoke<TauriSettingsSnapshot>('get_settings')) }
+    const imported = await invoke<TauriSettingsSnapshot>('import_font', { sourcePath: selected })
+    return { disposition: 'Imported', snapshot: toWebSettings(imported) }
+  }
+
   private async updateSettings(update: Record<string, unknown>) { return toWebSettings(await invoke<TauriSettingsSnapshot>('update_settings', { update })) }
   private ok(message: BridgeRequest, payload: unknown): BridgeResponse { return { protocolVersion: message.protocolVersion, requestId: message.requestId, success: true, payload, error: null } }
   private fail(message: BridgeRequest, error: unknown): BridgeResponse {
@@ -173,8 +180,13 @@ function toWebModule(module: ModuleSummary, runtime?: ModuleRuntimeSnapshot, sta
 }
 function toWebSettings(value: TauriSettingsSnapshot) {
   const code = value.language === 'en-US' ? 'en-US' : value.language === 'zh-CN' ? 'zh-CN' : 'system'
-  return { generatedAt: new Date().toISOString(), appearancePresetId: value.appearancePresetId, font: { id: 'Default', source: 'default', displayName: 'Default', familyName: null, resourceUrl: null }, fonts: [{ id: 'Default', source: 'default', displayName: 'Default', familyName: null, resourceUrl: null }], language: { code, effectiveCode: code === 'en-US' ? 'en-US' : 'zh-CN', displayName: code === 'en-US' ? 'English' : '系统默认', options: [{ code: 'system', displayName: 'System', nativeName: '系统默认' }, { code: 'zh-CN', displayName: 'Chinese', nativeName: '简体中文' }, { code: 'en-US', displayName: 'English', nativeName: 'English' }] }, showLogsInSidebar: value.showLogsInSidebar, mainWindowCloseBehavior: value.closeBehavior === 'exit' ? 'ExitApplication' : value.closeBehavior === 'tray' ? 'MinimizeToNotificationArea' : 'Ask', closeBehaviorMessage: '', launchAtLogin: value.launchAtLogin, canConfigureLaunchAtLogin: true, canRepairStartup: true, startupPresentationMode: value.startupPresentation === 'tray' ? 'FloatingBadge' : value.startupPresentation === 'minimized' ? 'Minimized' : 'MainWindow', startupBackend: 'Tauri', startupStatus: 'Ready', startupMessage: '' }
+  const fonts = (Array.isArray(value.fonts) ? value.fonts : []).map(toWebFont)
+  const defaultFont: FontOption = { id: 'Default', source: 'default', displayName: 'Default', familyName: null, resourceUrl: null }
+  const current = fonts.find(font => font.id === value.fontId) ?? defaultFont
+  if (!fonts.some(font => font.id === defaultFont.id)) fonts.unshift(defaultFont)
+  return { generatedAt: new Date().toISOString(), appearancePresetId: value.appearancePresetId, font: current, fonts, language: { code, effectiveCode: code === 'en-US' ? 'en-US' : 'zh-CN', displayName: code === 'en-US' ? 'English' : '系统默认', options: [{ code: 'system', displayName: 'System', nativeName: '系统默认' }, { code: 'zh-CN', displayName: 'Chinese', nativeName: '简体中文' }, { code: 'en-US', displayName: 'English', nativeName: 'English' }] }, showLogsInSidebar: value.showLogsInSidebar, mainWindowCloseBehavior: value.closeBehavior === 'exit' ? 'ExitApplication' : value.closeBehavior === 'tray' ? 'MinimizeToNotificationArea' : 'Ask', closeBehaviorMessage: '', launchAtLogin: value.launchAtLogin, canConfigureLaunchAtLogin: true, canRepairStartup: true, startupPresentationMode: value.startupPresentation === 'tray' ? 'FloatingBadge' : value.startupPresentation === 'minimized' ? 'Minimized' : 'MainWindow', startupBackend: 'Tauri', startupStatus: 'Ready', startupMessage: '' }
 }
+function toWebFont(font: FontOption): FontOption { return { id: font.id, source: font.source, displayName: font.displayName, familyName: font.familyName ?? null, resourceUrl: font.resourceUrl ?? null } }
 function closeBehaviorToRust(value: string) { return value === 'ExitApplication' ? 'exit' : value === 'MinimizeToNotificationArea' ? 'tray' : 'ask' }
 function startupToRust(value: string) { return value === 'FloatingBadge' ? 'tray' : value === 'Minimized' ? 'minimized' : 'main' }
 function unavailableUpdateSnapshot() { const now = new Date().toISOString(); return { generatedAt: now, state: 'DisabledByEnvironment', currentVersion: '0.1.0', latestVersion: '', publishedAt: '', lastChecked: now, summary: 'Tauri updater integration is not enabled yet.', showBanner: false, downloadState: 'DisabledByEnvironment', bytesReceived: 0, expectedBytes: 0, downloadError: '', canCheck: false, canDownload: false, canCancelDownload: false, canInstall: false, installationSupported: false, installMessage: '' } }

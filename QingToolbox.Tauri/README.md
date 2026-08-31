@@ -96,6 +96,10 @@ Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost
   最近模块 ID 通过固定 `%APPDATA%\\QingToolbox\\settings.json` 字段读写。
   更新使用同目录临时文件和备份回滚；未知旧字段会被保留，损坏文件会生成有限数量的
   `settings.corrupt-*.json` 备份。
+- 字体选择也由 Rust 设置层持有：内置字体目录只暴露固定的安全系统字体，用户导入的
+  `.ttf`、`.otf`、`.ttc` 会复制到私有 `%LOCALAPPDATA%\\QingToolbox\\Fonts\\Imported`
+  目录并以 SHA-256 ID 管理。WebView 只能通过受控 `qfont://` 资源读取已校验字体，不能
+  提交任意文件路径；缺失或损坏的导入字体会安全回退到默认字体。
 - 主窗口可以通过原生文件选择器导入 `.qmod`。导入器只接受 ZIP 容器，限制条目、展开大小、
   单文件大小和压缩比，拒绝绝对/穿越/重复/加密/符号链接路径；包先在用户模块根下的随机
   临时目录中解压并通过新宿主 manifest 校验，随后以同卷 rename 原子发布。导入阶段不会

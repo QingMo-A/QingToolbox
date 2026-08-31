@@ -19,6 +19,7 @@ use tauri::{
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
+mod fonts;
 mod importer;
 mod modules;
 mod paths;
@@ -33,7 +34,10 @@ use paths::{resolve_module_roots, user_modules_root, ModuleRoot, ModuleSource};
 use protocol::ProtocolEnvelope;
 use runtime::{ModuleRuntimeManager, ModuleRuntimeSnapshot, ModuleRuntimeState, RuntimeError};
 use settings::{SettingsSnapshot, SettingsStore, SettingsUpdate};
-use web::{open_module_window, serve_module_asset, serve_screenpin_asset, ScreenPinWindowRecord};
+use web::{
+    open_module_window, serve_font_asset, serve_module_asset, serve_screenpin_asset,
+    ScreenPinWindowRecord,
+};
 
 const MAX_EXTERNAL_DROP_PATHS: usize = 32;
 const MAX_EXTERNAL_DROP_PATH_LENGTH: usize = 32 * 1024;
@@ -203,6 +207,76 @@ fn get_session_logs(
         generated_at: now_rfc3339(),
         entries: entries.clone(),
     })
+}
+
+#[tauri::command]
+fn set_font(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+    font_id: String,
+) -> Result<SettingsSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    let Some(font) = fonts::option_for_id(&font_id) else {
+        return Err(CommandError {
+            code: "fontInvalid",
+            message: "所选字体不在当前字体目录中。".to_string(),
+        });
+    };
+    let mut settings = state.settings.lock().map_err(|_| CommandError {
+        code: "stateUnavailable",
+        message: "工具箱设置状态不可用。".to_string(),
+    })?;
+    let snapshot = settings
+        .update(SettingsUpdate {
+            font_id: Some(font.id.clone()),
+            ..SettingsUpdate::default()
+        })
+        .map_err(|error| CommandError {
+            code: error.code,
+            message: error.message,
+        })?;
+    drop(settings);
+    record_log(
+        &state,
+        "Information",
+        "Settings",
+        format!("Selected font {}.", font.display_name),
+    );
+    Ok(snapshot)
+}
+
+#[tauri::command]
+fn import_font(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+    source_path: String,
+) -> Result<SettingsSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    let imported = fonts::import_from_path(&source_path).map_err(|error| CommandError {
+        code: error.code,
+        message: error.message,
+    })?;
+    let mut settings = state.settings.lock().map_err(|_| CommandError {
+        code: "stateUnavailable",
+        message: "工具箱设置状态不可用。".to_string(),
+    })?;
+    let snapshot = settings
+        .update(SettingsUpdate {
+            font_id: Some(imported.id.clone()),
+            ..SettingsUpdate::default()
+        })
+        .map_err(|error| CommandError {
+            code: error.code,
+            message: error.message,
+        })?;
+    drop(settings);
+    record_log(
+        &state,
+        "Information",
+        "Settings",
+        format!("Imported font {}.", imported.display_name),
+    );
+    Ok(snapshot)
 }
 
 /// Apply a bounded, typed settings patch. The frontend cannot provide a
@@ -1844,11 +1918,16 @@ pub fn run() {
         .register_uri_scheme_protocol("qpin", |context, request| {
             serve_screenpin_asset(context.app_handle(), request)
         })
+        .register_uri_scheme_protocol("qfont", |context, request| {
+            serve_font_asset(context.app_handle(), request)
+        })
         .manage(HostState::new())
         .invoke_handler(tauri::generate_handler![
             get_host_info,
             get_settings,
             get_session_logs,
+            set_font,
+            import_font,
             update_settings,
             set_module_startup_authorization,
             import_module,

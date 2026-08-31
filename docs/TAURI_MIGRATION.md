@@ -125,6 +125,12 @@ the first release.
   smoke process can force-disable synchronization with
   `QING_TAURI_DISABLE_AUTOSTART_SYNC=1`, including when it exercises a Release
   executable.
+- Own font selection and import in Rust. The host exposes a fixed, safe system
+  font catalog plus hash-addressed user font records, persists only the selected
+  opaque ID, and serves verified `.ttf`/`.otf`/`.ttc` bytes through the private
+  `qfont://` protocol. The Vue surface never submits a path to an operating
+  system operation; missing or tampered imported assets fall back to the default
+  font.
 - Persist a bounded list of module IDs authorized to start with the host. The
   module page can toggle only a discovered manifest ID; startup initialization
   re-discovers the backend-owned module index and starts only those records.

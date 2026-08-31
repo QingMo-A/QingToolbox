@@ -8,7 +8,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::paths::settings_path;
+use crate::{fonts, paths::settings_path};
 
 const SETTINGS_SCHEMA_VERSION: u32 = 1;
 const MAX_SETTINGS_BYTES: u64 = 1024 * 1024;
@@ -28,6 +28,10 @@ pub struct SettingsSnapshot {
     pub settings_schema_version: u32,
     pub language: String,
     pub appearance_preset_id: String,
+    pub font_id: String,
+    pub font_source: String,
+    pub font_family_name: Option<String>,
+    pub fonts: Vec<fonts::FontOption>,
     pub close_behavior: String,
     pub startup_presentation: String,
     pub toggle_hotkey: String,
@@ -45,6 +49,7 @@ pub struct SettingsSnapshot {
 pub struct SettingsUpdate {
     pub language: Option<String>,
     pub appearance_preset_id: Option<String>,
+    pub font_id: Option<String>,
     pub close_behavior: Option<String>,
     pub startup_presentation: Option<String>,
     pub toggle_hotkey: Option<String>,
@@ -58,6 +63,9 @@ pub struct SettingsUpdate {
 struct Settings {
     language: String,
     appearance_preset_id: String,
+    font_id: String,
+    font_source: String,
+    font_family_name: Option<String>,
     close_behavior: String,
     startup_presentation: String,
     toggle_hotkey: String,
@@ -75,6 +83,9 @@ impl Default for Settings {
         Self {
             language: "system".to_string(),
             appearance_preset_id: "qing-default".to_string(),
+            font_id: "Default".to_string(),
+            font_source: "default".to_string(),
+            font_family_name: None,
             close_behavior: "ask".to_string(),
             // A first launch of the standalone Tauri host should be visible.
             // Existing legacy settings still map FloatingBadge to `tray`.
@@ -98,6 +109,9 @@ struct SettingsDocument {
     language: Option<String>,
     #[serde(alias = "AppearancePresetId")]
     appearance_preset_id: Option<String>,
+    font_id: Option<String>,
+    font_source: Option<String>,
+    font_family_name: Option<String>,
     #[serde(alias = "MainWindowCloseBehavior")]
     close_behavior: Option<Value>,
     #[serde(alias = "StartupPresentationMode")]
@@ -122,6 +136,9 @@ impl From<&Settings> for SettingsDocument {
             settings_schema_version: Some(SETTINGS_SCHEMA_VERSION),
             language: Some(settings.language.clone()),
             appearance_preset_id: Some(settings.appearance_preset_id.clone()),
+            font_id: Some(settings.font_id.clone()),
+            font_source: Some(settings.font_source.clone()),
+            font_family_name: settings.font_family_name.clone(),
             close_behavior: Some(Value::String(settings.close_behavior.clone())),
             startup_presentation: Some(Value::String(settings.startup_presentation.clone())),
             toggle_hotkey: Some(settings.toggle_hotkey.clone()),
@@ -174,6 +191,10 @@ impl SettingsStore {
             settings_schema_version: SETTINGS_SCHEMA_VERSION,
             language: self.settings.language.clone(),
             appearance_preset_id: self.settings.appearance_preset_id.clone(),
+            font_id: self.settings.font_id.clone(),
+            font_source: self.settings.font_source.clone(),
+            font_family_name: self.settings.font_family_name.clone(),
+            fonts: fonts::catalog(),
             close_behavior: self.settings.close_behavior.clone(),
             startup_presentation: self.settings.startup_presentation.clone(),
             toggle_hotkey: self.settings.toggle_hotkey.clone(),
@@ -191,6 +212,12 @@ impl SettingsStore {
         }
         if let Some(value) = update.appearance_preset_id {
             candidate.appearance_preset_id = normalize_appearance(&value);
+        }
+        if let Some(value) = update.font_id {
+            let selection = fonts::normalize_selection(Some(&value), None, None);
+            candidate.font_id = selection.id;
+            candidate.font_source = selection.source;
+            candidate.font_family_name = selection.family_name;
         }
         if let Some(value) = update.close_behavior {
             candidate.close_behavior = normalize_close_behavior(Some(&Value::String(value)));
@@ -256,11 +283,22 @@ fn read_document(path: &Path) -> Option<SettingsDocument> {
 }
 
 fn settings_from_document(document: &SettingsDocument) -> Settings {
+    let legacy_font_id = document.extra.get("FontId").and_then(Value::as_str);
+    let legacy_font_source = document.extra.get("FontSource").and_then(Value::as_str);
+    let legacy_font_family = document.extra.get("FontFamilyName").and_then(Value::as_str);
+    let font = fonts::normalize_selection(
+        document.font_id.as_deref().or(legacy_font_id),
+        document.font_source.as_deref().or(legacy_font_source),
+        document.font_family_name.as_deref().or(legacy_font_family),
+    );
     let mut settings = Settings {
         language: normalize_language(document.language.as_deref().unwrap_or_default()),
         appearance_preset_id: normalize_appearance(
             document.appearance_preset_id.as_deref().unwrap_or_default(),
         ),
+        font_id: font.id,
+        font_source: font.source,
+        font_family_name: font.family_name,
         close_behavior: normalize_close_behavior(document.close_behavior.as_ref()),
         startup_presentation: normalize_startup_presentation(
             document.startup_presentation.as_ref(),
@@ -498,6 +536,9 @@ mod tests {
             settings_schema_version: Some(9),
             language: Some("zh-CN".to_string()),
             appearance_preset_id: Some("neon-circuit".to_string()),
+            font_id: None,
+            font_source: None,
+            font_family_name: None,
             close_behavior: Some(Value::Number(1.into())),
             startup_presentation: Some(Value::String("MainWindow".to_string())),
             toggle_hotkey: Some("Ctrl+Alt+Space".to_string()),

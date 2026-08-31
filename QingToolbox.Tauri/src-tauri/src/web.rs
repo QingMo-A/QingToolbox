@@ -7,7 +7,7 @@ use tauri::{
 };
 
 use crate::{
-    module_window_label,
+    fonts, module_window_label,
     paths::{module_data_directory, resolve_existing_asset},
     HostState,
 };
@@ -140,6 +140,32 @@ pub fn serve_screenpin_asset<R: Runtime>(
         .header("Cache-Control", "no-store")
         .body(body.into_bytes())
         .expect("screen pin response cannot fail")
+}
+
+/// Serve a hash-addressed imported font without exposing the host's font
+/// directory or accepting a caller-provided filesystem path.
+pub fn serve_font_asset<R: Runtime>(
+    _app: &AppHandle<R>,
+    request: Request<Vec<u8>>,
+) -> Response<Vec<u8>> {
+    if request.method() != "GET" && request.method() != "HEAD" {
+        return error_response(StatusCode::METHOD_NOT_ALLOWED, "method not allowed");
+    }
+    let Some((body, content_type)) = fonts::read_asset(request.uri().path()) else {
+        return error_response(StatusCode::NOT_FOUND, "font asset not found");
+    };
+    let length = body.len().to_string();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", content_type)
+        .header("Content-Length", length)
+        .header("Cache-Control", "no-store")
+        .body(if request.method() == "HEAD" {
+            Vec::new()
+        } else {
+            body
+        })
+        .expect("font response builder cannot fail")
 }
 
 fn valid_pin_token(value: &str) -> bool {
