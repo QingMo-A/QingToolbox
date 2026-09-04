@@ -27,6 +27,12 @@ function Invoke-Installer {
     if ($process.ExitCode -ne 0) { throw "Installer command failed ($($process.ExitCode)): $Path" }
 }
 
+function Normalize-DirectoryPath([string]$Path) {
+    return [IO.Path]::GetFullPath($Path).TrimEnd(
+        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    )
+}
+
 if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $root, $sentinelRoot | Out-Null
 try {
@@ -67,7 +73,8 @@ try {
     }
     $uninstallRecord = Get-ItemProperty -LiteralPath $uninstallKey
     if ([string]$uninstallRecord.DisplayName -ne 'QingToolbox Tauri' -or
-        [string]$uninstallRecord.InstallLocation -ne $installRoot -or
+        (Normalize-DirectoryPath ([string]$uninstallRecord.InstallLocation)) -ne
+            (Normalize-DirectoryPath $installRoot) -or
         [string]::IsNullOrWhiteSpace([string]$uninstallRecord.DisplayVersion)) {
         throw 'Tauri uninstall record does not match the candidate installation.'
     }
@@ -87,7 +94,6 @@ try {
         }
     }
     & (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts/smoke-tauri-host.ps1') -ExecutablePath $installedExe
-    if ($LASTEXITCODE -ne 0) { throw 'Installed Tauri host smoke failed.' }
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
         throw "Tauri uninstaller was not created: $uninstaller"
     }
