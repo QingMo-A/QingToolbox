@@ -227,14 +227,19 @@ async fn check_host_update(
             cancel.store(true, Ordering::Relaxed);
         }
     }
-    let generation = state
-        .host_update
-        .lock()
-        .map_err(|_| CommandError {
+    let generation = {
+        let mut update = state.host_update.lock().map_err(|_| CommandError {
             code: "stateUnavailable",
             message: "宿主更新状态不可用。".to_string(),
-        })?
-        .begin_check(started_at.clone());
+        })?;
+        if update.is_installing() {
+            return Err(CommandError {
+                code: "updateBusy",
+                message: "宿主更新安装正在进行。".to_string(),
+            });
+        }
+        update.begin_check(started_at.clone())
+    };
     let result = tauri::async_runtime::spawn_blocking(move || {
         host_update::check_official_release(&current_version, started_at)
     })
@@ -323,11 +328,13 @@ fn download_host_update(
                     }
                 }
             },
-        )
-        .map(|_| ());
+        );
+        let installation_supported =
+            outcome.is_ok() && host_update::is_supported_tauri_production_installation();
+        let outcome = outcome.map(|_| ());
         if let Some(host_state) = app.try_state::<HostState>() {
             if let Ok(mut update) = host_state.host_update.lock() {
-                update.finish_download(generation, outcome);
+                update.finish_download(generation, outcome, installation_supported);
             }
             if let Ok(mut active) = host_state.host_update_cancel.lock() {
                 if active
@@ -353,6 +360,87 @@ fn download_host_update(
             message: "宿主更新状态不可用。".to_string(),
         })
         .map(|snapshot| snapshot.snapshot())
+}
+
+/// Revalidate the installed Tauri Production identity and the backend-owned
+/// cache, then hand the installer to Inno Setup. Vue submits no path or URL;
+/// both the release metadata and cache location come from Rust state.
+#[tauri::command]
+async fn install_host_update(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+) -> Result<HostUpdateSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    let cache_root = paths::user_data_root()
+        .ok_or_else(|| CommandError {
+            code: "storageUnavailable",
+            message: "宿主更新缓存目录不可用。".to_string(),
+        })?
+        .join("Updates")
+        .join("Host");
+    let (generation, release) = state
+        .host_update
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "宿主更新状态不可用。".to_string(),
+        })?
+        .begin_install()
+        .ok_or_else(|| CommandError {
+            code: "updateUnavailable",
+            message: "当前没有可交接的宿主更新。".to_string(),
+        })?;
+    let verified = tauri::async_runtime::spawn_blocking(move || {
+        if !host_update::is_supported_tauri_production_installation() {
+            return Err(host_update::InstallFailure::UnsupportedInstallation);
+        }
+        host_update::prepare_installer_for_handoff(&release, &cache_root)
+    })
+    .await
+    .map_err(|_| host_update::InstallFailure::CacheUnavailable)
+    .and_then(|result| result);
+
+    let app = window.app_handle().clone();
+    let installer = match verified {
+        Ok(path) => path,
+        Err(error) => {
+            let snapshot = state
+                .host_update
+                .lock()
+                .map_err(|_| CommandError {
+                    code: "stateUnavailable",
+                    message: "宿主更新状态不可用。".to_string(),
+                })?
+                .finish_install(generation, Err(error));
+            return Ok(snapshot);
+        }
+    };
+    if let Err(error) = host_update::launch_installer(&installer) {
+        let snapshot = state
+            .host_update
+            .lock()
+            .map_err(|_| CommandError {
+                code: "stateUnavailable",
+                message: "宿主更新状态不可用。".to_string(),
+            })?
+            .finish_install(generation, Err(error));
+        return Ok(snapshot);
+    }
+
+    let snapshot = state
+        .host_update
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "宿主更新状态不可用。".to_string(),
+        })?
+        .finish_install(generation, Ok(()));
+    // Inno Setup will close/restart the host using the explicit silent
+    // handoff flags. Stop only module processes owned by this host first so
+    // their windows and IPC pipes cannot keep the install directory locked.
+    stop_all_modules(&app);
+    app.exit(0);
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -2196,6 +2284,7 @@ pub fn run() {
             check_host_update,
             download_host_update,
             cancel_host_update,
+            install_host_update,
             get_settings,
             get_startup_registration_status,
             repair_startup_registration,

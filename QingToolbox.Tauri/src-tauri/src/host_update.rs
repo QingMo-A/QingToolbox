@@ -6,6 +6,8 @@ use std::{
 };
 
 #[cfg(windows)]
+use std::env;
+#[cfg(windows)]
 use std::io::Write;
 
 use serde::{Deserialize, Serialize};
@@ -21,6 +23,17 @@ const MAX_ASSET_URL_CHARS: usize = 2048;
 pub const MAX_INSTALLER_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_CHECKSUM_BYTES: u64 = 4 * 1024;
 const MAX_REDIRECTS: usize = 5;
+const MAX_MANIFEST_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_MANIFEST_FILES: usize = 16 * 1024;
+
+const TAURI_INSTALLER_APP_ID: &str = "{C9E5A4D1-1E8E-4F39-8F70-9D8D1C4B7A61}";
+const TAURI_UNINSTALL_KEY: &str =
+    "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{C9E5A4D1-1E8E-4F39-8F70-9D8D1C4B7A61}_is1";
+const TAURI_MARKER_KEY: &str = "Software\\QingMo-A\\QingToolbox\\Tauri";
+const TAURI_MARKER_INSTALL_KIND: &str = "tauri-production";
+const TAURI_MARKER_CONTRACT_VERSION: &str = "1";
+const TAURI_EXECUTABLE_NAME: &str = "QingToolbox.exe";
+const TAURI_MANIFEST_NAME: &str = "portable-manifest.json";
 
 /// The host-update contract is intentionally backend-owned. The Vue shell
 /// receives this projection and never receives a release download URL or
@@ -220,6 +233,7 @@ impl HostUpdateState {
         &mut self,
         generation: u64,
         result: Result<(), DownloadFailure>,
+        installation_supported: bool,
     ) -> HostUpdateSnapshot {
         if generation != self.generation {
             return self.snapshot();
@@ -234,8 +248,13 @@ impl HostUpdateState {
                 self.snapshot.download_state = "ReadyToInstall".to_string();
                 self.snapshot.bytes_received = self.snapshot.expected_bytes;
                 self.snapshot.download_error.clear();
-                self.snapshot.install_message =
-                    "安装交接尚未启用，已下载的安装包保存在宿主受控缓存中。".to_string();
+                self.snapshot.installation_supported = installation_supported;
+                self.snapshot.can_install = installation_supported;
+                self.snapshot.install_message = if installation_supported {
+                    "安装包已校验，可以交接给当前 Tauri Production 安装器。".to_string()
+                } else {
+                    "当前安装环境不支持宿主更新交接。".to_string()
+                };
             }
             Err(DownloadFailure::Cancelled) => {
                 self.snapshot.download_state = "Cancelled".to_string();
@@ -250,6 +269,61 @@ impl HostUpdateState {
                 self.snapshot.download_error = "下载或校验失败。".to_string();
                 self.snapshot.can_download = true;
                 self.snapshot.install_message.clear();
+            }
+        }
+        self.snapshot()
+    }
+
+    pub fn is_installing(&self) -> bool {
+        self.snapshot.download_state == "Installing"
+    }
+
+    /// Reserve one verified release for the installer handoff. This state
+    /// transition is the in-memory concurrency gate; a second request cannot
+    /// reserve the same release while the first request is validating it.
+    pub fn begin_install(&mut self) -> Option<(u64, HostReleaseInfo)> {
+        let release = self.release.clone()?;
+        if self.snapshot.download_state != "ReadyToInstall"
+            || !self.snapshot.can_install
+            || !self.snapshot.installation_supported
+        {
+            return None;
+        }
+        self.generation = self.generation.saturating_add(1);
+        self.snapshot.state = "Installing".to_string();
+        self.snapshot.download_state = "Installing".to_string();
+        self.snapshot.can_check = false;
+        self.snapshot.can_download = false;
+        self.snapshot.can_cancel_download = false;
+        self.snapshot.can_install = false;
+        self.snapshot.install_message = "正在启动更新安装程序。".to_string();
+        Some((self.generation, release))
+    }
+
+    pub fn finish_install(
+        &mut self,
+        generation: u64,
+        result: Result<(), InstallFailure>,
+    ) -> HostUpdateSnapshot {
+        if generation != self.generation {
+            return self.snapshot();
+        }
+        self.snapshot.can_check = true;
+        self.snapshot.can_download = false;
+        self.snapshot.can_cancel_download = false;
+        self.snapshot.can_install = false;
+        match result {
+            Ok(()) => {
+                self.snapshot.download_state = "Installing".to_string();
+                self.snapshot.install_message = "更新安装程序已启动，宿主即将退出。".to_string();
+            }
+            Err(_) => {
+                self.snapshot.state = "UpdateAvailable".to_string();
+                self.snapshot.download_state = "Failed".to_string();
+                self.snapshot.download_error = "无法启动更新安装程序。".to_string();
+                self.snapshot.installation_supported = false;
+                self.snapshot.install_message.clear();
+                self.snapshot.can_download = true;
             }
         }
         self.snapshot()
@@ -276,6 +350,14 @@ pub enum DownloadFailure {
     StorageUnavailable,
     SizeMismatch,
     HashMismatch,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum InstallFailure {
+    UnsupportedInstallation,
+    CacheUnavailable,
+    CacheInvalid,
+    InstallerLaunchFailed,
 }
 
 #[allow(dead_code)]
@@ -577,7 +659,10 @@ fn select_best_release(records: &[ReleaseRecord], current: &Version) -> Option<H
                 return None;
             }
             let version_text = version.to_string();
-            let installer_name = format!("QingToolbox-{version_text}-win-x64-setup.exe");
+            // The migration installer has its own asset identity. Never
+            // select the legacy WPF setup artifact, even if a release contains
+            // both installers.
+            let installer_name = format!("QingToolbox-{version_text}-win-x64-tauri-setup.exe");
             let checksum_name = format!("{installer_name}.sha256");
             let installers = record
                 .assets
@@ -680,6 +765,37 @@ fn parse_sidecar(bytes: &[u8], installer_name: &str) -> Result<String, DownloadF
     Ok(hash.to_ascii_uppercase())
 }
 
+fn validate_release_for_handoff(release: &HostReleaseInfo) -> Result<(), InstallFailure> {
+    let version = parse_version(&release.version).map_err(|_| InstallFailure::CacheInvalid)?;
+    let version_text = version.to_string();
+    if version_text != release.version {
+        return Err(InstallFailure::CacheInvalid);
+    }
+    let installer_name = format!("QingToolbox-{version_text}-win-x64-tauri-setup.exe");
+    let checksum_name = format!("{installer_name}.sha256");
+    if release.installer.name != installer_name
+        || release.checksum.name != checksum_name
+        || release.installer.id == 0
+        || release.checksum.id == 0
+        || release.installer.size == 0
+        || release.installer.size > MAX_INSTALLER_BYTES
+        || release.checksum.size == 0
+        || release.checksum.size > MAX_CHECKSUM_BYTES
+        || !is_release_asset_url(&release.installer.url, &installer_name)
+        || !is_release_asset_url(&release.checksum.url, &checksum_name)
+    {
+        return Err(InstallFailure::CacheInvalid);
+    }
+    Ok(())
+}
+
+fn is_release_asset_url(url: &str, asset_name: &str) -> bool {
+    is_official_asset_url(url)
+        && url
+            .strip_prefix("https://github.com/QingMo-A/QingToolbox/releases/download/")
+            .is_some_and(|path| path.ends_with(&format!("/{asset_name}")))
+}
+
 fn hash_file(path: &Path, cancel: &AtomicBool) -> Result<String, DownloadFailure> {
     use sha2::{Digest, Sha256};
     let mut input = fs::File::open(path).map_err(|_| DownloadFailure::StorageUnavailable)?;
@@ -705,10 +821,21 @@ fn verify_cached(
     checksum: &Path,
     cancel: &AtomicBool,
 ) -> Result<bool, DownloadFailure> {
-    let installer_len = fs::metadata(installer).map_err(|_| DownloadFailure::StorageUnavailable);
-    let checksum_len = fs::metadata(checksum).map_err(|_| DownloadFailure::StorageUnavailable);
-    let (Ok(installer_len), Ok(checksum_len)) = (installer_len, checksum_len) else {
-        return Ok(false);
+    let installer_len = match fs::symlink_metadata(installer) {
+        Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => {
+            metadata
+        }
+        Ok(_) => return Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(_) => return Err(DownloadFailure::StorageUnavailable),
+    };
+    let checksum_len = match fs::symlink_metadata(checksum) {
+        Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => {
+            metadata
+        }
+        Ok(_) => return Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(_) => return Err(DownloadFailure::StorageUnavailable),
     };
     if installer_len.len() != release.installer.size
         || checksum_len.len() != release.checksum.size
@@ -716,9 +843,24 @@ fn verify_cached(
     {
         return Ok(false);
     }
-    let sidecar = fs::read(checksum).map_err(|_| DownloadFailure::StorageUnavailable)?;
-    let expected = parse_sidecar(&sidecar, &release.installer.name)?;
-    Ok(hash_file(installer, cancel)? == expected)
+    let sidecar = match fs::read(checksum) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(_) => return Err(DownloadFailure::StorageUnavailable),
+    };
+    // A corrupt or stale sidecar is a cache miss. This lets a subsequent
+    // download replace the whole cache entry instead of permanently wedging
+    // the updater on a malformed file.
+    let expected = match parse_sidecar(&sidecar, &release.installer.name) {
+        Ok(value) => value,
+        Err(_) => return Ok(false),
+    };
+    match hash_file(installer, cancel) {
+        Ok(actual) => Ok(actual == expected),
+        Err(DownloadFailure::Cancelled) => Err(DownloadFailure::Cancelled),
+        Err(DownloadFailure::StorageUnavailable) => Err(DownloadFailure::StorageUnavailable),
+        Err(_) => Ok(false),
+    }
 }
 
 fn remove_best_effort(path: &Path) {
@@ -761,26 +903,347 @@ where
         return Err(DownloadFailure::Cancelled);
     }
 
-    let sidecar = download_asset_bytes(&release.checksum, cancel)?;
-    let expected_hash = parse_sidecar(&sidecar, &release.installer.name)?;
-    fs::write(&checksum_part, &sidecar).map_err(|_| DownloadFailure::StorageUnavailable)?;
-    progress(0);
-    download_asset_file(&release.installer, &installer_part, cancel, &mut progress)?;
-    verifying();
-    let actual_hash = hash_file(&installer_part, cancel)?;
-    if actual_hash != expected_hash {
+    let outcome = (|| {
+        let sidecar = download_asset_bytes(&release.checksum, cancel)?;
+        let expected_hash = parse_sidecar(&sidecar, &release.installer.name)
+            .map_err(|_| DownloadFailure::SourceInvalid)?;
+        fs::write(&checksum_part, &sidecar).map_err(|_| DownloadFailure::StorageUnavailable)?;
+        progress(0);
+        download_asset_file(&release.installer, &installer_part, cancel, &mut progress)?;
+        verifying();
+        let actual_hash = hash_file(&installer_part, cancel)?;
+        if actual_hash != expected_hash {
+            return Err(DownloadFailure::HashMismatch);
+        }
+        if cancel.load(AtomicOrdering::Relaxed) {
+            return Err(DownloadFailure::Cancelled);
+        }
+        fs::rename(&checksum_part, &checksum).map_err(|_| DownloadFailure::StorageUnavailable)?;
+        fs::rename(&installer_part, &installer).map_err(|_| DownloadFailure::StorageUnavailable)?;
+        Ok(installer.clone())
+    })();
+    if outcome.is_err() {
         remove_best_effort(&installer_part);
         remove_best_effort(&checksum_part);
-        return Err(DownloadFailure::HashMismatch);
     }
-    if cancel.load(AtomicOrdering::Relaxed) {
-        remove_best_effort(&installer_part);
-        remove_best_effort(&checksum_part);
-        return Err(DownloadFailure::Cancelled);
+    outcome
+}
+
+/// Revalidate a cached installer immediately before handoff. This is kept
+/// separate from the download state machine so a caller cannot rely solely on
+/// an earlier `ReadyToInstall` snapshot after the cache or release metadata
+/// may have changed.
+pub fn prepare_installer_for_handoff(
+    release: &HostReleaseInfo,
+    cache_root: &Path,
+) -> Result<PathBuf, InstallFailure> {
+    validate_release_for_handoff(release)?;
+    let (_, installer, checksum, _) =
+        cache_paths(release, cache_root).map_err(|_| InstallFailure::CacheInvalid)?;
+    let cancel = AtomicBool::new(false);
+    match verify_cached(release, &installer, &checksum, &cancel) {
+        Ok(true) => Ok(installer),
+        Ok(false) => Err(InstallFailure::CacheInvalid),
+        Err(_) => Err(InstallFailure::CacheUnavailable),
     }
-    fs::rename(&checksum_part, &checksum).map_err(|_| DownloadFailure::StorageUnavailable)?;
-    fs::rename(&installer_part, &installer).map_err(|_| DownloadFailure::StorageUnavailable)?;
-    Ok(installer)
+}
+
+#[cfg(windows)]
+pub fn is_supported_tauri_production_installation() -> bool {
+    verify_installed_tauri_production().is_ok()
+}
+
+#[cfg(not(windows))]
+pub fn is_supported_tauri_production_installation() -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
+    let executable =
+        fs::canonicalize(env::current_exe().map_err(|_| InstallFailure::UnsupportedInstallation)?)
+            .map_err(|_| InstallFailure::UnsupportedInstallation)?;
+    if executable.file_name().and_then(|value| value.to_str()) != Some(TAURI_EXECUTABLE_NAME) {
+        return Err(InstallFailure::UnsupportedInstallation);
+    }
+    let install_root = executable
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .ok_or(InstallFailure::UnsupportedInstallation)?;
+    if is_true_unc_path(&install_root.to_string_lossy()) {
+        return Err(InstallFailure::UnsupportedInstallation);
+    }
+
+    let marker_location = registry_string(TAURI_MARKER_KEY, "InstallLocation")?;
+    let uninstall_location = registry_string(TAURI_UNINSTALL_KEY, "InstallLocation")?;
+    let marker_root = canonical_local_path(&marker_location)?;
+    let uninstall_root = canonical_local_path(&uninstall_location)?;
+    let executable_root =
+        fs::canonicalize(install_root).map_err(|_| InstallFailure::UnsupportedInstallation)?;
+    if marker_root != uninstall_root || marker_root != executable_root {
+        return Err(InstallFailure::UnsupportedInstallation);
+    }
+
+    require_registry_value(TAURI_MARKER_KEY, "InstallKind", TAURI_MARKER_INSTALL_KIND)?;
+    require_registry_value(
+        TAURI_MARKER_KEY,
+        "InstallerContractVersion",
+        TAURI_MARKER_CONTRACT_VERSION,
+    )?;
+    require_registry_value(TAURI_MARKER_KEY, "AppId", TAURI_INSTALLER_APP_ID)?;
+    require_registry_value(TAURI_MARKER_KEY, "Distribution", "production")?;
+    require_registry_value(TAURI_MARKER_KEY, "Backend", "rust")?;
+    require_registry_value(TAURI_MARKER_KEY, "Framework", "tauri-2")?;
+    require_registry_value(TAURI_MARKER_KEY, "Frontend", "vue-3")?;
+    require_registry_value(TAURI_MARKER_KEY, "BuildProfile", "release")?;
+    require_registry_value(TAURI_MARKER_KEY, "ExecutableName", TAURI_EXECUTABLE_NAME)?;
+    require_registry_value(TAURI_MARKER_KEY, "ManifestFileName", TAURI_MANIFEST_NAME)?;
+
+    let display_name = registry_string(TAURI_UNINSTALL_KEY, "DisplayName")?;
+    if display_name != "QingToolbox Tauri" {
+        return Err(InstallFailure::UnsupportedInstallation);
+    }
+    let display_icon = registry_string(TAURI_UNINSTALL_KEY, "DisplayIcon")?;
+    let display_icon =
+        registered_command_path(&display_icon).ok_or(InstallFailure::UnsupportedInstallation)?;
+    if fs::canonicalize(display_icon).map_err(|_| InstallFailure::UnsupportedInstallation)?
+        != executable
+    {
+        return Err(InstallFailure::UnsupportedInstallation);
+    }
+    let uninstall_string = registry_string(TAURI_UNINSTALL_KEY, "UninstallString")?;
+    let uninstall_executable = registered_command_path(&uninstall_string)
+        .ok_or(InstallFailure::UnsupportedInstallation)?;
+    let expected_uninstaller = install_root.join("unins000.exe");
+    if fs::canonicalize(uninstall_executable)
+        .map_err(|_| InstallFailure::UnsupportedInstallation)?
+        != fs::canonicalize(expected_uninstaller)
+            .map_err(|_| InstallFailure::UnsupportedInstallation)?
+    {
+        return Err(InstallFailure::UnsupportedInstallation);
+    }
+
+    let manifest_path = install_root.join(TAURI_MANIFEST_NAME);
+    let manifest_metadata = fs::symlink_metadata(&manifest_path)
+        .map_err(|_| InstallFailure::UnsupportedInstallation)?;
+    if !manifest_metadata.file_type().is_file() || manifest_metadata.file_type().is_symlink() {
+        return Err(InstallFailure::UnsupportedInstallation);
+    }
+    let manifest_bytes =
+        fs::read(&manifest_path).map_err(|_| InstallFailure::UnsupportedInstallation)?;
+    if manifest_bytes.len() as u64 > MAX_MANIFEST_BYTES {
+        return Err(InstallFailure::UnsupportedInstallation);
+    }
+    let manifest: ProductionManifest = serde_json::from_slice(&manifest_bytes)
+        .map_err(|_| InstallFailure::UnsupportedInstallation)?;
+    if manifest.schema_version != 1
+        || manifest.product_name != "QingToolbox"
+        || manifest.distribution != "production"
+        || manifest.backend != "rust"
+        || manifest.framework != "tauri-2"
+        || manifest.frontend != "vue-3"
+        || manifest.build_profile != "release"
+        || manifest.target != "x86_64-pc-windows-msvc"
+        || manifest.source_dirty
+        || manifest.executable != TAURI_EXECUTABLE_NAME
+        || manifest.files.len() > MAX_MANIFEST_FILES
+    {
+        return Err(InstallFailure::UnsupportedInstallation);
+    }
+    let installed_version = registry_string(TAURI_MARKER_KEY, "InstalledVersion")?;
+    let display_version = registry_string(TAURI_UNINSTALL_KEY, "DisplayVersion")?;
+    if !is_running_version(&manifest.version)
+        || installed_version != manifest.version
+        || display_version != manifest.version
+    {
+        return Err(InstallFailure::UnsupportedInstallation);
+    }
+
+    let mut executable_entry = None;
+    for file in manifest.files {
+        if file.path != TAURI_EXECUTABLE_NAME {
+            continue;
+        }
+        if executable_entry.is_some()
+            || file.size > MAX_INSTALLER_BYTES
+            || !is_sha256_hex(&file.sha256)
+        {
+            return Err(InstallFailure::UnsupportedInstallation);
+        }
+        executable_entry = Some(file);
+    }
+    let executable_entry = executable_entry.ok_or(InstallFailure::UnsupportedInstallation)?;
+    let executable_metadata =
+        fs::symlink_metadata(&executable).map_err(|_| InstallFailure::UnsupportedInstallation)?;
+    if !executable_metadata.file_type().is_file()
+        || executable_metadata.file_type().is_symlink()
+        || executable_metadata.len() != executable_entry.size
+    {
+        return Err(InstallFailure::UnsupportedInstallation);
+    }
+    let actual_hash = hash_file(&executable, &AtomicBool::new(false))
+        .map_err(|_| InstallFailure::UnsupportedInstallation)?;
+    if actual_hash != executable_entry.sha256.to_ascii_uppercase() {
+        return Err(InstallFailure::UnsupportedInstallation);
+    }
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn launch_installer(_installer: &Path) -> Result<(), InstallFailure> {
+    Err(InstallFailure::UnsupportedInstallation)
+}
+
+#[cfg(windows)]
+pub fn launch_installer(installer: &Path) -> Result<(), InstallFailure> {
+    use std::os::windows::process::CommandExt;
+
+    if installer.extension().and_then(|value| value.to_str()) != Some("exe") {
+        return Err(InstallFailure::InstallerLaunchFailed);
+    }
+    std::process::Command::new(installer)
+        .args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOICONS"])
+        .current_dir(
+            installer
+                .parent()
+                .ok_or(InstallFailure::InstallerLaunchFailed)?,
+        )
+        .creation_flags(0x0800_0000)
+        .spawn()
+        .map(|_| ())
+        .map_err(|_| InstallFailure::InstallerLaunchFailed)
+}
+
+#[cfg(windows)]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProductionManifest {
+    schema_version: u32,
+    product_name: String,
+    distribution: String,
+    version: String,
+    backend: String,
+    framework: String,
+    frontend: String,
+    build_profile: String,
+    target: String,
+    source_dirty: bool,
+    executable: String,
+    files: Vec<ProductionManifestFile>,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Deserialize)]
+struct ProductionManifestFile {
+    path: String,
+    size: u64,
+    sha256: String,
+}
+
+#[cfg(windows)]
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn is_running_version(version: &str) -> bool {
+    version == env!("CARGO_PKG_VERSION") && parse_version(version).is_ok()
+}
+
+fn is_true_unc_path(value: &str) -> bool {
+    let value = value.trim().trim_matches('"');
+    let verbatim_prefix = "\\\\?\\";
+    if let Some(rest) = value.strip_prefix(verbatim_prefix) {
+        return rest
+            .get(..4)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("UNC\\"));
+    }
+    value.starts_with("\\\\")
+}
+
+#[cfg(windows)]
+fn canonical_local_path(value: &str) -> Result<PathBuf, InstallFailure> {
+    let path = PathBuf::from(value.trim().trim_matches('"'));
+    if path.as_os_str().is_empty() || is_true_unc_path(&path.to_string_lossy()) {
+        return Err(InstallFailure::UnsupportedInstallation);
+    }
+    fs::canonicalize(path).map_err(|_| InstallFailure::UnsupportedInstallation)
+}
+
+#[cfg(windows)]
+fn registered_command_path(value: &str) -> Option<PathBuf> {
+    let value = value.trim();
+    let candidate = if let Some(quoted) = value.strip_prefix('"') {
+        quoted.split_once('"')?.0
+    } else {
+        value.split_whitespace().next()?
+    };
+    let candidate = candidate.strip_suffix(",0").unwrap_or(candidate);
+    (!candidate.is_empty()).then(|| PathBuf::from(candidate))
+}
+
+#[cfg(windows)]
+fn require_registry_value(key: &str, value: &str, expected: &str) -> Result<(), InstallFailure> {
+    if registry_string(key, value)?.trim() == expected {
+        Ok(())
+    } else {
+        Err(InstallFailure::UnsupportedInstallation)
+    }
+}
+
+#[cfg(windows)]
+fn registry_string(key: &str, value: &str) -> Result<String, InstallFailure> {
+    use std::{ffi::c_void, ptr};
+    use windows_sys::Win32::{
+        Foundation::ERROR_SUCCESS,
+        System::Registry::{RegGetValueW, HKEY_CURRENT_USER, REG_VALUE_TYPE, RRF_RT_REG_SZ},
+    };
+
+    fn wide(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+    unsafe {
+        let key = wide(key);
+        let value = wide(value);
+        let mut value_type: REG_VALUE_TYPE = 0;
+        let mut bytes = 0u32;
+        if RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            &mut value_type,
+            ptr::null_mut(),
+            &mut bytes,
+        ) != ERROR_SUCCESS
+            || bytes == 0
+            || bytes > 32 * 1024
+            || bytes % 2 != 0
+        {
+            return Err(InstallFailure::UnsupportedInstallation);
+        }
+        let mut buffer = vec![0u16; (bytes as usize / 2).saturating_add(1)];
+        let mut actual = bytes;
+        if RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            &mut value_type,
+            buffer.as_mut_ptr() as *mut c_void,
+            &mut actual,
+        ) != ERROR_SUCCESS
+            || actual > bytes
+        {
+            return Err(InstallFailure::UnsupportedInstallation);
+        }
+        let units = (actual as usize / 2).min(buffer.len());
+        let end = buffer[..units]
+            .iter()
+            .position(|unit| *unit == 0)
+            .unwrap_or(units);
+        String::from_utf16(&buffer[..end]).map_err(|_| InstallFailure::UnsupportedInstallation)
+    }
 }
 
 #[cfg(windows)]
@@ -1244,14 +1707,22 @@ fn fetch_official_releases() -> Result<String, ()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_releases, parse_sidecar, parse_version, select_best_release, HostUpdateSnapshot,
-        HostUpdateState,
+        cache_paths, download_official_release, is_running_version, is_true_unc_path,
+        parse_releases, parse_sidecar, parse_version, select_best_release,
+        validate_release_for_handoff, verify_cached, DownloadFailure, HostUpdateSnapshot,
+        HostUpdateState, InstallFailure,
+    };
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicBool, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
     };
 
     const RELEASES: &str = r##"[
       {"tag_name":"v0.2.10-alpha","draft":false,"published_at":"2026-08-30T00:00:00Z","body":"New *features*","assets":[
-        {"id":10,"name":"QingToolbox-0.2.10-alpha-win-x64-setup.exe","browser_download_url":"https://github.com/QingMo-A/QingToolbox/releases/download/v0.2.10-alpha/QingToolbox-0.2.10-alpha-win-x64-setup.exe","size":1000},
-        {"id":11,"name":"QingToolbox-0.2.10-alpha-win-x64-setup.exe.sha256","browser_download_url":"https://github.com/QingMo-A/QingToolbox/releases/download/v0.2.10-alpha/QingToolbox-0.2.10-alpha-win-x64-setup.exe.sha256","size":96}]},
+        {"id":10,"name":"QingToolbox-0.2.10-alpha-win-x64-tauri-setup.exe","browser_download_url":"https://github.com/QingMo-A/QingToolbox/releases/download/v0.2.10-alpha/QingToolbox-0.2.10-alpha-win-x64-tauri-setup.exe","size":1000},
+        {"id":11,"name":"QingToolbox-0.2.10-alpha-win-x64-tauri-setup.exe.sha256","browser_download_url":"https://github.com/QingMo-A/QingToolbox/releases/download/v0.2.10-alpha/QingToolbox-0.2.10-alpha-win-x64-tauri-setup.exe.sha256","size":96}]},
       {"tag_name":"v0.3.0","draft":false,"published_at":"2026-08-30T00:00:00Z","body":"stable","assets":[]},
       {"tag_name":"v0.2.11-beta","draft":false,"published_at":"2026-08-30T00:00:00Z","body":"beta","assets":[]}
     ]"##;
@@ -1268,12 +1739,38 @@ mod tests {
     }
 
     #[test]
+    fn installed_identity_requires_the_running_compile_time_version() {
+        assert!(is_running_version(env!("CARGO_PKG_VERSION")));
+        assert!(!is_running_version("999.999.999"));
+    }
+
+    #[test]
+    fn local_verbatim_windows_paths_are_not_rejected_as_unc() {
+        assert!(is_true_unc_path(r"\\server\share\QingToolbox.exe"));
+        assert!(is_true_unc_path(r"\\?\UNC\server\share\QingToolbox.exe"));
+        assert!(is_true_unc_path(r"\\?\unc\server\share\QingToolbox.exe"));
+        assert!(!is_true_unc_path(
+            r"\\?\C:\Program Files\QingToolbox\QingToolbox.exe"
+        ));
+        assert!(!is_true_unc_path(
+            r"C:\Program Files\QingToolbox\QingToolbox.exe"
+        ));
+    }
+
+    #[test]
     fn release_selection_requires_exact_verified_assets_and_prefers_highest_allowed_version() {
         let records = parse_releases(RELEASES).expect("release payload");
         let current = parse_version("0.2.9-alpha").expect("current");
         let selected = select_best_release(&records, &current).expect("candidate");
         assert_eq!(selected.version, "0.2.10-alpha");
         assert!(selected.summary.contains("New features"));
+    }
+
+    #[test]
+    fn legacy_wpf_asset_name_is_not_an_update_candidate() {
+        let legacy = RELEASES.replace("-tauri-setup", "-setup");
+        let records = parse_releases(&legacy).expect("release payload");
+        assert!(select_best_release(&records, &parse_version("0.2.9-alpha").unwrap()).is_none());
     }
 
     #[test]
@@ -1301,7 +1798,7 @@ mod tests {
 
     #[test]
     fn checksum_sidecar_requires_exact_installer_name_and_sha256() {
-        let name = "QingToolbox-0.2.10-alpha-win-x64-setup.exe";
+        let name = "QingToolbox-0.2.10-alpha-win-x64-tauri-setup.exe";
         let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         assert_eq!(
             parse_sidecar(format!("{hash}  {name}\r\n").as_bytes(), name).unwrap(),
@@ -1327,9 +1824,73 @@ mod tests {
         assert!(snapshot.expected_bytes > 0);
         state.report_download_progress(download_generation, snapshot.expected_bytes / 2);
         assert_eq!(state.snapshot().bytes_received, snapshot.expected_bytes / 2);
-        let finished = state.finish_download(download_generation, Ok(()));
+        let finished = state.finish_download(download_generation, Ok(()), false);
         assert_eq!(finished.download_state, "ReadyToInstall");
         assert!(!finished.can_install);
         assert!(!finished.summary.contains("http"));
+    }
+
+    #[test]
+    fn install_state_is_single_use_and_rejects_a_failed_handoff_for_retry() {
+        let mut state = HostUpdateState::new("0.2.9-alpha", "initial");
+        let check_generation = state.begin_check("check");
+        let records = parse_releases(RELEASES).expect("release payload");
+        let release =
+            select_best_release(&records, &parse_version("0.2.9-alpha").unwrap()).unwrap();
+        state.finish_check(
+            check_generation,
+            "0.2.9-alpha",
+            "checked",
+            Ok(Some(release)),
+        );
+        let (download_generation, _) = state.begin_download().expect("download candidate");
+        state.finish_download(download_generation, Ok(()), true);
+        let (install_generation, _) = state.begin_install().expect("install candidate");
+        assert!(state.begin_install().is_none());
+        let snapshot = state.finish_install(install_generation, Err(InstallFailure::CacheInvalid));
+        assert_eq!(snapshot.state, "UpdateAvailable");
+        assert_eq!(snapshot.download_state, "Failed");
+        assert!(snapshot.can_download);
+        assert!(!snapshot.can_install);
+    }
+
+    #[test]
+    fn corrupt_cache_sidecar_is_a_miss_and_cancel_cleans_partial_files() {
+        let records = parse_releases(RELEASES).expect("release payload");
+        let release =
+            select_best_release(&records, &parse_version("0.2.9-alpha").unwrap()).unwrap();
+        assert!(validate_release_for_handoff(&release).is_ok());
+        let root = unique_test_directory();
+        let (directory, installer, checksum, installer_part) =
+            cache_paths(&release, &root).expect("cache paths");
+        fs::create_dir_all(&directory).expect("cache directory");
+        fs::write(&installer, vec![b'x'; 1000]).expect("installer");
+        fs::write(&checksum, vec![b'!'; 96]).expect("corrupt sidecar");
+        let cancel = AtomicBool::new(false);
+        assert_eq!(
+            verify_cached(&release, &installer, &checksum, &cancel),
+            Ok(false)
+        );
+
+        let checksum_part = directory.join(format!("{}.part", release.checksum.name));
+        fs::write(&installer_part, b"partial installer").expect("installer part");
+        fs::write(&checksum_part, b"partial checksum").expect("checksum part");
+        let cancelled = AtomicBool::new(true);
+        let result = download_official_release(&release, &root, &cancelled, |_| {}, || {});
+        assert_eq!(result, Err(DownloadFailure::Cancelled));
+        assert!(!installer.exists());
+        assert!(!checksum.exists());
+        assert!(!installer_part.exists());
+        assert!(!checksum_part.exists());
+        let _ = fs::remove_dir_all(root);
+        assert!(cancelled.load(Ordering::Relaxed));
+    }
+
+    fn unique_test_directory() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("qingtoolbox-host-update-{nonce}"))
     }
 }

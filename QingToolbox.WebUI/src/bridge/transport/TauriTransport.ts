@@ -117,7 +117,8 @@ export class TauriTransport implements Transport {
       case 'settings.importFont': return this.importFont()
       case 'logs.getSnapshot': return invoke<SessionLogSnapshot>('get_session_logs')
       case 'hostUpdate.getSnapshot':
-      case 'hostUpdate.install': return invoke<TauriHostUpdateSnapshot>('get_host_update_snapshot')
+        return invoke<TauriHostUpdateSnapshot>('get_host_update_snapshot')
+      case 'hostUpdate.install': return invoke<TauriHostUpdateSnapshot>('install_host_update')
       case 'hostUpdate.download': return invoke<TauriHostUpdateSnapshot>('download_host_update')
       case 'hostUpdate.cancel': return invoke<TauriHostUpdateSnapshot>('cancel_host_update')
       case 'hostUpdate.check': return invoke<TauriHostUpdateSnapshot>('check_host_update')

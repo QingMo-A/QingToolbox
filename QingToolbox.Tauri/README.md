@@ -122,11 +122,14 @@ Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost
   和资源路径校验。
 - 宿主更新快照、官方 Release 检查和安装器下载由 Rust 提供：Release 构建通过系统
   WinHTTP 请求固定的 QingMo-A/QingToolbox API，严格限制 SemVer 通道、响应大小和
-  安装器/SHA256 资产身份；下载只允许受控的 GitHub 重定向，写入用户数据下的
+  Tauri 专用 `QingToolbox-{version}-win-x64-tauri-setup.exe`/SHA256 资产身份；下载只允许受控的 GitHub 重定向，写入用户数据下的
   `Updates/Host` 缓存并在原子改名之前校验 sidecar、大小和 SHA256。Vue 不会接收
-  下载 URL 或本地路径，只轮询字节进度和 ReadyToInstall 状态。Debug/烟测默认关闭
-  联网检查，可显式设置 `QING_TAURI_ENABLE_UPDATE_CHECK=1` 进行集成验证；安装器
-  交接仍未启用，已校验包不会被 Vue 或宿主自动执行。
+  下载 URL 或本地路径，只轮询字节进度和 ReadyToInstall 状态。交接前 Rust 会同时
+  校验固定 migration AppId 的 HKCU 卸载记录、Tauri 专用 product marker、当前
+  `QingToolbox.exe` 及旁置 production manifest；Debug、portable、旧 WPF 和缺失
+  marker 的旧候选均不支持交接。交接使用 Inno Setup 静默参数，先收拢本宿主创建的
+  模块再退出宿主；启动失败时宿主保持运行。Debug/烟测默认关闭联网检查，可显式
+  设置 `QING_TAURI_ENABLE_UPDATE_CHECK=1` 进行集成验证。
 - Web 模块使用后端注册的 `qmod://` 资源协议打开独立窗口；资源每次请求
   都重新做模块目录边界检查，Vue 不会得到绝对路径。
 - 新宿主只接受 `runtimeType=Process`、`runtimeIsolation=OutOfProcess` 的
@@ -159,7 +162,7 @@ Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost
 - Launcher 已接入受控 Explorer 拖入和模块级全局快捷键：宿主在原生窗口边界
   canonicalize 并限制 `.exe`、`.lnk`、`.url`，只向声明了 `launcher.externalDrop`
   的模块发送事件；快捷键由 Rust global-shortcut 插件注册，页面只能录入模块自己
-  的组合键。更新器、签名和完整设置迁移仍是后续工作。Everything、qpdf 和局域网
+  的组合键。更新交接已接入；签名发布和完整设置迁移仍是后续工作。Everything、qpdf 和局域网
   发现都是模块内受控 runtime/资源，不建立旧 ABI 兼容层。
 - `bundle.active` 暂时关闭，避免 Tauri bundler 自动下载 NSIS 工具链；当前安装器候选
   使用仓库现有的固定 Inno Setup 供应链，并在切换正式 AppId 前保留独立迁移 AppId。

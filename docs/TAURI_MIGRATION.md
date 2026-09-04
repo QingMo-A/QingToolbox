@@ -211,16 +211,20 @@ the first release.
   production directory and manifest as the portable path. It has an isolated
   migration AppId, preserves user data outside the install directory, verifies
   every staged file and runs an install/uninstall smoke. It is intentionally not
-  the public installer yet: signed installer/bundle, updater integration, AppId
-  cut-over and the production parity checklist remain.
-- Complete signed installer/bundle, updater installation handoff and then run
-  the production parity checklist on every official module. Rust now owns the
+  the public installer yet: signed installer/bundle, production AppId cut-over
+  and the production parity checklist remain.
+- Complete signed installer/bundle and then run the production parity checklist
+  on every official module. Rust now owns the
   official Release check and installer download through system WinHTTP with
   bounded SemVer/asset validation, trusted redirects, an isolated cache and
-  sidecar/SHA256 verification; Vue receives only progress snapshots. Portable
-  and production directory builders already use the same release executable
-  and resource manifest, so the remaining work is signed packaging, install
-  identity/handoff and production trust rather than another host rewrite.
+  sidecar/SHA256 verification; Vue receives only progress snapshots. A verified
+  cache is handed off only when the fixed migration AppId uninstall record, the
+  Tauri production marker and the current executable's production manifest agree;
+  the Rust host starts the Inno installer with silent handoff flags and exits
+  after closing only its own modules. Portable/debug/WPF copies remain
+  unsupported. Portable and production directory builders already use the same
+  release executable and resource manifest, so the remaining work is signed
+  packaging and production trust rather than another host rewrite.
 - Run heavy runtimes (Everything/qpdf) as module-owned child processes or
   sidecars and close only instances created by the module. Qing Launcher now
   follows this rule for its private Everything client; its dedicated service

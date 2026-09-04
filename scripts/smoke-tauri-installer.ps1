@@ -18,6 +18,8 @@ $installRoot = Join-Path $root 'install'
 $sentinelRoot = Join-Path $root 'profile'
 $installedExe = Join-Path $installRoot 'QingToolbox.exe'
 $uninstaller = Join-Path $installRoot 'unins000.exe'
+$markerKey = 'HKCU:\Software\QingMo-A\QingToolbox\Tauri'
+$uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{C9E5A4D1-1E8E-4F39-8F70-9D8D1C4B7A61}_is1'
 
 function Invoke-Installer {
     param([string]$Path, [string[]]$Arguments)
@@ -34,6 +36,40 @@ try {
     )
     if (-not (Test-Path -LiteralPath $installedExe -PathType Leaf)) {
         throw "Tauri installer did not create the host executable: $installedExe"
+    }
+    if (-not (Test-Path -LiteralPath $markerKey)) {
+        throw 'Tauri installer did not create its production marker.'
+    }
+    $marker = Get-ItemProperty -LiteralPath $markerKey
+    foreach ($expected in @{
+        InstallKind = 'tauri-production'
+        InstallerContractVersion = '1'
+        AppId = '{C9E5A4D1-1E8E-4F39-8F70-9D8D1C4B7A61}'
+        InstallLocation = $installRoot
+        InstalledVersion = $null
+        Distribution = 'production'
+        Backend = 'rust'
+        Framework = 'tauri-2'
+        Frontend = 'vue-3'
+        BuildProfile = 'release'
+        ExecutableName = 'QingToolbox.exe'
+        ManifestFileName = 'portable-manifest.json'
+    }.GetEnumerator()) {
+        $actual = [string]$marker.($expected.Key)
+        if ($expected.Key -eq 'InstalledVersion') {
+            if ([string]::IsNullOrWhiteSpace($actual)) { throw 'Tauri production marker has no InstalledVersion.' }
+        } elseif ($actual -ne $expected.Value) {
+            throw "Tauri production marker mismatch for $($expected.Key): $actual"
+        }
+    }
+    if (-not (Test-Path -LiteralPath $uninstallKey)) {
+        throw 'Tauri installer did not create the fixed AppId uninstall record.'
+    }
+    $uninstallRecord = Get-ItemProperty -LiteralPath $uninstallKey
+    if ([string]$uninstallRecord.DisplayName -ne 'QingToolbox Tauri' -or
+        [string]$uninstallRecord.InstallLocation -ne $installRoot -or
+        [string]::IsNullOrWhiteSpace([string]$uninstallRecord.DisplayVersion)) {
+        throw 'Tauri uninstall record does not match the candidate installation.'
     }
     foreach ($relative in @(
         'resources/modules/qing.launcher/module.json',
@@ -58,6 +94,9 @@ try {
     Invoke-Installer -Path $uninstaller -Arguments @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
     if (Test-Path -LiteralPath $installedExe -PathType Leaf) {
         throw 'Tauri uninstaller left the host executable behind.'
+    }
+    if (Test-Path -LiteralPath $markerKey) {
+        throw 'Tauri uninstaller left its production marker behind.'
     }
     Write-Host 'Tauri installer install/uninstall smoke test passed.'
 }

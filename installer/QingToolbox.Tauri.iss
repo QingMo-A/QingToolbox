@@ -80,6 +80,24 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 ; cannot retain a stale module executable or an obsolete hashed Web asset.
 Type: filesandordirs; Name: "{app}\resources"
 
+[Registry]
+; This marker is deliberately separate from the fixed Inno uninstall record:
+; the Rust host requires both records plus its production manifest to agree
+; before it offers an update handoff. Portable/debug copies and the legacy WPF
+; installer therefore cannot satisfy this contract.
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "InstallKind"; ValueData: "tauri-production"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "InstallerContractVersion"; ValueData: "1"
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "AppId"; ValueData: "{{C9E5A4D1-1E8E-4F39-8F70-9D8D1C4B7A61}"
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "InstallLocation"; ValueData: "{app}"
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "InstalledVersion"; ValueData: "{#AppVersion}"
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "Distribution"; ValueData: "production"
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "Backend"; ValueData: "rust"
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "Framework"; ValueData: "tauri-2"
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "Frontend"; ValueData: "vue-3"
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "BuildProfile"; ValueData: "release"
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "ExecutableName"; ValueData: "QingToolbox.exe"
+Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "ManifestFileName"; ValueData: "portable-manifest.json"
+
 [Icons]
 Name: "{group}\QingToolbox Tauri"; Filename: "{app}\QingToolbox.exe"; WorkingDir: "{app}"
 Name: "{autodesktop}\QingToolbox Tauri"; Filename: "{app}\QingToolbox.exe"; WorkingDir: "{app}"; Tasks: desktopicon

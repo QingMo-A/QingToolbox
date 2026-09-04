@@ -16,11 +16,16 @@ with:
 The script consumes the validated `artifacts/tauri-production/QingToolbox`
 directory, checks its portable manifest and staged module tree, then compiles
 `QingToolbox.Tauri.iss` with the existing Inno Setup toolchain. It writes the
-installer and SHA256 sidecar to `artifacts/tauri-installer/output`. The script
-uses a migration-only AppId and a `QingToolbox-Tauri` default directory, so it
-cannot silently replace the legacy WPF installation. The smoke test performs a
-per-user silent install, validates the Rust host plus bundled module/license
-files, runs the host single-instance check, and uninstalls the candidate.
+Tauri-only installer (`QingToolbox-{version}-win-x64-tauri-setup.exe`) and SHA256
+sidecar to `artifacts/tauri-installer/output`. The script uses a migration-only
+AppId and a `QingToolbox-Tauri` default directory, so it cannot silently replace
+the legacy WPF installation. It also writes a Tauri production marker under
+`HKCU\Software\QingMo-A\QingToolbox\Tauri`; the Rust host requires this marker,
+the fixed AppId uninstall record, the current `QingToolbox.exe`, and the
+adjacent `portable-manifest.json` to agree before enabling update handoff. The smoke
+test performs a per-user silent install, validates the Rust host plus bundled
+module/license files and marker, runs the host single-instance check, and
+uninstalls the candidate.
 
 Build the x64 self-contained installer:
 
