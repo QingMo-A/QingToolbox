@@ -258,6 +258,73 @@ impl SettingsStore {
         self.settings = candidate;
         Ok(self.snapshot())
     }
+
+    pub fn floating_badge_position(&self) -> Option<(f64, f64)> {
+        if !self
+            .settings
+            .extra
+            .get("HasFloatingBadgePosition")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return None;
+        }
+        let left = self
+            .settings
+            .extra
+            .get("FloatingBadgeLeft")
+            .and_then(Value::as_f64)?;
+        let top = self
+            .settings
+            .extra
+            .get("FloatingBadgeTop")
+            .and_then(Value::as_f64)?;
+        (left.is_finite() && top.is_finite()).then_some((left, top))
+    }
+
+    pub fn set_floating_badge_position(
+        &mut self,
+        left: f64,
+        top: f64,
+    ) -> Result<(), SettingsError> {
+        if !left.is_finite() || !top.is_finite() {
+            return Err(SettingsError {
+                code: "settingsValueInvalid",
+                message: "悬浮窗位置无效。".to_string(),
+            });
+        }
+        let mut candidate = self.settings.clone();
+        candidate.extra.insert(
+            "FloatingBadgeLeft".to_string(),
+            Value::from(left.clamp(-32_000.0, 32_000.0)),
+        );
+        candidate.extra.insert(
+            "FloatingBadgeTop".to_string(),
+            Value::from(top.clamp(-32_000.0, 32_000.0)),
+        );
+        candidate
+            .extra
+            .insert("HasFloatingBadgePosition".to_string(), Value::Bool(true));
+        // The WPF host prefers ratio/monitor placement over Left/Top. Remove
+        // the now-stale values so a later rollback reads the Tauri position.
+        candidate.extra.remove("FloatingBadgeHorizontalRatio");
+        candidate.extra.remove("FloatingBadgeVerticalRatio");
+        candidate.extra.remove("FloatingBadgeMonitorDeviceName");
+        let Some(path) = self.path.as_deref() else {
+            return Err(SettingsError {
+                code: "settingsPathUnavailable",
+                message: "工具箱设置路径不可用。".to_string(),
+            });
+        };
+        write_document(path, &SettingsDocument::from(&candidate)).map_err(|error| {
+            SettingsError {
+                code: "settingsWriteFailed",
+                message: format!("无法保存工具箱设置：{error}"),
+            }
+        })?;
+        self.settings = candidate;
+        Ok(())
+    }
 }
 
 impl Default for SettingsStore {
@@ -623,5 +690,29 @@ mod tests {
         assert_eq!(normalize_hotkey("Ctrl++Space"), "Ctrl+Alt+Space");
         let long = "Ctrl+Alt+".to_string() + &"K".repeat(200);
         assert_eq!(normalize_hotkey(&long), "Ctrl+Alt+Space");
+    }
+
+    #[test]
+    fn floating_badge_position_round_trips_without_stale_legacy_ratios() {
+        let (directory, path) = test_path("floating-badge-position");
+        fs::create_dir_all(&directory).expect("settings directory");
+        fs::write(
+            &path,
+            br#"{"HasFloatingBadgePosition":true,"FloatingBadgeLeft":20,"FloatingBadgeTop":30,"FloatingBadgeHorizontalRatio":0.9,"FloatingBadgeVerticalRatio":0.4,"FloatingBadgeMonitorDeviceName":"DISPLAY"}"#,
+        )
+        .expect("legacy settings");
+        let mut store = SettingsStore::from_path(Some(path.clone()));
+        assert_eq!(store.floating_badge_position(), Some((20.0, 30.0)));
+
+        store
+            .set_floating_badge_position(120.5, 240.25)
+            .expect("save badge position");
+
+        let reloaded = SettingsStore::from_path(Some(path.clone()));
+        assert_eq!(reloaded.floating_badge_position(), Some((120.5, 240.25)));
+        let document = fs::read_to_string(path).expect("saved settings");
+        assert!(!document.contains("FloatingBadgeHorizontalRatio"));
+        assert!(!document.contains("FloatingBadgeMonitorDeviceName"));
+        let _ = fs::remove_dir_all(directory);
     }
 }

@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
     process::Command,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     thread,
@@ -46,6 +46,7 @@ const MAX_EXTERNAL_DROP_PATH_LENGTH: usize = 32 * 1024;
 const MAX_SESSION_LOG_ENTRIES: usize = 256;
 const MODULE_STATE_CHANGED_EVENT: &str = "qmod:module-state-changed";
 const DEFAULT_LAUNCHER_HOTKEY: &str = "Ctrl+Alt+L";
+const FLOATING_BADGE_WINDOW_LABEL: &str = "floating-badge";
 
 /// Process-wide state owned by the Rust host. Paths and module records stay on
 /// this side of the IPC boundary; the Vue layer only receives stable ids and
@@ -62,6 +63,7 @@ pub struct HostState {
     screenpin_windows: Mutex<std::collections::BTreeMap<String, ScreenPinWindowRecord>>,
     session_logs: Mutex<Vec<SessionLogEntry>>,
     close_prompt_active: AtomicBool,
+    floating_badge_move_generation: AtomicU64,
 }
 
 impl HostState {
@@ -81,6 +83,7 @@ impl HostState {
             screenpin_windows: Mutex::new(std::collections::BTreeMap::new()),
             session_logs: Mutex::new(Vec::new()),
             close_prompt_active: AtomicBool::new(false),
+            floating_badge_move_generation: AtomicU64::new(0),
         }
     }
 }
@@ -471,6 +474,76 @@ fn hide_to_tray(window: WebviewWindow) -> Result<(), CommandError> {
         code: "windowUnavailable",
         message: format!("无法隐藏工具箱窗口：{error}"),
     })
+}
+
+fn ensure_floating_badge_window(window: &WebviewWindow) -> Result<(), CommandError> {
+    if window.label() == FLOATING_BADGE_WINDOW_LABEL {
+        Ok(())
+    } else {
+        Err(CommandError {
+            code: "floatingBadgeUnauthorized",
+            message: "该操作只能由工具箱悬浮窗发起。".to_string(),
+        })
+    }
+}
+
+#[tauri::command]
+fn show_main_from_floating_badge(window: WebviewWindow) -> Result<(), CommandError> {
+    ensure_floating_badge_window(&window)?;
+    show_main_window(window.app_handle());
+    Ok(())
+}
+
+#[tauri::command]
+fn start_floating_badge_drag(window: WebviewWindow) -> Result<(), CommandError> {
+    ensure_floating_badge_window(&window)?;
+    window.start_dragging().map_err(|error| CommandError {
+        code: "windowUnavailable",
+        message: format!("无法拖动悬浮窗：{error}"),
+    })
+}
+
+#[tauri::command]
+fn prepare_floating_badge_window(window: WebviewWindow) -> Result<(), CommandError> {
+    ensure_floating_badge_window(&window)?;
+    window
+        .set_decorations(false)
+        .and_then(|_| window.set_resizable(false))
+        .and_then(|_| window.set_size(tauri::LogicalSize::new(68.0, 68.0)))
+        .map_err(|error| CommandError {
+            code: "windowUnavailable",
+            message: format!("无法初始化悬浮窗：{error}"),
+        })
+}
+
+fn persist_floating_badge_position<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    window: &WebviewWindow<R>,
+) -> Result<(), CommandError> {
+    let position = window.outer_position().map_err(|error| CommandError {
+        code: "windowUnavailable",
+        message: format!("无法读取悬浮窗位置：{error}"),
+    })?;
+    let scale = window.scale_factor().map_err(|error| CommandError {
+        code: "windowUnavailable",
+        message: format!("无法读取悬浮窗缩放比例：{error}"),
+    })?;
+    app.try_state::<HostState>()
+        .ok_or_else(|| CommandError {
+            code: "stateUnavailable",
+            message: "工具箱设置状态不可用。".to_string(),
+        })?
+        .settings
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "工具箱设置状态不可用。".to_string(),
+        })?
+        .set_floating_badge_position(position.x as f64 / scale, position.y as f64 / scale)
+        .map_err(|error| CommandError {
+            code: error.code,
+            message: error.message,
+        })
 }
 
 #[tauri::command]
@@ -2299,6 +2372,9 @@ pub fn run() {
             remove_module,
             list_modules,
             hide_to_tray,
+            show_main_from_floating_badge,
+            start_floating_badge_drag,
+            prepare_floating_badge_window,
             start_module,
             open_module,
             stop_module,
@@ -2327,6 +2403,7 @@ pub fn run() {
 
             let menu = MenuBuilder::new(app)
                 .text("open", "打开工具箱")
+                .text("floating-badge", "显示悬浮窗")
                 .separator()
                 .text("quit", "退出 QingToolbox")
                 .build()?;
@@ -2341,6 +2418,7 @@ pub fn run() {
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "open" => show_main_window(app),
+                    "floating-badge" => show_floating_badge(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -2348,6 +2426,10 @@ pub fn run() {
 
             if let Some(window) = app.get_webview_window("main") {
                 install_close_behavior(&window);
+                if let Some(badge) = app.get_webview_window(FLOATING_BADGE_WINDOW_LABEL) {
+                    apply_floating_badge_position(app.handle(), &badge);
+                    install_floating_badge_close_behavior(&badge);
+                }
                 apply_startup_presentation(app.handle(), &window);
             }
             Ok(())
@@ -2596,10 +2678,23 @@ fn start_runtime_supervisor<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
 }
 
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(badge) = app.get_webview_window(FLOATING_BADGE_WINDOW_LABEL) {
+        let _ = badge.hide();
+    }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+}
+
+fn show_floating_badge<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    if let Some(badge) = app.get_webview_window(FLOATING_BADGE_WINDOW_LABEL) {
+        let _ = badge.show();
+        let _ = badge.unminimize();
     }
 }
 
@@ -2715,10 +2810,68 @@ fn apply_startup_presentation<R: tauri::Runtime>(
             let _ = window.minimize();
         }
         "tray" => {
-            let _ = window.hide();
+            show_floating_badge(app);
         }
         _ => show_main_window(app),
     }
+}
+
+fn apply_floating_badge_position<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    badge: &WebviewWindow<R>,
+) {
+    let position = app.try_state::<HostState>().and_then(|state| {
+        state
+            .settings
+            .lock()
+            .ok()
+            .and_then(|settings| settings.floating_badge_position())
+    });
+    if let Some((left, top)) = position {
+        let _ = badge.set_position(tauri::LogicalPosition::new(left, top));
+    } else if let Ok(Some(monitor)) = badge.primary_monitor() {
+        let monitor_position = monitor.position();
+        let monitor_size = monitor.size();
+        let badge_size = (68.0 * monitor.scale_factor()).round() as i32;
+        let margin = (16.0 * monitor.scale_factor()).round() as i32;
+        let left = monitor_position.x + monitor_size.width as i32 - badge_size - margin;
+        let top = monitor_position.y + margin;
+        let _ = badge.set_position(tauri::PhysicalPosition::new(left, top));
+    }
+}
+
+fn install_floating_badge_close_behavior(window: &WebviewWindow) {
+    let app = window.app_handle().clone();
+    let badge = window.clone();
+    window.on_window_event(move |event| match event {
+        WindowEvent::CloseRequested { api, .. } => {
+            api.prevent_close();
+            show_main_window(&app);
+        }
+        WindowEvent::Moved(_) => {
+            let Some(state) = app.try_state::<HostState>() else {
+                return;
+            };
+            let generation = state
+                .floating_badge_move_generation
+                .fetch_add(1, Ordering::AcqRel)
+                + 1;
+            let app_for_save = app.clone();
+            let badge_for_save = badge.clone();
+            let _ = thread::Builder::new()
+                .name("qing-floating-badge-position".to_string())
+                .spawn(move || {
+                    thread::sleep(Duration::from_millis(250));
+                    let Some(state) = app_for_save.try_state::<HostState>() else {
+                        return;
+                    };
+                    if state.floating_badge_move_generation.load(Ordering::Acquire) == generation {
+                        let _ = persist_floating_badge_position(&app_for_save, &badge_for_save);
+                    }
+                });
+        }
+        _ => {}
+    });
 }
 
 fn install_close_behavior(window: &WebviewWindow) {
@@ -2807,6 +2960,12 @@ mod tests {
         assert!(module_id_from_window_label("main").is_none());
         assert!(module_id_from_window_label("module-2e2e2f2f657363617065").is_none());
         assert!(module_id_from_window_label("module-").is_none());
+    }
+
+    #[test]
+    fn floating_badge_label_is_not_a_main_or_module_window() {
+        assert_ne!(super::FLOATING_BADGE_WINDOW_LABEL, "main");
+        assert!(module_id_from_window_label(super::FLOATING_BADGE_WINDOW_LABEL).is_none());
     }
 
     #[test]

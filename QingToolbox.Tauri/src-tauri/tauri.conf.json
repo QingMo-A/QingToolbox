@@ -21,6 +21,24 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": true
+      },
+      {
+        "label": "floating-badge",
+        "title": "QingToolbox",
+        "url": "index.html?surface=floating-badge",
+        "width": 68,
+        "height": 68,
+        "minWidth": 68,
+        "minHeight": 68,
+        "maxWidth": 68,
+        "maxHeight": 68,
+        "resizable": false,
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
       }
     ],
     "security": {

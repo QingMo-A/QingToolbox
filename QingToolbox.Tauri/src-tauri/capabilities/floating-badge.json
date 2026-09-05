@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "floating-badge-capability",
+  "description": "Core IPC for the restricted QingToolbox floating badge window.",
+  "windows": ["floating-badge"],
+  "permissions": ["core:window:default"]
+}
