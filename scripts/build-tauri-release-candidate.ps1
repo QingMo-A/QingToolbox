@@ -8,6 +8,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+$powerShell = (Get-Process -Id $PID).Path
 
 $stageNames = @(
     'Verify Tauri host and all official modules',
@@ -43,6 +44,18 @@ function Invoke-CandidateStage {
         throw "Tauri candidate stage '$StageName' failed. " +
             "PowerShellSuccess=$stageSucceeded; ExitCode=$stageExitCode."
     }
+}
+
+function Invoke-CandidateScript {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [string[]]$Arguments = @()
+    )
+
+    if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
+        throw "Tauri candidate dependency is missing: $ScriptPath"
+    }
+    & $powerShell -NoProfile -ExecutionPolicy Bypass -File $ScriptPath @Arguments
 }
 
 function Invoke-GitText {
@@ -169,21 +182,24 @@ $initialSource = Get-TauriCandidateSource
 Assert-CleanSource $initialSource
 
 Invoke-CandidateStage -StageName $stageNames[0] -Action {
-    & (Join-Path $PSScriptRoot 'verify-tauri.ps1') `
-        -BuildDesktop -SmokeDesktop -SmokeEverything
+    Invoke-CandidateScript -ScriptPath (Join-Path $PSScriptRoot 'verify-tauri.ps1') `
+        -Arguments @('-BuildDesktop', '-SmokeDesktop', '-SmokeEverything')
 }
 Invoke-CandidateStage -StageName $stageNames[1] -Action {
-    & (Join-Path $PSScriptRoot 'package-tauri-modules.ps1') -SkipBuild -Smoke
+    Invoke-CandidateScript -ScriptPath (Join-Path $PSScriptRoot 'package-tauri-modules.ps1') `
+        -Arguments @('-SkipBuild', '-Smoke')
 }
 Invoke-CandidateStage -StageName $stageNames[2] -Action {
-    & (Join-Path $PSScriptRoot 'test-local-environment-contracts.ps1')
+    Invoke-CandidateScript `
+        -ScriptPath (Join-Path $PSScriptRoot 'test-local-environment-contracts.ps1')
 }
 Invoke-CandidateStage -StageName $stageNames[3] -Action {
-    $arguments = @{ Smoke = $true }
+    $arguments = @('-Smoke')
     if (-not [string]::IsNullOrWhiteSpace($IsccPath)) {
-        $arguments.IsccPath = $IsccPath
+        $arguments += @('-IsccPath', $IsccPath)
     }
-    & (Join-Path $PSScriptRoot 'build-tauri-installer.ps1') @arguments
+    Invoke-CandidateScript -ScriptPath (Join-Path $PSScriptRoot 'build-tauri-installer.ps1') `
+        -Arguments $arguments
 }
 $candidate = $null
 Invoke-CandidateStage -StageName $stageNames[4] -Action {
