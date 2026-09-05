@@ -15,9 +15,12 @@ on:
       - 'scripts/verify-tauri.ps1'
       - 'scripts/run-tauri-latest.ps1'
       - 'scripts/test-local-environment-contracts.ps1'
+      - 'scripts/test-tauri-release-candidate-contracts.ps1'
+      - 'scripts/prepare-inno-setup.ps1'
       - 'run-latest.bat'
       - 'run-legacy-wpf.bat'
       - 'installer/QingToolbox.Tauri.iss'
+      - 'installer/dependencies.psd1'
       - '.github/workflows/tauri-validation.yml'
   push:
     branches:
@@ -32,9 +35,12 @@ on:
       - 'scripts/verify-tauri.ps1'
       - 'scripts/run-tauri-latest.ps1'
       - 'scripts/test-local-environment-contracts.ps1'
+      - 'scripts/test-tauri-release-candidate-contracts.ps1'
+      - 'scripts/prepare-inno-setup.ps1'
       - 'run-latest.bat'
       - 'run-legacy-wpf.bat'
       - 'installer/QingToolbox.Tauri.iss'
+      - 'installer/dependencies.psd1'
       - '.github/workflows/tauri-validation.yml'
 
 permissions:
@@ -67,25 +73,32 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Verify Tauri host and native modules
+      - name: Install pinned Inno Setup 6
+        shell: pwsh
+        run: |
+          choco install innosetup --version=6.7.1 -y --no-progress
+          if ($LASTEXITCODE -ne 0) {
+            throw "Chocolatey failed to install Inno Setup 6.7.1."
+          }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) {
+            throw "ISCC.exe was not installed at the expected path: $iscc"
+          }
+          $preparedIscc = ./scripts/prepare-inno-setup.ps1 -IsccPath $iscc
+          if ([string]::IsNullOrWhiteSpace($preparedIscc)) {
+            throw "Inno Setup dependency preparation failed."
+          }
+          "ISCC_PATH=$preparedIscc" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Test Tauri release candidate gate contracts
+        shell: pwsh
+        run: ./scripts/test-tauri-release-candidate-contracts.ps1
+
+      - name: Build and validate unsigned Tauri release candidate
         shell: pwsh
         env:
           QING_TAURI_DISABLE_AUTOSTART_SYNC: '1'
-        run: ./scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop -SmokeEverything
-
-      - name: Package all Tauri modules
-        shell: pwsh
-        run: ./scripts/package-tauri-modules.ps1 -SkipBuild -Smoke
-
-      - name: Check default and legacy launch entry contracts
-        shell: pwsh
-        run: ./scripts/test-local-environment-contracts.ps1
-
-      - name: Build production candidate
-        shell: pwsh
-        env:
-          QING_TAURI_DISABLE_AUTOSTART_SYNC: '1'
-        run: ./scripts/build-tauri-production.ps1 -SkipModuleBuild -Smoke
+        run: ./scripts/build-tauri-release-candidate.ps1 -IsccPath $env:ISCC_PATH
 
       - name: Check formatting and repository diff
         shell: pwsh

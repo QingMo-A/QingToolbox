@@ -13,6 +13,17 @@ with:
 ./scripts/build-tauri-installer.ps1 -Smoke
 ```
 
+For the complete clean-HEAD M3 parity gate (all official modules, production
+manifest, Tauri-only installer identity, checksum and real install/uninstall),
+run:
+
+```powershell
+./scripts/build-tauri-release-candidate.ps1
+```
+
+This gate deliberately produces an unsigned engineering candidate. It does not
+push, tag, publish, sign or switch from the migration AppId.
+
 The script consumes the validated `artifacts/tauri-production/QingToolbox`
 directory, checks its portable manifest and staged module tree, then compiles
 `QingToolbox.Tauri.iss` with the existing Inno Setup toolchain. It writes the

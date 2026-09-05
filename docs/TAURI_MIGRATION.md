@@ -231,6 +231,17 @@ the first release.
   remains independently named and is never used to terminate a user's own
   Everything instance.
 
+- `scripts/build-tauri-release-candidate.ps1` now provides the unsigned M3
+  production parity gate. From a clean `toolbox` HEAD it runs every official
+  module/Everything/desktop verification, packages all `.qmod` candidates,
+  checks the local launch environment contracts, builds the production host
+  and Tauri-only Inno installer, performs a real install/host/uninstall smoke,
+  and binds the manifest, installer and SHA256 sidecar back to the same
+  unchanged source commit. It rejects legacy WPF asset names and any worktree
+  or HEAD change during the run. CI exercises the same entry point with pinned
+  Inno Setup 6.7.1. Code signing and the permanent production AppId cut-over
+  remain explicit public-release blockers.
+
 - The repository's default `run-latest.bat` now launches the Tauri Release
   candidate. The legacy WPF maintenance path is explicit (`run-legacy-wpf.bat`)
   and is not referenced by the Tauri host or its module packages.
@@ -241,6 +252,14 @@ command (`scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop
 tests, Vue typecheck/build, Release resource staging and the module-window IPC
 smoke. This is a validated engineering candidate, not yet the signed public
 installer described in M3.
+
+Run the complete unsigned production candidate gate with:
+
+```powershell
+./scripts/build-tauri-release-candidate.ps1
+```
+
+The command never tags, pushes or publishes a release.
 
 ### M4 — retire WPF
 
