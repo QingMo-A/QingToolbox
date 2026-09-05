@@ -175,6 +175,15 @@ pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
             };
 
             let (summary, id) = validate_manifest(&manifest, &directory, root.source);
+            // A valid module from an earlier (higher-priority) root owns its
+            // id completely. Legacy WPF packages in the shared user modules
+            // directory commonly carry the same id but fail the Tauri
+            // Process/OutOfProcess contract; surfacing those lower-priority
+            // diagnostics creates a duplicate broken card beside the bundled
+            // replacement even though it can never be selected.
+            if seen_ids.contains(&summary.id) {
+                continue;
+            }
             // Invalid/empty ids cannot be used as backend lookup keys. Keep
             // their diagnostics visible, but never allow a duplicate valid id
             // from a lower-priority root to replace the first one.
@@ -856,5 +865,27 @@ mod tests {
             .any(|issue| issue.code == "runtimeTypeMissing"));
         assert!(result.records.is_empty());
         let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn lower_priority_legacy_duplicate_is_hidden_by_a_valid_bundled_module() {
+        let (bundled_temp, bundled_root) = temp_module(
+            "qing.launcher",
+            r#"{"id":"qing.launcher","name":"Launcher","version":"0.3.0","entry":"entry.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#,
+        );
+        let (user_temp, mut user_root) = temp_module(
+            "qing.launcher",
+            r#"{"id":"qing.launcher","name":"Launcher","version":"0.2.2","entry":"entry.exe"}"#,
+        );
+        user_root.source = ModuleSource::User;
+
+        let result = discover_modules(&[bundled_root, user_root]);
+
+        assert_eq!(result.payload.modules.len(), 1);
+        assert!(result.payload.modules[0].valid);
+        assert_eq!(result.payload.modules[0].source, ModuleSource::Bundled);
+        assert_eq!(result.records["qing.launcher"].version, "0.3.0");
+        let _ = fs::remove_dir_all(bundled_temp);
+        let _ = fs::remove_dir_all(user_temp);
     }
 }
