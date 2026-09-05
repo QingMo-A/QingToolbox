@@ -14,6 +14,7 @@ $stageNames = @(
     'Verify Tauri host and all official modules',
     'Package Tauri modules',
     'Verify local environment contracts',
+    'Build Tauri production host',
     'Build and smoke Tauri installer',
     'Verify Tauri candidate assets',
     'Verify final source state'
@@ -194,7 +195,11 @@ Invoke-CandidateStage -StageName $stageNames[2] -Action {
         -ScriptPath (Join-Path $PSScriptRoot 'test-local-environment-contracts.ps1')
 }
 Invoke-CandidateStage -StageName $stageNames[3] -Action {
-    $arguments = @('-Smoke')
+    Invoke-CandidateScript -ScriptPath (Join-Path $PSScriptRoot 'build-tauri-production.ps1') `
+        -Arguments @('-SkipModuleBuild', '-Smoke')
+}
+Invoke-CandidateStage -StageName $stageNames[4] -Action {
+    $arguments = @('-SkipBuild', '-Smoke')
     if (-not [string]::IsNullOrWhiteSpace($IsccPath)) {
         $arguments += @('-IsccPath', $IsccPath)
     }
@@ -202,10 +207,10 @@ Invoke-CandidateStage -StageName $stageNames[3] -Action {
         -Arguments $arguments
 }
 $candidate = $null
-Invoke-CandidateStage -StageName $stageNames[4] -Action {
+Invoke-CandidateStage -StageName $stageNames[5] -Action {
     $script:candidate = Assert-TauriCandidateAssets -ExpectedCommit $initialSource.Commit
 }
-Invoke-CandidateStage -StageName $stageNames[5] -Action {
+Invoke-CandidateStage -StageName $stageNames[6] -Action {
     $finalSource = Get-TauriCandidateSource
     Assert-CleanSource $finalSource
     if ($finalSource.Commit -ne $initialSource.Commit) {

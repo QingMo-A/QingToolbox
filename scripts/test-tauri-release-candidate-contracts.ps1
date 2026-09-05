@@ -17,6 +17,7 @@ $expectedStages = @(
     'Stage: Verify Tauri host and all official modules',
     'Stage: Package Tauri modules',
     'Stage: Verify local environment contracts',
+    'Stage: Build Tauri production host',
     'Stage: Build and smoke Tauri installer',
     'Stage: Verify Tauri candidate assets',
     'Stage: Verify final source state'
@@ -41,7 +42,10 @@ foreach ($contract in @(
     "@('-BuildDesktop', '-SmokeDesktop', '-SmokeEverything')",
     "'package-tauri-modules.ps1'",
     "'test-local-environment-contracts.ps1'",
+    "'build-tauri-production.ps1'",
+    "@('-SkipModuleBuild', '-Smoke')",
     "'build-tauri-installer.ps1'",
+    "@('-SkipBuild', '-Smoke')",
     'sourceDirty',
     'sourceCommit',
     '-tauri-setup.exe',
