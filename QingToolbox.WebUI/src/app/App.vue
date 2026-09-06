@@ -13,6 +13,10 @@ import QHostUpdateBanner from '../design-system/components/QHostUpdateBanner.vue
 import { useLocalization } from '../localization/localization'
 import { routeTitleKeyByPath } from './router'
 import { applyFontPresentation } from '../presentation/fontPresentation'
+import QTitleBar from '../design-system/components/QTitleBar.vue'
+import { TauriTransport } from '../bridge/transport/TauriTransport'
+
+const nativeTitleBar = TauriTransport.isAvailable()
 
 const theme = useThemeStore()
 const appearance = useAppearancePresetStore()
@@ -62,11 +66,23 @@ watchEffect(() => {
 </script>
 
 <template>
+  <div class="q-desktop-frame" :class="{ 'with-titlebar': nativeTitleBar }">
+  <QTitleBar v-if="nativeTitleBar" />
   <QSidebarLayout @open-command-palette="commandPaletteOpen = true">
     <QHostUpdateBanner />
     <router-view />
   </QSidebarLayout>
+  </div>
   <QCommandPalette :open="commandPaletteOpen" @close="commandPaletteOpen = false" />
   <QToast />
 </template>
+<style>
+.q-desktop-frame { height: 100%; min-height: 0; }
+.q-desktop-frame.with-titlebar { display: grid; grid-template-rows: 40px minmax(0, 1fr); }
+.q-desktop-frame { user-select: none; -webkit-user-select: none; }
+.q-desktop-frame :is(input, textarea, [contenteditable="true"], pre, code, .logs-table, .log-details, [data-selectable]) {
+  user-select: text; -webkit-user-select: text;
+}
+.q-desktop-frame img { -webkit-user-drag: none; }
+</style>
 <style src="../styles/sidebar.css"></style>

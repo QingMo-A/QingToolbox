@@ -1,5 +1,6 @@
 @echo off
 setlocal
+set "QING_TAURI_DISABLE_AUTOSTART_SYNC=1"
 cd /d "%~dp0"
 title QingToolbox - Tauri production build
 

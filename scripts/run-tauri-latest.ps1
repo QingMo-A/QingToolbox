@@ -18,6 +18,12 @@ $tauriRoot = Join-Path $repoRoot 'QingToolbox.Tauri'
 $rustRoot = Join-Path $tauriRoot 'src-tauri'
 $artifactExe = Join-Path $repoRoot 'artifacts/tauri-production/QingToolbox/QingToolbox.exe'
 
+# The local development entry point and its Release candidate are not the
+# production installation. Keep them from registering or repairing the
+# user's Windows login-start entry, while the packaged executable remains
+# capable of managing that setting when launched outside this script.
+$env:QING_TAURI_DISABLE_AUTOSTART_SYNC = '1'
+
 function Invoke-Checked {
     param(
         [Parameter(Mandatory = $true)][string]$Label,

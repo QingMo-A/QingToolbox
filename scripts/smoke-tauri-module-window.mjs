@@ -41,11 +41,25 @@ try {
     // The Vue shell localizes the document title after startup (for example
     // "首页 · QingToolbox"). Match the stable product suffix instead of the
     // initial index.html title so the smoke remains valid in every locale.
-    waitForTarget((value) => typeof value.title === 'string' && value.title.includes('QingToolbox')),
+    waitForTarget((value) => typeof value.title === 'string' && value.title.includes('QingToolbox') && !value.url?.includes('surface=floating-badge')),
     spawnError,
     spawnExit,
   ])
   await waitFor(async () => Boolean(await evaluate(target, `!document.querySelector('.empty-state')?.textContent?.includes('正在读取') && !document.querySelector('.status-label')?.textContent?.includes('扫描模块')`)), 10000)
+  await waitFor(() => evaluate(target, `document.querySelectorAll('.q-titlebar-actions button').length === 4`), 10000)
+  const startup = await evaluate(target, `window.__TAURI_INTERNALS__.invoke('get_startup_registration_status')`)
+  if (startup?.canConfigure !== false || startup?.canRepair !== false) throw new Error('Development autostart controls remain enabled')
+  const startupDenied = await evaluate(target, `window.__TAURI_INTERNALS__.invoke('update_settings', { update: { launchAtLogin: true } }).then(() => false, e => e.code === 'autostartUnavailable')`)
+  if (!startupDenied) throw new Error('Development host accepted an autostart preference mutation')
+  if (!await evaluate(target, `getComputedStyle(document.querySelector('.q-desktop-frame')).userSelect === 'none'`)) {
+    throw new Error('Desktop shell unexpectedly permits interface text selection')
+  }
+  await evaluate(target, `document.querySelector('.q-titlebar-actions button').click(); true`)
+  const badgeTarget = await waitForTarget(value => value.url?.includes('surface=floating-badge'))
+  await waitFor(() => evaluate(badgeTarget, `Boolean(document.querySelector('.floating-badge'))`), 10000)
+  const denied = await evaluate(badgeTarget, `window.__TAURI_INTERNALS__.invoke('control_main_window', { action: 'minimize' }).then(() => false, e => e.code === 'mainWindowUnauthorized')`)
+  if (!denied) throw new Error('Floating badge can invoke privileged main window commands')
+  await evaluate(badgeTarget, `window.__TAURI_INTERNALS__.invoke('show_main_from_floating_badge')`)
   // The current shell keeps module cards in the Modules workspace rather
   // than duplicating them on the dashboard. Navigate through the rendered
   // router link so the smoke follows the same user path as the UI.

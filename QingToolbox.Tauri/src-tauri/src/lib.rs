@@ -476,6 +476,44 @@ fn hide_to_tray(window: WebviewWindow) -> Result<(), CommandError> {
     })
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum MainWindowAction {
+    Minimize,
+    ToggleMaximize,
+    Close,
+    Drag,
+    FloatingBadge,
+}
+
+#[tauri::command]
+fn control_main_window(
+    window: WebviewWindow,
+    action: MainWindowAction,
+) -> Result<(), CommandError> {
+    ensure_main_window(&window)?;
+    let result = match action {
+        MainWindowAction::Minimize => window.minimize(),
+        MainWindowAction::ToggleMaximize => window.is_maximized().and_then(|maximized| {
+            if maximized {
+                window.unmaximize()
+            } else {
+                window.maximize()
+            }
+        }),
+        MainWindowAction::Close => window.close(),
+        MainWindowAction::Drag => window.start_dragging(),
+        MainWindowAction::FloatingBadge => {
+            show_floating_badge(window.app_handle());
+            Ok(())
+        }
+    };
+    result.map_err(|error| CommandError {
+        code: "windowUnavailable",
+        message: format!("无法操作工具箱窗口：{error}"),
+    })
+}
+
 fn ensure_floating_badge_window(window: &WebviewWindow) -> Result<(), CommandError> {
     if window.label() == FLOATING_BADGE_WINDOW_LABEL {
         Ok(())
@@ -718,6 +756,12 @@ fn update_settings(
     update: SettingsUpdate,
 ) -> Result<SettingsSnapshot, CommandError> {
     ensure_main_window(&window)?;
+    if update.launch_at_login.is_some() && !autostart_sync_enabled() {
+        return Err(CommandError {
+            code: "autostartUnavailable",
+            message: "当前开发/候选环境已禁用登录启动设置。".to_string(),
+        });
+    }
     let mut settings = state.settings.lock().map_err(|_| CommandError {
         code: "stateUnavailable",
         message: "工具箱设置状态不可用。".to_string(),
@@ -2372,6 +2416,7 @@ pub fn run() {
             remove_module,
             list_modules,
             hide_to_tray,
+            control_main_window,
             show_main_from_floating_badge,
             start_floating_badge_drag,
             prepare_floating_badge_window,

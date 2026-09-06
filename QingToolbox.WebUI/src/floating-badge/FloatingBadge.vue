@@ -83,6 +83,7 @@ html.floating-badge-document body,
 html.floating-badge-document #app {
   width: 100%;
   height: 100%;
+  min-width: 0;
   margin: 0;
   overflow: hidden;
   background: transparent !important;
