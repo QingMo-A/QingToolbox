@@ -7,3 +7,4 @@ QingToolbox.Tauri/native-launcher/third-party/Everything/NOTICE.md -text -diff
 # Preserve qpdf's upstream notice/license bytes when checking out on Windows.
 QingToolbox.Tauri/native-pdf/third-party/qpdf/LICENSE.txt -text -diff
 QingToolbox.Tauri/native-pdf/third-party/qpdf/NOTICE.md -text -diff
+QingToolbox.Tauri/native-pdf/third-party/qpdf/SHA256SUMS -text -diff
