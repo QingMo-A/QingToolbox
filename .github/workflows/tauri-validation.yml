@@ -65,6 +65,14 @@ jobs:
           cache: npm
           cache-dependency-path: QingToolbox.Tauri/package-lock.json
 
+      - name: Restore Tauri host and WebUI dependencies
+        shell: pwsh
+        run: |
+          npm ci --prefix QingToolbox.Tauri --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Tauri npm restore failed.' }
+          npm ci --prefix QingToolbox.WebUI --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'WebUI npm restore failed.' }
+
       - name: Setup Rust stable
         shell: pwsh
         run: |
