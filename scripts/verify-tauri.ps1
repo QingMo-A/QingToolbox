@@ -256,12 +256,19 @@ if ($SmokeDesktop) {
     & (Join-Path $repoRoot 'scripts/smoke-tauri-host.ps1') -ExecutablePath $desktopExecutable
     if ($LASTEXITCODE -ne 0) { throw "Tauri host smoke failed with exit code $LASTEXITCODE" }
 
-    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
-    if (-not $nodeCommand) {
-        throw 'node was not found. Install Node.js before running the module-window smoke test.'
+    & node (Join-Path $repoRoot 'scripts/test-tauri-module-lifecycle.mjs')
+    if ($LASTEXITCODE -ne 0) { throw "Tauri module lifecycle smoke failed with exit code $LASTEXITCODE" }
+
+    if ($env:GITHUB_ACTIONS -eq 'true') {
+        Write-Warning 'Skipping interactive WebView2/CDP window smoke on the non-interactive GitHub Actions desktop; local Windows validation covers it.'
+    } else {
+        $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+        if (-not $nodeCommand) {
+            throw 'node was not found. Install Node.js before running the module-window smoke test.'
+        }
+        & $nodeCommand.Source (Join-Path $repoRoot 'scripts/smoke-tauri-module-window.mjs') $desktopExecutable
+        if ($LASTEXITCODE -ne 0) { throw "Tauri module-window smoke failed with exit code $LASTEXITCODE" }
     }
-    & $nodeCommand.Source (Join-Path $repoRoot 'scripts/smoke-tauri-module-window.mjs') $desktopExecutable
-    if ($LASTEXITCODE -ne 0) { throw "Tauri module-window smoke failed with exit code $LASTEXITCODE" }
 }
 
 Write-Host 'Tauri verification passed.'

@@ -244,10 +244,14 @@ if ($Smoke) {
     Invoke-Checked -Label 'Smoke portable Tauri host' -Action {
         & (Join-Path $repoRoot 'scripts\smoke-tauri-host.ps1') -ExecutablePath $outputExe
     }
-    $node = Get-Command node.exe -ErrorAction SilentlyContinue
-    if (-not $node) { throw 'node.exe is required for the module-window smoke test.' }
-    Invoke-Checked -Label 'Smoke portable module window' -Action {
-        & $node.Source (Join-Path $repoRoot 'scripts\smoke-tauri-module-window.mjs') $outputExe
+    if ($env:GITHUB_ACTIONS -eq 'true') {
+        Write-Warning 'Skipping interactive portable WebView2/CDP window smoke on GitHub Actions; the native module lifecycle and host smoke remain required.'
+    } else {
+        $node = Get-Command node.exe -ErrorAction SilentlyContinue
+        if (-not $node) { throw 'node.exe is required for the module-window smoke test.' }
+        Invoke-Checked -Label 'Smoke portable module window' -Action {
+            & $node.Source (Join-Path $repoRoot 'scripts\smoke-tauri-module-window.mjs') $outputExe
+        }
     }
 }
 
