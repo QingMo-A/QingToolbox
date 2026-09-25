@@ -431,6 +431,18 @@ fn main() {
             }
         };
         match envelope.message_type.as_str() {
+            "module.lifecycle.request" if handshaken => {
+                let Some(active) = envelope.payload.get("active").and_then(Value::as_bool) else {
+                    break;
+                };
+                let response = serde_json::json!({
+                    "protocolVersion": 1, "messageType": "module.lifecycle.response",
+                    "requestId": envelope.request_id, "payload": { "active": active }
+                });
+                let _ = serde_json::to_writer(&mut writer, &response);
+                let _ = writeln!(writer);
+                let _ = writer.flush();
+            }
             "module.hello.request" if !handshaken => {
                 let valid = envelope.payload.get("moduleId").and_then(Value::as_str)
                     == Some(module_id.as_str())
@@ -454,7 +466,7 @@ fn main() {
                     &mut writer,
                     "module.hello.response",
                     &envelope.request_id,
-                    json!({ "moduleId": module_id, "nonce": nonce, "name": "Text Tools", "protocolVersion": HOST_PROTOCOL_VERSION }),
+                    json!({ "moduleId": module_id, "nonce": nonce, "lifecycleVersion": 1, "name": "Text Tools", "protocolVersion": HOST_PROTOCOL_VERSION }),
                     None,
                 );
             }

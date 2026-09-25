@@ -3,11 +3,15 @@ param(
     [switch]$SkipBuild,
     [switch]$Smoke,
     [switch]$Zip,
+    [switch]$LegacyUpgradeTest,
     [string]$IsccPath
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ($LegacyUpgradeTest -and $Smoke) {
+    throw 'The isolated installer smoke cannot be used with the real product identity. Install this test package interactively.'
+}
 
 $repoRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $tauriRoot = Join-Path $repoRoot 'QingToolbox.Tauri'
@@ -16,6 +20,7 @@ $productionRoot = Join-Path $repoRoot 'artifacts/tauri-production'
 $sourceRoot = Join-Path $productionRoot 'QingToolbox'
 $installerRoot = Join-Path $repoRoot 'artifacts/tauri-installer'
 $outputRoot = Join-Path $installerRoot 'output'
+if ($LegacyUpgradeTest) { $outputRoot = Join-Path $installerRoot 'legacy-upgrade-test' }
 $installerScript = Join-Path $repoRoot 'installer/QingToolbox.Tauri.iss'
 
 function Resolve-Iscc {
@@ -53,7 +58,10 @@ function Resolve-Version {
 }
 
 function Test-Manifest {
-    param([Parameter(Mandatory = $true)][string]$Root)
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [switch]$AllowDirty
+    )
     $manifestPath = Join-Path $Root 'portable-manifest.json'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
         throw "Portable manifest is missing: $manifestPath"
@@ -70,7 +78,10 @@ function Test-Manifest {
         throw 'Portable manifest is not a Rust/Tauri/Vue production Release.'
     }
     if ([bool]$manifest.sourceDirty) {
-        throw 'Refusing to package a dirty Tauri source tree; commit the source first.'
+        if (-not $AllowDirty) {
+            throw 'Refusing to package a dirty Tauri source tree; commit the source first.'
+        }
+        Write-Warning 'Legacy upgrade test mode is packaging a dirty candidate. This installer is unsigned and is not a formal release.'
     }
     $moduleRoot = Join-Path $Root 'resources/modules'
     if (-not (Test-Path -LiteralPath $moduleRoot -PathType Container)) {
@@ -114,11 +125,11 @@ if (-not (Test-Path -LiteralPath $iconPath -PathType Leaf)) { throw "Tauri icon 
 
 if (-not $SkipBuild) {
     Invoke-Checked -Label 'Build production Tauri directory' -Action {
-        & (Join-Path $repoRoot 'scripts/build-tauri-production.ps1') -Smoke
+        & (Join-Path $repoRoot 'scripts/build-tauri-production.ps1') -Smoke:$Smoke
     }
 }
 
-$manifest = Test-Manifest -Root $sourceRoot
+$manifest = Test-Manifest -Root $sourceRoot -AllowDirty:$LegacyUpgradeTest
 $currentCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
 if (-not $?) {
     throw 'Unable to resolve the current source commit before packaging the Tauri installer.'
@@ -143,18 +154,25 @@ foreach ($languageFile in @(
 }
 
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
-Get-ChildItem -LiteralPath $outputRoot -Force -ErrorAction SilentlyContinue |
-    Remove-Item -Recurse -Force
-$baseName = "QingToolbox-$version-win-x64-tauri-setup"
+$baseName = if ($LegacyUpgradeTest) {
+    "QingToolbox-$version-win-x64-legacy-upgrade-test-unsigned-setup"
+} else {
+    "QingToolbox-$version-win-x64-tauri-setup"
+}
+$issArguments = @(
+    "/DAppVersion=$version",
+    "/DFileVersion=$fileVersion",
+    "/DSourceDir=$sourceRoot",
+    "/DOutputDir=$outputRoot",
+    "/DOutputBaseFilename=$baseName",
+    "/DBrandIconPath=$iconPath"
+)
+if ($LegacyUpgradeTest) {
+    $issArguments += '/DLegacyUpgradeTest=1'
+}
+$issArguments += $installerScript
 Invoke-Checked -Label 'Compile Tauri Inno installer' -Action {
-    & $resolvedIscc `
-        "/DAppVersion=$version" `
-        "/DFileVersion=$fileVersion" `
-        "/DSourceDir=$sourceRoot" `
-        "/DOutputDir=$outputRoot" `
-        "/DOutputBaseFilename=$baseName" `
-        "/DBrandIconPath=$iconPath" `
-        $installerScript
+    & $resolvedIscc @issArguments
 }
 
 $installerPath = Join-Path $outputRoot "$baseName.exe"
@@ -168,7 +186,7 @@ $hash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToUppe
 if ($Zip) {
     $zipPath = Join-Path $installerRoot "$baseName.zip"
     if (Test-Path -LiteralPath $zipPath -PathType Leaf) { Remove-Item -LiteralPath $zipPath -Force }
-    Compress-Archive -Path (Join-Path $outputRoot '*') -DestinationPath $zipPath -CompressionLevel Optimal
+    Compress-Archive -LiteralPath @($installerPath, "$installerPath.sha256") -DestinationPath $zipPath -CompressionLevel Optimal
     Write-Host "Installer archive: $zipPath"
 }
 
@@ -182,3 +200,6 @@ Write-Host "`nTauri installer candidate prepared."
 Write-Host "Installer: $installerPath"
 Write-Host "SHA256:   $hash"
 Write-Host "Source:   $($manifest.sourceCommit)"
+if ($LegacyUpgradeTest) {
+    Write-Warning 'This is an unsigned legacy WPF-overwrite test package. Do not publish it as a release.'
+}

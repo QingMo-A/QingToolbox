@@ -1,33 +1,9 @@
 @echo off
 setlocal
-set "QING_TAURI_DISABLE_AUTOSTART_SYNC=1"
-cd /d "%~dp0QingToolbox.Tauri"
+cd /d "%~dp0"
 title QingToolbox Tauri development host
 
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build-tauri-canary.ps1"
-if errorlevel 1 (
-  echo Failed to build the native module canary. >&2
-  pause
-  exit /b 1
-)
-
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build-tauri-launcher.ps1"
-if errorlevel 1 (
-  echo Failed to build the Rust Qing Launcher module. >&2
-  pause
-  exit /b 1
-)
-
-for %%M in (pdf transfer texttools windowtopmost powerguard screenpin) do (
-  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build-tauri-%%M.ps1"
-  if errorlevel 1 (
-    echo Failed to build the Rust %%M module. >&2
-    pause
-    exit /b 1
-  )
-)
-
-npm run tauri -- dev
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run-tauri-latest.ps1" -Configuration Debug -SkipUpdate
 set "QING_TAURI_EXIT_CODE=%ERRORLEVEL%"
 if not "%QING_TAURI_EXIT_CODE%"=="0" pause
 exit /b %QING_TAURI_EXIT_CODE%

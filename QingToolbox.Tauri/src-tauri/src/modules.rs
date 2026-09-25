@@ -153,6 +153,12 @@ pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
                 .and_then(|name| name.to_str())
                 .unwrap_or("unknown-module")
                 .to_string();
+            // The WPF updater owns this journal/staging directory in the
+            // shared user module root. Preserve it for recovery, but never
+            // display or execute its contents as an installed module.
+            if directory_name.eq_ignore_ascii_case(".qing-transactions") {
+                continue;
+            }
             let manifest_path = match canonical_manifest_path(&directory) {
                 Ok(path) => path,
                 Err(error) => {
@@ -713,6 +719,22 @@ mod tests {
                 path: temp,
             },
         )
+    }
+
+    #[test]
+    fn legacy_transaction_directory_is_preserved_and_not_a_module() {
+        let (temp, root) = temp_module(
+            ".qing-transactions",
+            r#"{"id":"staged.module","name":"Not installed","version":"1.0.0","entry":"entry.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#,
+        );
+        fs::create_dir(temp.join("broken-module")).expect("broken module");
+        let result = discover_modules(&[root]);
+        assert!(result.records.is_empty());
+        assert_eq!(result.payload.modules.len(), 1);
+        assert_eq!(result.payload.modules[0].id, "broken-module");
+        assert_eq!(result.payload.modules[0].issues[0].code, "manifestMissing");
+        assert!(temp.join(".qing-transactions/module.json").is_file());
+        let _ = fs::remove_dir_all(temp);
     }
 
     #[test]

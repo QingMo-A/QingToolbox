@@ -92,3 +92,7 @@ export function setModuleHotkey(hotkey: string) {
 export function clearModuleHotkey() {
   return tauriInvoke<{ moduleId: string; hotkey: string | null; status: string }>('clear_module_hotkey')
 }
+
+export function setHotkeyRecording(active: boolean) {
+  return tauriInvoke<number>('set_launcher_hotkey_recording', { active })
+}

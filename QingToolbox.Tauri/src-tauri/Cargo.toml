@@ -1,6 +1,6 @@
 [package]
 name = "qingtoolbox-tauri"
-version = "0.1.0"
+version = "0.3.0-alpha"
 description = "Lightweight QingToolbox desktop host"
 authors = ["QingMo-A"]
 edition = "2021"
@@ -31,7 +31,8 @@ zip = { version = "=2.4.2", default-features = false, features = ["deflate-miniz
 tauri-plugin-autostart = "=2.5.1"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "=0.60.2", features = ["Win32_Networking_WinHttp", "Win32_System_Registry"] }
+webview2-com = "=0.38.2"
+windows-sys = { version = "=0.60.2", features = ["Win32_Networking_WinHttp", "Win32_System_Registry", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 codegen-units = 1

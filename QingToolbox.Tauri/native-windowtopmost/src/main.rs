@@ -177,6 +177,7 @@ impl WindowApp {
             }
             "setTopmost" => self.set_selected(payload, true),
             "removeTopmost" => self.set_selected(payload, false),
+            "selectWindow" => self.select_window(payload),
             "clearSelection" => {
                 let mut state = self
                     .state
@@ -194,6 +195,31 @@ impl WindowApp {
             }
             _ => Err(ModuleError::new("unknown_method", "未知的窗口置顶操作。")),
         }
+    }
+
+    fn select_window(&self, payload: &Value) -> Result<Value, ModuleError> {
+        let id = payload
+            .get("windowId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ModuleError::new("invalid_payload", "windowId 必须是字符串。"))?;
+        if !valid_window_id(id) {
+            return Err(ModuleError::new("invalid_payload", "windowId 无效。"));
+        }
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !state.windows.iter().any(|window| window.id == id) {
+            return Err(ModuleError::new(
+                "window_unavailable",
+                "目标窗口已不可用，请刷新列表。",
+            ));
+        }
+        state.selected_window_id = Some(id.to_string());
+        state.status = "selected".to_string();
+        state.error = None;
+        drop(state);
+        Ok(self.snapshot())
     }
 
     fn set_selected(&self, payload: &Value, topmost: bool) -> Result<Value, ModuleError> {
@@ -362,6 +388,18 @@ fn main() {
             }
         };
         match envelope.message_type.as_str() {
+            "module.lifecycle.request" if handshaken => {
+                let Some(active) = envelope.payload.get("active").and_then(Value::as_bool) else {
+                    break;
+                };
+                let response = serde_json::json!({
+                    "protocolVersion": 1, "messageType": "module.lifecycle.response",
+                    "requestId": envelope.request_id, "payload": { "active": active }
+                });
+                let _ = serde_json::to_writer(&mut writer, &response);
+                let _ = writeln!(writer);
+                let _ = writer.flush();
+            }
             "module.hello.request" if !handshaken => {
                 let valid = envelope.payload.get("moduleId").and_then(Value::as_str)
                     == Some(module_id.as_str())
@@ -385,7 +423,7 @@ fn main() {
                     &mut writer,
                     "module.hello.response",
                     &envelope.request_id,
-                    json!({ "moduleId": module_id, "nonce": nonce, "name": "Window Topmost", "protocolVersion": HOST_PROTOCOL_VERSION }),
+                    json!({ "moduleId": module_id, "nonce": nonce, "lifecycleVersion": 1, "name": "Window Topmost", "protocolVersion": HOST_PROTOCOL_VERSION }),
                     None,
                 );
             }
@@ -639,6 +677,50 @@ mod tests {
             .invoke("setTopmost", &json!({ "windowId": "w-1" }))
             .unwrap_err();
         assert_eq!(error.code, "window_unavailable");
+    }
+
+    #[test]
+    fn list_selection_is_kept_by_backend_until_cleared() {
+        let app = WindowApp::new();
+        let id = "w-FFFFFFABCDEF";
+        {
+            let mut state = app.state.lock().unwrap();
+            state.windows.push(WindowTarget {
+                id: id.to_string(),
+                hwnd: 1,
+                pid: 1,
+                title: "Test window".to_string(),
+                process_name: "test.exe".to_string(),
+                is_topmost: false,
+            });
+        }
+        let selected = app
+            .invoke("selectWindow", &json!({ "windowId": id }))
+            .unwrap();
+        assert_eq!(selected["selectedWindowId"], id);
+        assert_eq!(
+            app.invoke("getState", &json!({})).unwrap()["selectedWindowId"],
+            id
+        );
+        let cleared = app.invoke("clearSelection", &json!({})).unwrap();
+        assert!(cleared["selectedWindowId"].is_null());
+    }
+
+    #[test]
+    fn list_selection_rejects_unknown_and_malformed_ids() {
+        let app = WindowApp::new();
+        assert_eq!(
+            app.invoke("selectWindow", &json!({ "windowId": "not-an-id" }))
+                .unwrap_err()
+                .code,
+            "invalid_payload"
+        );
+        assert_eq!(
+            app.invoke("selectWindow", &json!({ "windowId": "w-FFFFFFABCDEF" }))
+                .unwrap_err()
+                .code,
+            "window_unavailable"
+        );
     }
 
     #[test]

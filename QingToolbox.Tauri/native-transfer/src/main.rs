@@ -272,11 +272,13 @@ struct DiscoveryRuntime {
     daemon: ServiceDaemon,
     service_fullname: String,
     stop: Arc<AtomicBool>,
+    workers: Vec<thread::JoinHandle<()>>,
 }
 
 struct TransferApp {
     state: Arc<Mutex<SharedState>>,
     process_stop: Arc<AtomicBool>,
+    active: AtomicBool,
     data_directory: PathBuf,
     discovery: Mutex<Option<DiscoveryRuntime>>,
     friendly_name: String,
@@ -301,6 +303,7 @@ impl TransferApp {
                 ..SharedState::default()
             })),
             process_stop: Arc::new(AtomicBool::new(false)),
+            active: AtomicBool::new(false),
             data_directory,
             discovery: Mutex::new(None),
             friendly_name,
@@ -360,12 +363,14 @@ impl TransferApp {
         ) {
             Ok(service) => service.enable_addr_auto(),
             Err(error) => {
+                let _ = daemon.shutdown();
                 self.set_error(format!("局域网服务注册失败：{error}"));
                 return;
             }
         };
         let service_fullname = service.get_fullname().to_string();
         if let Err(error) = daemon.register(service) {
+            let _ = daemon.shutdown();
             self.set_error(format!("局域网服务注册失败：{error}"));
             return;
         }
@@ -379,12 +384,12 @@ impl TransferApp {
             }
         };
         let discovery_stop = Arc::new(AtomicBool::new(false));
-        let runtime = DiscoveryRuntime {
+        let mut runtime = DiscoveryRuntime {
             daemon: daemon.clone(),
             service_fullname: service_fullname.clone(),
             stop: Arc::clone(&discovery_stop),
+            workers: Vec::new(),
         };
-        *lock_recover(&self.discovery) = Some(runtime);
         {
             let mut state = lock_recover(&self.state);
             state.discovery_running = true;
@@ -393,10 +398,15 @@ impl TransferApp {
 
         let accept_app = Arc::clone(self);
         let accept_stop = Arc::clone(&discovery_stop);
-        thread::spawn(move || accept_loop(accept_app, listener, accept_stop));
+        runtime.workers.push(thread::spawn(move || {
+            accept_loop(accept_app, listener, accept_stop)
+        }));
 
         let browse_app = Arc::clone(self);
-        thread::spawn(move || browse_loop(browse_app, receiver, discovery_stop, service_fullname));
+        runtime.workers.push(thread::spawn(move || {
+            browse_loop(browse_app, receiver, discovery_stop, service_fullname)
+        }));
+        *lock_recover(&self.discovery) = Some(runtime);
     }
 
     fn stop_discovery(&self) {
@@ -405,6 +415,9 @@ impl TransferApp {
             runtime.stop.store(true, Ordering::Release);
             let _ = runtime.daemon.unregister(&runtime.service_fullname);
             let _ = runtime.daemon.shutdown();
+            for worker in runtime.workers {
+                let _ = worker.join();
+            }
         }
         lock_recover(&self.state).discovery_running = false;
     }
@@ -454,6 +467,18 @@ impl TransferApp {
     }
 
     fn invoke(self: &Arc<Self>, method: &str, payload: &Value) -> Result<Value, ModuleError> {
+        if !self.active.load(Ordering::Acquire)
+            && matches!(
+                method,
+                "refresh"
+                    | "connect"
+                    | "sendFile"
+                    | "acceptIncomingConnection"
+                    | "acceptIncomingFile"
+            )
+        {
+            return Err(ModuleError::new("module_inactive", "请先启用模块。"));
+        }
         match method {
             "getState" => Ok(self.snapshot()),
             "refresh" => {
@@ -824,6 +849,38 @@ fn main() {
             }
         };
         match envelope.message_type.as_str() {
+            "module.lifecycle.request" if handshaken => {
+                let Some(active) = envelope.payload.get("active").and_then(Value::as_bool) else {
+                    break;
+                };
+                if active {
+                    app.start_discovery();
+                } else {
+                    app.active.store(false, Ordering::Release);
+                    app.stop_discovery();
+                    // Drain the accepting thread before disconnecting so it
+                    // cannot install a late incoming session after disable.
+                    app.disconnect();
+                }
+                if active && !lock_recover(&app.state).discovery_running {
+                    write_host_error(
+                        &mut writer,
+                        "module.lifecycle.response",
+                        &envelope.request_id,
+                        "activation_failed",
+                        "局域网发现启动失败。".to_string(),
+                    );
+                    continue;
+                }
+                app.active.store(active, Ordering::Release);
+                let response = serde_json::json!({
+                    "protocolVersion": 1, "messageType": "module.lifecycle.response",
+                    "requestId": envelope.request_id, "payload": { "active": active }
+                });
+                let _ = serde_json::to_writer(&mut writer, &response);
+                let _ = writeln!(writer);
+                let _ = writer.flush();
+            }
             "module.hello.request" if !handshaken => {
                 let valid = envelope.payload.get("moduleId").and_then(Value::as_str)
                     == Some(module_id.as_str())
@@ -840,12 +897,11 @@ fn main() {
                     break;
                 }
                 handshaken = true;
-                app.start_discovery();
                 write_host_response(
                     &mut writer,
                     "module.hello.response",
                     &envelope.request_id,
-                    json!({ "moduleId": module_id, "nonce": nonce, "name": "QingTransfer", "protocolVersion": HOST_PROTOCOL_VERSION }),
+                    json!({ "moduleId": module_id, "nonce": nonce, "lifecycleVersion": 1, "name": "QingTransfer", "protocolVersion": HOST_PROTOCOL_VERSION }),
                 );
             }
             "module.invoke.request" if handshaken => {

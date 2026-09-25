@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "QingToolbox",
-  "version": "0.1.0",
+  "version": "0.3.0-alpha",
   "identifier": "com.qingmo.qingtoolbox",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -24,6 +24,7 @@
       },
       {
         "label": "floating-badge",
+        "shadow": false,
         "title": "QingToolbox",
         "url": "index.html?surface=floating-badge",
         "width": 68,
@@ -42,7 +43,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' qfont: data:; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' qfont: http://qfont.localhost https://qfont.localhost data:; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost"
     }
   },
   "bundle": {

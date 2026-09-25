@@ -115,11 +115,8 @@ function Test-ProductionCandidateCurrent {
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $false }
     try {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-        $commit = (& git -C $repoRoot rev-parse HEAD).Trim()
-        $changes = @(& git -C $repoRoot status --porcelain --untracked-files=normal)
-        return $manifest.sourceCommit -eq $commit -and
-            $manifest.sourceDirty -eq $false -and
-            $changes.Count -eq 0 -and
+        & $nodePath (Join-Path $PSScriptRoot 'tauri-build-cache.mjs') check host
+        return $LASTEXITCODE -eq 0 -and
             $manifest.backend -eq 'rust' -and
             $manifest.framework -eq 'tauri-2' -and
             $manifest.frontend -eq 'vue-3' -and
@@ -137,6 +134,10 @@ $cargoPath = Resolve-Cargo
 $env:Path = "$(Split-Path -Parent $cargoPath);$(Split-Path -Parent $nodePath);$env:Path"
 
 if ($Configuration -eq 'Release') {
+    if (-not $SkipModuleBuild) {
+        & (Join-Path $PSScriptRoot 'build-tauri-modules.ps1') -ForceRebuild:$ForceRebuild
+        if ($LASTEXITCODE -ne 0) { throw 'Module preparation failed.' }
+    }
     $candidateCurrent = -not $ForceRebuild -and (Test-ProductionCandidateCurrent)
     if ($candidateCurrent) {
         Write-Host "Reusing current Tauri production candidate: $artifactExe"
@@ -149,8 +150,9 @@ if ($Configuration -eq 'Release') {
             }
         }
     } else {
+        Write-Host 'Source or build output changed (or no cache yet); refreshing the candidate.'
         $arguments = @{}
-        if ($SkipModuleBuild) { $arguments.SkipModuleBuild = $true }
+        $arguments.SkipModuleBuild = $true
         if ($Smoke) { $arguments.Smoke = $true }
         Invoke-Checked -Label 'Build Tauri production candidate' -Action {
             & (Join-Path $PSScriptRoot 'build-tauri-production.ps1') @arguments
@@ -164,9 +166,13 @@ if ($Configuration -eq 'Release') {
         throw "Tauri production executable is missing: $artifactExe"
     }
     $workingDirectory = Split-Path -Parent $artifactExe
-    $process = Start-Process -FilePath $artifactExe -WorkingDirectory $workingDirectory -PassThru
+    $process = Start-Process -FilePath $artifactExe -WorkingDirectory $workingDirectory -WindowStyle Hidden -PassThru
     Start-Sleep -Milliseconds 1200
     if ($process.HasExited) {
+        if ($process.ExitCode -eq 0) {
+            Write-Host 'QingToolbox handed activation to the existing instance.'
+            exit 0
+        }
         throw "Tauri production host exited during startup with code $($process.ExitCode)."
     }
     Write-Host "QingToolbox Tauri Release started (PID $($process.Id))."
@@ -174,10 +180,8 @@ if ($Configuration -eq 'Release') {
 }
 
 if (-not $SkipModuleBuild) {
-    foreach ($module in @('canary', 'launcher', 'pdf', 'transfer', 'texttools', 'windowtopmost', 'powerguard', 'screenpin')) {
-        Invoke-Checked -Label "Build Tauri $module module" -Action {
-            & (Join-Path $PSScriptRoot "build-tauri-$module.ps1")
-        }
+    Invoke-Checked -Label 'Prepare changed Tauri modules' -Action {
+        & (Join-Path $PSScriptRoot 'build-tauri-modules.ps1') -ForceRebuild:$ForceRebuild
     }
 }
 Push-Location $tauriRoot
@@ -192,7 +196,7 @@ try {
     $env:QING_TAURI_STARTUP_PRESENTATION = 'main'
     $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
     if (-not $npm) { throw 'npm.cmd was not found.' }
-    $process = Start-Process -FilePath $npm.Source -WorkingDirectory $tauriRoot -ArgumentList @('run', 'tauri', '--', 'dev') -PassThru
+    $process = Start-Process -FilePath $npm.Source -WorkingDirectory $tauriRoot -ArgumentList @('run', 'tauri', '--', 'dev') -WindowStyle Hidden -PassThru
     Start-Sleep -Milliseconds 1800
     if ($process.HasExited) {
         throw "Tauri Debug host exited during startup with code $($process.ExitCode)."

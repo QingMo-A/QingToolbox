@@ -45,7 +45,8 @@ async function call(method: string, payload: Record<string, unknown> = {}): Prom
 }
 
 function select(id: string): void {
-  state.value.selectedWindowId = id
+  if (loading.value || busy.value || state.value.selectedWindowId === id) return
+  void call('selectWindow', { windowId: id })
 }
 
 async function pick(): Promise<void> {
@@ -73,7 +74,11 @@ function statusLabel(status: string): string {
 
 async function poll(): Promise<void> {
   if (busy.value || loading.value) return
-  try { apply(await getState()) } catch { /* transient module restart */ }
+  const current = sequence
+  try {
+    const next = await getState()
+    if (!busy.value && current === sequence) apply(next)
+  } catch { /* transient module restart */ }
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -107,38 +112,40 @@ onBeforeUnmount(() => {
     <header class="hero">
       <div class="brand">
         <div class="brand-mark"><img v-if="context?.iconDataUrl" :src="context.iconDataUrl" alt="" /><span v-else>↑</span></div>
-        <div><p class="eyebrow">QING TOOLBOX</p><h1>{{ context?.name || 'Window Topmost' }}</h1><p>选择可见窗口并切换始终置顶。</p></div>
+        <div><p class="eyebrow">QING TOOLBOX · WINDOW CONTROL</p><h1>窗口置顶</h1></div>
       </div>
       <button class="icon-button" aria-label="关闭" title="关闭" @click="hideModuleWindow">×</button>
     </header>
 
     <div v-if="error" class="alert danger"><span>{{ error }}</span><button aria-label="关闭提示" @click="error = ''">×</button></div>
 
-    <section class="toolbar">
-      <button :disabled="loading || busy" @click="call('refresh')">刷新</button>
-      <button class="primary" :disabled="loading || busy" @click="pick">拾取窗口</button>
-      <span class="hint">{{ state.windows.length }} 个可操作窗口</span>
-    </section>
-
-    <section class="table-card">
-      <div class="table-head"><span>标题</span><span>进程 / PID</span><span>句柄</span><span>置顶</span></div>
-      <div v-if="loading" class="empty">正在准备窗口列表…</div>
-      <div v-else-if="state.windows.length === 0" class="empty">当前没有可操作的可见窗口。</div>
-      <button v-for="item in state.windows" :key="item.id" class="window-row" :class="{ selected: item.id === state.selectedWindowId }" @click="select(item.id)">
-        <span class="title-cell" :title="item.title">{{ item.title }}</span>
-        <span>{{ item.processName }} <small>({{ item.processId }})</small></span>
-        <span class="mono">{{ item.handleText }}</span>
-        <span class="pill" :class="{ active: item.isTopmost }">{{ item.isTopmost ? '是' : '否' }}</span>
-      </button>
-    </section>
-
-    <footer class="footer">
-      <span class="status"><i :class="{ active: selected }" />{{ statusLabel(state.status) }}</span>
+    <section class="toolbar" aria-label="窗口操作">
+      <div class="toolbar-tools">
+        <button :disabled="loading || busy" @click="call('refresh')">刷新列表</button>
+        <button class="pick-button" :disabled="loading || busy" @click="pick">拾取窗口</button>
+        <span class="hint">{{ state.windows.length }} 个窗口</span>
+      </div>
       <div class="actions">
         <button :disabled="!canAct" @click="setTopmost(false)">取消置顶</button>
         <button class="primary" :disabled="!canAct" @click="setTopmost(true)">设为置顶</button>
         <button :disabled="loading || busy || !state.selectedWindowId" @click="call('clearSelection')">清除选择</button>
       </div>
+    </section>
+
+    <section class="table-card">
+      <div class="table-head"><span>窗口标题</span><span>进程 / PID</span><span class="handle-cell">句柄</span><span>置顶</span></div>
+      <div v-if="loading" class="empty">正在准备窗口列表…</div>
+      <div v-else-if="state.windows.length === 0" class="empty">当前没有可操作的可见窗口。</div>
+      <button v-for="item in state.windows" :key="item.id" class="window-row" :class="{ selected: item.id === state.selectedWindowId }" :aria-pressed="item.id === state.selectedWindowId" :disabled="loading || busy" @click="select(item.id)">
+        <span class="title-cell" :title="item.title">{{ item.title }}</span>
+        <span>{{ item.processName }} <small>({{ item.processId }})</small></span>
+        <span class="mono handle-cell">{{ item.handleText }}</span>
+        <span class="pill" :class="{ active: item.isTopmost }">{{ item.isTopmost ? '是' : '否' }}</span>
+      </button>
+    </section>
+
+    <footer class="footer">
+      <span class="status"><i :class="{ active: selected }" />{{ statusLabel(state.status) }}<strong v-if="selected" :title="selected.title">{{ selected.title }}</strong></span>
     </footer>
   </main>
 </template>

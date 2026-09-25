@@ -15,6 +15,8 @@ use std::{
 use png::{BitDepth, ColorType, Encoder};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+mod clipboard;
+mod selection;
 
 const HOST_PROTOCOL_VERSION: u16 = 1;
 const HOST_MAX_FRAME_BYTES: usize = 1024 * 1024;
@@ -81,6 +83,8 @@ struct DisplayBounds {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Pin {
+    #[serde(skip)]
+    png: Vec<u8>,
     id: String,
     data_url: String,
     x: i32,
@@ -100,6 +104,15 @@ struct PinState {
 #[derive(Clone, Debug)]
 struct PinApp {
     state: Arc<Mutex<PinState>>,
+    selection: Arc<Mutex<SelectionJob>>,
+}
+
+#[derive(Debug, Default)]
+enum SelectionJob {
+    #[default]
+    Idle,
+    Running,
+    Finished(Result<Value, ModuleError>),
 }
 
 impl PinApp {
@@ -109,6 +122,7 @@ impl PinApp {
                 status: "ready".to_string(),
                 ..PinState::default()
             })),
+            selection: Arc::new(Mutex::new(SelectionJob::Idle)),
         }
     }
 
@@ -119,6 +133,54 @@ impl PinApp {
 
     fn invoke(&self, method: &str, payload: &Value) -> Result<Value, ModuleError> {
         match method {
+            "copyPin" => {
+                let id = payload
+                    .get("pinId")
+                    .and_then(Value::as_str)
+                    .filter(|id| valid_pin_id(id))
+                    .ok_or_else(|| ModuleError::new("invalid_payload", "截图 id 无效。"))?;
+                let png = self
+                    .lock()
+                    .pins
+                    .iter()
+                    .find(|p| p.id == id)
+                    .map(|p| p.png.clone())
+                    .ok_or_else(|| ModuleError::new("pin_unavailable", "截图已不存在。"))?;
+                clipboard::copy(&png).map_err(|e| ModuleError::new("clipboard_failed", e))?;
+                Ok(json!({"copied":true}))
+            }
+            "selectRegion" => {
+                let mut job = self.selection.lock().unwrap_or_else(|p| p.into_inner());
+                if matches!(*job, SelectionJob::Running) {
+                    return Err(ModuleError::new("selection_busy", "正在框选截图。"));
+                }
+                *job = SelectionJob::Running;
+                let app = self.clone();
+                std::thread::spawn(move || {
+                    let result = selection::select()
+                        .map_err(|message| ModuleError::new("selection_failed", message))
+                        .and_then(|region| match region {
+                            Some((x, y, width, height)) => app.invoke(
+                                "captureRegion",
+                                &json!({"x":x,"y":y,"width":width,"height":height}),
+                            ),
+                            None => Ok(json!({"cancelled":true})),
+                        });
+                    *app.selection.lock().unwrap_or_else(|p| p.into_inner()) =
+                        SelectionJob::Finished(result);
+                });
+                Ok(json!({"selecting":true}))
+            }
+            "getSelectionResult" => {
+                let mut job = self.selection.lock().unwrap_or_else(|p| p.into_inner());
+                if matches!(*job, SelectionJob::Running) {
+                    return Ok(json!({"selecting":true}));
+                }
+                match std::mem::take(&mut *job) {
+                    SelectionJob::Finished(result) => result,
+                    _ => Ok(json!({"cancelled":true})),
+                }
+            }
             "getState" => Ok(self.snapshot()),
             "getDisplayBounds" => Ok(json!({ "displayBounds": display_bounds() })),
             "getPin" => {
@@ -161,6 +223,7 @@ impl PinApp {
                 state.next_id = state.next_id.saturating_add(1);
                 let pin_id = format!("pin-{:X}", state.next_id);
                 state.pins.push(Pin {
+                    png,
                     id: pin_id,
                     data_url,
                     x,
@@ -474,6 +537,12 @@ fn write_response(
 }
 
 fn main() {
+    #[cfg(windows)]
+    unsafe {
+        windows_sys::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
+            windows_sys::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        );
+    }
     let app = PinApp::new();
     let module_id =
         std::env::var("QINGTOOLBOX_MODULE_ID").unwrap_or_else(|_| "qing.screenpin".to_string());
@@ -523,6 +592,18 @@ fn main() {
             }
         };
         match envelope.message_type.as_str() {
+            "module.lifecycle.request" if handshaken => {
+                let Some(active) = envelope.payload.get("active").and_then(Value::as_bool) else {
+                    break;
+                };
+                let response = serde_json::json!({
+                    "protocolVersion": 1, "messageType": "module.lifecycle.response",
+                    "requestId": envelope.request_id, "payload": { "active": active }
+                });
+                let _ = serde_json::to_writer(&mut writer, &response);
+                let _ = writeln!(writer);
+                let _ = writer.flush();
+            }
             "module.hello.request" if !handshaken => {
                 let valid = envelope.payload.get("moduleId").and_then(Value::as_str)
                     == Some(module_id.as_str())
@@ -546,7 +627,7 @@ fn main() {
                     &mut writer,
                     "module.hello.response",
                     &envelope.request_id,
-                    json!({ "moduleId": module_id, "nonce": nonce, "name": "Screen Pin", "protocolVersion": HOST_PROTOCOL_VERSION }),
+                    json!({ "moduleId": module_id, "nonce": nonce, "lifecycleVersion": 1, "name": "Screen Pin", "protocolVersion": HOST_PROTOCOL_VERSION }),
                     None,
                 );
             }
@@ -630,6 +711,7 @@ mod tests {
             state.pins.push(Pin {
                 id: format!("pin-{index:X}"),
                 data_url: "data:image/png;base64,eA==".to_string(),
+                png: Vec::new(),
                 x: 0,
                 y: 0,
                 width: 1,
@@ -646,6 +728,7 @@ mod tests {
             .map(|index| Pin {
                 id: format!("pin-{index:X}"),
                 data_url: "x".repeat((MAX_PIN_DATA_URL_BYTES / 2) + 1),
+                png: Vec::new(),
                 x: 0,
                 y: 0,
                 width: 1,

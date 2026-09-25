@@ -63,6 +63,10 @@ try {
     if ($state.payload.items | Get-Member -Name target -ErrorAction SilentlyContinue) { throw 'Launcher state leaked a target path.' }
 
     if ($Everything) {
+        $writer.WriteLine((ConvertTo-Json @{ protocolVersion = 1; messageType = 'module.lifecycle.request'; requestId = 'activate-1'; payload = @{ active = $true } } -Compress))
+        $writer.Flush()
+        $activation = $reader.ReadLine() | ConvertFrom-Json
+        if ($activation.payload.active -ne $true) { throw 'Launcher activation was not acknowledged.' }
         $everythingQuery = if ($EverythingService) { 'Everything.exe' } else { 'qing-everything-smoke.txt' }
         $writer.WriteLine((ConvertTo-Json @{ protocolVersion = 1; messageType = 'module.invoke.request'; requestId = 'everything-1'; payload = @{ method = 'searchEverything'; payload = @{ mode = 'everything-file'; query = $everythingQuery; requestId = 'smoke-1' } } } -Compress))
         $writer.Flush()
@@ -71,6 +75,10 @@ try {
         if (-not ($everythingResponse.payload.results | Where-Object { $_.name -eq $everythingQuery })) { throw "Everything search did not return $everythingQuery." }
         $resultId = ($everythingResponse.payload.results | Where-Object { $_.name -eq $everythingQuery } | Select-Object -First 1).id
         if ([string]::IsNullOrWhiteSpace($resultId) -or $resultId -match '[\\/]') { throw 'Everything response exposed an unsafe result id.' }
+        $writer.WriteLine((ConvertTo-Json @{ protocolVersion = 1; messageType = 'module.invoke.request'; requestId = 'everything-empty'; payload = @{ method = 'searchEverything'; payload = @{ mode = 'everything-file'; query = 'qing-no-match-7c2b437cd90f'; requestId = 'smoke-empty' } } } -Compress))
+        $writer.Flush()
+        $emptyResponse = $reader.ReadLine() | ConvertFrom-Json
+        if ($emptyResponse.payload.status -ne 'ready' -or $emptyResponse.payload.results.Count -ne 0) { throw "Everything no-match query was confused with an unbuilt index: $($emptyResponse | ConvertTo-Json -Compress)" }
     }
 
     $writer.WriteLine((ConvertTo-Json @{ protocolVersion = 1; messageType = 'module.shutdown.request'; requestId = 'shutdown-1'; payload = @{} } -Compress))
@@ -80,7 +88,7 @@ try {
     if (-not $process.WaitForExit(3000)) { throw 'Launcher did not exit after shutdown.' }
     Write-Host 'Qing Launcher module smoke passed.'
 } finally {
-    if (-not $process.HasExited) { $process.Kill($true); $process.WaitForExit() }
+    if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
     $process.Dispose()
     if (Test-Path -LiteralPath $dataRoot) { Remove-Item -LiteralPath $dataRoot -Recurse -Force -ErrorAction SilentlyContinue }
 }

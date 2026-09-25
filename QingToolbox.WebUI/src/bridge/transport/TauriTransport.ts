@@ -86,10 +86,10 @@ export class TauriTransport implements Transport {
       case 'modules.getSnapshot': return this.moduleSnapshot()
       case 'modules.import': return this.importModule()
       case 'modules.updateFromPicker': return this.updateModuleFromPicker(requiredString(message.payload.moduleId))
-      case 'modules.load':
-      case 'modules.activate': await invoke('start_module', { moduleId: requiredString(message.payload.moduleId) }); return this.moduleSnapshot()
+      case 'modules.load': await invoke('start_module', { moduleId: requiredString(message.payload.moduleId) }); return this.moduleSnapshot()
       case 'modules.open': await invoke('open_module', { moduleId: requiredString(message.payload.moduleId) }); return this.moduleSnapshot()
-      case 'modules.deactivate':
+      case 'modules.activate': await invoke('set_module_active', { moduleId: requiredString(message.payload.moduleId), active: true }); return this.moduleSnapshot()
+      case 'modules.deactivate': await invoke('set_module_active', { moduleId: requiredString(message.payload.moduleId), active: false }); return this.moduleSnapshot()
       case 'modules.unload': await invoke('stop_module', { moduleId: requiredString(message.payload.moduleId) }); return this.moduleSnapshot()
       case 'modules.openDirectory':
         await invoke('open_module_directory', { moduleId: requiredString(message.payload.moduleId) })
@@ -189,9 +189,9 @@ function appSnapshot(version: string, modules: ModuleSummary[], runtime: ModuleR
     generatedAt: new Date().toISOString(),
   }
 }
-function toWebModule(module: ModuleSummary, runtime?: ModuleRuntimeSnapshot, startupEnabled = false) {
-  const state = runtime?.state === 'running' ? 'Running' : runtime?.state === 'starting' ? 'Starting' : runtime?.state === 'failed' ? 'Failed' : 'NotLoaded'; const valid = module.valid
-  return { id: module.id, displayName: module.name, displayDescription: module.description ?? '', version: module.version, author: module.author ?? '', runtimeType: module.runtimeType ?? 'process', loadMode: 'Process', runtimeState: state, isValid: valid, errorCount: module.issues.length, errors: module.issues.map(issue => issue.message), permissions: [], minimumHostVersion: '', isUserInstalled: module.source === 'user', canRemove: module.source === 'user', canLoad: valid && state !== 'Running', canActivate: valid && state !== 'Running', canOpen: valid && module.uiKind === 'Web', canDeactivate: state === 'Running', canUnload: state === 'Running', isBusy: state === 'Starting', isExecutionBlocked: false, isStartupEnabled: startupEnabled, startupAuthorizationState: valid ? startupEnabled ? 'Enabled' : 'NotEnabled' : 'Unavailable', canChangeStartupAuthorization: valid, isStartupAuthorizationBusy: false, updateStatus: 'DisabledByEnvironment', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: false, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'DisabledByEnvironment', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0, canInstallVerifiedUpdate: false, iconDataUrl: module.iconDataUrl }
+export function toWebModule(module: ModuleSummary, runtime?: ModuleRuntimeSnapshot, startupEnabled = false) {
+  const state = runtime?.state === 'running' ? 'Running' : runtime?.state === 'loaded' ? 'Loaded' : runtime?.state === 'deactivated' ? 'Deactivated' : runtime?.state === 'starting' ? 'Starting' : runtime?.state === 'failed' ? 'Failed' : runtime?.state === 'stopped' ? 'Unloaded' : 'NotLoaded'; const valid = module.valid
+  return { id: module.id, displayName: module.name, displayDescription: module.description ?? '', version: module.version, author: module.author ?? '', runtimeType: module.runtimeType ?? 'process', loadMode: 'Process', runtimeState: state, isValid: valid, errorCount: module.issues.length, errors: module.issues.map(issue => issue.message), permissions: [], minimumHostVersion: '', isUserInstalled: module.source === 'user', canRemove: module.source === 'user', canLoad: valid && (state === 'NotLoaded' || state === 'Unloaded' || state === 'Failed'), canActivate: valid && (state === 'Loaded' || state === 'Deactivated'), canOpen: valid && ['Loaded', 'Running', 'Deactivated'].includes(state) && module.uiKind === 'Web', canDeactivate: state === 'Running', canUnload: ['Loaded', 'Running', 'Deactivated'].includes(state), isBusy: state === 'Starting', isExecutionBlocked: !valid, isStartupEnabled: startupEnabled, startupAuthorizationState: valid ? startupEnabled ? 'Enabled' : 'NotEnabled' : 'Unavailable', canChangeStartupAuthorization: valid, isStartupAuthorizationBusy: false, updateStatus: 'DisabledByEnvironment', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: false, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'DisabledByEnvironment', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0, canInstallVerifiedUpdate: false, iconDataUrl: module.iconDataUrl }
 }
 function toWebSettings(value: TauriSettingsSnapshot, startup?: StartupRegistrationSnapshot | null) {
   const code = value.language === 'en-US' ? 'en-US' : value.language === 'zh-CN' ? 'zh-CN' : 'system'

@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Qing Launcher</title>
     <style>
-      :root { background: #f4f8ff; }
-      html, body, #app { min-height: 100%; margin: 0; }
+      :root { background: transparent; }
+      html, body, #app { height: 100%; margin: 0; background: transparent; }
       .boot-splash { min-height: 100vh; display: grid; place-items: center; color: #315b8f; font: 14px "Segoe UI", "Microsoft YaHei", sans-serif; }
-      .boot-card { display: grid; justify-items: center; gap: 12px; }
+      .boot-card { display: grid; justify-items: center; gap: 12px; padding: 28px 38px; border-radius: 22px; background: rgba(250,253,255,.9); }
       .boot-mark { width: 48px; height: 48px; border-radius: 15px; background: linear-gradient(145deg, #36a7ff, #1e5de8); box-shadow: 0 9px 22px rgba(35,104,218,.24); }
       .boot-spinner { width: 22px; height: 22px; border: 3px solid #cfe1f8; border-top-color: #2678dc; border-radius: 50%; animation: boot-spin .9s linear infinite; }
       @keyframes boot-spin { to { transform: rotate(360deg); } }

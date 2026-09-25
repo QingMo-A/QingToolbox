@@ -88,7 +88,8 @@ const safeFontResource = (value: string|null|undefined): string|null => {
   try {
     const url = new URL(value)
     const isLegacyWebResource = url.origin === 'https://app.qingtoolbox.local'
-    const isTauriResource = url.protocol === 'qfont:' && url.hostname === 'localhost'
+    const isTauriResource = (url.protocol === 'qfont:' && url.hostname === 'localhost')
+      || url.origin === 'http://qfont.localhost' || url.origin === 'https://qfont.localhost'
     if ((!isLegacyWebResource && !isTauriResource) || !/^\/user-fonts\/(?:font-)?[0-9a-f]{64}\.(ttf|otf|ttc)$/i.test(url.pathname)) return null
     return url.href
   } catch { return null }

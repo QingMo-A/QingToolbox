@@ -287,6 +287,14 @@ impl EverythingRuntime {
         let _ = fs::remove_file(&export_path);
         let bytes = bytes?;
         let paths = parse_export(&bytes);
+        // A successful query with zero rows is ambiguous while the private
+        // database is first being built. Distinguish an empty index from a
+        // legitimate no-match query before telling the UI there are no files.
+        if paths.is_empty() && self.indexed_entry_count(&es)? == 0 {
+            return Err(EverythingError::indexing(
+                "Everything 索引尚未建立或索引为空，请稍后重试。",
+            ));
+        }
         self.result_map.clear();
         let mut views = Vec::with_capacity(paths.len());
         for path in paths.into_iter().take(MAX_RESULTS) {
@@ -646,6 +654,36 @@ impl EverythingRuntime {
         } else {
             format!("Everything IPC 查询失败：{detail}")
         }))
+    }
+
+    fn indexed_entry_count(&self, es: &Path) -> Result<u64, EverythingError> {
+        let mut command = hidden_process(es);
+        command.args([
+            "-instance",
+            &self.instance_name,
+            "-timeout",
+            "3000",
+            "-get-result-count",
+        ]);
+        let output = run_with_timeout(command, Duration::from_secs(5)).map_err(|error| {
+            EverythingError::ipc(format!("Everything 索引状态无法读取：{error}"))
+        })?;
+        if output.status.code() == Some(8) {
+            return Err(EverythingError::indexing(
+                "Everything 正在建立索引，请稍后重试。",
+            ));
+        }
+        if !output.status.success() {
+            return Err(EverythingError::ipc("Everything 索引状态无法读取。"));
+        }
+        let count = String::from_utf8_lossy(&output.stdout);
+        let digits = count
+            .chars()
+            .filter(char::is_ascii_digit)
+            .collect::<String>();
+        digits
+            .parse::<u64>()
+            .map_err(|_| EverythingError::ipc("Everything 索引状态格式无效。"))
     }
 
     fn next_token(&mut self) -> String {

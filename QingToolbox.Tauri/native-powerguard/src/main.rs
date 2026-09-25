@@ -193,11 +193,7 @@ impl PowerApp {
             .as_deref()
             .and_then(load_settings)
             .unwrap_or_default();
-        let state = if settings.guard_enabled {
-            GuardState::StartupGrace
-        } else {
-            GuardState::Disabled
-        };
+        let state = GuardState::Disabled;
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 settings,
@@ -233,6 +229,9 @@ impl PowerApp {
     }
 
     fn tick(&self) {
+        if self.stop.load(Ordering::Acquire) {
+            return;
+        }
         let now = Instant::now();
         let should_probe = {
             let mut inner = self.lock();
@@ -277,7 +276,7 @@ impl PowerApp {
                 && inner.settings.guard_enabled
                 && !inner.shutdown_attempted
         };
-        if execute {
+        if execute && !self.stop.load(Ordering::Acquire) {
             self.lock().shutdown_attempted = true;
             if let Err(message) = request_system_shutdown() {
                 let mut inner = self.lock();
@@ -289,7 +288,9 @@ impl PowerApp {
 
         if should_probe {
             let result = probe_connectivity();
-            self.apply_probe(result);
+            if !self.stop.load(Ordering::Acquire) {
+                self.apply_probe(result);
+            }
         }
     }
 
@@ -749,7 +750,7 @@ fn write_response(
 
 fn main() {
     let app = PowerApp::new();
-    let monitor = app.start_monitor();
+    let mut monitor: Option<thread::JoinHandle<()>> = None;
     let module_id =
         env::var("QINGTOOLBOX_MODULE_ID").unwrap_or_else(|_| "qing.powerguard".to_string());
     let nonce = env::var("QINGTOOLBOX_MODULE_NONCE").unwrap_or_default();
@@ -798,6 +799,42 @@ fn main() {
             }
         };
         match envelope.message_type.as_str() {
+            "module.lifecycle.request" if handshaken => {
+                let Some(active) = envelope.payload.get("active").and_then(Value::as_bool) else {
+                    break;
+                };
+                if active && monitor.is_none() {
+                    app.stop.store(false, Ordering::Release);
+                    {
+                        let mut inner = app.lock();
+                        inner.started_at = Instant::now();
+                        inner.state = if inner.settings.guard_enabled {
+                            GuardState::StartupGrace
+                        } else {
+                            GuardState::Disabled
+                        };
+                    }
+                    monitor = Some(app.start_monitor());
+                } else if !active {
+                    app.stop.store(true, Ordering::Release);
+                    if let Some(worker) = monitor.take() {
+                        let _ = worker.join();
+                    }
+                    let mut inner = app.lock();
+                    inner.state = GuardState::Disabled;
+                    inner.countdown_deadline = None;
+                    inner.test_deadline = None;
+                    inner.offline_since = None;
+                    inner.recovery_since = None;
+                }
+                let response = serde_json::json!({
+                    "protocolVersion": 1, "messageType": "module.lifecycle.response",
+                    "requestId": envelope.request_id, "payload": { "active": active }
+                });
+                let _ = serde_json::to_writer(&mut writer, &response);
+                let _ = writeln!(writer);
+                let _ = writer.flush();
+            }
             "module.hello.request" if !handshaken => {
                 let valid = envelope.payload.get("moduleId").and_then(Value::as_str)
                     == Some(module_id.as_str())
@@ -821,7 +858,7 @@ fn main() {
                     &mut writer,
                     "module.hello.response",
                     &envelope.request_id,
-                    json!({ "moduleId": module_id, "nonce": nonce, "name": "PowerGuard", "protocolVersion": HOST_PROTOCOL_VERSION }),
+                    json!({ "moduleId": module_id, "nonce": nonce, "lifecycleVersion": 1, "name": "PowerGuard", "protocolVersion": HOST_PROTOCOL_VERSION }),
                     None,
                 );
             }
@@ -875,7 +912,9 @@ fn main() {
         }
     }
     app.stop.store(true, Ordering::Release);
-    let _ = monitor.join();
+    if let Some(worker) = monitor {
+        let _ = worker.join();
+    }
 }
 
 #[cfg(test)]

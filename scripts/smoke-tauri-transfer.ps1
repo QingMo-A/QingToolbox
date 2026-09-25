@@ -58,6 +58,9 @@ try {
         throw 'QingTransfer getState response was invalid.'
     }
     if ($null -eq $state.payload.discovery.peers) { throw 'QingTransfer discovery snapshot omitted peers.' }
+    if ($state.payload.discovery.running) { throw 'Loading must not start discovery.' }
+    $activation = Send-Frame $process @{ protocolVersion = 1; messageType = 'module.lifecycle.request'; requestId = 'activate-smoke'; payload = @{ active = $true } } 'activate'
+    if ($activation.payload.active -ne $true) { throw 'Transfer activation was not acknowledged.' }
 
     # Paths submitted by Vue are still validated inside the module. A relative
     # path must never reach the network worker or the filesystem.

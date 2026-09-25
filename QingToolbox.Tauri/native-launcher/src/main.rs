@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 mod everything;
+mod icons;
 
 use everything::{
     parse_search_mode, EverythingRuntime, EverythingSearchMode, EverythingSearchResponse,
@@ -27,11 +28,8 @@ const MAX_FOLDER_ITEMS: usize = 512;
 const MAX_FOLDER_NAME_LENGTH: usize = 40;
 const MAX_EXTERNAL_DROP_PATHS: usize = 32;
 const MAX_EXTERNAL_DROP_PATH_LENGTH: usize = 32 * 1024;
-// State snapshots are exchanged over a 1 MiB line-delimited protocol. Keep a
-// conservative aggregate budget for presentation-only icon data so a large
-// launcher cannot make an otherwise valid getState response disappear at the
-// transport boundary.
-const MAX_STATE_ICON_BYTES: usize = 384 * 1024;
+// State contains small icon ids; high-resolution PNGs are fetched separately
+// so a large launcher stays inside the 1 MiB line-delimited protocol limit.
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -342,6 +340,48 @@ impl LauncherStore {
         self.save().is_ok()
     }
 
+    /// Copy an already discovered Desktop entry into the independent Custom
+    /// collection. The WebView can only supply its opaque Desktop id, never a
+    /// filesystem path. Repeated drops select the existing Custom entry.
+    fn add_desktop_item_to_custom(&mut self, desktop_id: &str) -> Result<(), &'static str> {
+        if self.sort_mode != "desktop" {
+            return Err("desktop mode is required");
+        }
+        let desktop = self
+            .desktop_items
+            .iter()
+            .find(|item| item.id == desktop_id)
+            .ok_or("desktop item not found")?
+            .clone();
+        let previous_items = self.items.clone();
+        let previous_order = self.custom_order.clone();
+        let previous_mode = self.sort_mode.clone();
+        let key = identity_key(&desktop.target);
+        if !self
+            .items
+            .iter()
+            .any(|item| identity_key(&item.target) == key)
+        {
+            if self.items.len() >= MAX_ITEMS || self.custom_order.len() >= MAX_ORDER_IDS {
+                return Err("custom launcher is full");
+            }
+            let mut item = desktop;
+            item.id = custom_stable_id(&item.target);
+            item.source = "custom".to_string();
+            self.custom_order.push(item.id.clone());
+            self.items.push(item);
+            self.normalize_order();
+        }
+        self.sort_mode = "custom".to_string();
+        if self.save().is_err() {
+            self.items = previous_items;
+            self.custom_order = previous_order;
+            self.sort_mode = previous_mode;
+            return Err("launcher state could not be saved");
+        }
+        Ok(())
+    }
+
     fn set_order(&mut self, ids: &[String]) -> bool {
         if ids.len() > MAX_ORDER_IDS {
             return false;
@@ -369,24 +409,25 @@ impl LauncherStore {
         self.save().is_ok()
     }
 
-    fn remove(&mut self, id: &str) -> bool {
-        let before = self.items.len() + self.desktop_items.len() + self.folders.len();
+    fn remove_custom_item(&mut self, id: &str) -> Result<(), &'static str> {
+        if self.sort_mode == "desktop" || !self.items.iter().any(|item| item.id == id) {
+            return Err("custom item not found");
+        }
+        let previous_items = self.items.clone();
+        let previous_order = self.custom_order.clone();
+        let previous_folders = self.folders.clone();
         self.items.retain(|item| item.id != id);
-        self.desktop_items.retain(|item| item.id != id);
         self.custom_order.retain(|value| value != id);
-        let mut membership_changed = false;
         for folder in &mut self.folders {
-            let original = folder.item_ids.len();
             folder.item_ids.retain(|value| value != id);
-            membership_changed |= original != folder.item_ids.len();
         }
-        self.folders.retain(|folder| folder.id != id);
-        let changed = membership_changed
-            || before != self.items.len() + self.desktop_items.len() + self.folders.len();
-        if changed {
-            let _ = self.save();
+        if self.save().is_err() {
+            self.items = previous_items;
+            self.custom_order = previous_order;
+            self.folders = previous_folders;
+            return Err("launcher state could not be saved");
         }
-        changed
+        Ok(())
     }
 
     fn top_level_ids(&self) -> Vec<String> {
@@ -430,8 +471,11 @@ impl LauncherStore {
     }
 
     fn move_item_to_folder(&mut self, item_id: &str, folder_id: &str) -> Result<(), &'static str> {
-        if !self.items.iter().any(|item| item.id == item_id) {
-            return Err("item not found");
+        if self.sort_mode != "custom"
+            || !self.items.iter().any(|item| item.id == item_id)
+            || !self.custom_order.iter().any(|id| id == item_id)
+        {
+            return Err("item is not in the custom grid");
         }
         let target_index = self
             .folders
@@ -446,6 +490,8 @@ impl LauncherStore {
         {
             return Err("folder item limit reached");
         }
+        let previous_folders = self.folders.clone();
+        let previous_order = self.custom_order.clone();
         for folder in &mut self.folders {
             folder.item_ids.retain(|id| id != item_id);
         }
@@ -454,7 +500,12 @@ impl LauncherStore {
         if !folder.item_ids.iter().any(|id| id == item_id) {
             folder.item_ids.push(item_id.to_string());
         }
-        self.save().map_err(|_| "launcher state could not be saved")
+        if self.save().is_err() {
+            self.folders = previous_folders;
+            self.custom_order = previous_order;
+            return Err("launcher state could not be saved");
+        }
+        Ok(())
     }
 
     fn move_item_out_of_folder(
@@ -617,7 +668,7 @@ impl LauncherStore {
                 working_directory: canonical.parent().map(normalize_path).unwrap_or_default(),
                 last_launched_at: None,
                 source: "custom".to_string(),
-                icon_data_url: icon_data_url(&canonical),
+                icon_data_url: None,
             });
             self.custom_order.push(id);
             added += 1;
@@ -651,11 +702,7 @@ impl LauncherStore {
                 .filter_map(|id| self.items.iter().find(|item| &item.id == id).cloned())
                 .collect()
         };
-        let mut icon_budget = MAX_STATE_ICON_BYTES;
-        let items = source
-            .iter()
-            .map(|item| item_view(item, &mut icon_budget))
-            .collect();
+        let items = source.iter().map(item_view).collect();
         let folders = if self.sort_mode == "custom" {
             self.custom_order
                 .iter()
@@ -667,7 +714,7 @@ impl LauncherStore {
                         .item_ids
                         .iter()
                         .filter_map(|id| self.items.iter().find(|item| &item.id == id))
-                        .map(|item| item_view(item, &mut icon_budget))
+                        .map(item_view)
                         .collect(),
                 })
                 .collect()
@@ -692,7 +739,7 @@ impl LauncherStore {
             .into_iter()
             .filter(|item| recent_ids.insert(identity_key(&item.target)))
             .take(10)
-            .map(|item| item_view(&item, &mut icon_budget))
+            .map(|item| item_view(&item))
             .collect();
         LauncherState {
             sort_mode: self.sort_mode.clone(),
@@ -731,9 +778,11 @@ fn main() {
         .unwrap_or_else(|| PathBuf::from("."));
     let mut everything = EverythingRuntime::new(module_directory, data_directory.clone());
     let mut desktop_loaded = false;
+    let mut lifecycle_active = false;
     let stdin = io::stdin();
     let mut stdout = BufWriter::new(io::stdout());
 
+    let mut handshaken = false;
     for line in stdin.lock().lines() {
         let line = match line {
             Ok(line) if !line.trim().is_empty() => line,
@@ -748,7 +797,24 @@ fn main() {
             _ => break,
         };
         match envelope.message_type.as_str() {
-            "module.hello.request" => {
+            "module.lifecycle.request" if handshaken => {
+                let Some(active) = envelope.payload.get("active").and_then(Value::as_bool) else {
+                    break;
+                };
+                if !active {
+                    everything.shutdown();
+                }
+                lifecycle_active = active;
+                let response = serde_json::json!({
+                    "protocolVersion": 1, "messageType": "module.lifecycle.response",
+                    "requestId": envelope.request_id, "payload": { "active": active }
+                });
+                let _ = serde_json::to_writer(&mut stdout, &response);
+                let _ = writeln!(stdout);
+                let _ = stdout.flush();
+            }
+            "module.hello.request" if !handshaken => {
+                handshaken = true;
                 if !valid_hello(&envelope.payload, &module_id, &expected_nonce) {
                     write_error(
                         &mut stdout,
@@ -767,14 +833,14 @@ fn main() {
                         request_id: &envelope.request_id,
                         payload: json!({
                             "moduleId": module_id,
-                            "nonce": expected_nonce,
+                            "nonce": expected_nonce, "lifecycleVersion": 1,
                             "version": env!("CARGO_PKG_VERSION"),
                         }),
                         error: None,
                     },
                 );
             }
-            "module.invoke.request" => {
+            "module.invoke.request" if handshaken => {
                 let Some(object) = envelope.payload.as_object() else {
                     write_error(
                         &mut stdout,
@@ -795,6 +861,16 @@ fn main() {
                     );
                     continue;
                 };
+                if method == "searchEverything" && !lifecycle_active {
+                    write_error(
+                        &mut stdout,
+                        "module.invoke.response",
+                        &envelope.request_id,
+                        "module_inactive",
+                        "请先启用模块。",
+                    );
+                    continue;
+                }
                 let payload = object.get("payload").cloned().unwrap_or(Value::Null);
                 match handle_method(
                     method,
@@ -822,7 +898,7 @@ fn main() {
                     ),
                 }
             }
-            "module.event" => {
+            "module.event" if handshaken => {
                 let Some(object) = envelope.payload.as_object() else {
                     eprintln!("Qing Launcher ignored an event with a non-object payload");
                     continue;
@@ -855,7 +931,7 @@ fn main() {
                     }
                 }
             }
-            "module.shutdown.request" => {
+            "module.shutdown.request" if handshaken => {
                 write_response(
                     &mut stdout,
                     Response {
@@ -923,6 +999,19 @@ fn handle_method(
 ) -> Result<Value, (&'static str, String)> {
     match method {
         "ping" => Ok(json!({ "pong": true })),
+        "getItemIcon" => {
+            let id = required_string(&payload, "id")?;
+            let item = store
+                .items
+                .iter_mut()
+                .chain(store.desktop_items.iter_mut())
+                .find(|item| item.id == id)
+                .ok_or(("item_not_found", "应用不存在。".to_string()))?;
+            if item.icon_data_url.is_none() {
+                item.icon_data_url = icon_data_url(Path::new(&item.target));
+            }
+            Ok(json!({ "dataUrl": item.icon_data_url }))
+        }
         "getState" => {
             ensure_desktop(store, desktop_loaded);
             serde_json::to_value(store.state()).map_err(|_| {
@@ -953,6 +1042,19 @@ fn handle_method(
             if mode == "desktop" {
                 ensure_desktop(store, desktop_loaded);
             }
+            serde_json::to_value(store.state()).map_err(|_| {
+                (
+                    "serialization_failed",
+                    "state could not be serialized".to_string(),
+                )
+            })
+        }
+        "addDesktopItemToCustom" => {
+            let id = required_string(&payload, "id")?;
+            ensure_desktop(store, desktop_loaded);
+            store
+                .add_desktop_item_to_custom(&id)
+                .map_err(|message| ("desktop_add_failed", message.to_string()))?;
             serde_json::to_value(store.state()).map_err(|_| {
                 (
                     "serialization_failed",
@@ -1001,7 +1103,9 @@ fn handle_method(
         }
         "removeItem" => {
             let id = required_string(&payload, "id")?;
-            let _ = store.remove(&id);
+            store
+                .remove_custom_item(&id)
+                .map_err(|message| ("remove_failed", message.to_string()))?;
             serde_json::to_value(store.state()).map_err(|_| {
                 (
                     "serialization_failed",
@@ -1233,7 +1337,7 @@ fn scan_desktop() -> Vec<LauncherItem> {
                 working_directory: path.parent().map(normalize_path).unwrap_or_default(),
                 last_launched_at: None,
                 source: "desktop".to_string(),
-                icon_data_url: icon_data_url(&path),
+                icon_data_url: None,
             });
         }
     }
@@ -1310,14 +1414,14 @@ fn normalize_items(items: Vec<LauncherItem>, source: &str) -> Vec<LauncherItem> 
                 normalize_path(Path::new(&item.working_directory))
             };
             item.source = source.to_string();
-            item.icon_data_url = icon_data_url(Path::new(&item.target));
+            item.icon_data_url = None;
             seen.insert(item.id.clone()).then_some(item)
         })
         .take(MAX_ITEMS)
         .collect()
 }
 
-/// Resolve a trusted launcher target to a small, session-local PNG data URL.
+/// Resolve a trusted launcher target to a high-resolution session-local PNG.
 ///
 /// The launcher deliberately does not persist icon bytes: targets can move or
 /// be replaced while the app is not running, and re-reading them on startup
@@ -1334,6 +1438,11 @@ fn icon_data_url(path: &Path) -> Option<String> {
 
     if !path.exists() {
         return None;
+    }
+    if let Some(bytes) =
+        icons::extract(path).filter(|bytes| !bytes.is_empty() && bytes.len() <= MAX_ICON_PNG_BYTES)
+    {
+        return Some(format!("data:image/png;base64,{}", base64_encode(&bytes)));
     }
     let mut wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
     wide.push(0);
@@ -1369,7 +1478,7 @@ fn icon_data_url(_path: &Path) -> Option<String> {
 const LAUNCHER_ICON_SIZE: i32 = 64;
 
 #[cfg(windows)]
-const MAX_ICON_PNG_BYTES: usize = 96 * 1024;
+const MAX_ICON_PNG_BYTES: usize = 256 * 1024;
 
 #[cfg(windows)]
 fn render_shell_icon(icon: windows_sys::Win32::UI::WindowsAndMessaging::HICON) -> Option<Vec<u8>> {
@@ -1515,14 +1624,10 @@ fn base64_encode(bytes: &[u8]) -> String {
     output
 }
 
-fn item_view(item: &LauncherItem, icon_budget: &mut usize) -> ItemView {
-    let icon_key = item.icon_data_url.as_ref().and_then(|value| {
-        if value.len() > *icon_budget {
-            return None;
-        }
-        *icon_budget -= value.len();
-        Some(value.clone())
-    });
+fn item_view(item: &LauncherItem) -> ItemView {
+    // Send only references in state, so no icon disappears when hundreds of
+    // applications exceed the JSON frame budget. PNGs are fetched on demand.
+    let icon_key = Some(format!("launcher-icon:{}", item.id));
     ItemView {
         id: item.id.clone(),
         name: item.name.clone(),
@@ -1878,7 +1983,12 @@ mod tests {
             .filter_map(|item| item.icon_key.as_ref())
             .map(String::len)
             .sum::<usize>();
-        assert!(icon_bytes <= MAX_STATE_ICON_BYTES);
+        assert!(icon_bytes < 32 * 1024);
+        assert!(state.items.iter().all(|item| item
+            .icon_key
+            .as_deref()
+            .unwrap()
+            .starts_with("launcher-icon:")));
         assert!(bytes.len() < MAX_FRAME_BYTES);
     }
 
@@ -2017,6 +2127,78 @@ mod tests {
     }
 
     #[test]
+    fn desktop_drop_adds_one_custom_item_and_keeps_desktop_independent() {
+        let mut store = test_store();
+        store.sort_mode = "desktop".to_string();
+        store.desktop_items.push(LauncherItem {
+            id: "desktop-two".to_string(),
+            name: "Two".to_string(),
+            target: "C:\\Two.lnk".to_string(),
+            arguments: String::new(),
+            working_directory: "C:\\".to_string(),
+            last_launched_at: None,
+            source: "desktop".to_string(),
+            icon_data_url: None,
+        });
+        assert_eq!(store.add_desktop_item_to_custom("desktop-two"), Ok(()));
+        assert_eq!(store.sort_mode, "custom");
+        assert_eq!(store.items.len(), 2);
+        assert_eq!(store.desktop_items.len(), 1);
+        assert_eq!(store.items[1].source, "custom");
+        assert_eq!(store.custom_order.last(), Some(&store.items[1].id));
+        let saved: StoreDocument = serde_json::from_slice(&fs::read(&store.path).unwrap()).unwrap();
+        assert_eq!(saved.sort_mode.as_deref(), Some("custom"));
+        assert_eq!(saved.items.unwrap().len(), 2);
+        store.sort_mode = "desktop".to_string();
+        assert_eq!(store.add_desktop_item_to_custom("desktop-two"), Ok(()));
+        assert_eq!(
+            store.items.len(),
+            2,
+            "repeated drop must not duplicate the app"
+        );
+        let _ = fs::remove_file(store.path);
+    }
+
+    #[test]
+    fn desktop_drop_rejects_unknown_or_non_desktop_ids() {
+        let mut store = test_store();
+        store.sort_mode = "desktop".to_string();
+        assert_eq!(
+            store.add_desktop_item_to_custom("C:\\Untrusted.exe"),
+            Err("desktop item not found")
+        );
+        assert_eq!(
+            store.add_desktop_item_to_custom("one"),
+            Err("desktop item not found")
+        );
+        assert_eq!(store.items.len(), 1);
+        assert_eq!(store.sort_mode, "desktop");
+        let _ = fs::remove_file(store.path);
+    }
+
+    #[test]
+    fn deleting_custom_icon_keeps_desktop_entry_and_persists() {
+        let mut store = test_store();
+        let mut desktop = store.items[0].clone();
+        desktop.id = "desktop-one".to_string();
+        desktop.source = "desktop".to_string();
+        store.desktop_items.push(desktop);
+        store.sort_mode = "alphabetical".to_string();
+        assert_eq!(
+            store.remove_custom_item("desktop-one"),
+            Err("custom item not found")
+        );
+        assert_eq!(store.remove_custom_item("one"), Ok(()));
+        assert!(store.items.is_empty());
+        assert!(store.custom_order.is_empty());
+        assert_eq!(store.desktop_items.len(), 1);
+        let saved: StoreDocument = serde_json::from_slice(&fs::read(&store.path).unwrap()).unwrap();
+        assert!(saved.items.unwrap().is_empty());
+        assert_eq!(saved.desktop_items.unwrap().len(), 1);
+        let _ = fs::remove_file(store.path);
+    }
+
+    #[test]
     fn folders_keep_items_out_of_top_level_order_and_restore_them_on_delete() {
         let mut store = test_store();
         store.items.push(LauncherItem {
@@ -2036,6 +2218,8 @@ mod tests {
         store
             .move_item_to_folder("one", &folder_id)
             .expect("item moved into folder");
+        assert!(!store.custom_order.iter().any(|id| id == "one"));
+        assert!(store.move_item_to_folder("one", &folder_id).is_err());
         let state = store.state();
         assert_eq!(
             state

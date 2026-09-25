@@ -45,6 +45,8 @@ try {
     if ($state.messageType -ne 'module.invoke.response' -or $null -eq $state.payload.windows -or $null -eq $state.payload.status) { throw 'Window Topmost getState response was invalid.' }
     $bad = Send-Frame $process @{ protocolVersion = 1; messageType = 'module.invoke.request'; requestId = 'bad-window'; payload = @{ method = 'setTopmost'; payload = @{ windowId = 'not-a-window-id' } } } 'invalid window id'
     if ($null -eq $bad.error -or $bad.error.code -ne 'invalid_payload') { throw 'Window Topmost accepted an invalid opaque window id.' }
+    $badSelection = Send-Frame $process @{ protocolVersion = 1; messageType = 'module.invoke.request'; requestId = 'bad-selection'; payload = @{ method = 'selectWindow'; payload = @{ windowId = 'not-a-window-id' } } } 'invalid selection id'
+    if ($null -eq $badSelection.error -or $badSelection.error.code -ne 'invalid_payload') { throw 'Window Topmost accepted an invalid list selection id.' }
     $shutdown = Send-Frame $process @{ protocolVersion = 1; messageType = 'module.shutdown.request'; requestId = 'shutdown-smoke'; payload = @{} } 'shutdown'
     if ($shutdown.messageType -ne 'module.shutdown.response') { throw 'Window Topmost shutdown response was invalid.' }
     $process.StandardInput.Close()

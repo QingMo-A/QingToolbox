@@ -312,7 +312,12 @@ fn imported_option(path: &Path) -> Option<FontOption> {
         display_name: format!("Imported Font · {}", &hash[..8]),
         family_name: None,
         resource_url: Some(format!(
-            "qfont://localhost/user-fonts/font-{hash}.{extension}"
+            "{}/user-fonts/font-{hash}.{extension}",
+            if cfg!(windows) {
+                "http://qfont.localhost"
+            } else {
+                "qfont://localhost"
+            }
         )),
     })
 }

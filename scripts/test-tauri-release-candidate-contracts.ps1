@@ -53,8 +53,8 @@ foreach ($contract in @(
     'Get-FileHash',
     'SHA256',
     'HEAD changed while the Tauri candidate gate was running.',
-    'Signing:       required before public release',
-    'migration AppId (production cut-over not performed)'
+    'Signing:       unsigned alpha (publisher certificate not configured)',
+    'QingToolbox product AppId (WPF-to-Tauri in-place upgrade)'
 )) {
     if ($content.IndexOf($contract, [StringComparison]::Ordinal) -lt 0) {
         throw "Tauri candidate gate lost contract text: $contract"
@@ -64,6 +64,12 @@ foreach ($forbidden in @('git push', 'git tag', 'gh release', 'build-installer.p
     if ($content.IndexOf($forbidden, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
         throw "Tauri candidate gate contains a forbidden publish/legacy operation: $forbidden"
     }
+}
+
+$installer = [IO.File]::ReadAllText((Join-Path (Split-Path -Parent $PSScriptRoot) 'installer/QingToolbox.Tauri.iss'))
+if ($installer.IndexOf('AppId={{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}', [StringComparison]::Ordinal) -lt 0 -or
+    $installer.IndexOf('C9E5A4D1-1E8E-4F39-8F70-9D8D1C4B7A61', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+    throw 'The public Tauri installer must use the QingToolbox product AppId, never the isolated test AppId.'
 }
 
 Write-Host 'Tauri release candidate gate contracts passed.'

@@ -155,7 +155,25 @@ pub fn serve_font_asset<R: Runtime>(
         return error_response(StatusCode::NOT_FOUND, "font asset not found");
     };
     let length = body.len().to_string();
-    Response::builder()
+    let mut response = Response::builder();
+    if let Some(origin) = request
+        .headers()
+        .get("Origin")
+        .and_then(|v| v.to_str().ok())
+    {
+        if matches!(
+            origin,
+            "http://tauri.localhost"
+                | "https://tauri.localhost"
+                | "tauri://localhost"
+                | "http://localhost:1420"
+        ) {
+            response = response
+                .header("Access-Control-Allow-Origin", origin)
+                .header("Vary", "Origin");
+        }
+    }
+    response
         .status(StatusCode::OK)
         .header("Content-Type", content_type)
         .header("Content-Length", length)
@@ -178,9 +196,9 @@ fn format_pin_document(record: &ScreenPinWindowRecord) -> String {
     // it in the isolated document.
     let image = html_escape(&record.data_url);
     let title = html_escape(&record.pin_id);
-    format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Screen Pin {title}</title><style>html,body{{margin:0;width:100%;height:100%;background:#101827;overflow:hidden}}body{{display:grid;place-items:center}}img{{display:block;max-width:100%;max-height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none}}</style></head><body><img src=\"{image}\" alt=\"Screen Pin\"></body></html>"
-    )
+    include_str!("screenpin.html")
+        .replace("__TITLE__", &title)
+        .replace("__IMAGE__", &image)
 }
 
 fn html_escape(value: &str) -> String {
@@ -220,6 +238,9 @@ pub fn open_module_window<R: Runtime>(
         .map_err(|_| "模块 Web 入口不是有效 URL。".to_string())?;
     let label = module_window_label(module_id);
     if let Some(window) = app.get_webview_window(&label) {
+        if module_id == crate::launcher_overlay::MODULE_ID {
+            return crate::launcher_overlay::show(&window).map_err(|e| e.to_string());
+        }
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -231,7 +252,8 @@ pub fn open_module_window<R: Runtime>(
     let webview_data_directory = module_data_directory(module_id)
         .map_err(|_| "模块 WebView 数据目录不可用。".to_string())?
         .join("tauri-webview");
-    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::CustomProtocol(url))
+    let overlay = module_id == crate::launcher_overlay::MODULE_ID;
+    let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::CustomProtocol(url))
         .title(format!("QingToolbox · {}", record.name))
         .inner_size(960.0, 680.0)
         .resizable(true)
@@ -240,9 +262,24 @@ pub fn open_module_window<R: Runtime>(
         // CSS and bridge are still loading. The page-load callback reveals the
         // window only after the first document has finished, which avoids the
         // white flash users otherwise see when opening a cold module.
-        .visible(false)
-        .on_page_load(|window, payload| {
+        .visible(false);
+    if overlay {
+        builder = builder
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .background_color(tauri::window::Color(0, 0, 0, 0))
+            .resizable(false)
+            .always_on_top(true)
+            .skip_taskbar(true);
+    }
+    let window = builder
+        .on_page_load(move |window, payload| {
             if matches!(payload.event(), PageLoadEvent::Finished) {
+                if overlay {
+                    let _ = crate::launcher_overlay::show(&window);
+                    return;
+                }
                 let _ = window.show();
                 let _ = window.unminimize();
                 let _ = window.set_focus();
@@ -250,8 +287,37 @@ pub fn open_module_window<R: Runtime>(
         })
         .build()
         .map_err(|error| format!("无法打开模块窗口：{error}"))?;
+    if overlay {
+        crate::launcher_keyboard::install(&window).map_err(|error| error.to_string())?;
+    }
     window.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { .. } = event {
+        if module_id_for_close == crate::launcher_overlay::MODULE_ID
+            && matches!(event, tauri::WindowEvent::Destroyed)
+        {
+            crate::launcher_outside_click::stop(&app_for_close);
+        }
+        if module_id_for_close == crate::launcher_overlay::MODULE_ID
+            && matches!(
+                event,
+                tauri::WindowEvent::Focused(false)
+                    | tauri::WindowEvent::Destroyed
+                    | tauri::WindowEvent::CloseRequested { .. }
+            )
+        {
+            let _ = crate::launcher_keyboard::stop(&app_for_close);
+        }
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            if module_id_for_close == crate::launcher_overlay::MODULE_ID {
+                api.prevent_close();
+                if let Some(window) =
+                    app_for_close.get_webview_window(&module_window_label(&module_id_for_close))
+                {
+                    if crate::launcher_overlay::can_dismiss(&window) {
+                        let _ = crate::launcher_overlay::hide(&window);
+                    }
+                }
+                return;
+            }
             if let Some(state) = app_for_close.try_state::<HostState>() {
                 let _ = crate::clear_module_hotkey_binding(
                     &app_for_close,

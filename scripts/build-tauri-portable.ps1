@@ -27,6 +27,7 @@ $outputExe = Join-Path $stageRoot 'QingToolbox.exe'
 $builtExe = Join-Path $releaseRoot 'qingtoolbox-tauri.exe'
 $builtResources = Join-Path $releaseRoot 'resources'
 $sourceBundledModules = Join-Path $rustRoot 'resources\modules'
+$cacheScript = Join-Path $PSScriptRoot 'tauri-build-cache.mjs'
 
 function Assert-ArtifactPath {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -128,36 +129,16 @@ if (-not (Test-Path -LiteralPath (Join-Path $rustRoot 'tauri.conf.json') -PathTy
 }
 
 if (-not $SkipModuleBuild) {
-    Invoke-Checked -Label 'Build protocol canary' -Action {
-        & (Join-Path $repoRoot 'scripts\build-tauri-canary.ps1')
-    }
-    Invoke-Checked -Label 'Build Qing Launcher module' -Action {
-        & (Join-Path $repoRoot 'scripts\build-tauri-launcher.ps1')
-    }
-    Invoke-Checked -Label 'Build Qing PDF module' -Action {
-        & (Join-Path $repoRoot 'scripts\build-tauri-pdf.ps1')
-    }
-    Invoke-Checked -Label 'Build QingTransfer module' -Action {
-        & (Join-Path $repoRoot 'scripts\build-tauri-transfer.ps1')
-    }
-    Invoke-Checked -Label 'Build Text Tools module' -Action {
-        & (Join-Path $repoRoot 'scripts\build-tauri-texttools.ps1')
-    }
-    Invoke-Checked -Label 'Build Window Topmost module' -Action {
-        & (Join-Path $repoRoot 'scripts\build-tauri-windowtopmost.ps1')
-    }
-    Invoke-Checked -Label 'Build PowerGuard module' -Action {
-        & (Join-Path $repoRoot 'scripts\build-tauri-powerguard.ps1')
-    }
-    Invoke-Checked -Label 'Build Screen Pin module' -Action {
-        & (Join-Path $repoRoot 'scripts\build-tauri-screenpin.ps1')
+    Invoke-Checked -Label 'Prepare changed Tauri modules' -Action {
+        & (Join-Path $repoRoot 'scripts\build-tauri-modules.ps1')
     }
 }
 
+$buildFingerprint = & node $cacheScript fingerprint host
+if ($LASTEXITCODE -ne 0) { throw 'Cannot fingerprint Tauri build inputs.' }
 Push-Location $appRoot
 try {
-    Invoke-Checked -Label 'Typecheck Tauri Vue frontend' -Action { npm run typecheck }
-    Invoke-Checked -Label 'Build Tauri Vue frontend' -Action { npm run build }
+    # tauri build runs beforeBuildCommand once; that Vue build includes typecheck.
     # Tauri copies resource files into target/release but does not prune old
     # hashed Vite assets on every incremental build. Clear only this exact,
     # generated resource directory so the production package stays small and
@@ -247,6 +228,10 @@ $manifest = [ordered]@{
 }
 $manifestPath = Join-Path $stageRoot 'portable-manifest.json'
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+if ($Distribution -eq 'production' -and $stageRoot -eq (Join-Path $repoRoot 'artifacts\tauri-production\QingToolbox')) {
+    & node $cacheScript save host $buildFingerprint
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot save the development build cache.' }
+}
 
 if ($Zip) {
     $zipPath = Assert-ArtifactPath (Join-Path $artifactRoot ("QingToolbox-tauri-$version-win-x64-portable.zip"))

@@ -11,6 +11,17 @@ afterEach(() => {
 })
 
 describe('font presentation', () => {
+  it('loads the Windows Tauri custom-protocol font origin', async () => {
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { add: vi.fn() } })
+    const sources: string[] = []
+    class FakeFontFace { constructor(_family: string, source: string) { sources.push(source) } load() { return Promise.resolve(this) } }
+    vi.stubGlobal('FontFace', FakeFontFace)
+    await expect(applyFontPresentation({ ...imported, resourceUrl: `http://qfont.localhost/user-fonts/font-${hash}.ttf` })).resolves.toBe(true)
+    expect(sources[0]).toContain('http://qfont.localhost/')
+    await applyFontPresentation({ ...imported, resourceUrl: `http://untrusted.localhost/user-fonts/font-${hash}.ttf` })
+    expect(sources).toHaveLength(1)
+    expect(document.documentElement.dataset.fontId).toBe('Default')
+  })
   it('keeps the built-in Default stack readable', async () => {
     expect(fontStackFor(null)).toContain('Segoe UI Variable')
     await expect(applyFontPresentation(null)).resolves.toBe(true)

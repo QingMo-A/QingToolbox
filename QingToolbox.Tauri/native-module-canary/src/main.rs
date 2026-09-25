@@ -34,6 +34,7 @@ struct ErrorBody {
 fn main() {
     let stdin = io::stdin();
     let mut stdout = io::BufWriter::new(io::stdout());
+    let mut handshaken = false;
     for line in stdin.lock().lines() {
         let line = match line {
             Ok(line) if !line.trim().is_empty() => line,
@@ -49,7 +50,20 @@ fn main() {
         }
 
         match envelope.message_type.as_str() {
-            "module.hello.request" => {
+            "module.lifecycle.request" if handshaken => {
+                let Some(active) = envelope.payload.get("active").and_then(Value::as_bool) else {
+                    break;
+                };
+                let response = serde_json::json!({
+                    "protocolVersion": 1, "messageType": "module.lifecycle.response",
+                    "requestId": envelope.request_id, "payload": { "active": active }
+                });
+                let _ = serde_json::to_writer(&mut stdout, &response);
+                let _ = writeln!(stdout);
+                let _ = stdout.flush();
+            }
+            "module.hello.request" if !handshaken => {
+                handshaken = true;
                 let Some(object) = envelope.payload.as_object() else {
                     break;
                 };
@@ -65,14 +79,14 @@ fn main() {
                     request_id: &envelope.request_id,
                     payload: serde_json::json!({
                         "moduleId": module_id,
-                        "nonce": nonce,
+                        "nonce": nonce, "lifecycleVersion": 1,
                         "version": env!("CARGO_PKG_VERSION"),
                     }),
                     error: None,
                 };
                 write_response(&mut stdout, &response);
             }
-            "module.shutdown.request" => {
+            "module.shutdown.request" if handshaken => {
                 let response = Response {
                     protocol_version: PROTOCOL_VERSION,
                     message_type: "module.shutdown.response",
@@ -83,13 +97,23 @@ fn main() {
                 write_response(&mut stdout, &response);
                 break;
             }
-            "module.invoke.request" => {
+            "module.invoke.request" if handshaken => {
                 let Some(object) = envelope.payload.as_object() else {
-                    write_error(&mut stdout, &envelope.request_id, "invalid_payload", "Invoke payload must be an object.");
+                    write_error(
+                        &mut stdout,
+                        &envelope.request_id,
+                        "invalid_payload",
+                        "Invoke payload must be an object.",
+                    );
                     continue;
                 };
                 let Some(method) = object.get("method").and_then(Value::as_str) else {
-                    write_error(&mut stdout, &envelope.request_id, "invalid_method", "Invoke method is required.");
+                    write_error(
+                        &mut stdout,
+                        &envelope.request_id,
+                        "invalid_method",
+                        "Invoke method is required.",
+                    );
                     continue;
                 };
                 if method == "ping" {
@@ -103,7 +127,12 @@ fn main() {
                     };
                     write_response(&mut stdout, &response);
                 } else {
-                    write_error(&mut stdout, &envelope.request_id, "unknown_method", "The canary does not implement this operation.");
+                    write_error(
+                        &mut stdout,
+                        &envelope.request_id,
+                        "unknown_method",
+                        "The canary does not implement this operation.",
+                    );
                 }
             }
             _ => {
@@ -123,7 +152,12 @@ fn main() {
     }
 }
 
-fn write_error(stdout: &mut impl Write, request_id: &str, code: &'static str, message: &'static str) {
+fn write_error(
+    stdout: &mut impl Write,
+    request_id: &str,
+    code: &'static str,
+    message: &'static str,
+) {
     let response = Response {
         protocol_version: PROTOCOL_VERSION,
         message_type: "module.invoke.response",

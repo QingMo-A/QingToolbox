@@ -51,7 +51,9 @@ operations must return an error without terminating the module process.
 Requests:
 
 - `hello` — negotiate protocol and return module metadata.
-- `activate` / `deactivate` — change the module lifecycle state.
+- `module.lifecycle.request` / `module.lifecycle.response` — acknowledged
+  activation changes using an `active` boolean, independent of process residency.
+  See [module lifecycle contract](TAURI_MODULE_LIFECYCLE.md).
 - `snapshot` — return the current serializable state.
 - `invoke` — call a module operation using a JSON object payload.
 - `shutdown` — ask the module to exit; the host owns the final kill timeout.
@@ -205,26 +207,25 @@ the first release.
   dedicated always-on-top Tauri window through a host-issued token URL; the host
   closes and releases those windows when the pin or module is removed.
 
-### M3 — production hardening remaining
+### M3 — production hardening and unsigned alpha cut-over
 
-- A reproducible unsigned Inno Setup installer candidate now consumes the same
-  production directory and manifest as the portable path. It has an isolated
-  migration AppId, preserves user data outside the install directory, verifies
-  every staged file and runs an install/uninstall smoke. It is intentionally not
-  the public installer yet: signed installer/bundle, production AppId cut-over
-  and the production parity checklist remain.
-- Complete signed installer/bundle and then run the production parity checklist
-  on every official module. Rust now owns the
+- A reproducible unsigned Inno Setup installer consumes the same production
+  directory and manifest as the portable path. For the user-approved
+  0.3.0-alpha release it uses the existing QingToolbox product AppId, backs up
+  a registered WPF installation before the first migration, preserves shared
+  user data and passes the disposable-profile install/uninstall smoke.
+- A signed installer and representative-environment acceptance remain future
+  hardening work. Rust already owns the
   official Release check and installer download through system WinHTTP with
   bounded SemVer/asset validation, trusted redirects, an isolated cache and
   sidecar/SHA256 verification; Vue receives only progress snapshots. A verified
-  cache is handed off only when the fixed migration AppId uninstall record, the
+  cache is handed off only when the product AppId uninstall record, the
   Tauri production marker and the current executable's production manifest agree;
   the Rust host starts the Inno installer with silent handoff flags and exits
   after closing only its own modules. Portable/debug/WPF copies remain
   unsupported. Portable and production directory builders already use the same
-  release executable and resource manifest, so the remaining work is signed
-  packaging and production trust rather than another host rewrite.
+  release executable and resource manifest. The unsigned alpha decision does
+  not imply that signing or real-user WPF upgrade acceptance has passed.
 - Run heavy runtimes (Everything/qpdf) as module-owned child processes or
   sidecars and close only instances created by the module. Qing Launcher now
   follows this rule for its private Everything client; its dedicated service
@@ -239,8 +240,8 @@ the first release.
   and binds the manifest, installer and SHA256 sidecar back to the same
   unchanged source commit. It rejects legacy WPF asset names and any worktree
   or HEAD change during the run. CI exercises the same entry point with pinned
-  Inno Setup 6.7.1. Code signing and the permanent production AppId cut-over
-  remain explicit public-release blockers.
+  Inno Setup 6.7.1. Product AppId cut-over is part of this release; code signing
+  is explicitly waived for the alpha, not silently treated as complete.
 
 - The repository's default `run-latest.bat` now launches the Tauri Release
   candidate. The legacy WPF maintenance path is explicit (`run-legacy-wpf.bat`)
@@ -250,8 +251,8 @@ The current migration slice has passed the repository's full Windows validation
 command (`scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop
 -SmokeEverything`), including all eight native module smoke suites, host Rust
 tests, Vue typecheck/build, Release resource staging and the module-window IPC
-smoke. This is a validated engineering candidate, not yet the signed public
-installer described in M3.
+smoke. The user approved an unsigned public alpha after this engineering
+candidate; signing and real-user migration acceptance remain open.
 
 Run the complete unsigned production candidate gate with:
 

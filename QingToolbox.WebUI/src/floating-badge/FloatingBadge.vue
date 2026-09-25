@@ -93,11 +93,10 @@ html.floating-badge-document #app {
   width: 60px;
   height: 60px;
   margin: 4px;
-  padding: 8px;
-  border: 1px solid color-mix(in srgb, var(--q-border, #cbd9ec) 88%, transparent);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--q-surface, #fff) 94%, transparent);
-  box-shadow: 0 8px 22px rgb(15 38 74 / 24%);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   cursor: grab;
   user-select: none;
   touch-action: none;
@@ -106,8 +105,8 @@ html.floating-badge-document #app {
 
 .floating-badge:hover,
 .floating-badge:focus-visible {
-  background: color-mix(in srgb, var(--q-brand-soft, #e8f1ff) 92%, transparent);
-  box-shadow: 0 10px 26px rgb(15 38 74 / 30%);
+  background: transparent;
+  box-shadow: none;
   outline: none;
   transform: translateY(-1px);
 }

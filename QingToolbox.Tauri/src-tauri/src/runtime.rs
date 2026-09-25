@@ -1,9 +1,12 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::{BufRead, BufReader, Write},
     process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio},
-    sync::mpsc::{self, Receiver, TryRecvError},
+    sync::{
+        mpsc::{self, Receiver, TryRecvError},
+        Arc, Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -32,7 +35,9 @@ const EVENT_TIMEOUT: Duration = Duration::from_secs(10);
 pub enum ModuleRuntimeState {
     NotStarted,
     Starting,
+    Loaded,
     Running,
+    Deactivated,
     Stopped,
     Failed,
 }
@@ -61,6 +66,8 @@ struct RunningModule {
     nonce: String,
     handshake_deadline: Instant,
     handshake_complete: bool,
+    active: bool,
+    activated_once: bool,
     messages: Receiver<RuntimeMessage>,
 }
 
@@ -74,6 +81,9 @@ enum RuntimeMessage {
 /// Owns only processes explicitly started by this host. Module paths come
 /// from the backend discovery index; callers never provide an executable path.
 pub struct ModuleRuntimeManager {
+    // A read-only projection for native input callbacks: never hold the IPC
+    // mutex on the UI thread just to check whether a hotkey is still enabled.
+    pub active_modules: Arc<Mutex<BTreeSet<String>>>,
     running: BTreeMap<String, RunningModule>,
     snapshots: BTreeMap<String, ModuleRuntimeSnapshot>,
     next_generation: u64,
@@ -83,6 +93,7 @@ pub struct ModuleRuntimeManager {
 impl ModuleRuntimeManager {
     pub fn new() -> Self {
         Self {
+            active_modules: Arc::new(Mutex::new(BTreeSet::new())),
             running: BTreeMap::new(),
             snapshots: BTreeMap::new(),
             next_generation: 0,
@@ -98,7 +109,10 @@ impl ModuleRuntimeManager {
         if let Some(snapshot) = self.refresh_one(module_id) {
             if matches!(
                 snapshot.state,
-                ModuleRuntimeState::Starting | ModuleRuntimeState::Running
+                ModuleRuntimeState::Starting
+                    | ModuleRuntimeState::Loaded
+                    | ModuleRuntimeState::Running
+                    | ModuleRuntimeState::Deactivated
             ) {
                 return Ok(snapshot);
             }
@@ -196,6 +210,8 @@ impl ModuleRuntimeManager {
                 nonce,
                 handshake_deadline: Instant::now() + HANDSHAKE_TIMEOUT,
                 handshake_complete: false,
+                active: false,
+                activated_once: false,
                 messages,
             },
         );
@@ -233,7 +249,7 @@ impl ModuleRuntimeManager {
                 message: "该模块未声明此操作。".to_string(),
             });
         }
-        let initial = self.start(module_id, record)?;
+        let initial = self.snapshot(module_id);
         self.wait_until_running(module_id, initial.state)?;
 
         self.next_request_id = self.next_request_id.saturating_add(1);
@@ -247,6 +263,61 @@ impl ModuleRuntimeManager {
             }),
         );
 
+        self.exchange(module_id, request, "module.invoke.response", INVOKE_TIMEOUT)
+    }
+
+    /// Activation changes ongoing work, never process residency. Only an
+    /// acknowledged transition can change the public state.
+    pub fn set_active(
+        &mut self,
+        module_id: &str,
+        active: bool,
+    ) -> Result<ModuleRuntimeSnapshot, RuntimeError> {
+        let initial = self.snapshot(module_id);
+        self.wait_until_running(module_id, initial.state)?;
+        if self
+            .running
+            .get(module_id)
+            .is_some_and(|module| module.active == active)
+        {
+            return Ok(self.snapshot(module_id));
+        }
+        self.next_request_id = self.next_request_id.saturating_add(1);
+        let request = ProtocolEnvelope::new(
+            "module.lifecycle.request",
+            format!("lifecycle-{}-{}", initial.generation, self.next_request_id),
+            serde_json::json!({ "active": active }),
+        );
+        let response = self.exchange(
+            module_id,
+            request,
+            "module.lifecycle.response",
+            INVOKE_TIMEOUT,
+        )?;
+        if response.get("active").and_then(Value::as_bool) != Some(active) {
+            self.fail_running(module_id, "模块未确认启停状态。".to_string());
+            return Err(RuntimeError {
+                code: "moduleLifecycleInvalid",
+                message: "模块未确认启停状态。".to_string(),
+            });
+        }
+        let module = self
+            .running
+            .get_mut(module_id)
+            .expect("acknowledged resident module");
+        module.active = active;
+        module.activated_once |= active;
+        Ok(self.snapshot(module_id))
+    }
+
+    fn exchange(
+        &mut self,
+        module_id: &str,
+        request: ProtocolEnvelope<Value>,
+        response_type: &str,
+        timeout: Duration,
+    ) -> Result<Value, RuntimeError> {
+        let request_id = request.request_id.clone();
         {
             let running = self
                 .running
@@ -267,7 +338,7 @@ impl ModuleRuntimeManager {
             }
         }
 
-        let deadline = Instant::now() + INVOKE_TIMEOUT;
+        let deadline = Instant::now() + timeout;
         loop {
             let mut response = None;
             let mut failure = None;
@@ -282,7 +353,7 @@ impl ModuleRuntimeManager {
                 loop {
                     match running.messages.try_recv() {
                         Ok(RuntimeMessage::Frame(frame)) if frame.request_id == request_id => {
-                            if frame.message_type != "module.invoke.response" {
+                            if frame.message_type != response_type {
                                 failure = Some(RuntimeError {
                                     code: "moduleResponseInvalid",
                                     message: format!(
@@ -385,7 +456,7 @@ impl ModuleRuntimeManager {
                 message: "该模块未声明此事件。".to_string(),
             });
         }
-        let initial = self.start(module_id, record)?;
+        let initial = self.snapshot(module_id);
         self.wait_until_running(module_id, initial.state)?;
 
         self.next_request_id = self.next_request_id.saturating_add(1);
@@ -521,7 +592,10 @@ impl ModuleRuntimeManager {
     ) -> Result<(), RuntimeError> {
         if !matches!(
             initial_state,
-            ModuleRuntimeState::Starting | ModuleRuntimeState::Running
+            ModuleRuntimeState::Starting
+                | ModuleRuntimeState::Loaded
+                | ModuleRuntimeState::Running
+                | ModuleRuntimeState::Deactivated
         ) {
             return Err(RuntimeError {
                 code: "moduleNotRunning",
@@ -532,7 +606,9 @@ impl ModuleRuntimeManager {
         loop {
             let snapshot = self.snapshot(module_id);
             match snapshot.state {
-                ModuleRuntimeState::Running => return Ok(()),
+                ModuleRuntimeState::Loaded
+                | ModuleRuntimeState::Running
+                | ModuleRuntimeState::Deactivated => return Ok(()),
                 ModuleRuntimeState::Failed => {
                     return Err(RuntimeError {
                         code: "moduleHandshakeFailed",
@@ -561,6 +637,17 @@ impl ModuleRuntimeManager {
     }
 
     pub fn stop(&mut self, module_id: &str) -> ModuleRuntimeSnapshot {
+        if self
+            .running
+            .get(module_id)
+            .is_some_and(|module| module.active)
+        {
+            // Unload first cancels continuous tasks, then releases the process.
+            let _ = self.set_active(module_id, false);
+        }
+        if let Ok(mut active) = self.active_modules.lock() {
+            active.remove(module_id);
+        }
         let previous =
             self.snapshots
                 .get(module_id)
@@ -729,7 +816,14 @@ impl ModuleRuntimeManager {
             } => ModuleRuntimeSnapshot {
                 module_id: module_id.to_string(),
                 state: if handshaken {
-                    ModuleRuntimeState::Running
+                    let module = &self.running[module_id];
+                    if module.active {
+                        ModuleRuntimeState::Running
+                    } else if module.activated_once {
+                        ModuleRuntimeState::Deactivated
+                    } else {
+                        ModuleRuntimeState::Loaded
+                    }
                 } else {
                     ModuleRuntimeState::Starting
                 },
@@ -771,12 +865,22 @@ impl ModuleRuntimeManager {
                 }
             }
         };
+        if let Ok(mut active) = self.active_modules.lock() {
+            if snapshot.state == ModuleRuntimeState::Running {
+                active.insert(module_id.to_string());
+            } else {
+                active.remove(module_id);
+            }
+        }
         self.snapshots
             .insert(module_id.to_string(), snapshot.clone());
         Some(snapshot)
     }
 
     fn fail_running(&mut self, module_id: &str, error: String) {
+        if let Ok(mut active) = self.active_modules.lock() {
+            active.remove(module_id);
+        }
         let generation = self
             .running
             .remove(module_id)
@@ -840,6 +944,9 @@ fn validate_hello_payload(
         .ok_or_else(|| "模块 hello 响应缺少 nonce。".to_string())?;
     if actual_nonce != expected_nonce {
         return Err("模块 hello 响应的 nonce 不匹配。".to_string());
+    }
+    if object.get("lifecycleVersion").and_then(Value::as_u64) != Some(1) {
+        return Err("模块不支持独立加载/启停协议，请更新模块。".to_string());
     }
     Ok(())
 }
@@ -1046,7 +1153,8 @@ mod tests {
     fn hello_payload_requires_the_backend_nonce_and_module_id() {
         let payload = serde_json::json!({
             "moduleId": "demo.module",
-            "nonce": "nonce-1"
+            "nonce": "nonce-1",
+            "lifecycleVersion": 1
         });
         validate_hello_payload(&payload, "demo.module", "nonce-1").expect("valid hello");
 
@@ -1063,6 +1171,20 @@ mod tests {
         let error = validate_hello_payload(&payload, "demo.module", "nonce-1")
             .expect_err("nonce is required");
         assert!(error.contains("nonce"));
+    }
+
+    #[test]
+    fn legacy_modules_cannot_claim_safe_inactive_residency() {
+        let payload = serde_json::json!({ "moduleId": "demo.module", "nonce": "nonce-1" });
+        assert!(validate_hello_payload(&payload, "demo.module", "nonce-1").is_err());
+    }
+
+    #[test]
+    fn enabling_does_not_implicitly_load_a_module() {
+        let mut manager = ModuleRuntimeManager::new();
+        assert!(manager.set_active("missing.module", true).is_err());
+        assert!(manager.running.is_empty());
+        assert_eq!(manager.snapshot("missing.module").generation, 0);
     }
 
     #[test]
@@ -1096,6 +1218,7 @@ mod tests {
             source: ModuleSource::Bundled,
         };
         let mut manager = ModuleRuntimeManager::new();
+        manager.start("qing.canary", &record).expect("load canary");
         let response = manager
             .invoke(
                 "qing.canary",
@@ -1106,9 +1229,42 @@ mod tests {
             .expect("canary invoke response");
         assert_eq!(response["pong"], true);
         assert_eq!(response["echo"]["source"], "runtime-test");
+        let loaded = manager.snapshot("qing.canary");
+        assert_eq!(loaded.state, ModuleRuntimeState::Loaded);
+        let pid = manager.running["qing.canary"].child.id();
+        for active in [true, true, false, false, true, false] {
+            let result = manager
+                .set_active("qing.canary", active)
+                .expect("lifecycle ack");
+            assert_eq!(result.generation, loaded.generation);
+            assert_eq!(
+                result.state,
+                if active {
+                    ModuleRuntimeState::Running
+                } else {
+                    ModuleRuntimeState::Deactivated
+                }
+            );
+            assert_eq!(manager.running["qing.canary"].child.id(), pid);
+            manager
+                .invoke("qing.canary", &record, "ping", Value::Null)
+                .expect("resident module remains callable");
+        }
         assert_eq!(
             manager.stop("qing.canary").state,
             ModuleRuntimeState::Stopped
         );
+        assert!(manager.running.is_empty());
+        assert!(
+            record.entry.is_file(),
+            "unload must not delete installed files"
+        );
+        assert!(
+            manager
+                .invoke("qing.canary", &record, "ping", Value::Null)
+                .is_err(),
+            "late UI traffic cannot reload an unloaded module"
+        );
+        assert!(manager.running.is_empty());
     }
 }

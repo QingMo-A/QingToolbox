@@ -225,5 +225,5 @@ Write-Host "Branch:        $($initialSource.Branch)"
 Write-Host "Installer:     $($candidate.InstallerPath)"
 Write-Host "SHA256:        $($candidate.Sha256)"
 Write-Host "Manifest:      $($candidate.ManifestPath)"
-Write-Host 'Signing:       required before public release'
-Write-Host 'Installer ID:  migration AppId (production cut-over not performed)'
+Write-Host 'Signing:       unsigned alpha (publisher certificate not configured)'
+Write-Host 'Installer ID:  QingToolbox product AppId (WPF-to-Tauri in-place upgrade)'

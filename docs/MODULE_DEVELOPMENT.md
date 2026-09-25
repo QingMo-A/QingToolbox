@@ -1,5 +1,9 @@
 # Module Development
 
+For Rust/Tauri process modules, follow the [independent load/enable/disable/unload
+lifecycle contract](TAURI_MODULE_LIFECYCLE.md). The .NET APIs below describe the
+legacy WPF maintenance path, not the current process-module lifecycle.
+
 Modules depend only on `QingToolbox.Abstractions`. They must not reference the
 Shell, Core, or concrete host implementation.
 

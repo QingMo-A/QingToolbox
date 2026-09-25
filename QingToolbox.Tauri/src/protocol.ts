@@ -48,7 +48,7 @@ export type ModuleListPayload = {
   scannedAtUnixMs: number
 }
 
-export type ModuleRuntimeState = 'notStarted' | 'starting' | 'running' | 'stopped' | 'failed'
+export type ModuleRuntimeState = 'notStarted' | 'starting' | 'loaded' | 'deactivated' | 'running' | 'stopped' | 'failed'
 
 export type ModuleRuntimeSnapshot = {
   moduleId: string

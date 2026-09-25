@@ -53,3 +53,31 @@ The reset script accepts only validated project-local profiles and cannot target
 The reset command supports PowerShell's standard `-WhatIf` and `-Confirm` behavior. `-Force` suppresses the additional high-impact confirmation only; it still calls `ShouldProcess`, so `-Force -WhatIf` never deletes the Profile.
 
 ModuleTest currently runs the host built from the current source checkout. Versioned test-host caching remains a later-phase capability.
+
+## Tauri local startup cache
+
+`run-latest.bat` and `run-tauri-production.bat` reuse the local Release candidate
+when its source-content and output fingerprints match. Uncommitted changes do
+not force another build when they were already included in the candidate.
+`run-tauri-dev.bat` uses the same per-module cache before starting Vite/Tauri dev;
+it still starts the development server and lets Cargo perform its normal
+incremental check. It is not the fast standalone Release launcher.
+
+The cache is local to `artifacts/tauri-build-cache`. Changed modules rebuild
+individually; missing or changed outputs invalidate the cache. Source changes
+during a build prevent a cache record from being saved. The first launch after
+this cache is introduced builds once to establish a trustworthy record.
+
+Use `scripts/run-tauri-latest.ps1 -Configuration Release -ForceRebuild` to force
+a refresh. Explicit packaging remains in `scripts/build-tauri-production.ps1`
+and the installer scripts. Routine startup no longer requests smoke suites.
+This cache does not weaken the clean-commit requirements for public installers.
+
+## Settings UI copy rules
+
+The settings page should stay focused on setting names, controls, current state,
+errors, and actionable warnings. Do not add page subtitles, navigation descriptions,
+card explanations, or option helper text as decorative development copy. Keep this
+rule for new sections and localized strings; legacy translation keys may remain for
+compatibility but must not be rendered unless they report state or are required for
+an operation.

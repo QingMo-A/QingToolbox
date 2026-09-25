@@ -29,6 +29,9 @@ const MAX_MANIFEST_FILES: usize = 16 * 1024;
 const TAURI_INSTALLER_APP_ID: &str = "{C9E5A4D1-1E8E-4F39-8F70-9D8D1C4B7A61}";
 const TAURI_UNINSTALL_KEY: &str =
     "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{C9E5A4D1-1E8E-4F39-8F70-9D8D1C4B7A61}_is1";
+const PRODUCT_INSTALLER_APP_ID: &str = "{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}";
+const PRODUCT_UNINSTALL_KEY: &str =
+    "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}_is1";
 const TAURI_MARKER_KEY: &str = "Software\\QingMo-A\\QingToolbox\\Tauri";
 const TAURI_MARKER_INSTALL_KIND: &str = "tauri-production";
 const TAURI_MARKER_CONTRACT_VERSION: &str = "1";
@@ -974,8 +977,17 @@ fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
         return Err(InstallFailure::UnsupportedInstallation);
     }
 
+    // The product identity is eligible only after an actual Tauri installation:
+    // all marker, executable and manifest checks below still apply. Merely
+    // finding a legacy WPF uninstall record never enables update handoff.
+    let installer_id = registry_string(TAURI_MARKER_KEY, "AppId")?;
+    let (uninstall_key, expected_display_name) = match installer_id.as_str() {
+        TAURI_INSTALLER_APP_ID => (TAURI_UNINSTALL_KEY, "QingToolbox Tauri"),
+        PRODUCT_INSTALLER_APP_ID => (PRODUCT_UNINSTALL_KEY, "QingToolbox"),
+        _ => return Err(InstallFailure::UnsupportedInstallation),
+    };
     let marker_location = registry_string(TAURI_MARKER_KEY, "InstallLocation")?;
-    let uninstall_location = registry_string(TAURI_UNINSTALL_KEY, "InstallLocation")?;
+    let uninstall_location = registry_string(uninstall_key, "InstallLocation")?;
     let marker_root = canonical_local_path(&marker_location)?;
     let uninstall_root = canonical_local_path(&uninstall_location)?;
     let executable_root =
@@ -990,7 +1002,6 @@ fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
         "InstallerContractVersion",
         TAURI_MARKER_CONTRACT_VERSION,
     )?;
-    require_registry_value(TAURI_MARKER_KEY, "AppId", TAURI_INSTALLER_APP_ID)?;
     require_registry_value(TAURI_MARKER_KEY, "Distribution", "production")?;
     require_registry_value(TAURI_MARKER_KEY, "Backend", "rust")?;
     require_registry_value(TAURI_MARKER_KEY, "Framework", "tauri-2")?;
@@ -999,11 +1010,11 @@ fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
     require_registry_value(TAURI_MARKER_KEY, "ExecutableName", TAURI_EXECUTABLE_NAME)?;
     require_registry_value(TAURI_MARKER_KEY, "ManifestFileName", TAURI_MANIFEST_NAME)?;
 
-    let display_name = registry_string(TAURI_UNINSTALL_KEY, "DisplayName")?;
-    if display_name != "QingToolbox Tauri" {
+    let display_name = registry_string(uninstall_key, "DisplayName")?;
+    if display_name != expected_display_name {
         return Err(InstallFailure::UnsupportedInstallation);
     }
-    let display_icon = registry_string(TAURI_UNINSTALL_KEY, "DisplayIcon")?;
+    let display_icon = registry_string(uninstall_key, "DisplayIcon")?;
     let display_icon =
         registered_command_path(&display_icon).ok_or(InstallFailure::UnsupportedInstallation)?;
     if fs::canonicalize(display_icon).map_err(|_| InstallFailure::UnsupportedInstallation)?
@@ -1011,7 +1022,7 @@ fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
     {
         return Err(InstallFailure::UnsupportedInstallation);
     }
-    let uninstall_string = registry_string(TAURI_UNINSTALL_KEY, "UninstallString")?;
+    let uninstall_string = registry_string(uninstall_key, "UninstallString")?;
     let uninstall_executable = registered_command_path(&uninstall_string)
         .ok_or(InstallFailure::UnsupportedInstallation)?;
     let expected_uninstaller = install_root.join("unins000.exe");
@@ -1051,7 +1062,7 @@ fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
         return Err(InstallFailure::UnsupportedInstallation);
     }
     let installed_version = registry_string(TAURI_MARKER_KEY, "InstalledVersion")?;
-    let display_version = registry_string(TAURI_UNINSTALL_KEY, "DisplayVersion")?;
+    let display_version = registry_string(uninstall_key, "DisplayVersion")?;
     if !is_running_version(&manifest.version)
         || installed_version != manifest.version
         || display_version != manifest.version

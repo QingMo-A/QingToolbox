@@ -681,6 +681,7 @@ fn main() {
     let stdin = io::stdin();
     let mut stdout = BufWriter::new(io::stdout());
 
+    let mut handshaken = false;
     for line in stdin.lock().lines() {
         let line = match line {
             Ok(line) if !line.trim().is_empty() => line,
@@ -695,7 +696,20 @@ fn main() {
             _ => break,
         };
         match envelope.message_type.as_str() {
-            "module.hello.request" => {
+            "module.lifecycle.request" if handshaken => {
+                let Some(active) = envelope.payload.get("active").and_then(Value::as_bool) else {
+                    break;
+                };
+                let response = serde_json::json!({
+                    "protocolVersion": 1, "messageType": "module.lifecycle.response",
+                    "requestId": envelope.request_id, "payload": { "active": active }
+                });
+                let _ = serde_json::to_writer(&mut stdout, &response);
+                let _ = writeln!(stdout);
+                let _ = stdout.flush();
+            }
+            "module.hello.request" if !handshaken => {
+                handshaken = true;
                 if !valid_hello(&envelope.payload, &app.module_id, &app.expected_nonce) {
                     write_error(
                         &mut stdout,
@@ -715,13 +729,14 @@ fn main() {
                         payload: json!({
                             "moduleId": app.module_id,
                             "nonce": app.expected_nonce,
+                            "lifecycleVersion": 1,
                             "version": env!("CARGO_PKG_VERSION"),
                         }),
                         error: None,
                     },
                 );
             }
-            "module.invoke.request" => {
+            "module.invoke.request" if handshaken => {
                 let Some(object) = envelope.payload.as_object() else {
                     write_error(
                         &mut stdout,
@@ -763,7 +778,7 @@ fn main() {
                     ),
                 }
             }
-            "module.shutdown.request" => {
+            "module.shutdown.request" if handshaken => {
                 write_response(
                     &mut stdout,
                     Response {

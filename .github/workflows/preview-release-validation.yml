@@ -13,14 +13,6 @@ on:
         required: false
         default: ""
         type: string
-  pull_request:
-    branches:
-      - toolbox
-  push:
-    branches:
-      - toolbox
-    paths-ignore:
-      - "**/*.md"
 
 permissions:
   contents: read

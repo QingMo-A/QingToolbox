@@ -8,6 +8,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ($env:GITHUB_ACTIONS -ne 'true') {
+    throw 'The product-AppId installer smoke runs only in a disposable GitHub Actions Windows profile.'
+}
 
 $installer = (Resolve-Path -LiteralPath $InstallerPath).Path
 if ([IO.Path]::GetExtension($installer) -ine '.exe') { throw 'InstallerPath must point to an .exe.' }
@@ -19,7 +22,7 @@ $sentinelRoot = Join-Path $root 'profile'
 $installedExe = Join-Path $installRoot 'QingToolbox.exe'
 $uninstaller = Join-Path $installRoot 'unins000.exe'
 $markerKey = 'HKCU:\Software\QingMo-A\QingToolbox\Tauri'
-$uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{C9E5A4D1-1E8E-4F39-8F70-9D8D1C4B7A61}_is1'
+$uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}_is1'
 
 function Invoke-Installer {
     param([string]$Path, [string[]]$Arguments)
@@ -50,7 +53,7 @@ try {
     foreach ($expected in @{
         InstallKind = 'tauri-production'
         InstallerContractVersion = '1'
-        AppId = '{C9E5A4D1-1E8E-4F39-8F70-9D8D1C4B7A61}'
+        AppId = '{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}'
         InstallLocation = $installRoot
         InstalledVersion = $null
         Distribution = 'production'
@@ -72,7 +75,7 @@ try {
         throw 'Tauri installer did not create the fixed AppId uninstall record.'
     }
     $uninstallRecord = Get-ItemProperty -LiteralPath $uninstallKey
-    if ([string]$uninstallRecord.DisplayName -ne 'QingToolbox Tauri' -or
+    if ([string]$uninstallRecord.DisplayName -ne 'QingToolbox' -or
         (Normalize-DirectoryPath ([string]$uninstallRecord.InstallLocation)) -ne
             (Normalize-DirectoryPath $installRoot) -or
         [string]::IsNullOrWhiteSpace([string]$uninstallRecord.DisplayVersion)) {

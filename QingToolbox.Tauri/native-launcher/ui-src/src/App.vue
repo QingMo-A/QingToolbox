@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import LauncherIcon from './LauncherIcon.vue'
+import LauncherAppIcon from './LauncherAppIcon.vue'
+import { OverlayInteraction } from './overlayInteraction'
+import LauncherGrid from './LauncherGrid.vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
@@ -7,6 +11,7 @@ import {
   invokeModule,
   parseSearchMode,
   setModuleHotkey,
+  setHotkeyRecording,
   type EverythingResult,
   type EverythingSearchMode,
   type EverythingSearchResponse,
@@ -14,6 +19,45 @@ import {
   type LauncherState,
   type ModuleContext,
 } from './bridge'
+
+const panel = ref<HTMLElement | null>(null)
+const searchInput = ref<HTMLInputElement | null>(null)
+const overlay = ref(new OverlayInteraction())
+const recentContainer = ref<HTMLElement | null>(null)
+const recentCount = ref(5)
+let recentObserver: ResizeObserver | undefined
+const overlayListeners: UnlistenFn[] = []
+let disposed = false
+
+function isOutsidePanel(event: PointerEvent): boolean {
+  return !(event.target as HTMLElement).closest('.launcher-shell')
+}
+function beginBlankClick(event: PointerEvent): void {
+  if (event.button !== 0) return
+  overlay.value.begin(event.pointerId, event.clientX, event.clientY, isOutsidePanel(event))
+}
+function endBlankClick(event: PointerEvent): void {
+  const dismiss = overlay.value.end(event.pointerId, event.clientX, event.clientY, isOutsidePanel(event))
+  if (dismiss && !busy.value && !recordingHotkey.value) void hideModuleWindow()
+}
+function internalDragChanged(id: string | null): void {
+  draggedId.value = id
+  if (!id) customDropHover.value = false
+  overlay.value.internalDrag(Boolean(id))
+}
+function reveal(focusSearch = true): void {
+  overlay.value.cancel()
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    panel.value?.animate([{ opacity: 0, transform: 'translateY(10px) scale(.985)' }, { opacity: 1, transform: 'none' }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' })
+  }
+  if (focusSearch && !recordingHotkey.value && !overlay.value.external) searchInput.value?.focus({ preventScroll: true })
+}
+function addOverlayListener<T>(event: string, callback: (payload: T) => void): void {
+  void listen<T>(event, message => callback(message.payload)).then(unlisten => {
+    if (disposed) unlisten()
+    else overlayListeners.push(unlisten)
+  }).catch(() => {})
+}
 
 const DEFAULT_HOTKEY = 'Ctrl+Alt+L'
 
@@ -45,15 +89,17 @@ const everythingError = ref('')
 const selectedEverythingIndex = ref(-1)
 const resultMenu = ref<{ result: EverythingResult; x: number; y: number } | null>(null)
 const draggedId = ref<string | null>(null)
-const dropIndex = ref<number | null>(null)
-const draggedClickGuard = ref(false)
+const customDropHover = ref(false)
 const openFolderId = ref<string | null>(null)
 const hotkeyPanelOpen = ref(false)
 const recordingHotkey = ref(false)
+let recordingSession: number | null = null
+let recordingEpoch = 0
+let recordingStop: Promise<unknown> = Promise.resolve()
+let recordingKeyQuietUntil = 0
 const hotkeySaving = ref(false)
 const hotkeyError = ref('')
 const hotkeyInput = ref<HTMLInputElement | null>(null)
-let draggedClickGuardTimer: number | undefined
 let everythingDebounceTimer: number | undefined
 let everythingRequestSerial = 0
 let unlistenStateChanged: UnlistenFn | undefined
@@ -196,10 +242,31 @@ function hotkeyText(value: LauncherState['hotkey']): string {
   ].filter(Boolean).join('+')
 }
 
+const displayedHotkeyDraft = computed(() => {
+  try { return formatHotkey(hotkeySpecFromText(hotkeyDraft.value)) }
+  catch { return hotkeyDraft.value }
+})
+
 function stopHotkeyRecording(): void {
-  if (!recordingHotkey.value) return
+  if (recordingHotkey.value) recordingKeyQuietUntil = performance.now() + 300
+  recordingEpoch++
   recordingHotkey.value = false
   window.removeEventListener('keydown', captureHotkey, true)
+  if (recordingSession !== null) {
+    recordingSession = null
+    recordingStop = setHotkeyRecording(false).catch(reason => { hotkeyError.value = messageOf(reason) })
+  }
+}
+
+function nativeRecordedKey(value: { session: number; virtualKey: number; ctrl: boolean; alt: boolean; shift: boolean; win: boolean }): void {
+  if (!recordingHotkey.value || value.session !== recordingSession) return
+  const vk = value.virtualKey
+  const key = vk >= 65 && vk <= 90 ? `Key${String.fromCharCode(vk)}`
+    : vk >= 48 && vk <= 57 ? `Digit${String.fromCharCode(vk)}`
+    : vk >= 112 && vk <= 123 ? `F${vk - 111}`
+    : Object.values(namedHotkeys).find(key => key.virtualKey === vk)?.token
+  captureHotkey(new KeyboardEvent('keydown', { code: key ?? '', key: vk === 27 ? 'Escape' : key ?? '',
+    ctrlKey: value.ctrl, altKey: value.alt, shiftKey: value.shift, metaKey: value.win }))
 }
 
 function captureHotkey(event: KeyboardEvent): void {
@@ -210,8 +277,8 @@ function captureHotkey(event: KeyboardEvent): void {
     stopHotkeyRecording()
     return
   }
-  // Capture at the window boundary so Alt+Space never reaches the WebView's
-  // default context/system-menu handling while the recorder is active.
+  // Native WebView accelerator handling intercepts Alt/Ctrl combinations;
+  // this DOM path also covers ordinary Shift+letter keys and browser tests.
   event.preventDefault()
   event.stopImmediatePropagation()
   if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) return
@@ -242,13 +309,24 @@ async function startHotkeyRecording(): Promise<void> {
     return
   }
   recordingHotkey.value = true
-  window.addEventListener('keydown', captureHotkey, true)
-  await nextTick()
-  hotkeyInput.value?.focus()
+  const epoch = ++recordingEpoch
+  try {
+    await recordingStop
+    const session = await setHotkeyRecording(true)
+    if (epoch !== recordingEpoch || disposed) { await setHotkeyRecording(false); return }
+    recordingSession = session
+    window.addEventListener('keydown', captureHotkey, true)
+    await nextTick()
+    hotkeyInput.value?.focus()
+  } catch (reason) {
+    if (epoch === recordingEpoch) { recordingHotkey.value = false; hotkeyError.value = messageOf(reason) }
+  }
 }
 
 async function saveHotkey(): Promise<void> {
   if (hotkeySaving.value || !hotkeyDraft.value) return
+  stopHotkeyRecording()
+  await recordingStop
   let next: LauncherState['hotkey']
   try {
     next = hotkeySpecFromText(hotkeyDraft.value)
@@ -431,6 +509,12 @@ async function copyEverythingResultPath(result: EverythingResult): Promise<void>
 }
 
 function onWindowKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && performance.now() < recordingKeyQuietUntil) { event.preventDefault(); return }
+  if (event.key === 'Escape' && hotkeyPanelOpen.value && !recordingHotkey.value) {
+    event.preventDefault(); hotkeyPanelOpen.value = false; return
+  }
+  if (event.key === 'Escape' && openFolderId.value) { event.preventDefault(); openFolderId.value = null; return }
+  if (overlay.value.external) return
   if (resultMenu.value && event.key === 'Escape') {
     event.preventDefault()
     closeEverythingMenu()
@@ -524,6 +608,19 @@ async function setMode(mode: LauncherState['sortMode']): Promise<void> {
   }
 }
 
+async function addDesktopItemToCustom(id: string): Promise<void> {
+  if (busy.value || state.value.sortMode !== 'desktop') return
+  busy.value = true
+  error.value = ''
+  try {
+    state.value = await invokeModule<LauncherState>('addDesktopItemToCustom', { id })
+  } catch (reason) {
+    error.value = messageOf(reason)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function launch(item: LauncherItem): Promise<void> {
   if (busy.value) return
   busy.value = true
@@ -538,89 +635,33 @@ async function launch(item: LauncherItem): Promise<void> {
   }
 }
 
-function dragStart(event: DragEvent, item: LauncherItem): void {
-  if (state.value.sortMode === 'alphabetical' || query.value.trim()) {
-    event.preventDefault()
-    return
-  }
-  draggedId.value = item.id
-  // `dropIndex` is a slot in the list after the dragged item is removed. This
-  // keeps the insertion coordinate stable when moving an item from the front
-  // towards the back (and makes the final slot a valid drop target).
-  const sourceIndex = state.value.items.findIndex((value) => value.id === item.id)
-  dropIndex.value = Math.max(0, sourceIndex)
-  draggedClickGuard.value = false
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', item.id)
-  }
+type LauncherTile = LauncherItem | LauncherState['folders'][number]
+const gridTiles = computed<LauncherTile[]>(() => {
+  if (state.value.sortMode !== 'custom' || query.value.trim()) return filteredItems.value
+  const all: LauncherTile[] = [...state.value.items, ...state.value.folders]
+  const map = new Map(all.map(tile => [tile.id, tile]))
+  return [...new Set([...state.value.customOrder, ...all.map(tile => tile.id)])]
+    .map(id => map.get(id)).filter((tile): tile is LauncherTile => Boolean(tile))
+})
+function clickItem(item: LauncherItem): void { void launch(item) }
+function openTile(tile: LauncherTile): void {
+  if ('items' in tile) openFolderId.value = tile.id
+  else void launch(tile)
+}
+async function saveGridOrder(ids: string[]): Promise<void> {
+  busy.value = true
+  error.value = ''
+  try { state.value = await invokeModule<LauncherState>('setCustomOrder', { ids }) }
+  catch (reason) { error.value = messageOf(reason); throw reason }
+  finally { busy.value = false }
+}
+async function moveIntoFolder(itemId: string, folderId: string): Promise<void> {
+  await invokeState('moveItemToFolder', { itemId, folderId })
 }
 
-function dragOver(event: DragEvent, index: number): void {
-  if (!draggedId.value || state.value.sortMode === 'alphabetical' || query.value.trim()) return
-  const item = state.value.items[index]
-  if (!item) return
-  if (item.id === draggedId.value) {
-    event.preventDefault()
-    event.stopPropagation()
-    return
-  }
-  event.preventDefault()
-  event.stopPropagation()
-  const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  const remainingIndex = remainingItems().findIndex((value) => value.id === item.id)
-  if (remainingIndex < 0) return
-  dropIndex.value = remainingIndex + (event.clientX > bounds.left + bounds.width / 2 ? 1 : 0)
-}
-
-function gridDragOver(event: DragEvent): void {
-  if (!draggedId.value || state.value.sortMode === 'alphabetical' || query.value.trim()) return
-  // Tile handlers stop propagation. Reaching the grid itself means the
-  // pointer is over unused space, which is the explicit append position.
-  event.preventDefault()
-  dropIndex.value = remainingItems().length
-}
-
-function remainingItems(): LauncherItem[] {
-  return state.value.items.filter((item) => item.id !== draggedId.value)
-}
-
-function remainingIndex(itemId: string): number {
-  return remainingItems().findIndex((item) => item.id === itemId)
-}
-
-function showDropBefore(item: LauncherItem): boolean {
-  return draggedId.value !== null && dropIndex.value === remainingIndex(item.id)
-}
-
-function showDropAfter(item: LauncherItem): boolean {
-  const index = remainingIndex(item.id)
-  return draggedId.value !== null && index >= 0 && index === remainingItems().length - 1 && dropIndex.value === index + 1
-}
-
-function guardClickAfterDrag(): void {
-  draggedClickGuard.value = true
-  if (draggedClickGuardTimer !== undefined) window.clearTimeout(draggedClickGuardTimer)
-  draggedClickGuardTimer = window.setTimeout(() => {
-    draggedClickGuard.value = false
-    draggedClickGuardTimer = undefined
-  }, 350)
-}
-
-function clickItem(item: LauncherItem): void {
-  if (draggedClickGuard.value) {
-    draggedClickGuard.value = false
-    return
-  }
-  void launch(item)
-}
-
-function topLevelOrder(): string[] {
-  if (state.value.customOrder.length) return [...state.value.customOrder]
-  return [
-    ...state.value.items.map((item) => item.id),
-    ...state.value.folders.map((folder) => folder.id),
-  ]
+async function removeItem(id: string): Promise<void> {
+  if (state.value.sortMode === 'desktop') return
+  await invokeState('removeItem', { id })
 }
 
 async function invokeState(method: string, payload: Record<string, unknown> = {}): Promise<void> {
@@ -654,24 +695,6 @@ async function deleteFolder(folder: LauncherState['folders'][number]): Promise<v
   await invokeState('deleteFolder', { id: folder.id })
 }
 
-async function dropIntoFolder(event: DragEvent, folder: LauncherState['folders'][number]): Promise<void> {
-  event.preventDefault()
-  event.stopPropagation()
-  const movingId = draggedId.value
-  draggedId.value = null
-  dropIndex.value = null
-  if (!movingId || state.value.sortMode !== 'custom' || busy.value) return
-  await invokeState('moveItemToFolder', { itemId: movingId, folderId: folder.id })
-  guardClickAfterDrag()
-}
-
-function allowFolderDrop(event: DragEvent): void {
-  if (!draggedId.value || state.value.sortMode !== 'custom' || query.value.trim()) return
-  event.preventDefault()
-  event.stopPropagation()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-}
-
 async function moveOutOfFolder(item: LauncherItem, folder: LauncherState['folders'][number]): Promise<void> {
   await invokeState('moveItemOutOfFolder', { itemId: item.id, folderId: folder.id })
 }
@@ -684,54 +707,37 @@ async function moveFolderItem(folder: LauncherState['folders'][number], index: n
   await invokeState('setFolderOrder', { folderId: folder.id, ids })
 }
 
-async function drop(event: DragEvent): Promise<void> {
-  event.preventDefault()
-  event.stopPropagation()
-  const movingId = draggedId.value
-  const targetIndex = dropIndex.value
-  const visibleRemaining = remainingItems()
-  const currentOrder = topLevelOrder()
-  draggedId.value = null
-  dropIndex.value = null
-  if (!movingId || targetIndex === null || busy.value) return
-  const ids = currentOrder.filter((id) => id !== movingId)
-  const targetItem = visibleRemaining[targetIndex]
-  let insertion = targetItem ? ids.indexOf(targetItem.id) : -1
-  if (insertion < 0) {
-    const lastVisible = visibleRemaining.at(-1)
-    insertion = lastVisible ? ids.indexOf(lastVisible.id) + 1 : ids.length
-  }
-  ids.splice(Math.max(0, Math.min(insertion, ids.length)), 0, movingId)
-  if (ids.every((id, index) => id === currentOrder[index])) {
-    guardClickAfterDrag()
-    return
-  }
-  guardClickAfterDrag()
-  busy.value = true
-  error.value = ''
-  try {
-    state.value = await invokeModule<LauncherState>('setCustomOrder', { ids })
-  } catch (reason) {
-    error.value = messageOf(reason)
-  } finally {
-    busy.value = false
-  }
-}
-
-function cancelDrag(): void {
-  draggedId.value = null
-  dropIndex.value = null
-}
-
 watch(query, () => scheduleEverythingSearch())
+watch(hotkeyPanelOpen, open => { if (!open) stopHotkeyRecording() })
+watch(recentContainer, element => {
+  recentObserver?.disconnect()
+  if (element) recentObserver?.observe(element)
+}, { flush: 'post' })
 watch(() => state.value.hotkey, (value) => {
   if (!recordingHotkey.value && !hotkeySaving.value) hotkeyDraft.value = formatHotkey(value)
 }, { deep: true })
 
 onMounted(() => {
+  addOverlayListener<Parameters<typeof nativeRecordedKey>[0]>('launcher:recorded-key', nativeRecordedKey)
+  addOverlayListener<number>('launcher:recording-stopped', session => {
+    if (session !== recordingSession) return
+    recordingSession = null
+    stopHotkeyRecording()
+  })
+  addOverlayListener<{ active: boolean }>('launcher:external-drag', payload => overlay.value.externalDrag(payload.active))
+  addOverlayListener<{ focusSearch: boolean }>('launcher:shown', payload => reveal(payload.focusSearch))
+  recentObserver = new ResizeObserver(() => { recentCount.value = Math.max(1, Math.floor((recentContainer.value?.clientWidth ?? 740) / 148)) })
+  if (recentContainer.value) recentObserver.observe(recentContainer.value)
+  reveal(document.hasFocus())
   window.addEventListener('keydown', onWindowKeydown)
   void load()
-  void listen('qmod:module-state-changed', () => {
+  void listen<{ reason?: string }>('qmod:module-state-changed', async ({ payload }) => {
+    if (payload.reason === 'externalDrop') {
+      query.value = ''
+      hotkeyPanelOpen.value = false
+      openFolderId.value = null
+      if (state.value.sortMode !== 'custom') await setMode('custom')
+    }
     void reloadStateAfterHostEvent()
   }).then((unlisten) => {
     unlistenStateChanged = unlisten
@@ -741,8 +747,10 @@ onMounted(() => {
   })
 })
 onBeforeUnmount(() => {
+  disposed = true
+  overlayListeners.splice(0).forEach(unlisten => unlisten())
+  recentObserver?.disconnect()
   stopHotkeyRecording()
-  if (draggedClickGuardTimer !== undefined) window.clearTimeout(draggedClickGuardTimer)
   if (everythingDebounceTimer !== undefined) window.clearTimeout(everythingDebounceTimer)
   unlistenStateChanged?.()
   unlistenStateChanged = undefined
@@ -751,56 +759,49 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="launcher-shell">
+  <main class="launcher-viewport" @pointerdown="beginBlankClick" @pointerup="endBlankClick" @pointercancel="overlay.cancel()" @contextmenu.prevent>
+  <section ref="panel" class="launcher-shell" :class="{ 'external-drag': overlay.external }">
     <header class="topbar">
       <div class="brand">
         <div class="brand-mark" aria-hidden="true">
-          <img v-if="context?.iconDataUrl" :src="context.iconDataUrl" alt="" />
-          <span v-else>▦</span>
+          <LauncherIcon name="grid" />
         </div>
         <div>
-          <p class="eyebrow">QING TOOLBOX</p>
           <h1>启动台</h1>
         </div>
       </div>
       <div class="top-actions">
-        <span class="version">Rust module · v{{ context?.version ?? '—' }}</span>
-        <button class="hotkey-toggle" type="button" :aria-expanded="hotkeyPanelOpen" @click="hotkeyPanelOpen = !hotkeyPanelOpen">
-          {{ hotkeyPanelOpen ? '收起快捷键' : '快捷键' }}
+        <nav class="mode-tabs" aria-label="排序方式">
+          <button v-for="mode in (['custom', 'alphabetical', 'desktop'] as const)" :key="mode" type="button" :data-mode="mode" :class="{ active: state.sortMode === mode, 'desktop-drop-target': mode === 'custom' && state.sortMode === 'desktop' && !!draggedId, 'desktop-drop-hover': mode === 'custom' && customDropHover }" :disabled="busy || everythingActive || (!!draggedId && !(state.sortMode === 'desktop' && mode === 'custom'))" @click="!draggedId && setMode(mode)">
+            {{ { custom: '自定义', alphabetical: '首字母', desktop: '桌面' }[mode] }}
+          </button>
+        </nav>
+        <button v-if="state.sortMode === 'custom' && !everythingActive" class="folder-add icon-button" type="button" aria-label="新建文件夹" title="新建文件夹" :disabled="busy" @click="createFolder"><LauncherIcon name="folderAdd" /></button>
+        <button class="hotkey-toggle" type="button" aria-label="设置" title="设置" :aria-expanded="hotkeyPanelOpen" @click="hotkeyPanelOpen = !hotkeyPanelOpen">
+          <LauncherIcon name="settings" />
         </button>
-        <button class="refresh" type="button" :disabled="busy || loading" @click="refresh">↻</button>
+        <button class="refresh" type="button" aria-label="刷新应用" title="刷新应用" :disabled="busy || loading" @click="refresh"><LauncherIcon name="refresh" /></button>
       </div>
     </header>
 
     <section class="search-row" aria-label="搜索应用">
-      <span class="search-icon" aria-hidden="true">⌕</span>
+      <LauncherIcon class="search-icon" name="search" />
       <span v-if="everythingActive" class="everything-badge" :title="everythingBadge">{{ everythingBadge }}</span>
-      <input v-model="query" type="search" placeholder="搜索应用…" />
-      <button v-if="query" class="clear" type="button" aria-label="清空搜索" @click="query = ''">×</button>
+      <input ref="searchInput" v-model="query" type="search" aria-label="搜索应用" placeholder="搜索应用…" autocomplete="off" spellcheck="false" />
+      <button v-if="query" class="clear" type="button" aria-label="清空搜索" @click="query = ''"><LauncherIcon name="close" /></button>
     </section>
 
-    <nav class="mode-tabs" aria-label="排序方式">
-      <button v-for="mode in (['custom', 'alphabetical', 'desktop'] as const)" :key="mode" type="button" :class="{ active: state.sortMode === mode }" :disabled="busy || everythingActive" @click="setMode(mode)">
-        {{ { custom: '自定义', alphabetical: '首字母', desktop: '桌面' }[mode] }}
-      </button>
-      <span v-if="!everythingActive" class="mode-hint">{{ modeLabel }} · {{ state.items.length }} 个应用</span>
-      <span v-else class="mode-hint everything-mode-hint">{{ everythingStatusLabel() }}</span>
-      <button v-if="state.sortMode === 'custom' && !query.trim() && !everythingActive" class="folder-add" type="button" :disabled="busy" @click="createFolder">
-        ＋ 文件夹
-      </button>
-    </nav>
+
 
     <section v-if="hotkeyPanelOpen" class="hotkey-panel" aria-labelledby="hotkey-title">
       <div>
-        <p class="eyebrow">宿主全局快捷键</p>
-        <h2 id="hotkey-title">快速显示启动台</h2>
-        <small>快捷键由 Rust/Tauri 注册；录入时支持 Alt+Space，不会打开系统菜单。</small>
+        <h2 id="hotkey-title">快捷键</h2>
       </div>
       <div class="hotkey-controls">
         <input
           ref="hotkeyInput"
           class="hotkey-input"
-          :value="recordingHotkey ? '请按下组合键…' : (hotkeyDraft || formatHotkey(state.hotkey))"
+          :value="recordingHotkey ? '请按下组合键…' : (displayedHotkeyDraft || formatHotkey(state.hotkey))"
           readonly
           aria-label="启动台快捷键"
           @click="startHotkeyRecording"
@@ -813,14 +814,15 @@ onBeforeUnmount(() => {
         <button type="button" class="hotkey-action secondary" :disabled="hotkeySaving" @click="resetHotkey">恢复默认</button>
       </div>
       <p v-if="hotkeyError" class="hotkey-error" role="alert">{{ hotkeyError }}</p>
-      <p class="hotkey-current">当前：{{ formatHotkey(state.hotkey) }} · {{ state.hotkeyStatus === 'HostManaged' ? '宿主已接管' : state.hotkeyStatus }}</p>
+      <p class="hotkey-current">当前：{{ formatHotkey(state.hotkey) }}</p>
+      <button class="settings-close icon-button" aria-label="关闭设置" @click="stopHotkeyRecording(); hotkeyPanelOpen = false"><LauncherIcon name="close" /></button>
     </section>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <p v-if="everythingActive && everythingError" class="error everything-error" role="alert">{{ everythingError }}</p>
+    <p v-if="everythingActive && everythingError && everythingStatus !== 'indexing'" class="error everything-error" role="alert">{{ everythingError }}</p>
     <section v-if="loading" class="loading-card" aria-live="polite">
       <span class="spinner" aria-hidden="true" />
-      <div><strong>正在准备启动台</strong><small>读取 Rust 模块状态…</small></div>
+      <div><strong>正在准备启动台</strong></div>
     </section>
     <section v-else class="content">
       <section v-if="everythingActive" class="everything-panel" aria-live="polite" @contextmenu.prevent>
@@ -829,9 +831,11 @@ onBeforeUnmount(() => {
           <span>正在查询内置 Everything…</span>
         </div>
         <div v-else-if="!everythingResults.length" class="empty everything-empty">
-          <span class="empty-icon" aria-hidden="true">⌕</span>
-          <strong>{{ everythingError || (search.query ? '没有找到匹配结果' : '输入关键词开始搜索') }}</strong>
-          <small>{{ everythingError ? '普通启动台搜索仍可正常使用' : '支持 *.exe、file:、folder: 等 Everything 查询语法' }}</small>
+          <LauncherIcon class="empty-icon" name="search" />
+          <strong>{{ everythingStatus === 'indexing' ? 'Everything 索引尚未就绪' : everythingError || (search.query ? '没有找到匹配结果' : '输入关键词开始搜索') }}</strong>
+          <small v-if="everythingStatus === 'indexing'">{{ everythingStatusLabel() }}；普通启动台搜索不受影响。</small>
+          <small v-else>{{ everythingError ? '普通启动台搜索仍可正常使用' : '支持 *.exe、file:、folder: 等 Everything 查询语法' }}</small>
+          <button v-if="everythingStatus === 'indexing' || everythingStatus === 'unavailable' || everythingStatus === 'error'" type="button" class="everything-retry" @click="scheduleEverythingSearch">重试</button>
         </div>
         <div v-else class="everything-list" role="listbox" aria-label="Everything 搜索结果" :aria-activedescendant="selectedEverythingIndex >= 0 ? `everything-result-${everythingResults[selectedEverythingIndex]?.id}` : undefined">
           <article
@@ -846,7 +850,7 @@ onBeforeUnmount(() => {
             @click="openEverythingResult(result)"
             @contextmenu="showEverythingMenu($event, result)"
           >
-            <span class="everything-result-icon" aria-hidden="true">{{ resultIcon(result) }}</span>
+            <span class="everything-result-icon"><LauncherIcon :name="result.isDirectory ? 'folder' : 'file'" /></span>
             <span class="everything-result-copy">
               <strong :title="result.name">{{ result.name }}</strong>
               <small :title="result.parentPath">{{ result.parentPath || '—' }}</small>
@@ -857,55 +861,14 @@ onBeforeUnmount(() => {
       </section>
       <template v-else>
       <div v-if="!filteredItems.length && !(state.sortMode === 'custom' && !query.trim() && state.folders.length)" class="empty">
-          <span class="empty-icon" aria-hidden="true">⌁</span>
-          <strong>{{ query ? '没有匹配的应用' : '桌面上还没有可用项目' }}</strong>
-          <small>{{ query ? '换个关键词试试' : '将 .exe、.lnk 或 .url 放到桌面后刷新' }}</small>
+          <LauncherIcon class="empty-icon" :name="query ? 'search' : 'grid'" />
+          <strong>{{ query ? '没有匹配的应用' : state.sortMode === 'desktop' ? '桌面暂无应用' : '拖入应用或快捷方式' }}</strong>
         </div>
-      <section v-if="state.sortMode === 'custom' && !query.trim() && state.folders.length" class="folder-grid" aria-label="文件夹">
-        <article
-          v-for="folder in state.folders"
-          :key="folder.id"
-          class="folder-tile"
-          :class="{ 'folder-drop-target': draggedId }"
-          @click="openFolderId = folder.id"
-          @dragover="allowFolderDrop"
-          @drop="dropIntoFolder($event, folder)"
-        >
-          <div class="folder-preview" aria-hidden="true">
-            <span v-for="item in folder.items.slice(0, 4)" :key="item.id" class="folder-preview-icon">
-              <img v-if="item.iconKey" :src="item.iconKey" alt="" draggable="false" />
-              <span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span>
-            </span>
-            <span v-if="!folder.items.length" class="folder-empty-mark">＋</span>
-          </div>
-          <strong :title="folder.name">{{ folder.name }}</strong>
-          <small>{{ folder.items.length }} 个项目</small>
-          <div class="folder-actions" @click.stop>
-            <button type="button" aria-label="重命名文件夹" @click="renameFolder(folder)">✎</button>
-            <button type="button" aria-label="删除文件夹" @click="deleteFolder(folder)">×</button>
-          </div>
-        </article>
-      </section>
-      <div v-if="filteredItems.length" class="app-grid" :class="{ dragging: draggedId }" @dragover="gridDragOver" @dragend="cancelDrag" @drop="drop">
-        <article
-          v-for="(item, index) in filteredItems"
-          :key="item.id"
-          class="app-tile"
-          :class="{ dragging: draggedId === item.id, 'drop-before': showDropBefore(item), 'drop-after': showDropAfter(item) }"
-          :draggable="state.sortMode !== 'alphabetical' && !query.trim()"
-          @dragstart="dragStart($event, item)"
-          @dragover="dragOver($event, index)"
-          @click="clickItem(item)"
-        >
-          <div class="app-icon" :class="{ fallback: !item.iconKey }" aria-hidden="true">
-            <img v-if="item.iconKey" :src="item.iconKey" alt="" draggable="false" />
-            <span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span>
-          </div>
-          <strong :title="item.name">{{ item.name }}</strong>
-          <small>{{ item.source === 'desktop' ? '桌面' : '自定义' }}</small>
-        </article>
-      </div>
+      <LauncherGrid v-if="gridTiles.length" :tiles="gridTiles" :enabled="state.sortMode !== 'alphabetical' && !query.trim()" :desktop-mode="state.sortMode === 'desktop'"
+        :busy="busy" :save-order="saveGridOrder" @open="openTile" @rename="renameFolder" @remove-folder="deleteFolder"
+        @move-into="moveIntoFolder" @remove-item="removeItem" @dragging="internalDragChanged" @custom-hover="customDropHover = $event" @drop-to-custom="addDesktopItemToCustom" />
 
+      <Transition name="folder-open">
       <section v-if="openFolderId && state.folders.find((folder) => folder.id === openFolderId)" class="folder-panel" role="dialog" aria-modal="true">
         <div class="folder-panel-card">
           <header>
@@ -918,9 +881,8 @@ onBeforeUnmount(() => {
           <div class="folder-items">
             <div v-for="(item, index) in state.folders.find((folder) => folder.id === openFolderId)?.items" :key="item.id" class="folder-item">
               <button type="button" class="folder-item-main" @click="clickItem(item)">
-                <span class="recent-icon" :class="{ fallback: !item.iconKey }">
-                  <img v-if="item.iconKey" :src="item.iconKey" alt="" draggable="false" />
-                  <span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span>
+                <span class="recent-icon">
+                  <LauncherAppIcon :icon-key="item.iconKey" />
                 </span>
                 <span>{{ item.name }}</span>
               </button>
@@ -930,20 +892,21 @@ onBeforeUnmount(() => {
                 <button type="button" :disabled="busy" @click="moveOutOfFolder(item, state.folders.find((folder) => folder.id === openFolderId)!)">移出</button>
               </div>
             </div>
-            <p v-if="!(state.folders.find((folder) => folder.id === openFolderId)?.items.length)" class="folder-panel-empty">把应用拖到这里的文件夹卡片即可归类。</p>
+            <p v-if="!(state.folders.find((folder) => folder.id === openFolderId)?.items.length)" class="folder-panel-empty">文件夹为空</p>
           </div>
         </div>
       </section>
+      </Transition>
 
-      <section v-if="state.recent.length" class="recent">
-        <div class="section-title"><span>最近启动</span><small>最近 10 项</small></div>
-        <div class="recent-list">
-          <button v-for="item in state.recent" :key="item.id" type="button" class="recent-item" @click="launch(item)">
-            <span class="recent-icon" :class="{ fallback: !item.iconKey }">
-              <img v-if="item.iconKey" :src="item.iconKey" alt="" draggable="false" />
-              <span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span>
+      <section class="recent">
+        <div class="section-title"><LauncherIcon name="clock" /><span>最近启动</span></div>
+        <div ref="recentContainer" class="recent-list">
+          <button v-for="item in state.recent.slice(0, recentCount)" :key="item.id" type="button" class="recent-item" @click="launch(item)">
+            <span class="recent-icon">
+              <LauncherAppIcon :icon-key="item.iconKey" />
             </span><span>{{ item.name }}</span>
           </button>
+          <span v-if="!state.recent.length" class="recent-empty">—</span>
         </div>
       </section>
       </template>
@@ -958,6 +921,8 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <footer><span>拖动图标可调整顺序</span><span v-if="state.sortMode === 'alphabetical'">首字母模式下排序已锁定</span><span v-else>位置由 Rust 持久化</span></footer>
+
+    <Transition name="drop-hint"><div v-if="overlay.external" class="external-drop-hint"><LauncherIcon name="upload" /><strong>松开添加到自定义</strong></div></Transition>
+  </section>
   </main>
 </template>
