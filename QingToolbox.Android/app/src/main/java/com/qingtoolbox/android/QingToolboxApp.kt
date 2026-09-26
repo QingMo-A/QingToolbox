@@ -236,7 +236,11 @@ private fun QingToolboxShell(
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = ShellDestination.Home.route,
+            startDestination = shellLaunchBackground(ShellDestination.Home.route),
+            // No transition between shell destinations. A cross-fade keeps the outgoing
+            // screen composed for its whole duration, so a tab tap leaves the previous
+            // page visible underneath the new one instead of replacing it. See
+            // SHELL_STAGGER_MILLIS for why this is deliberate rather than an omission.
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),

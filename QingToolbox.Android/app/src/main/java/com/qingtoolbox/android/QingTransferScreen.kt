@@ -23,6 +23,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +63,13 @@ fun QingTransferDevicesScreen(
     val connection = session.connection
     val peers by session.peers.collectAsStateWithLifecycle()
     val state by session.discoveryState.collectAsStateWithLifecycle()
+    // The process-scoped session may still hold the peer list from an earlier visit.
+    // Rendering it for the frame it takes `retain` to settle would show peers that the
+    // just-restarted discovery has not confirmed, so the list stays behind a veil until
+    // this screen has actually landed. The veil is what makes the previous page's
+    // content go away immediately instead of lingering on the way in.
+    var revealPeers by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { revealPeers = true }
     val connectionState by connection.state.collectAsStateWithLifecycle()
     val incomingPeer by connection.incomingPeer.collectAsStateWithLifecycle()
     val incomingOffer by connection.incomingOffer.collectAsStateWithLifecycle()
@@ -155,6 +163,11 @@ fun QingTransferDevicesScreen(
     ) {
         // The screen is a list of peers. The header card, the folder row and the
         // refresh button all moved to the top bar, so nothing sits above the list.
+        // `retain` is driven per state: the search row must not flicker off and on
+        // when discovery flips SEARCHING -> READY, and the error row must not linger
+        // once peers have actually been confirmed.
+        val keepSearchRow = !revealPeers || state == QingTransferDiscoveryState.SEARCHING
+        val keepErrorRow = state == QingTransferDiscoveryState.ERROR && (peers.isEmpty() || !revealPeers)
         if (connectionState != QingTransferConnectionState.IDLE) {
             item {
                 QingCard(modifier = Modifier.fillMaxWidth()) {
@@ -193,7 +206,10 @@ fun QingTransferDevicesScreen(
                 }
             }
         }
-        if (peers.isEmpty()) {
+        if (peers.isNotEmpty()) {
+            items(peers, key = { it.serviceName }) { peer -> QingTransferPeerCard(peer, connectionState, connection::connect) }
+        }
+        if (revealPeers && peers.isEmpty()) {
             item {
                 QingEmptyState(
                     modifier = Modifier.fillMaxWidth(),
@@ -202,18 +218,20 @@ fun QingTransferDevicesScreen(
                     body = stringResource(R.string.qing_transfer_hint),
                 )
             }
-        } else {
-            items(peers, key = { it.serviceName }) { peer -> QingTransferPeerCard(peer, connectionState, connection::connect) }
         }
-        item {
-            QingStatusText(
-                text = when (state) {
-                    QingTransferDiscoveryState.SEARCHING -> stringResource(R.string.qing_transfer_searching)
-                    QingTransferDiscoveryState.ERROR -> stringResource(R.string.qing_transfer_error)
-                    else -> stringResource(R.string.qing_transfer_hint)
-                },
-                modifier = Modifier.padding(top = 2.dp, bottom = 20.dp),
-            )
+        if (keepSearchRow || keepErrorRow) {
+            item {
+                // No discovery state left to report means the hint that already sits in
+                // the empty card is shown twice, so only the two live states get a row.
+                val text = when {
+                    keepErrorRow -> stringResource(R.string.qing_transfer_error)
+                    else -> stringResource(R.string.qing_transfer_searching)
+                }
+                QingStatusText(
+                    text = text,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 20.dp),
+                )
+            }
         }
     }
     if (showReceiveSettings) {
