@@ -2,7 +2,6 @@ package com.qingtoolbox.android
 
 import java.io.File
 import java.nio.charset.StandardCharsets
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,33 +10,47 @@ import org.junit.Test
  * Pins the shell's navigation-animation policy.
  *
  * The regression this guards against is a slow cross-fade, which is a source-level
- * property: `NavHost` has no `enterTransition` parameter, the default cross-fade is
- * whatever the navigation artifact decides. A runtime assertion cannot see that, so
- * these checks read the screen files and fail if a transition argument comes back.
+ * property: `NavHost` has no runtime-visible handle on whether a transition was
+ * configured, so the check reads the call site instead.
  */
 class QingShellNavigationTest {
 
     @Test
-    fun shellSwitchesDestinationsWithoutATransition() {
+    fun shellPassesExplicitlyEmptyTransitions() {
         val source = File(moduleRoot(), SHELL_SOURCE).readText(StandardCharsets.UTF_8)
 
-        assertFalse(
-            "NavHost animations are opted out of at the call site, not configured, so a " +
-                "transition argument means the outgoing screen is composed again.",
-            false,
+        assertTrue(
+            "NavHost must opt out of the default cross-fade explicitly.",
+            source.contains("enterTransition = { ShellEnterTransition }"),
+        )
+        assertTrue(
+            "NavHost must opt out of the default cross-fade explicitly.",
+            source.contains("exitTransition = { ShellExitTransition }"),
         )
     }
 
     @Test
-    fun staggerConstantIsZero() {
-        assertEquals(0L, SHELL_STAGGER_MILLIS)
+    fun startDestinationIsNotWrappedInAnErasingHelper() {
+        val source = File(moduleRoot(), SHELL_SOURCE).readText(StandardCharsets.UTF_8)
+
+        // NavHost has both a `String` and an `Any` overload. The `Any` overload expects a
+        // KClass-registered graph and throws "Cannot find startDestination kotlin.String
+        // from NavGraph" for a route-based one, so the argument must keep its static type.
+        assertTrue(
+            "startDestination must be the raw route string.",
+            source.contains("startDestination = ShellDestination.Home.route"),
+        )
+        assertFalse(
+            "Wrapping startDestination in a helper erases its type and binds the wrong NavHost overload.",
+            source.contains("shellLaunchBackground"),
+        )
     }
 
     @Test
-    fun shellSourcesUseDefaultNoAnimationNavigation() {
+    fun shellSourcesDoNotUseAdHocAnimationContainers() {
         listOf(SHELL_SOURCE, DEVICES_SOURCE).forEach { path ->
             val source = File(moduleRoot(), path).readText(StandardCharsets.UTF_8)
-            listOf("Crossfade", "AnimatedContent", "AnimatedVisibility", "enterTransition", "exitTransition")
+            listOf("Crossfade", "AnimatedContent", "AnimatedVisibility")
                 .forEach { symbol ->
                     assertFalse(
                         "$path uses $symbol; the shell switches screens instantly.",

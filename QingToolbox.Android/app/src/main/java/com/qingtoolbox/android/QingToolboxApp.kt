@@ -236,11 +236,18 @@ private fun QingToolboxShell(
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = shellLaunchBackground(ShellDestination.Home.route),
+            startDestination = ShellDestination.Home.route,
             // No transition between shell destinations. A cross-fade keeps the outgoing
             // screen composed for its whole duration, so a tab tap leaves the previous
-            // page visible underneath the new one instead of replacing it. See
-            // SHELL_STAGGER_MILLIS for why this is deliberate rather than an omission.
+            // page visible underneath the new one instead of replacing it.
+            //
+            // The start destination must stay a `String` here. NavHost has overloads taking
+            // `String` and `Any`; the `Any` one wants a KClass-registered graph and throws
+            // "Cannot find startDestination kotlin.String from NavGraph" when handed a
+            // route-based one. Wrapping this argument in anything that erases its static
+            // type silently selects the wrong overload.
+            enterTransition = { ShellEnterTransition },
+            exitTransition = { ShellExitTransition },
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
