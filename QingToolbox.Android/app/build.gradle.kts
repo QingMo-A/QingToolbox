@@ -1,8 +1,20 @@
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+// Name every APK after the moment it was built, so an older package on a phone
+// can never be mistaken for a newer one. The stamp is captured once, when this
+// script is evaluated, so all variants of a single build agree.
+val buildStamp: String = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
+    .apply { timeZone = TimeZone.getDefault() }
+    .format(Date())
 
 android {
     namespace = "com.qingtoolbox.android"
@@ -48,6 +60,35 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+}
+
+// After each variant assembles, drop a timestamped copy of its APK next to the
+// original. Both the debug and release builds are handled, so
+// `assembleDebug` yields `build-<stamp>.apk` and `assembleRelease` yields
+// `build-<stamp>-release.apk`.
+androidComponents {
+    onVariants { variant ->
+        val variantName = variant.name.replaceFirstChar { it.uppercase() }
+        val suffix = if (variant.buildType == "release") "-release" else ""
+        val outputDir = layout.buildDirectory.dir("outputs/apk/${variant.buildType}")
+
+        tasks.matching { it.name == "assemble$variantName" }.configureEach {
+            doLast {
+                val dir = outputDir.get().asFile
+                if (!dir.isDirectory) return@doLast
+                // Unsigned release builds land as `app-<type>-unsigned.apk`, so
+                // accept either spelling instead of hard-coding one.
+                val source = dir.listFiles()
+                    ?.filter { it.extension == "apk" && !it.name.startsWith("build-") }
+                    ?.maxByOrNull { it.lastModified() }
+                if (source != null) {
+                    val target = dir.resolve("build-$buildStamp$suffix.apk")
+                    source.copyTo(target, overwrite = true)
+                    logger.lifecycle("Timestamped package: ${target.absolutePath}")
+                }
+            }
         }
     }
 }
