@@ -295,7 +295,7 @@ fn import_qmod_into(
     if fs::symlink_metadata(&destination).is_ok() {
         return Err(ImportError {
             code: "moduleAlreadyInstalled",
-            message: "相同模块已存在，请先移除旧版本。".to_string(),
+            message: "相同模块已存在，请在模块管理中选择更新包。".to_string(),
         });
     }
 
@@ -340,7 +340,7 @@ fn import_qmod_into(
     if fs::symlink_metadata(&destination).is_ok() {
         return Err(ImportError {
             code: "moduleAlreadyInstalled",
-            message: "相同模块已存在，请先移除旧版本。".to_string(),
+            message: "相同模块已存在，请在模块管理中选择更新包。".to_string(),
         });
     }
     fs::rename(&staging_module, &destination).map_err(|error| ImportError {

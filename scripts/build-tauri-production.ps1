@@ -19,8 +19,8 @@ if (-not (Test-Path -LiteralPath $portableScript -PathType Leaf)) {
 
 # Keep one packaging implementation for both preview and production. The
 # production entry point differs only in its fixed artifact channel and its
-# release manifest label; this avoids two copies of module staging logic
-# drifting apart.
+# release manifest label; both entry points remain host-only and modules are
+# built as separate .qmod packages.
 $arguments = @{
     OutputDirectory = $artifactRoot
     Distribution = 'production'

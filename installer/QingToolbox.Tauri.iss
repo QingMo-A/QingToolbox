@@ -88,13 +88,13 @@ chinesesimplified.RunQingToolbox=运行 QingToolbox
 Name: "desktopicon"; Description: "{cm:DesktopShortcut}"; GroupDescription: "{cm:AdditionalShortcuts}"; Flags: unchecked
 
 [Files]
-; The source is a validated portable Release directory. Keep the complete
-; resources/modules tree so the Rust host cannot fall back to legacy modules.
+; The validated host Release contains no official modules. Each module is
+; independently installed and updated from its own .qmod package.
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
-; `resources` is entirely host-owned. Remove it before copying so an upgrade
-; cannot retain a stale module executable or an obsolete hashed Web asset.
+; PrepareToInstall first migrates modules from the bundled 0.3.0-alpha host.
+; Then remove the old host-owned resource tree so no bundled copy survives.
 Type: filesandordirs; Name: "{app}\resources"
 
 [Registry]
@@ -132,6 +132,9 @@ var
   LegacyInstallDir: String;
   BackupDir: String;
   LegacyMigrationPending: Boolean;
+
+function GetFileAttributesW(const FileName: String): Cardinal;
+  external 'GetFileAttributesW@kernel32.dll stdcall';
 
 function SameDirectory(const A, B: String): Boolean;
 begin
@@ -208,6 +211,94 @@ begin
   end;
 end;
 
+function IsLegacyInProcessModule(const Directory, ModuleId: String): Boolean;
+var
+  ManifestBytes: AnsiString;
+  Manifest: String;
+begin
+  Result := False;
+  if not LoadStringFromFile(Directory + '\module.json', ManifestBytes) then exit;
+  Manifest := ManifestBytes;
+  StringChangeEx(Manifest, ' ', '', True);
+  StringChangeEx(Manifest, #9, '', True);
+  StringChangeEx(Manifest, #13, '', True);
+  StringChangeEx(Manifest, #10, '', True);
+  Manifest := Lowercase(Manifest);
+  Result := (Pos('"id":"' + Lowercase(ModuleId) + '"', Manifest) > 0) and
+    (Pos('"runtimetype":"inprocess"', Manifest) > 0);
+end;
+
+procedure MigrateBundledModule(const ModuleId, SourceRoot, UserRoot, StageRoot,
+  BackupRoot: String);
+var
+  Source, Destination, Stage, Backup: String;
+  SourceAttributes: Cardinal;
+  ReplaceLegacy: Boolean;
+begin
+  Source := SourceRoot + '\' + ModuleId;
+  Destination := UserRoot + '\' + ModuleId;
+  if not DirExists(Source) then exit;
+  if not FileExists(Source + '\module.json') then
+    RaiseException('Bundled module manifest is missing: ' + Source);
+  ReplaceLegacy := DirExists(Destination) and
+    IsLegacyInProcessModule(Destination, ModuleId);
+  if DirExists(Destination) or FileExists(Destination) then
+    if not ReplaceLegacy then begin
+      Log('Preserving existing user-installed module: ' + ModuleId);
+      exit;
+    end;
+  SourceAttributes := GetFileAttributesW(Source);
+  if (SourceAttributes = $FFFFFFFF) or ((SourceAttributes and $400) <> 0) then
+    RaiseException('Bundled module directory is unavailable or a reparse point: ' + Source);
+  if ReplaceLegacy then begin
+    SourceAttributes := GetFileAttributesW(Destination);
+    if (SourceAttributes = $FFFFFFFF) or ((SourceAttributes and $400) <> 0) then
+      RaiseException('Legacy user module directory is unavailable or a reparse point: ' + Destination);
+  end;
+  Stage := StageRoot + '\' + ModuleId;
+  BackupTree(Source, Stage);
+  if ReplaceLegacy then begin
+    Backup := BackupRoot + '\' + ModuleId;
+    if not ForceDirectories(BackupRoot) or not RenameFile(Destination, Backup) then
+      RaiseException('Could not back up legacy WPF module: ' + ModuleId);
+  end;
+  if not RenameFile(Stage, Destination) then begin
+    if ReplaceLegacy then RenameFile(Backup, Destination);
+    RaiseException('Could not migrate bundled module to the user module directory: ' + ModuleId);
+  end;
+  if ReplaceLegacy then Log('Backed up legacy WPF module to: ' + Backup);
+  Log('Migrated formerly bundled module to user installation: ' + ModuleId);
+end;
+
+procedure MigrateLegacyBundledModules();
+var
+  RegisteredLocation, SourceRoot, UserRoot, StageRoot, BackupRoot, Suffix: String;
+begin
+  if not RegQueryStringValue(HKCU64, 'Software\QingMo-A\QingToolbox\Tauri',
+     'InstallLocation', RegisteredLocation) or
+     not SameDirectory(ExpandConstant('{app}'), RegisteredLocation) then exit;
+  SourceRoot := ExpandConstant('{app}\resources\modules');
+  if not DirExists(SourceRoot) then exit;
+  if (GetFileAttributesW(SourceRoot) and $400) <> 0 then
+    RaiseException('Bundled module root is a reparse point: ' + SourceRoot);
+  UserRoot := ExpandConstant('{localappdata}\QingToolbox\Modules');
+  Suffix := GetDateTimeString('yyyymmdd-hhnnss', '-', ':') + '-' + IntToStr(Random(1000000));
+  StageRoot := ExpandConstant('{localappdata}\QingToolbox\ModuleMigration-') + Suffix;
+  BackupRoot := ExpandConstant('{localappdata}\QingToolbox-MigrationBackups\TauriModules-') + Suffix;
+  if DirExists(StageRoot) or not ForceDirectories(UserRoot) or
+     not ForceDirectories(StageRoot) then
+    RaiseException('Could not create the user module migration directory.');
+  MigrateBundledModule('qing.canary', SourceRoot, UserRoot, StageRoot, BackupRoot);
+  MigrateBundledModule('qing.launcher', SourceRoot, UserRoot, StageRoot, BackupRoot);
+  MigrateBundledModule('qing.pdf', SourceRoot, UserRoot, StageRoot, BackupRoot);
+  MigrateBundledModule('qing.qingtransfer', SourceRoot, UserRoot, StageRoot, BackupRoot);
+  MigrateBundledModule('qing.texttools', SourceRoot, UserRoot, StageRoot, BackupRoot);
+  MigrateBundledModule('qing.windowtopmost', SourceRoot, UserRoot, StageRoot, BackupRoot);
+  MigrateBundledModule('qing.powerguard', SourceRoot, UserRoot, StageRoot, BackupRoot);
+  MigrateBundledModule('qing.screenpin', SourceRoot, UserRoot, StageRoot, BackupRoot);
+  RemoveDir(StageRoot);
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   SettingsFile, BackupBase, RegisteredLocation: String;
@@ -225,6 +316,12 @@ begin
     end;
   except
     Result := 'Cannot verify that QingToolbox is closed. Upgrade stopped before touching the installation.';
+    exit;
+  end;
+  try
+    MigrateLegacyBundledModules();
+  except
+    Result := 'Cannot preserve bundled modules before the host-only upgrade: ' + GetExceptionMessage;
     exit;
   end;
   if not FileExists(ExpandConstant('{app}\QingToolbox.Shell.exe')) then exit;

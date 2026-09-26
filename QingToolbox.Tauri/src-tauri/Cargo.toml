@@ -1,6 +1,6 @@
 [package]
 name = "qingtoolbox-tauri"
-version = "0.3.0-alpha"
+version = "0.3.1-alpha"
 description = "Lightweight QingToolbox desktop host"
 authors = ["QingMo-A"]
 edition = "2021"

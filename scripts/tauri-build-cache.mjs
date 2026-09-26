@@ -31,7 +31,9 @@ function fingerprint(paths, source) {
     if (!entry || entry.isSymbolicLink()) throw new Error(`Unsupported cache input: ${path}`)
     if (!entry.isDirectory()) { hash.update(readFileSync(path)); hash.update('\0'); return }
     for (const child of readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
-      if (source && (excluded.has(child.name) || name === 'QingToolbox.Tauri/src-tauri' && child.name === 'resources')) continue
+      if (source && (excluded.has(child.name) ||
+        name === 'QingToolbox.Tauri/src-tauri' && child.name === 'resources' ||
+        scope === 'host' && name === 'QingToolbox.Tauri' && child.name.startsWith('native-'))) continue
       visit(resolve(path, child.name))
     }
   }
@@ -40,7 +42,7 @@ function fingerprint(paths, source) {
 }
 const common = ['scripts/tauri-build-cache.mjs', '.cargo', 'rust-toolchain.toml']
 const inputs = scope === 'host'
-  ? ['QingToolbox.Tauri', 'QingToolbox.Tauri/src-tauri/resources/modules', 'QingToolbox.WebUI', ...readdirSync(resolve(root, 'scripts')).filter(n => /^(build-tauri|tauri-packaging)/.test(n)).map(n => `scripts/${n}`), 'LICENSE', 'THIRD_PARTY_NOTICES.md', ...common]
+  ? ['QingToolbox.Tauri', 'QingToolbox.WebUI', ...readdirSync(resolve(root, 'scripts')).filter(n => /^(build-tauri|tauri-packaging)/.test(n)).map(n => `scripts/${n}`), 'LICENSE', 'THIRD_PARTY_NOTICES.md', ...common]
   : [`QingToolbox.Tauri/${modules[scope][0]}`, `scripts/build-tauri-${scope}.ps1`, ...common]
 const output = scope === 'host'
   ? 'artifacts/tauri-production/QingToolbox'

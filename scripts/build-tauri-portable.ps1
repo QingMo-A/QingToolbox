@@ -26,7 +26,6 @@ $stageRoot = Join-Path $artifactRoot 'QingToolbox'
 $outputExe = Join-Path $stageRoot 'QingToolbox.exe'
 $builtExe = Join-Path $releaseRoot 'qingtoolbox-tauri.exe'
 $builtResources = Join-Path $releaseRoot 'resources'
-$sourceBundledModules = Join-Path $rustRoot 'resources\modules'
 $cacheScript = Join-Path $PSScriptRoot 'tauri-build-cache.mjs'
 
 function Assert-ArtifactPath {
@@ -128,21 +127,16 @@ if (-not (Test-Path -LiteralPath (Join-Path $rustRoot 'tauri.conf.json') -PathTy
     throw "Tauri configuration was not found: $rustRoot"
 }
 
-if (-not $SkipModuleBuild) {
-    Invoke-Checked -Label 'Prepare changed Tauri modules' -Action {
-        & (Join-Path $repoRoot 'scripts\build-tauri-modules.ps1')
-    }
-}
+# Keep the switch for callers of the existing script, but host packaging is
+# independent of module builds. Modules are built and released as .qmod files.
 
 $buildFingerprint = & node $cacheScript fingerprint host
 if ($LASTEXITCODE -ne 0) { throw 'Cannot fingerprint Tauri build inputs.' }
 Push-Location $appRoot
 try {
     # tauri build runs beforeBuildCommand once; that Vue build includes typecheck.
-    # Tauri copies resource files into target/release but does not prune old
-    # hashed Vite assets on every incremental build. Clear only this exact,
-    # generated resource directory so the production package stays small and
-    # cannot carry an unreachable UI bundle from an older module build.
+    # Clear the generated Tauri resource directory so an incremental build
+    # cannot retain modules from the old bundled-module release.
     $expectedReleaseResources = [IO.Path]::GetFullPath((Join-Path $rustRoot 'target\release\resources'))
     if ([IO.Path]::GetFullPath($builtResources) -ne $expectedReleaseResources) {
         throw "Refusing to clean an unexpected Tauri release resource path: $builtResources"
@@ -162,27 +156,8 @@ finally {
 if (-not (Test-Path -LiteralPath $builtExe -PathType Leaf)) {
     throw "Tauri release executable was not produced: $builtExe"
 }
-# `bundle.active=false` keeps the portable build independent from Tauri's
-# platform bundler (and avoids downloading installer toolchains), so
-# `tauri build --no-bundle` is not required to materialize bundle resources.
-# The module build scripts already publish validated binaries/assets into this
-# repository-owned source root; copy that exact root into the release layout
-# explicitly instead of relying on an incidental bundler side effect.
-if (-not (Test-Path -LiteralPath $sourceBundledModules -PathType Container)) {
-    throw "Bundled module resources were not produced: $sourceBundledModules"
-}
-$expectedReleaseResources = [IO.Path]::GetFullPath((Join-Path $rustRoot 'target\release\resources'))
-if ([IO.Path]::GetFullPath($builtResources) -ne $expectedReleaseResources) {
-    throw "Refusing to stage an unexpected Tauri release resource path: $builtResources"
-}
-if (Test-Path -LiteralPath $builtResources) {
-    Remove-Item -LiteralPath $builtResources -Recurse -Force
-}
-New-Item -ItemType Directory -Force -Path $builtResources | Out-Null
-Copy-Item -LiteralPath $sourceBundledModules -Destination $builtResources -Recurse -Force
-$bundledModules = Join-Path $builtResources 'modules'
-if (-not (Test-Path -LiteralPath $bundledModules -PathType Container)) {
-    throw "Failed to stage bundled modules into the release layout: $bundledModules"
+if (Test-Path -LiteralPath (Join-Path $builtResources 'modules')) {
+    throw 'The host build unexpectedly contains bundled modules.'
 }
 
 $resolvedStage = Assert-ArtifactPath $stageRoot
@@ -194,13 +169,6 @@ if (Test-Path -LiteralPath $resolvedStage) {
 }
 New-Item -ItemType Directory -Force -Path $resolvedStage | Out-Null
 Copy-Item -LiteralPath $builtExe -Destination $outputExe -Force
-$stageResources = Join-Path $stageRoot 'resources'
-New-Item -ItemType Directory -Force -Path $stageResources | Out-Null
-# Keep the resource root shape intact. Copying `resources\*` into a newly
-# created directory can flatten the `modules` child on Windows PowerShell,
-# which makes the portable host fall back to user-installed (legacy) modules.
-# The bundled host must always see resources/modules/<module-id>.
-Copy-Item -LiteralPath $bundledModules -Destination $stageResources -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $appRoot 'THIRD_PARTY_NOTICES.md') -Destination $stageRoot -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $stageRoot -Force
 
@@ -243,15 +211,6 @@ if ($Zip) {
 if ($Smoke) {
     Invoke-Checked -Label 'Smoke portable Tauri host' -Action {
         & (Join-Path $repoRoot 'scripts\smoke-tauri-host.ps1') -ExecutablePath $outputExe
-    }
-    if ($env:GITHUB_ACTIONS -eq 'true') {
-        Write-Warning 'Skipping interactive portable WebView2/CDP window smoke on GitHub Actions; the native module lifecycle and host smoke remain required.'
-    } else {
-        $node = Get-Command node.exe -ErrorAction SilentlyContinue
-        if (-not $node) { throw 'node.exe is required for the module-window smoke test.' }
-        Invoke-Checked -Label 'Smoke portable module window' -Action {
-            & $node.Source (Join-Path $repoRoot 'scripts\smoke-tauri-module-window.mjs') $outputExe
-        }
     }
 }
 

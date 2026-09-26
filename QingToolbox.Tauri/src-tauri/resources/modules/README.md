@@ -1,7 +1,10 @@
-# Bundled modules
+# Module package build staging
 
-The Tauri host scans this directory read-only. Each bundled module must live
-in its own directory and contain a `module.json` process-profile manifest.
+Each official module lives in its own directory with a `module.json`
+process-profile manifest. This is a repository build/staging directory for
+independent `.qmod` packages, not part of the production host installer.
+Development hosts may scan it read-only; production hosts scan user-installed
+modules only.
 
 Build the checked-in native handshake canary into this directory with:
 

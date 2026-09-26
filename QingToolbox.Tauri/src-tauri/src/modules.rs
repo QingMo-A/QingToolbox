@@ -120,8 +120,8 @@ pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
     let mut seen_ids = BTreeSet::new();
     let root_summaries = roots.iter().map(summarize_root).collect::<Vec<_>>();
 
-    // Root order is intentional: bundled modules win over user modules with
-    // the same id, matching the host's development-directory precedence.
+    // Root order is intentional: a user-installed package wins over a
+    // repository development copy with the same id.
     for root in roots {
         let canonical_root = match fs::canonicalize(&root.path) {
             Ok(path) if path.is_dir() => path,
@@ -890,23 +890,23 @@ mod tests {
     }
 
     #[test]
-    fn lower_priority_legacy_duplicate_is_hidden_by_a_valid_bundled_module() {
+    fn user_install_wins_over_lower_priority_development_copy() {
         let (bundled_temp, bundled_root) = temp_module(
             "qing.launcher",
             r#"{"id":"qing.launcher","name":"Launcher","version":"0.3.0","entry":"entry.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#,
         );
         let (user_temp, mut user_root) = temp_module(
             "qing.launcher",
-            r#"{"id":"qing.launcher","name":"Launcher","version":"0.2.2","entry":"entry.exe"}"#,
+            r#"{"id":"qing.launcher","name":"Launcher","version":"0.3.1","entry":"entry.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#,
         );
         user_root.source = ModuleSource::User;
 
-        let result = discover_modules(&[bundled_root, user_root]);
+        let result = discover_modules(&[user_root, bundled_root]);
 
         assert_eq!(result.payload.modules.len(), 1);
         assert!(result.payload.modules[0].valid);
-        assert_eq!(result.payload.modules[0].source, ModuleSource::Bundled);
-        assert_eq!(result.records["qing.launcher"].version, "0.3.0");
+        assert_eq!(result.payload.modules[0].source, ModuleSource::User);
+        assert_eq!(result.records["qing.launcher"].version, "0.3.1");
         let _ = fs::remove_dir_all(bundled_temp);
         let _ = fs::remove_dir_all(user_temp);
     }

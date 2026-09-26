@@ -71,5 +71,13 @@ if ($installer.IndexOf('AppId={{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}', [StringC
     $installer.IndexOf('C9E5A4D1-1E8E-4F39-8F70-9D8D1C4B7A61', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
     throw 'The public Tauri installer must use the QingToolbox product AppId, never the isolated test AppId.'
 }
+if ($installer.IndexOf('MigrateLegacyBundledModules();', [StringComparison]::Ordinal) -lt 0 -or
+    $installer.IndexOf("Type: filesandordirs; Name: `"{app}\resources`"", [StringComparison]::Ordinal) -lt 0) {
+    throw 'The installer must migrate old bundled modules before removing host-owned resources.'
+}
+$tauriConfig = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'QingToolbox.Tauri/src-tauri/tauri.conf.json') -Raw | ConvertFrom-Json
+if ($tauriConfig.bundle.PSObject.Properties.Name -contains 'resources') {
+    throw 'The host Tauri bundle must not include official modules.'
+}
 
 Write-Host 'Tauri release candidate gate contracts passed.'

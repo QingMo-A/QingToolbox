@@ -71,29 +71,40 @@ impl std::error::Error for PathError {}
 pub fn resolve_module_roots() -> Vec<ModuleRoot> {
     let mut roots = Vec::new();
 
-    if let Ok(executable) = env::current_exe() {
-        if let Some(parent) = executable.parent() {
-            push_unique_root(
-                &mut roots,
-                ModuleRoot {
-                    source: ModuleSource::Bundled,
-                    path: parent.join("resources").join("modules"),
-                },
-            );
-        }
+    // Official modules are independently installed in the per-user root.
+    // Production must not discover a stale executable-adjacent module tree
+    // left by the 0.3.0-alpha installer during an upgrade.
+    if let Some(user_root) = user_modules_root() {
+        push_unique_root(
+            &mut roots,
+            ModuleRoot {
+                source: ModuleSource::User,
+                path: user_root,
+            },
+        );
     }
 
     // A release executable must not trust its working directory: launchers,
     // shortcuts, and shell integrations can choose an arbitrary CWD. Keep
     // repository-relative roots available for debug development only, or when
-    // an integration test explicitly opts in. The executable-adjacent root
-    // above remains the sole bundled production source.
+    // an integration test explicitly opts in.
     let allow_workspace_roots = cfg!(debug_assertions)
         || env::var("QING_TAURI_ALLOW_WORKSPACE_RESOURCES")
             .ok()
             .as_deref()
             == Some("1");
     if allow_workspace_roots {
+        if let Ok(executable) = env::current_exe() {
+            if let Some(parent) = executable.parent() {
+                push_unique_root(
+                    &mut roots,
+                    ModuleRoot {
+                        source: ModuleSource::Bundled,
+                        path: parent.join("resources").join("modules"),
+                    },
+                );
+            }
+        }
         if let Ok(current) = env::current_dir() {
             for relative in [
                 PathBuf::from("resources").join("modules"),
@@ -108,16 +119,6 @@ pub fn resolve_module_roots() -> Vec<ModuleRoot> {
                 );
             }
         }
-    }
-
-    if let Some(user_root) = user_modules_root() {
-        push_unique_root(
-            &mut roots,
-            ModuleRoot {
-                source: ModuleSource::User,
-                path: user_root,
-            },
-        );
     }
 
     roots

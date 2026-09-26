@@ -73,15 +73,15 @@ pwsh ../scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop -SmokeEverything
 pwsh ../scripts/build-tauri-portable.ps1 -Smoke -Zip
 ```
 
-脚本会把 Tauri executable、`resources/modules`、逐文件 SHA256 manifest 和许可
-文件放到 `artifacts/tauri-portable/`。当前 portable 目录已包含原生 Launcher、
-Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost、PowerGuard
-和 Screen Pin。需要生产候选目录时使用 `pwsh ../scripts/build-tauri-production.ps1`
-（输出到 `artifacts/tauri-production/`）；该入口与 portable 预览共用同一套构建和
-校验逻辑，不会把旧 WPF 模块混入新宿主。需要验证可安装候选时使用
-`pwsh ../scripts/build-tauri-installer.ps1 -Smoke`；它复用仓库固定的 Inno Setup
-链路，输出到 `artifacts/tauri-installer/output/`，并使用独立的迁移 AppId，不会覆盖
-旧 WPF 安装。`run-tauri-installer.bat` 是同一流程的便捷入口。
+脚本只把 Tauri 宿主 executable、逐文件 SHA256 manifest 和宿主许可文件放到
+`artifacts/tauri-portable/`。官方模块均由独立 `.qmod` 交付，不再内置于宿主。
+需要生产候选目录时使用 `pwsh ../scripts/build-tauri-production.ps1`
+（输出到 `artifacts/tauri-production/`）；可安装候选使用
+`pwsh ../scripts/build-tauri-installer.ps1 -Smoke`，输出到
+`artifacts/tauri-installer/output/`，沿用 QingToolbox 产品 AppId。升级旧版 Tauri
+安装时，安装器会先把 0.3.0-alpha 的内置模块迁入用户模块目录；已有的有效
+Tauri 模块保持原样，同 ID 的旧 WPF 模块先备份再替换。
+`run-tauri-installer.bat` 是同一流程的便捷入口。
 
 没有 Tauri 环境时仍可使用 `npm run dev` 在浏览器中预览；前端会显示
 `浏览器预览` 状态，而不会伪装成 Rust 后端。
@@ -164,8 +164,8 @@ Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost
   的模块发送事件；快捷键由 Rust global-shortcut 插件注册，页面只能录入模块自己
   的组合键。更新交接已接入；签名发布和完整设置迁移仍是后续工作。Everything、qpdf 和局域网
   发现都是模块内受控 runtime/资源，不建立旧 ABI 兼容层。
-- `bundle.active` 暂时关闭，避免 Tauri bundler 自动下载 NSIS 工具链；当前安装器候选
-  使用仓库现有的固定 Inno Setup 供应链，并在切换正式 AppId 前保留独立迁移 AppId。
+- `bundle.active` 暂时关闭，避免 Tauri bundler 自动下载 NSIS 工具链；安装器使用
+  仓库现有的固定 Inno Setup 供应链，并沿用 QingToolbox 的产品 AppId。
 - capability 当前只授予 Tauri core 默认能力和主窗口显式的 dialog 文件选择器权限；
   模块窗口不继承文件选择器、文件系统或进程权限。新增系统能力必须显式增加权限，
   Vue 仍不能直接读写文件系统或启动进程。
@@ -174,14 +174,15 @@ Qing PDF（固定 qpdf 运行时）、QingTransfer、Text Tools、Window Topmost
 - 主窗口关闭行为由设置控制：`tray` 隐藏到托盘，`exit` 走 Tauri 正常退出清理，`ask`
   使用原生确认对话框让用户选择。本体退出时只收拢本宿主创建的模块进程。
 - 完整 Vue 模块管理页的“打开目录”和“删除用户模块”已接入 Rust；删除前会关闭
-  模块窗口、停止对应进程并再次校验用户模块根目录边界，内置模块保持只读。
+  模块窗口、停止对应进程并再次校验用户模块根目录边界。正式安装包不含内置模块。
 - 模块详情页的“随工具箱启动”授权已迁移到 Rust 设置，授权列表有界、按模块 ID
   去重并在宿主启动时只启动已授权且已发现的模块。
 - 主窗口日志页已通过 `get_session_logs` 读取 Rust 宿主的有界内存会话日志；模块扫描、
   导入、覆盖更新、启停、目录操作、设置变更和启动授权等事件不会把路径或句柄暴露给 Vue。
 - Rust 运行时监督器会在模块启动、退出或失败状态变化时向主窗口发送有界事件；Vue
   对事件刷新做合并处理，并重新读取宿主和模块快照，后台进程退出后无需手动刷新。
-- 不修改、不加载现有 WPF 项目；旧模块迁移将在协议确定后单独进行。
+- 不加载旧 WPF DLL 模块；从 0.3.0-alpha 升级时，安装器会备份同 ID 的旧 WPF
+  用户模块并迁入对应的 Tauri 模块。直接从 WPF 宿主升级时需单独导入新版 `.qmod`。
 
 ## 版本策略
 

@@ -83,25 +83,14 @@ function Test-Manifest {
         }
         Write-Warning 'Legacy upgrade test mode is packaging a dirty candidate. This installer is unsigned and is not a formal release.'
     }
-    $moduleRoot = Join-Path $Root 'resources/modules'
-    if (-not (Test-Path -LiteralPath $moduleRoot -PathType Container)) {
-        throw "Portable package is missing resources/modules: $moduleRoot"
-    }
-    $expectedModules = @(
-        'qing.canary', 'qing.launcher', 'qing.pdf', 'qing.qingtransfer',
-        'qing.texttools', 'qing.windowtopmost', 'qing.powerguard', 'qing.screenpin'
-    )
-    foreach ($module in $expectedModules) {
-        $modulePath = Join-Path $moduleRoot $module
-        if (-not (Test-Path -LiteralPath (Join-Path $modulePath 'module.json') -PathType Leaf)) {
-            throw "Portable package is missing the manifest for $module."
-        }
-        if (-not (Test-Path -LiteralPath (Join-Path $modulePath 'bin') -PathType Container)) {
-            throw "Portable package is missing the executable directory for $module."
-        }
+    if (Test-Path -LiteralPath (Join-Path $Root 'resources/modules')) {
+        throw 'The host package must not bundle modules; deliver them as separate .qmod assets.'
     }
     foreach ($entry in @($manifest.files)) {
         $relative = [string]$entry.path
+        if ($relative.StartsWith('resources/modules/', [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Portable manifest contains a bundled module: $relative"
+        }
         if ([string]::IsNullOrWhiteSpace($relative) -or $relative.Contains('..') -or $relative.StartsWith('/') -or $relative.Contains('\')) {
             throw "Portable manifest contains an unsafe path: $relative"
         }

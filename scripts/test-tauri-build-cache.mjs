@@ -51,3 +51,34 @@ test('content cache reuses unchanged work and rejects changed/missing outputs', 
   rmSync(resolve(root, out))
   assert.equal(run('check', 'launcher').status, 1)
 })
+
+test('host fingerprint ignores independently packaged module inputs', t => {
+  const base = resolve(tmpdir())
+  const root = mkdtempSync(join(base, 'qing-host-cache-test-'))
+  t.after(() => {
+    assert.equal(dirname(resolve(root)), base)
+    assert.ok(root.startsWith(join(base, 'qing-host-cache-test-')))
+    rmSync(root, { recursive: true, force: true })
+  })
+  const write = (path, content) => {
+    const file = resolve(root, path)
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, content)
+  }
+  write('scripts/tauri-build-cache.mjs', '')
+  copyFileSync(fileURLToPath(new URL('./tauri-build-cache.mjs', import.meta.url)), resolve(root, 'scripts/tauri-build-cache.mjs'))
+  write('QingToolbox.Tauri/src-tauri/src/main.rs', 'host')
+  write('QingToolbox.Tauri/native-launcher/src/main.rs', 'module')
+  write('QingToolbox.Tauri/src-tauri/resources/modules/qing.launcher/module.json', '{}')
+  const fingerprint = () => {
+    const result = spawnSync(process.execPath, [resolve(root, 'scripts/tauri-build-cache.mjs'), 'fingerprint', 'host'], { encoding: 'utf8' })
+    assert.equal(result.status, 0, result.stderr)
+    return result.stdout.trim()
+  }
+  const before = fingerprint()
+  write('QingToolbox.Tauri/native-launcher/src/main.rs', 'new module')
+  write('QingToolbox.Tauri/src-tauri/resources/modules/qing.launcher/module.json', '{"new":true}')
+  assert.equal(fingerprint(), before)
+  write('QingToolbox.Tauri/src-tauri/src/main.rs', 'new host')
+  assert.notEqual(fingerprint(), before)
+})
