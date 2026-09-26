@@ -47,9 +47,11 @@ every visible tool arrives as an imported module**, not as code baked into the s
    resources. `PackagedAndroidModulesTest` reads the real packages in `../android_modules`, so
    the Python packer and the Kotlin importer are checked against each other.
 4. Run `gradle :app:assembleDebug` to produce
-   `app/build/outputs/apk/debug/app-debug.apk`.
+   `app/build/outputs/apk/debug/build-<yyyyMMdd-HHmmss>.apk`. The untimestamped
+   `app-debug.apk` is written too, but the stamped copy is the one to keep: it
+   is what tells two builds apart once a package sits on a device.
 5. With a device or emulator connected, install it with
-   `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
+   `adb install -r app/build/outputs/apk/debug/build-<yyyyMMdd-HHmmss>.apk`.
 
 ## Status
 
