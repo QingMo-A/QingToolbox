@@ -113,10 +113,16 @@ fun QingIconSurface(
     modifier: Modifier = Modifier.size(48.dp),
     containerColor: Color = MaterialTheme.colorScheme.primaryContainer,
     usePrimaryBrush: Boolean = false,
+    /**
+     * Overrides the themed control radius. A tile nested inside a card can end up rounder
+     * than the card itself, which makes the two read as different shapes; callers that sit
+     * inside a container pass the container's radius to keep them in one family.
+     */
+    cornerRadius: androidx.compose.ui.unit.Dp? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val style = LocalQingAppearance.current
-    val shape = qingShape(style.controlCornerRadius)
+    val shape = qingShape(cornerRadius ?: style.controlCornerRadius)
     val brush = if (usePrimaryBrush) style.primaryBrush() else null
     val backgroundModifier = if (brush != null) {
         Modifier.background(brush, shape)

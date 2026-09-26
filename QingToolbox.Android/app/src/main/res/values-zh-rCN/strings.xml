@@ -108,16 +108,18 @@
     <string name="qing_transfer_auto_accept_hint">仅当启用默认文件夹、已配置且可写时自动接受；否则每次都会请求确认。</string>
 
     <string name="settings_appearance">外观</string>
+    <string name="settings_appearance_body">主题与控件的视觉风格</string>
     <string name="settings_theme">主题</string>
     <string name="settings_theme_current">当前：%1$s</string>
     <string name="settings_theme_choose_title">选择主题</string>
     <string name="settings_theme_preview">实时预览</string>
+    <string name="settings_theme_count">共 %1$d 套</string>
     <string name="settings_language">语言</string>
+    <string name="settings_language_body">界面文字的显示语言</string>
     <string name="settings_language_current">%1$s</string>
     <string name="settings_about">关于</string>
-    <string name="settings_qing_android">QingToolbox Android</string>
-    <string name="settings_version">版本</string>
-    <string name="settings_version_body">%1$s</string>
+    <string name="settings_about_body">本地优先的双端工具箱</string>
+    <string name="settings_shell_contract">外壳只搭框架，功能以模块导入。</string>
 
     <string name="language_choose_title">应用语言</string>
     <string name="language_follow_system">跟随系统</string>

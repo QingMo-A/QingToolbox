@@ -3,6 +3,9 @@ package com.qingtoolbox.android
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -28,6 +32,8 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DevicesOther
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
@@ -51,11 +57,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -692,62 +702,178 @@ private fun SettingsScreen(
     var showThemeDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
     val currentLanguage = AppLanguageManager.current()
+    // Each label is resolved in composable scope first: `joinToString`'s lambda is not a
+    // composable context, so `stringResource` cannot be called inside it.
+    val themeNameSummary = AppearanceTheme.entries
+        .map { theme -> stringResource(theme.labelRes) }
+        .joinToString("  ·  ")
+    // Read once so the section tiles, the version chip and the cards they sit inside all
+    // resolve to the same radius for the active theme.
+    val cardCornerRadius = LocalQingAppearance.current.cardCornerRadius
+    val controlCornerRadius = LocalQingAppearance.current.controlCornerRadius
+    val controlBorderColor = LocalQingAppearance.current.controlBorderColor
+    val heroContentColor = if (LocalQingAppearance.current.primaryBrush() != null) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { ModuleSectionTitle(stringResource(R.string.settings_appearance)) }
+        // The page opens with what the app is and what is configured, rather than
+        // dropping straight into a list of controls.
         item {
-            QingClickableCard(
-                onClick = { showThemeDialog = true },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                QingListItem(
-                    leadingContent = {
-                        ThemeSwatch(theme = currentAppearance, selected = true)
-                    },
-                    headlineContent = { Text(stringResource(R.string.settings_theme)) },
-                    supportingContent = {
-                        Text(
-                            stringResource(
-                                R.string.settings_theme_current,
-                                stringResource(currentAppearance.labelRes),
-                            ),
+            QingHeroCard(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    QingIconSurface(
+                        modifier = Modifier.size(56.dp),
+                        usePrimaryBrush = true,
+                        containerColor = MaterialTheme.colorScheme.primary,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Tune,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
                         )
-                    },
-                    trailingContent = { DisclosureIndicator() },
-                )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            // The bare app name; the platform suffix lives in the About
+                            // row below, so this headline stays on one line.
+                            text = stringResource(R.string.app_name),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = heroContentColor,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = BuildConfig.VERSION_NAME,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontFamily = FontFamily.Monospace,
+                            color = heroContentColor,
+                        )
+                    }
+                }
             }
         }
-        item { ModuleSectionTitle(stringResource(R.string.settings_language)) }
         item {
-            QingClickableCard(
-                onClick = { showLanguageDialog = true },
-                modifier = Modifier.fillMaxWidth(),
+            SettingsSectionCard(
+                title = stringResource(R.string.settings_appearance),
+                body = stringResource(R.string.settings_appearance_body),
             ) {
-                QingListItem(
-                    leadingContent = {
-                        Icon(Icons.Outlined.Language, contentDescription = null)
+                SettingsActionRow(
+                    onClick = { showThemeDialog = true },
+                    leading = {
+                        QingIconSurface(
+                            modifier = Modifier.size(44.dp),
+                            // The theme's own control radius can exceed the radius of the
+                            // row this tile sits in (Aurora Flow uses 16dp), which reads as
+                            // a different shape family. Clamp it so a tile inside a card
+                            // never looks rounder than the card that contains it.
+                            cornerRadius = cardCornerRadius,
+                            containerColor = currentAppearance.swatchColor,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Palette,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
                     },
-                    headlineContent = { Text(stringResource(R.string.settings_language)) },
-                    supportingContent = {
-                        Text(stringResource(R.string.settings_language_current, stringResource(currentLanguage.labelRes)))
-                    },
-                    trailingContent = { DisclosureIndicator() },
+                    headline = stringResource(R.string.settings_theme),
+                    supporting = stringResource(
+                        R.string.settings_theme_current,
+                        stringResource(currentAppearance.labelRes),
+                    ),
+                )
+                SettingsInlineNote(
+                    text = themeNameSummary + "   " + stringResource(
+                        R.string.settings_theme_count,
+                        AppearanceTheme.entries.size,
+                    ),
                 )
             }
         }
-        item { QingDivider() }
-        item { ModuleSectionTitle(stringResource(R.string.settings_about)) }
         item {
-            QingListItem(
-                leadingContent = { Icon(Icons.Outlined.Info, contentDescription = null) },
-                headlineContent = { Text(stringResource(R.string.settings_qing_android)) },
-                supportingContent = {
-                    Text(stringResource(R.string.settings_version_body, BuildConfig.VERSION_NAME))
-                },
-            )
+            SettingsSectionCard(
+                title = stringResource(R.string.settings_language),
+                body = stringResource(R.string.settings_language_body),
+            ) {
+                SettingsActionRow(
+                    onClick = { showLanguageDialog = true },
+                    leading = {
+                        QingIconSurface(
+                            modifier = Modifier.size(44.dp),
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Language,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                        }
+                    },
+                    headline = stringResource(R.string.settings_language),
+                    supporting = stringResource(
+                        R.string.settings_language_current,
+                        stringResource(currentLanguage.labelRes),
+                    ),
+                )
+            }
+        }
+        item {
+            SettingsSectionCard(title = stringResource(R.string.settings_about)) {
+                // The badge sits on its own line rather than trailing the text. Sharing one
+                // row made the column narrow enough that "本地优先的双端工具箱" broke after
+                // six characters and the caption next to it wrapped to three lines, both of
+                // which read as a layout fault rather than a deliberate stack.
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        QingIconSurface(
+                            modifier = Modifier.size(44.dp),
+                            cornerRadius = cardCornerRadius,
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.settings_about_body),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = stringResource(R.string.settings_shell_contract),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    // The badge is the single place the version appears; the row above it
+                    // already names the app, so repeating the number in the caption made
+                    // the same string show twice.
+                    VersionBadge(
+                        version = BuildConfig.VERSION_NAME,
+                        cornerRadius = controlCornerRadius,
+                        borderColor = controlBorderColor,
+                    )
+                }
+            }
         }
     }
     if (showThemeDialog) {
@@ -768,6 +894,108 @@ private fun SettingsScreen(
         )
     }
 }
+
+/**
+ * A titled settings group.
+ *
+ * The heading carries a one-line explanation because the three settings here are not
+ * self-evident from their labels alone — "Appearance" and "Language" say what they
+ * change, not what changes them. The body is what the settings page was missing when it
+ * was a flat list of three identical rows.
+ */
+@Composable
+private fun SettingsSectionCard(
+    title: String,
+    body: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(modifier = Modifier.padding(start = 2.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            if (body != null) {
+                Text(
+                    text = body,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        QingCard(modifier = Modifier.fillMaxWidth()) {
+            Column(content = content)
+        }
+    }
+}
+
+/** One tappable row inside a [SettingsSectionCard], with a leading surface and a chevron. */
+@Composable
+private fun SettingsActionRow(
+    onClick: () -> Unit,
+    leading: @Composable () -> Unit,
+    headline: String,
+    supporting: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        leading()
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = headline,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = supporting,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        DisclosureIndicator()
+    }
+}
+
+/** A quiet caption below a section's rows. */
+@Composable
+private fun SettingsInlineNote(text: String) {
+    Text(
+        text = text,
+        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** The version, shown as a monospace chip so it reads as data rather than a caption. */
+@Composable
+private fun VersionBadge(
+    version: String,
+    cornerRadius: Dp,
+    borderColor: Color,
+) {
+    val shape = RoundedCornerShape(cornerRadius)
+    Text(
+        text = version,
+        modifier = Modifier
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .border(LocalQingAppearance.current.borderWidth, borderColor, shape)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        style = MaterialTheme.typography.labelMedium,
+        fontFamily = FontFamily.Monospace,
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
 
 /**
  * One shared shape for both appearance pickers.
