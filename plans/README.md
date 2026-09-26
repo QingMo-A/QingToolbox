@@ -72,6 +72,13 @@ Read these plans in order unless the user says otherwise:
     - Keep Root and Xposed/LSPosed-compatible capabilities optional and isolated from the normal mobile startup path.
     - Queue QingTransfer as the first planned symmetric PC/Android LAN module after the mobile Shell and real module requirements are proven.
 
+14. [`014-qingtransfer-symmetric-transfer-and-remote-control.md`](014-qingtransfer-symmetric-transfer-and-remote-control.md)
+    - **Draft — Pending User Approval.**
+    - Complete the four-path symmetric transfer matrix (PC↔Android, PC↔PC, Android↔Android) by adding the missing Windows endpoint.
+    - Introduce the `亲密设备` / `连接设备` / `陌生设备` trust tiers, backed by a real pairing identity rather than a spoofable DNS-SD service name.
+    - Add LAN remote control in all four directions, as a host capability rather than a downloadable module, with the floating-window controller mode on Android.
+    - Records the platform hard limits (per-session MediaProjection consent, manual accessibility enablement, `FLAG_SECURE` blackout) and the binding safety constraints that follow from them.
+
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
 
 A plan marked `Draft — Pending User Approval` is review material only. Codex must not implement its slices until the user explicitly approves the plan and an execution prompt selects one bounded slice. An active plan still authorizes only the single slice selected by the current Codex prompt.
