@@ -42,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -344,10 +345,9 @@ fun QingTopAppBar(
     actions: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val style = LocalQingAppearance.current
-    val shape = RoundedCornerShape(
-        bottomStart = style.cardCornerRadius,
-        bottomEnd = style.cardCornerRadius,
-    )
+    // The top bar is a flat edge-to-edge surface: no rounding, and the hairline
+    // below it is a straight line rather than an arc.
+    val shape = RectangleShape
     val containerColor = when (style.navigationStyle) {
         QingNavigationStyle.CIRCUIT -> MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
         QingNavigationStyle.TERMINAL -> MaterialTheme.colorScheme.surface
@@ -385,7 +385,8 @@ fun QingNavigationBar(
     content: @Composable RowScope.() -> Unit,
 ) {
     val style = LocalQingAppearance.current
-    val shape = RoundedCornerShape(topStart = style.cardCornerRadius, topEnd = style.cardCornerRadius)
+    // Matches the top bar: a flat edge-to-edge surface with a straight hairline.
+    val shape = RectangleShape
     val containerColor = when (style.navigationStyle) {
         QingNavigationStyle.CIRCUIT -> MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
         QingNavigationStyle.TERMINAL -> MaterialTheme.colorScheme.surface

@@ -50,7 +50,11 @@ internal fun shouldShowIncomingDialog(
 ): Boolean = state == QingTransferConnectionState.WAITING_APPROVAL && peer != null
 
 @Composable
-fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
+fun QingTransferDevicesScreen(
+    modifier: Modifier = Modifier,
+    showReceiveSettings: Boolean,
+    onDismissReceiveSettings: () -> Unit,
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val session = remember(context) { QingTransferProcessSessionStore.get(context) }
@@ -64,7 +68,6 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
     val transferProgress by connection.progress.collectAsStateWithLifecycle()
     val connectionError by connection.error.collectAsStateWithLifecycle()
     var saveOffer by remember { mutableStateOf<QingTransferFileOffer?>(null) }
-    var showReceiveSettings by remember { mutableStateOf(false) }
     var receivePreferences by remember { mutableStateOf(connection.receivePreferences()) }
     val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
@@ -150,32 +153,12 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item {
-            QingCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        QingIconSurface(modifier = Modifier.size(52.dp)) {
-                            Icon(Icons.Outlined.DevicesOther, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(stringResource(R.string.qing_transfer_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                            Text(stringResource(R.string.qing_transfer_body), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    QingSecondaryButton(
-                        onClick = {
-                            // A restart is a full foreground-session reset: no stale
-                            // connection may outlive the advertised listener.
-                            connection.disconnect()
-                            discovery.restart()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = null)
-                        Spacer(Modifier.size(8.dp))
-                        Text(stringResource(R.string.qing_transfer_refresh))
-                    }
-                    if (connectionState != QingTransferConnectionState.IDLE) {
+        // The screen is a list of peers. The header card, the folder row and the
+        // refresh button all moved to the top bar, so nothing sits above the list.
+        if (connectionState != QingTransferConnectionState.IDLE) {
+            item {
+                QingCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         QingStatusText(
                             text = when (connectionState) {
                                 QingTransferConnectionState.CONNECTING -> stringResource(R.string.qing_transfer_connecting)
@@ -202,26 +185,12 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
                                     Text(stringResource(R.string.qing_transfer_cancel_transfer))
                                 }
                             }
-                    QingSecondaryButton(onClick = connection::disconnect, modifier = Modifier.fillMaxWidth()) {
+                            QingSecondaryButton(onClick = connection::disconnect, modifier = Modifier.fillMaxWidth()) {
                                 Text(stringResource(R.string.qing_transfer_disconnect))
                             }
                         }
                     }
                 }
-            }
-        }
-        item {
-            QingClickableCard(onClick = { showReceiveSettings = true }, modifier = Modifier.fillMaxWidth()) {
-                QingListItem(
-                    leadingContent = { Icon(Icons.Outlined.Folder, contentDescription = null) },
-                    headlineContent = { Text(stringResource(R.string.qing_transfer_receive_settings)) },
-                    supportingContent = {
-                        Text(
-                            if (receivePreferences.defaultTreeUri.isNullOrBlank()) stringResource(R.string.qing_transfer_no_default_directory)
-                            else stringResource(R.string.qing_transfer_default_directory_configured),
-                        )
-                    },
-                )
             }
         }
         if (peers.isEmpty()) {
@@ -249,7 +218,7 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
     }
     if (showReceiveSettings) {
         AlertDialog(
-            onDismissRequest = { showReceiveSettings = false },
+            onDismissRequest = onDismissReceiveSettings,
             title = { Text(stringResource(R.string.qing_transfer_receive_settings)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -286,7 +255,7 @@ fun QingTransferDevicesScreen(modifier: Modifier = Modifier) {
                     Text(stringResource(R.string.qing_transfer_auto_accept_hint), style = MaterialTheme.typography.bodySmall)
                 }
             },
-            confirmButton = { TextButton(onClick = { showReceiveSettings = false }) { Text(stringResource(R.string.ok)) } },
+            confirmButton = { TextButton(onClick = onDismissReceiveSettings) { Text(stringResource(R.string.ok)) } },
         )
     }
 }

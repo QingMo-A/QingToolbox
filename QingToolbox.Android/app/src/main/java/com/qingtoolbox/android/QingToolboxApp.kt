@@ -27,9 +27,11 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DevicesOther
 import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -111,6 +114,7 @@ private fun QingToolboxShell(
     uiState: QingToolboxUiState,
 ) {
     val navController = rememberNavController()
+    val context = LocalContext.current
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val openModuleId = backStackEntry?.arguments?.getString(MODULE_ID_ARGUMENT)
@@ -127,6 +131,12 @@ private fun QingToolboxShell(
 
     val moduleThemeCss = rememberMobileModuleThemeCss()
     LaunchedEffect(moduleThemeCss) { viewModel.runtime.updateTheme(moduleThemeCss) }
+
+    // The transfer session is process-scoped, so the shell and the Devices screen share
+    // one instance rather than each opening its own. The folder dialog is hosted here
+    // because the button that opens it lives in the top bar.
+    val transferSession = remember(context) { QingTransferProcessSessionStore.get(context) }
+    var showReceiveSettings by remember { mutableStateOf(false) }
 
     uiState.message?.let { message ->
         LaunchedEffect(message.token) {
@@ -159,26 +169,53 @@ private fun QingToolboxShell(
                         fontWeight = FontWeight.SemiBold,
                     )
                 },
-                actions = if (currentShell == ShellDestination.Modules && openModuleId == null) {
-                    {
-                        if (uiState.busy) {
-                            CircularProgressIndicator(
-                                modifier = Modifier
-                                    .padding(horizontal = 14.dp)
-                                    .size(20.dp),
-                                strokeWidth = 2.dp,
-                            )
-                        } else {
-                            IconButton(onClick = { importLauncher.launch(arrayOf("*/*")) }) {
+                actions = when {
+                    currentShell == ShellDestination.Modules && openModuleId == null -> {
+                        {
+                            if (uiState.busy) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier
+                                        .padding(horizontal = 14.dp)
+                                        .size(20.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                IconButton(onClick = { importLauncher.launch(arrayOf("*/*")) }) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Add,
+                                        contentDescription = stringResource(R.string.modules_import_action),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    currentShell == ShellDestination.Devices && openModuleId == null -> {
+                        {
+                            // Receive-folder settings live here so the transfer screen itself
+                            // stays a list of peers. Folder first, refresh last, matching the
+                            // order the two buttons read in.
+                            IconButton(onClick = { showReceiveSettings = true }) {
                                 Icon(
-                                    imageVector = Icons.Outlined.Add,
-                                    contentDescription = stringResource(R.string.modules_import_action),
+                                    imageVector = Icons.Outlined.Folder,
+                                    contentDescription = stringResource(R.string.qing_transfer_receive_settings),
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    // A restart is a full foreground-session reset: no stale
+                                    // connection may outlive the advertised listener.
+                                    transferSession.connection.disconnect()
+                                    transferSession.discovery.restart()
+                                },
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Refresh,
+                                    contentDescription = stringResource(R.string.qing_transfer_refresh),
                                 )
                             }
                         }
                     }
-                } else {
-                    null
+                    else -> null
                 },
             )
         },
@@ -245,7 +282,12 @@ private fun QingToolboxShell(
             }
             // Device connectivity stays on the shell: it is core plumbing shared with the
             // desktop host rather than an installable module.
-            composable(ShellDestination.Devices.route) { QingTransferDevicesScreen() }
+            composable(ShellDestination.Devices.route) {
+                QingTransferDevicesScreen(
+                    showReceiveSettings = showReceiveSettings,
+                    onDismissReceiveSettings = { showReceiveSettings = false },
+                )
+            }
             composable(ShellDestination.Settings.route) {
                 val state by viewModel.uiState.collectAsStateWithLifecycle()
                 SettingsScreen(

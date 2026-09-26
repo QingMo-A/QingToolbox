@@ -67,8 +67,6 @@
     <string name="devices_no_connected">No devices connected</string>
     <string name="devices_cross_future">Cross-device connections are planned for a future milestone.</string>
 
-    <string name="qing_transfer_title">QingTransfer</string>
-    <string name="qing_transfer_body">Discover nearby QingToolbox devices on this local network.</string>
     <string name="qing_transfer_searching">Looking for nearby devices...</string>
     <string name="qing_transfer_empty">No QingToolbox devices are online yet.</string>
     <string name="qing_transfer_hint">Discovery uses local DNS-SD. No connection or transfer is started here.</string>
