@@ -73,10 +73,11 @@ Read these plans in order unless the user says otherwise:
     - Queue QingTransfer as the first planned symmetric PC/Android LAN module after the mobile Shell and real module requirements are proven.
 
 14. [`014-qingtransfer-symmetric-transfer-and-remote-control.md`](014-qingtransfer-symmetric-transfer-and-remote-control.md)
-    - **Draft — Pending User Approval.**
+    - **Decisions Resolved — implementation requires a bounded execution prompt selecting one slice.**
     - Complete the four-path symmetric transfer matrix (PC↔Android, PC↔PC, Android↔Android) by adding the missing Windows endpoint.
-    - Introduce the `亲密设备` / `连接设备` / `陌生设备` trust tiers, backed by a real pairing identity rather than a spoofable DNS-SD service name.
+    - Introduce the `亲密设备` / `连接设备` / `陌生设备` trust tiers, assigned from the nearby-device list but confirmed by the peer, backed by a fingerprint rather than a spoofable DNS-SD service name.
     - Add LAN remote control in all four directions, as a host capability rather than a downloadable module, with the floating-window controller mode on Android.
+    - Restore the native DEX module channel now that distribution is private and self-hosted. Google Play policy is explicitly not a design constraint.
     - Records the platform hard limits (per-session MediaProjection consent, manual accessibility enablement, `FLAG_SECURE` blackout) and the binding safety constraints that follow from them.
 
 Plan 003 is a master architecture plan. It does not authorize implementing every UI phase in one task. Future UI work should use additional numbered plans referencing this architecture.
