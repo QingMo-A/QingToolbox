@@ -1,64 +1,39 @@
 # QingToolbox 开发计划
 
-> 本文是 QingToolbox 的当前开发路线、发布边界和项目交接说明。
+> 本文是 QingToolbox 的当前开发路线、发布边界与项目交接说明。
 >
-> 文档创建时，`toolbox` 的已验证远程基线为 `aaae0475529c570c87c170e773feabd2b779834b`。继续开发前必须重新获取远程状态，不得假设该 SHA 始终是最新版本。
+> **文档同步状态**：更新于 2026-09-26，对应宿主主线 `0.3.1-alpha`（开发中）与最新发布 `v0.3.0-alpha`。
+> 继续开发前必须重新获取远程状态，不得假设该基线始终是最新版本。
 
-## UI modernization status (authoritative addendum)
+## 0. 当前状态速览
 
-- Current release status: **QingToolbox 0.2.1-alpha — Published**.
-- Tag: `v0.2.1-alpha`; release source SHA: `44374fb96f0ac8d78f71540d2d30d86c1fe6f31a`.
-- GitHub Actions Run `30615658843`: `success`; published at `2026-07-31T09:17:13Z`.
-- Official assets: `QingToolbox-0.2.1-alpha-win-x64-setup.exe` and its same-name SHA256 sidecar. The installer is `54,725,974` bytes with SHA256 `447ACEDE37CA5172B348A9662998B320C5710146235E03C6E7439D4850D77848`.
-- Starter-module source baseline: `c4c1b8fe15a37c16b38192aab3b26735bc232be6`.
-- TextTools `0.1.1`, PowerGuard `0.1.0`, and WindowTopmost `0.1.1` are separately prepared module candidates. The host installer and host Release do not contain their DLLs or `.qmod` files; the project owner will provide them through an independent module-delivery path.
-- `0.2.0-alpha` was the internal Preview 2 development target and was not published as an official Release. The `0.2.1-alpha` upgrade gate therefore uses the existing official `v0.1.0-alpha` installer.
-- The three starter modules remain independently delivered and were not bundled with the host Release. Plan 013 remains Frozen; follow-up work returns to user-visible features and module development. Automated and manual acceptance results remain separate and must not be inferred.
+| 项目 | 值 |
+| --- | --- |
+| 默认分支 | `toolbox` |
+| 模块源码分支 | `modules` |
+| 宿主主线技术栈 | Rust + Tauri 2 + Vue 3（`QingToolbox.Tauri`） |
+| 宿主当前版本 | `0.3.1-alpha`（开发中） |
+| 最新已发布宿主版本 | `v0.3.0-alpha`（2026-09-25） |
+| 历史 WPF 宿主版本 | `0.2.9-alpha`（冻结，仅维护历史安装链） |
+| 正式分发方式 | 每用户 Inno Setup 安装器 + 同名 `.sha256` |
+| 代码签名 | **未完成** |
+| 稳定 Module API | **未冻结**（当前 Experimental） |
 
-- B1: Engineering Complete — Frozen.
-- B2.1: Engineering Complete — Frozen.
-- UI-1: Engineering Complete — Frozen; protocol-v4 session and immutable-serving correction verified.
-- Production and ModuleTest continue to use the native WPF workspace.
-- UI-1.1 / Plan 006: Engineering Complete — Frozen.
-- UI-1.2 / Plan 007: Engineering Complete — Frozen.
-- UI-1.3 / Plan 008: Engineering Complete — Frozen.
-- UI-2A / Plan 009: Implementation Complete; Development-only read-only module center and visual foundation.
-- UI-2A preserves protocol v4 and projects authoritative C# module state without module side effects.
-- UI-3 / Plan 010: Implementation Complete.
-- UI-4A / Plan 011: Implementation Complete.
-- Plan 012: Implementation Complete; all current Development Web workspaces have English and Simplified Chinese primary UI coverage.
-- Plan 012 prerequisite P1 commit: `9f63a9d69e424738b420ddc9305b8b482f56c198`.
-- Plan 012 UI-5A1 commit: `3f2645f963d51747cf9655d785a5038dcbb7d31a`.
-- Plan 012 UI-5A2 commit: `ed1a3172ce8a65cdffc9ab561939c3d7c4075a96`.
-- Plan 012 UI-5A3A commit: `3ddedcb7849831f865e40cc82ed998b908d623a9`.
-- Plan 012 UI-5A3B1 read-only workspaces: Implementation Complete.
-- Plan 012 UI-5A3B2 Settings localization and module metadata refresh: Implementation Complete. Successful language changes refresh one complete host-localized Module Snapshot. Plan 012 is complete.
-- Plan 013: **Implementation Complete / Frozen, with one tracked P1 handoff remediation**. Installer-only delivery, discovery, verified download, user confirmation, and Inno Setup handoff are complete. A real-user report shows that an in-app upgrade can advance the installed executable version while the next launch falls back to the native WPF workspace, whereas a manual installer overlay on the same machine restores the Production Vue workspace. This narrowly reopens only the 013D process-exit and installer-handoff acceptance boundary; it does not reopen discovery, download verification, the Web Bridge, or the broader update architecture.
-- Production and Development Web module updates support an explicit, inline-confirmed installation of a host-authorized verified package through the frozen B1/B2.1 transaction boundary. Installation remains user-initiated; it is not automatic.
-- Production Web UI: Implemented for the next release candidate. Production now uses the same verified local Vue assets and ready handshake, with the native WPF workspace retained as the initialization and process-failure fallback.
-- Production now exposes only the existing official-source verified module-update transaction: fixed release identity, package hash and size, strict `qmod.json`, verified staging, runtime quiescing, atomic replacement, rollback, and cold-start recovery remain host-owned. Development Diagnostics remain Development-only, arbitrary local same-ID `.qmod` overwrite remains rejected, and automatic module installation remains deferred.
-- Preview 2 release work and UI modernization remain independent tracks.
+已发布版本与证据：
 
-The shared Vue workspace currently contains Home, Modules, Running, Session Logs, and Settings;
-Development additionally exposes Development Diagnostics. Plan 009's original boundary remains the read-only module center and
-visual foundation; Running, Logs, Settings, and the narrow settings mutations added afterward
-are incremental implementation, not a retroactive expansion of Plan 009.
-
-The completed Web Settings mutations are limited to host-confirmed `Language`, `AppearancePresetId`,
-`ShowLogsInSidebar`, `MainWindowCloseBehavior`, `StartupPresentationMode`, host-confirmed `LaunchAtLogin`, and the bounded
-startup-registration repair action. These completed additions do not authorize further Startup health
-parity work or additional Settings Bridge commands. Any future user-visible Settings feature must be
-selected and reviewed independently. B2.1 boundaries, session security, environment isolation, and
-native fallback stay frozen.
-
-The Production/Development verified-update installation entry projects only a host-calculated capability.
-The Web request contains only the module ID; verified staging identity and attestation remain private to
-the host, and the existing transaction coordinator owns quiescing, replacement, rollback, recovery, and
-runtime-intent restoration. ModuleTest does not gain a Web UI. B1/B2.1 remain **Engineering Complete — Frozen**.
+| 版本 | 发布日期 | 关键证据 |
+| --- | --- | --- |
+| `0.3.0-alpha` | 2026-09-25 | 首个 Tauri 宿主预览；Tag `v0.3.0-alpha` |
+| `0.2.9-alpha` | 2026-08-21 | 提交 `d4b30d5`；Preview 验证 run `32462342007` 通过 |
+| `0.2.8-alpha` | 2026-08-16 | 提交 `b6a7cc2`；Preview 验证 run `31951259828` 通过 |
+| `0.2.7-alpha` | 2026-08-15 | Tag `v0.2.7-alpha` |
+| `0.2.6-alpha` | 2026-08-15 | 无独立发布说明文件（见 `docs/releases/`） |
+| `0.2.5-alpha` | 2026-08-11 | Tag `v0.2.5-alpha` |
+| `0.1.0-alpha` | 2026-07-16 | Preview 1；含便携 ZIP 与安装器 |
 
 ## 1. 项目定位
 
-QingToolbox 是一个面向 Windows 的模块化桌面工具箱。
+QingToolbox 是一个面向 Windows 的模块化桌面工具箱。宿主只提供壳、生命周期与安全边界，具体工具能力由独立模块按需交付。
 
 项目核心目标：
 
@@ -66,12 +41,12 @@ QingToolbox 是一个面向 Windows 的模块化桌面工具箱。
 - 模块发现、加载、启动授权、更新和删除具有明确的安全边界。
 - Production、Development、ModuleTest 三种环境严格隔离。
 - 发布过程可复现、可审计，并通过安装器、宿主载荷审计和升级测试验证。
-- 可靠基础设施与 Plan 013 宿主自更新已经完成并冻结；后续优先推进用户可见工具和现代化 UI。
+- 可靠基础设施与宿主自更新已完成并冻结；后续优先推进用户可见工具与现代化 UI。
 
 当前开发分支：
 
-- `toolbox`：宿主、安装器、开发工具、文档和发布基础设施。
-- `modules`：官方模块索引、每模块更新描述及模块发布协议。
+- `toolbox`：宿主、协议、脚本、安装器、开发工具与文档。
+- `modules`：官方模块源码、模块模板与模块更新协议（历史 WPF 模块线）。
 
 两个分支独立维护。宿主开发不得顺手修改 `modules`，模块协议变更也不得未经审查混入宿主提交。
 
@@ -79,12 +54,22 @@ QingToolbox 是一个面向 Windows 的模块化桌面工具箱。
 
 ### 2.1 宿主与模块
 
-- 宿主项目不得引用任何具体模块程序集。
+Tauri 主线（当前）：
+
+- 宿主不得引用任何具体模块的实现代码。
+- 宿主与模块之间只允许存在 [`protocol/`](../protocol/README.md) 定义的版本化进程协议。
+- 模块在独立操作系统中以当前用户权限运行；宿主不得建立通用文件系统、进程或窗口桥。
+- 模块只能调用自己清单 `operations` / `events` 白名单中声明的操作；不声明即无调用面。
+- 模块窗口的 IPC 权限按 `module-*` 标签隔离，页面不得提交任意模块 ID 或路径。
+- 单个模块失败、超时或协议错误必须被隔离，不能终止宿主。
+- 宿主创建的模块进程由宿主收拢；不得触碰用户自行启动的同名进程。
+
+历史 WPF 线（冻结）：
+
 - 模块扫描阶段只读取 `module.json` 和本地化资源。
 - 扫描期间禁止加载、反射或执行模块 DLL。
 - 模块 DLL 只能在用户明确操作或已验证的启动授权恢复阶段加载。
-- 模块窗口是宿主子窗口；宿主退出时必须关闭窗口并卸载模块。
-- 单个模块失败必须被隔离，不能终止宿主。
+- 宿主项目不得引用任何具体模块程序集。
 
 ### 2.2 环境隔离
 
@@ -100,6 +85,9 @@ Production、Development、ModuleTest 必须分别隔离：
 
 Development 和 ModuleTest 不得注册真实 Windows 开机自启，不得污染正式用户数据。
 
+沙箱根目录唯一派生自 `<RepositoryRoot>\.qingtoolbox\development\<Profile>` 或
+`<RepositoryRoot>\.qingtoolbox\module-test\<Profile>`；宿主校验稳定的源码标记，不得从当前目录、`.git`、可执行文件位置或解决方案父目录猜测仓库根。相关路径段中的符号链接、junction 等 reparse point 必须在启动前被拒绝。
+
 ### 2.3 Git 与发布
 
 - 未经用户明确授权，不创建 tag 或 GitHub Release。
@@ -109,381 +97,167 @@ Development 和 ModuleTest 不得注册真实 Windows 开机自启，不得污�
 - 提交信息沿用四段式风格，并保证 UTF-8 无 BOM。
 - 远程验证必须匹配精确最终 `HEAD` SHA；其他提交的成功 CI 不能代替当前提交。
 
-## 3. 当前已经完成的主体能力
+## 3. 已完成能力
 
-### 3.1 宿主与模块生命周期
+### 3.1 Tauri 宿主（主线）
 
-已实现：
+- 单实例运行：实例锁 + 本地管道激活，二次启动切换到已有窗口。
+- 窗口与界面：原生无边框标题栏、通知区域图标、桌面悬浮标、关闭行为（询问 / 托盘 / 退出）、可配置启动显示模式。
+- 全局快捷键：固定版本 plugin 在 Rust setup 阶段注册，默认 `Ctrl+Alt+Space`，可在设置中修改。
+- 登录自启动：固定版本 autostart 插件在 Rust 侧同步，设置页可读取真实注册状态并发起修复；开发/烟测默认不产生副作用。
+- 设置持有：语言、外观、字体、关闭行为、启动显示模式、最近模块、模块启动授权均由 Rust 持有并原子写入共享 `settings.json`，保留未知旧字段并生成有限数量的损坏备份。
+- 字体：内置安全系统字体目录 + 以 SHA-256 ID 管理的用户导入字体，经受控 `qfont://` 协议读取，WebView 无法提交任意路径。
+- 宿主自更新：官方 Release 检查、安装器下载、sidecar/大小/SHA256 校验、安装记录与 production marker 复核，最后由用户确认并交给 Inno Setup 静默交接。
+- 会话日志：Rust 持有有界内存日志，Vue 通过 `get_session_logs` 读取，不暴露路径或句柄。
+- `.qmod` 导入：ZIP 结构校验、条目/大小/压缩比上限、路径穿越与 reparse point 拒绝、同卷原子发布。
+- 模块窗口：受控 `qmod://` 资源协议，每次请求重新校验模块目录边界。
+- 界面双语：简体中文与英文。
 
-- 模块 Manifest 扫描、校验和展示。
-- Load、Activate、Deactivate、Unload 生命周期。
-- 独立模块窗口管理。
-- 启动授权与模块载荷指纹验证。
-- 模块执行前最终指纹复验，降低 TOCTOU 风险。
-- 用户模块安全删除流程，并保留模块数据。
-- 点击模块安装目录，在资源管理器中打开。
-- 模块卡片响应式按钮布局和图标回退规则。
+### 3.2 模块运行时与生命周期
 
-### 3.2 Windows 登录自启动
+- 版本化协议信封：单行 UTF-8 JSON 帧，1 MiB 上限。
+- nonce-bound `hello` 握手：每次模块启动使用系统 RNG nonce，必须回显才标记就绪。
+- 驻留与激活分离：Load / Enable / Disable / Unload / Delete 是独立动作。
+- 打开界面与一次性操作不会隐式启用后台工作。
+- 未加载模块不会被陈旧 UI 调用、事件或排队快捷键回调重新拉起。
+- 授权启动的模块会显式 Load **并** Enable；Disable 不撤销用户独立的启动授权。
+- 协议损坏或超时是可见失败，不会被投影为成功停用。
+- 缺少生命周期契约的旧模块明确失败并要求更新，宿主不得把终止旧模块伪装成停用。
 
-自启动主体架构已经封板，当前包含：
+详见 [`docs/TAURI_MODULE_LIFECYCLE.md`](TAURI_MODULE_LIFECYCLE.md)。
 
-- 当前用户 Task Scheduler Logon Trigger 作为首选后端。
-- HKCU Run 作为兼容降级后端。
-- 当前用户、InteractiveToken、LeastPrivilege，不提权、不保存密码。
-- Pipe-first 单实例启动，激活通信早于设置读取和 DI 重型初始化。
-- 可见呈现先于模块扫描和启动模块恢复。
-- Preferred 与根目录 Fallback 任务路径。
-- 任务存在状态、健康状态、重复任务和外部禁用诊断。
-- 注册事务、原始任务 XML 快照和回滚。
-- Startup Test、Startup Health Journal 和阶段耗时。
-- Explorer 重启后的通知区域恢复。
-- 卸载时清理 QingToolbox owned Task 和 Run 项。
-- 自启设置页中的刷新、修复、测试和诊断。
+### 3.3 模块发现、授权与更新
 
-开机自启不再作为持续扩建的主线。后续只修复明确的发布阻塞错误。
+- 官方模块索引与每模块更新协议；SemVer 与宿主兼容性选择。
+- ETag / Last-Modified 条件请求与隔离缓存。
+- 手动下载 `.qmod`，含流式大小限制、长度验证与 SHA256 校验。
+- 用户明确开启的“随工具箱启动”授权，绑定递归覆盖依赖、原生库、配置、本地化与资源的完整载荷 SHA256；模块文件变化后必须重新确认。
+- Production / Development 中由用户确认的已安装模块更新：严格 `qmod.json` 暂存、运行时停用、原子替换、回滚与冷启动恢复。
+- 拒绝任意本地同 ID `.qmod` 覆盖，不支持自动安装。
 
-### 3.3 模块更新检测与下载
+必须准确描述为：
 
-已实现：
-
-- 官方模块索引和每模块更新协议。
-- SemVer 和宿主兼容性选择。
-- ETag、Last-Modified、隔离缓存和过期状态。
-- 手动下载 `.qmod`。
-- 流式大小限制与长度验证。
-- SHA256 校验。
-- Verified Package 隔离存储。
-- 下载取消、进度和状态展示。
-- 不自动加载、执行或安装已下载包。
-
-当前必须准确描述为：
-
-> 检测模块更新，并下载、验证更新包。
+> 检测模块更新，并在用户确认下由宿主验证、原子替换、失败回滚。
 
 不得描述为：
 
-> 自动更新或安装模块。
+> 自动更新或自动安装模块。
 
-### 3.4 发布基础设施
+### 3.4 发布与验证基础设施
 
-已实现：
+- Debug / Release 构建与 Vue typecheck/build。
+- Rust 宿主测试、协议 canary、模块窗口 IPC 烟测与八个原生模块烟测套件。
+- 本地环境契约测试与 Profile 隔离校验。
+- Tauri release candidate gate（`scripts/build-tauri-release-candidate.ps1`）：从干净 `toolbox` HEAD 执行全部官方模块/Everything/桌面验证、打包 `.qmod` 候选、构建生产宿主与 Tauri 专属 Inno 安装器、执行真实安装/宿主/卸载烟测，并把 manifest、安装器与 SHA256 sidecar 绑定回同一源码提交。
+- 安装器：固定版本 Inno Setup 供应链、逐用户安装、载荷 manifest 与逐文件 SHA256 校验。
+- GitHub Actions 双工作流：`tauri-validation` 与 `preview-release-validation`。
+- 隔离用户目录中的安装—卸载往返、Repair、降级保护与原地升级验证。
+- 精确最终 HEAD 的 `workflow_dispatch` 调度与结论核对工具。
 
-- Debug 与 Release 构建。
-- Module Load、Module Update、Module Package Download、Startup Reliability Smoke Test。
-- 本地环境契约测试。
-- 安装器内部 publish、Host Payload Manifest 和载荷审计。
-- Inno Setup 安装器。
-- 当前版本安装、卸载和用户数据保留 Roundtrip。
-- 固定 AppId 与自有 marker 的安全旧目录发现、自定义目录原地升级，以及运行中 Shell 的成功后恢复。
-- 安装器目录选择契约：合法显式 `/DIR` 优先于自动记录；无显式目录的有效记录冲突继续安全拒绝。
-- 安装前通过 `WizardDirValue()` 复验向导最终目录，并只恢复该最终目标中原本运行的 Shell。
-- Preview Release Candidate Gate。
+### 3.5 历史 WPF 发行线（冻结）
 
-Preview 2 当前已完成但仍需远程门禁确认的实现：
+0.2.x 线已完成并冻结，仅用于维护历史安装链与数据迁移：
 
-- 统一 `0.2.0-alpha` / `0.2.0.0` / `QingToolbox Preview 2` 发布元数据。
-- 固定应用身份、原目录覆盖、同版本 Repair 和 SemVer 降级保护。
-- 确定性 Host Payload Manifest、官方 Preview 1 宿主基线和精确废弃文件差集。
-- 官方 Preview 1 安装器及 SHA256 sidecar 解析与校验。
-- 原地升级、旧进程替换、用户状态与未知文件保留、单一卸载入口和快捷方式验证。
-- Startup Recovery 托管、Startup Test 记录分离、并发扫描共享和 Dispatcher 外最终 Hash 复验。
-- 精确最终 HEAD 的 `workflow_dispatch` 调度、run 身份核对和结论验证工具。
-- 可记录 Automated Pass、Manual Pass、Blocked、Not Run 和 Failed 的 Preview 2 人工验收清单。
+- Task Scheduler 首选、HKCU Run 降级的可靠登录自启动。
+- Pipe-first 启动、可见呈现先于模块发现、Startup Health Journal 与 Explorer 恢复。
+- Host Payload Manifest 与精确废弃文件清理。
+- 固定 AppId 的原地覆盖升级、同版本 Repair、SemVer 降级保护。
+- B1 可恢复模块更新事务核心与 B2.1 生命周期适配（**Engineering Complete — Frozen**，仅限 Development / ModuleTest）。
+- Plan 013 宿主自更新（**Implementation Complete / Frozen**）。
 
-## 4. 当前发布目标：QingToolbox Preview 2
+## 4. 当前发布目标
 
-建议版本：
+**Tauri 主线**：推进 `0.3.1-alpha`，在 0.3.0-alpha 之后继续补齐用户可见体验与生产加固，并在授权后推进签名与真实用户迁移验收。
 
-- 产品版本：`0.2.0-alpha`
-- FileVersion：`0.2.0.0`
-- 显示名称：`QingToolbox Preview 2`
-- 主题：`Reliable Startup & Module Lifecycle / 可靠启动与模块生命周期`
+**已达成**：`0.3.0-alpha`（2026-09-25）完成首次 Tauri 宿主公开预览，且在原有产品 AppId 下实现了从 WPF 的原地迁移。
 
-Preview 2 的产品目标不是完成全部自动更新，而是证明：
+## 5. 已冻结的计划
 
-> QingToolbox 能可靠启动、原地升级、安全管理模块，并保留用户状态。
+| 计划 | 状态 |
+| --- | --- |
+| Plan 013 宿主自更新 | Implementation Complete / Frozen |
+| B1 模块更新事务核心 | Engineering Complete — Frozen（仅 Development / ModuleTest） |
+| B2.1 生命周期适配与 TextTools 金丝雀 | Engineering Complete — Frozen |
+| UI-1 ~ UI-4A / Plan 005–011 | Engineering Complete — Frozen |
+| Plan 012 Development Web 本地化 | Implementation Complete |
+| Plan 015 Qing Launcher 模块 | 已随 0.3.0-alpha 交付 |
+| Plan 016 Web 模块宿主版本边界 | 已由 0.2.6 / 0.2.7-alpha 交付 |
 
-## 5. 已完成计划：Plan 013 宿主自更新
+编号计划的完整索引见 [`plans/README.md`](../plans/README.md)。
 
-Plan 013 状态为 **Implementation Complete / Frozen**，完整边界见
-[`docs/plans/PLAN_013_HOST_SELF_UPDATE.md`](plans/PLAN_013_HOST_SELF_UPDATE.md)。
-**013A**、**013B**、**013C** 与 **013D** 已达到 Implementation Complete，Plan 013 现已 Frozen：正式 Windows Release 仅分发安装器与
-同名 `.sha256`；Production 原生工作区可异步检查官方 Release，并通过 24 小时缓存与条件请求
-显示非阻塞更新提示，由用户明确下载、校验和确认，再将安装器交给现有 Inno Setup 完成原地覆盖。
-用户手动运行更高版本安装器、同版本 Repair 与降级保护继续由同一安装器路径支持。
+除发现明确 P0/P1 缺陷外，不再对已冻结边界追加普通边缘加固。
 
-## 5.1 Preview 1 → Preview 2 原地升级门禁（保留的发布基础设施）
-
-这是 Preview 2 发布工作的保留门禁，不代表当前功能开发主线；未执行的人工验收仍按真实状态保留为 `Not Run` 或 `Blocked`。
-
-### 5.1.1 版本与发布说明
-
-- 将宿主版本统一升级到 `0.2.0-alpha` / `0.2.0.0`。
-- 安装器显示 `Preview 2`。
-- 新增 `docs/releases/0.2.0-alpha.md`。
-- 更新 README 和 CHANGELOG。
-- 不修改 `docs/releases/0.1.0-alpha.md`。
-- 不创建 tag 或 Release。
-
-### 5.1.2 真实旧版资产
-
-- 只从 GitHub 官方 `v0.1.0-alpha` Release 获取旧安装器。
-- 必须验证官方 SHA256 sidecar。
-- 不从第三方来源下载。
-- 不提交旧安装器、旧 ZIP 或下载缓存。
-- 可以提交由官方资产生成的旧版宿主文件基线 JSON。
-- 旧 Release 缺少安装器或 Hash 时必须明确阻塞，不得猜测或伪造。
-
-### 5.1.3 原地覆盖升级测试
-
-新增自动化流程：
-
-1. 将官方 `v0.1.0-alpha` 安装到隔离目录。
-2. 创建设置、用户模块、模块数据、缓存、启动授权和未知安装目录文件 Sentinel。
-3. 在同一目录运行当前 `0.2.0-alpha` 安装器。
-4. 不先卸载旧版。
-5. 验证旧进程关闭，新宿主文件替换。
-6. 验证设置、模块、数据、缓存和启动授权保留。
-7. 验证未知用户文件保留。
-8. 验证废弃的旧版宿主自有文件被精确清理。
-9. 验证只有一个安装目录和一个 Inno 卸载入口。
-10. 再次运行同版本安装器，验证 Repair Install。
-11. 卸载 Preview 2，验证安装目录删除而用户数据继续保留。
-
-### 5.1.4 安装器兼容保证
-
-- 固定 `AppId`，Preview 1 与 Preview 2 必须被识别为同一应用。
-- 显式启用 `UsePreviousAppDir=yes`。
-- 安装器不得通过先卸载旧版实现升级。
-- 用户设置、模块、数据和缓存不得放入 `{app}`。
-- 运行中的旧 Shell 可以关闭，但安装结束后只能运行新版。
-- 不得产生重复开始菜单项、桌面快捷方式或卸载入口。
-
-### 5.1.5 降级保护
-
-从 `0.2.0-alpha` 开始的新安装器必须拒绝覆盖更高版本。
-
-允许：
-
-- `0.1.0-alpha → 0.2.0-alpha`
-- `0.2.0-alpha → 0.2.0-alpha` 修复安装
-- `0.2.0-alpha → 更高版本`
-
-拒绝：
-
-- `0.2.0-beta → 0.2.0-alpha`
-- `0.2.0 → 0.2.0-alpha`
-- `0.3.0-alpha → 0.2.0-alpha`
-
-版本比较必须使用 SemVer 语义，不能使用字符串比较。
-
-已发布的 `v0.1.0-alpha` 安装器无法追溯加入保护，这一点必须在文档中明确。
-
-### 5.1.6 Host Payload Manifest 与废弃文件清理
-
-生成 `host-payload.manifest.json`，记录宿主拥有的文件：
-
-- `relativePath`
-- `size`
-- `sha256`
-- `category`
-
-Manifest 不包含用户数据、具体模块、缓存、日志、DevTools、PDB 或源码。
-
-通过旧版官方基线与当前 Manifest 的差集生成精确废弃文件清单：
-
-- 只删除旧官方基线中存在、而当前版本不再拥有的路径。
-- 禁止通配符清空安装目录。
-- 禁止删除未知文件、相似文件名、用户模块或用户数据。
-- 所有路径必须通过绝对路径、穿越、ADS、UNC 和目录边界校验。
-
-### 5.1.7 启动和扫描残余边界
-
-随升级门禁一起收尾，不再扩展新能力：
-
-- 同步 COM 回滚超时后，底层 Recovery 必须继续被托管和观察。
-- Recovery 未完成时，不得开始第二个注册修改事务。
-- Startup Test 的 `AttemptId` 与 `StartupTestId` 必须统一为一条逻辑记录。
-- Startup Test 结果与正式注册健康状态分开展示。
-- 启动扫描和手动刷新相撞时共享同一个底层扫描任务，不能以 `IsScanning` 直接返回并错报成功。
-- 启动模块执行前的最终 Hash 复验不得占用 WPF Dispatcher。
-
-## 6. Preview 2 发布门禁
+## 6. 发布门禁
 
 ### 6.1 自动化门禁
 
-必须通过：
+Tauri 主线必须通过：
 
-- `dotnet restore`
-- Debug build
-- Release build
-- Startup Reliability Smoke Test
-- Module Update Smoke Test
-- Module Package Download Smoke Test
-- Module Load Smoke Test
-- Local Environment Contracts
-- Installer Roundtrip
-- Preview 1 → Preview 2 Upgrade Test
-- Repair Install Test
-- Downgrade Guard Test
-- Host Payload Manifest Verification
-- Obsolete Host File Cleanup Test
-- Unknown Install File Preservation Test
-- Installer Build
-- Asset Manifest Verification
-- Preview RC Gate
+```powershell
+pwsh ./scripts/verify-tauri.ps1
+pwsh ./scripts/verify-tauri.ps1 -BuildDesktop -SmokeDesktop -SmokeEverything
+pwsh ./scripts/build-tauri-release-candidate.ps1
+```
 
-CI 和 RC Gate 必须使用精确最终 HEAD。没有旧版官方安装器时，不得声称完整 Upgrade Gate 或 RC Gate 已通过。
+覆盖范围：Rust `cargo check` 与宿主测试、Vue typecheck/build、协议 canary、八个原生模块烟测、Release 资源暂存、模块窗口 IPC 烟测、`.qmod` 打包、生产宿主构建、Tauri 专属 Inno 安装器与真实安装/宿主/卸载烟测。
 
-Preview 2 自动化升级门禁已经实现，并至少有一个历史提交通过了对应精确 SHA 的隔离远程验证；历史运行证据记录在
-`docs/PREVIEW_2_ACCEPTANCE_CHECKLIST.md`，不能代表后续最终 HEAD。每个新候选必须在全部修改提交并推送后，使用
-`scripts/verify-preview-final-head.ps1` 调度 `workflow_dispatch`，严格核对 event、branch、head SHA 和最终结论。
-真实升级测试会启动 Production 模式宿主，而普通 Windows 账户的 Known Folder 无法通过环境变量可靠重定向，因此
-本地安全门禁不得为测试强制关闭用户 Shell 或触及真实 Production 数据；该测试只在一次性 GitHub Actions 账户中执行。
-所有未实际执行的人工升级、登录启动、Repair、卸载和代表性 Windows 环境项目必须保持 **Not Run** 或 **Blocked**。
-项目所有者已明确决定暂时推迟剩余 Preview 2 人工发布验收，并授权进入后续开发。这不表示未执行的原地升级、登录重登、Repair、卸载或代表性环境项目通过；这些项目继续保持 `Not Run`。阶段 A 的 `.qmod` 离线结构验证与安全 Staging 后来已经完成；当前后续方向以用户可见工具、模块信息展示、设置体验和现代化 UI 为优先。
+历史 WPF 线保留门禁：`dotnet restore`、Debug/Release 构建、Module Load / Module Update / Module Package Download / Startup Reliability Smoke Test、Local Environment Contracts、Installer Roundtrip、原地升级与 Repair、Host Payload Manifest 校验、废弃文件清理与未知文件保留。
+
+CI 与 RC Gate 必须使用精确最终 HEAD。没有对应官方旧安装器时，不得声称完整 Upgrade Gate 或 RC Gate 已通过。
 
 ### 6.2 人工验收
 
-发布前至少在测试机执行：
+以下项目必须保持 **Not Run** 或 **Blocked**，除非在验收清单中另有记录：
 
-- 安装正式 v0.1.0-alpha。
-- 创建真实测试设置和用户模块。
-- 开启登录自启动。
-- 使用 Preview 2 安装器原地覆盖。
-- 验证设置、模块、数据和登录任务保留。
-- 注销并重新登录，确认可见启动。
-- 执行同版本修复安装。
-- 卸载并确认 Task、Run 和卸载入口清理。
-- 确认用户模块和模块数据保留。
+- 真实 Windows 普通用户环境下的安装、升级、Repair 与卸载。
+- 从已安装 WPF 版本的首次迁移。
+- 登录自启动与重新登录后的可见启动。
+- 签名与 SmartScreen 行为。
+- 多显示器、跨 DPI 与 Windows 11 Snap 弹层。
+- 代表性环境验收。
 
-未实际执行的人工项目不得报告为 Pass。
+未实际执行的人工项目不得报告为 Pass，自动化结果不得替代人工结果。
 
-## 7. 原始 Preview 2 范围不包含的内容（历史）
+## 7. 明确不包含的范围
 
-以下项目在原始 Preview 2 规划时明确延后。该历史范围不等于当前仓库仍缺少这些能力；其中宿主应用内自更新后来已由独立的 Plan 013 完成并冻结，且不改变尚未执行的 Preview 2 人工验收状态：
+当前版本明确不提供：
 
-- `.qmod` 自动解压和安装。
-- 自动替换当前模块。
-- Pending Update。
-- 模块更新失败回滚。
-- QingToolbox 宿主应用内一键自更新（后来由 Plan 013 完成）。
+- 代码签名与数字签名信任链。
+- 稳定版 Module API 与 0.x 二进制兼容承诺。
+- 独立 NuGet SDK、`dotnet new` 模板与 `qtool` CLI。
+- 模块自动安装（所有更新必须由用户明确确认）。
+- 任意本地同 ID `.qmod` 覆盖。
 - 第三方模块更新源。
-- 数字签名信任链。
-- Windows Service。
-- SYSTEM 或管理员任务。
-- 稳定版 Module API。
+- Windows Service、SYSTEM 或管理员级任务。
+- Qmod 包签名。
 
-## 8. Preview 2 之后的路线
+## 8. 后续路线
 
-### 8.1 阶段 A：qmod 离线结构验证与安全 Staging
+### 8.1 阶段 C：Module API 与 SDK（0.4.0-alpha 方向）
 
-目标：验证 `.qmod`，但仍不安装到正式模块目录。
+- 冻结稳定 Module API 边界。
+- 发布独立 NuGet SDK。
+- 提供模块模板与端到端开发文档。
+- 明确 API 兼容性策略。
+- 完善权限声明与能力模型。
+- 提供版本化测试宿主。
 
-要求包括：
+### 8.2 Tauri 模块开发体验补齐
 
-- 将 qmod 视为 ZIP，但禁止加载或执行 DLL。
-- 校验压缩包结构、必需文件和包内 Manifest。
-- 防御 ZIP Bomb：总解压大小、单文件大小、Entry 数量和压缩比上限。
-- 拒绝绝对路径、盘符、UNC、`..`、ADS、保留设备名、尾随点空格和大小写碰撞。
-- 拒绝 Symlink、Reparse Point 和特殊文件。
-- 严格比对模块 ID、版本、Module API、选中 Release、包大小和 SHA256。
-- 仅解压到环境隔离的临时 Staging。
-- 完整验证后原子重命名为已验证 Staging。
-- 不写入 `UserModulesDirectory`。
-- 不调用 Import、Load 或 Activate。
+当前 Tauri 模块开发需要读者自行组合多处资料。已知缺口：
 
-阶段 A 已达到 **Engineering Complete**：稳定包句柄和完整官方 Release 身份约束共享；本地与跨进程发布锁按物理 root/environment/module/version 隔离，独立 Worker 覆盖竞争、持锁崩溃恢复和取消，且锁等待不占解压容量。Incoming candidate 在原子移动前完成 metadata、Manifest、路径、长度与 Hash 的稳定句柄认证，`Directory.Move` 与 committed 标记位于同一线性化提交区；Caller 取消只能发生在提交前或提交后，不能观察到已 Move 但未 committed 的状态。移动后的取消、日志及锁 marker 诊断清理不能改写成功，未来复用仍执行同等严格认证。Staging/UserModules 配置根要求绝对、非卷根、物理不重叠且无 Reparse。Staging 仍不等于安装，不接触正式模块目录，也不加载或执行 DLL。阶段 B 已完成并冻结 B1 工程边界，Preview 2 剩余人工发布验收继续为 `Not Run`。安全边界见 `docs/QMOD_STAGING_SECURITY.md`。
+- 缺少 Rust 模块模板（现有模板属于历史 WPF 进程内模块）。
+- 缺少一份端到端「新建 Tauri 模块」指南。
+- `modules` 分支仍停留在 WPF 模块线，需要在主文档中持续标注其状态。
 
-### 8.2 阶段 B：0.3.0-alpha 模块事务更新
+### 8.3 M4：退役 WPF
 
-阶段 B 已开始。B1 的可恢复事务安装核心现为 **Engineering Complete — Frozen**：可信 Verified
-Staging 重新认证、物理根/environment/module 跨进程锁、同卷 candidate、旧目录备份、原子
-promotion、静态安装复验、失败回滚和崩溃恢复均由独立 smoke test 覆盖。除发现明确安全缺陷外，
-不再扩展 B1 内核。核心仍只允许 `Development`/`ModuleTest` 执行；B2.1 已接入真实 Shell
-生命周期适配器、启动恢复 Gate 和真实 TextTools 金丝雀，但 Production UI 与事务执行仍未开放。
-Preview 2 未执行的人工验收继续为 `Not Run`。
-完整边界见 `docs/MODULE_UPDATE_TRANSACTION.md`。
+- 对比 WPF 与 Tauri 的冷启动、空闲内存、隐藏/恢复延迟与模块启动延迟基线指标（该对比数据集仍为 pending）。
+- 在所有官方模块通过一致性检查清单后，移除 WPF 宿主与旧的进程内加载器。
 
-B1 的提交、内容和运行时边界已封闭：事务 Marker 与 backup 保留到 `Committed` schema 4 Journal
-原子落盘；Journal temp 由同一文件句柄写入、Flush、复核，并通过 Journal Namespace Handle 加相对
-叶名替换。旧 schema 3 只按严格旧字段布局和安全现场迁移，歧义现场保留且要求人工恢复。
-installed→backup、candidate→installed、installed→failed-candidate 和 backup→installed 均通过
-源目录句柄、目标父目录句柄和相对叶名完成 native rename，不存在 `Directory.Move` 降级。
+## 9. 提交与验证工作流
 
-树认证使用包含对象 File ID、长度和 SHA256 的双遍快照及有界 `SecureTreeLease`；Manifest 字节来自
-同一认证文件句柄。Windows 不允许在子文件拒绝 delete sharing 时重命名其祖先目录，因此最终边界会在
-持有全部句柄时再次校验，随后释放子句柄、保留 root 身份句柄完成原子 rename，并立即复核完整快照；
-无法通过的后置状态不会被提交为可信版本。新版 Runtime Restore 的进程内副作用不依赖 Progress
-Journal 写入成功才被观察，false、异常或写入失败都会先查询、静默并验证卸载 v2，再恢复 v1。
-五个真实子进程窗口包含真正已写入 payload 的 candidate copy 中途崩溃。
-
-进入 B2.1 时，真实生命周期适配器和 Development/ModuleTest-only TextTools 金丝雀已经接入；
-当时宿主自更新、Production 安装、普通用户自动安装和 Production 模块替换尚未开始。宿主自更新随后由 Plan 013 独立完成并冻结；Production 模块事务边界没有因此开放。
-
-目标流程：
-
-`Verified qmod → Staging → 关闭旧模块 → 卸载 → 原子替换 → 启动验证 → 失败回滚`
-
-必须具备：
-
-- 当前模块目录快照或可恢复备份。
-- 原子目录替换。
-- 运行中窗口和模块生命周期协调。
-- 安装后 Manifest、指纹和启动验证。
-- 失败自动回滚。
-- 崩溃恢复和 Pending Transaction。
-- 用户数据目录与模块程序目录严格分离。
-
-第一个真实更新样本建议使用低风险的 `TextTools` 金丝雀版本，而不是 PowerGuard。
-
-### 8.2.1 B2.1 lifecycle integration status
-
-B1 and B2.1 are **Engineering Complete — Frozen**. B2.1 includes the real Shell lifecycle adapter,
-an explicit startup recovery/execution gate, module-attributed RecoveryRequired blocking, and a
-pinned real TextTools canary for Development/ModuleTest. Cold-start recovery defers runtime intent
-until recovery has been inspected and discovery has completed, so recovery does not execute module
-DLLs early.
-
-Real TextTools WPF/BAML testing proved that closing the view and completing logical unload does not
-reliably release a collectible ALC. ADR-001 therefore fixes the runtime boundary: UI-free service
-modules use `InProcessCollectible + None`; real WPF view modules use one trusted out-of-process
-ModuleHost per module; legacy in-process WPF remains compatible but cannot use a live transaction.
-The capability is verified from the manifest, never guessed by creating a view.
-
-This did not complete all of B2. At the time B2.1 was frozen, Production transaction execution, a
-Production module-update button, automatic qmod installation, and host self-update were not yet
-available. Host self-update was subsequently completed and frozen under Plan 013; the Production
-module transaction boundary remains closed. Preview 2 manual acceptance items that were not executed
-remain `Not Run`.
-
-The B2.1 local verification matrix passed. Implementation commit
-`1293402ac2c13964b55cbdf488d7582c752036ba` passed Preview validation run `29865749109`, including
-the real TextTools process canary, host-only packaging, installer roundtrip, and Preview upgrade.
-The next engineering stage is **UI-1 Development-only Web Shell Foundation**; it must preserve the
-frozen runtime, transaction, and capability boundaries.
-
-### 8.3 阶段 C：0.4.0-alpha Module API 与 SDK
-
-- 稳定 Module API 边界。
-- 独立 NuGet SDK。
-- 模块模板与开发文档。
-- API 兼容性策略。
-- 权限声明和能力模型。
-- 版本化测试宿主。
-
-### 8.4 已完成并冻结：Plan 013 宿主应用内自更新
-
-宿主自更新复用现有安装器覆盖能力：
-
-`检测宿主更新 → 下载并验证安装器 → 用户确认 → 启动安装器 → Inno Setup 接管关闭 → 原地覆盖并重新打开`
-
-宿主不直接替换自身文件。Plan 013 已完成并冻结；文件替换、运行中 Shell 接管与恢复继续由现有 Inno Setup 完成。
-
-## 9. 提交和验证工作流
-
-每次 Codex 任务开始前：
+每次开始工作前执行：
 
 ```powershell
 git branch --show-current
@@ -498,31 +272,19 @@ git log -15 --format=fuller
 
 规则：
 
-- 本地存在修改时，先审查并接管，禁止覆盖。
+- 本地存在修改时，先审查并在其基础上继续，禁止覆盖或丢弃。
 - 本地 HEAD 领先远程时，先检查已有提交，不得 amend。
 - 推送前执行 `git diff --check`。
 - 只显式添加本轮源码、测试、脚本和文档。
 - 不提交 `artifacts/`、`publish/`、`bin/`、`obj/`、安装器、ZIP、PDB、日志、真实注册表数据、真实 Task XML、设置或测试用户数据。
 - 推送后确认 `HEAD == origin/toolbox`。
-- 使用 `gh run list` 和 `gh run watch` 核对精确最终 SHA。
+- 使用 `gh run list` 与 `gh run watch` 核对精确最终 SHA。
 
-推荐提交风格：
+提交信息规范见 [`CONTRIBUTING.md`](../CONTRIBUTING.md)。
 
-```text
-[+] add ...
+## 10. 项目上下文恢复提示词
 
-[fix] ...
-
-[test] ...
-
-[docs] ...
-```
-
-纯文档提交可以使用四段 `[docs]`，但仍保持无 BOM、多段式和可审计语义。
-
-## 10. 项目对话迁移提示词
-
-下面的提示词用于在新的 ChatGPT/Codex 对话中恢复项目上下文。粘贴后，新环境应先读取本文件和远程仓库，再开始任何修改。
+下面的提示词用于在新的对话中恢复项目上下文。粘贴后，新环境应先读取本文件、根 `README.md` 与远程仓库状态，再开始任何修改。
 
 ```text
 你正在接手 QingMo-A/QingToolbox 项目。
@@ -530,99 +292,62 @@ git log -15 --format=fuller
 请先读取并遵守仓库中的：
 
 docs/DEVELOPMENT_PLAN.md
-docs/plans/PLAN_013_HOST_SELF_UPDATE.md
+README.md
+docs/TAURI_MIGRATION.md
+protocol/README.md
 
 仓库：QingMo-A/QingToolbox
-宿主开发分支：toolbox
-模块协议分支：modules
+默认分支与宿主开发分支：toolbox（当前宿主版本 0.3.1-alpha，最新发布 v0.3.0-alpha）
+模块源码分支：modules（历史 WPF 模块线，独立维护）
 
-当前项目是一个 .NET 10 / WPF 的 Windows 模块化工具箱。
+当前项目主线是 Rust + Tauri 2 + Vue 3 的 Windows 模块化工具箱。
+宿主持有窗口、托盘、设置、模块发现与进程监督；模块是独立 Rust 进程，
+通过 protocol/ 中的版本化 JSON 行协议通信，打包为 .qmod。
+旧 .NET/WPF 宿主仅作为尚未退役的历史安装链保留，新宿主不会加载旧 DLL。
 
 最重要的架构约束：
 
-1. 宿主不得引用具体模块程序集。
-2. 模块扫描阶段只读取 module.json 和本地化资源，禁止加载 DLL。
-3. Production、Development、ModuleTest 的设置、模块、缓存、Mutex 和 Pipe 必须隔离。
-4. 单个模块失败不能终止宿主。
-5. 未经我明确授权，不得创建 tag 或 GitHub Release。
-6. 不得修改已有 v0.1.0-alpha tag 或 Release。
-7. 不得 amend、force push、reset --hard 或使用 --no-verify。
-8. 不得覆盖本地未提交修改。
-9. modules 分支与 toolbox 分支独立，除非任务明确要求，否则不要修改 modules。
-10. 所有远程验证必须匹配精确最终 HEAD SHA。
+1. 宿主不得引用任何具体模块的实现代码。
+2. 宿主与模块之间只允许存在 protocol/ 定义的版本化进程协议。
+3. 模块只能调用清单 operations / events 白名单中声明的操作。
+4. 宿主不得建立通用文件系统、进程或窗口桥；Vue 不得提交任意路径。
+5. Production、Development、ModuleTest 的设置、模块、缓存、Mutex 和 Pipe 必须隔离。
+6. 单个模块失败不能终止宿主。
+7. 未经我明确授权，不得创建 tag 或 GitHub Release。
+8. 不得修改已有 v0.1.0-alpha tag 或 Release。
+9. 不得 amend、force push、reset --hard 或使用 --no-verify。
+10. 不得覆盖本地未提交修改。
+11. modules 分支与 toolbox 分支独立，除非任务明确要求，否则不要修改 modules。
+12. 所有远程验证必须匹配精确最终 HEAD SHA。
 
-当前已经完成：
+当前已经具备的能力：
 
-- 模块扫描、加载、激活、卸载和独立窗口。
-- 启动授权与模块载荷指纹。
-- 安全删除用户模块并保留模块数据。
-- 打开模块安装目录。
-- Task Scheduler 首选、Registry Run 降级的可靠登录自启动。
-- Pipe-first 启动、可见呈现先于模块发现、启动健康与测试、Explorer 恢复和卸载清理。
-- 官方模块更新检测。
-- qmod 手动下载、大小限制和 SHA256 验证。
-- 当前只下载并验证更新包，不自动解压、安装、Import、Load 或 Activate。
-- 开发环境隔离、Smoke Tests、安装器和 Preview RC Gate。
+- Tauri 宿主：单实例、托盘、悬浮标、全局快捷键、登录自启动、Rust 持有设置与字体。
+- 宿主自更新：官方 Release 校验 + SHA256 + Inno Setup 交接。
+- 模块运行时：nonce 握手、1 MiB 帧限制、独立的 Load/Enable/Disable/Unload/Delete。
+- 模块发现、启动授权（完整载荷 SHA256）与用户确认的模块更新事务。
+- .qmod 导入与安全暂存。
+- 八个原生模块：Qing Launcher、QingTransfer、Screen Pin、Window Topmost、
+  PowerGuard、Text Tools、Qing PDF，以及验证用 Web Module Canary。
+- 双 CI 工作流、release candidate gate 与安装器供应链。
 
-项目所有者已明确推迟剩余 Preview 2 人工发布验收。未执行项目继续保持 `Not Run`。
-Plan 013 已完成并冻结，除 P0/P1 外不得继续追加普通边缘加固。正式 Windows Release 只分发
-安装器及其同名 SHA256。Production 原生界面可以检查官方 GitHub Release；用户明确点击后才会
-下载安装器。下载受大小上限约束，并严格验证 sidecar、文件长度和 SHA256；安装前会再次复核，
-随后以 `/SILENT /NORESTART` 交给现有 Inno Setup。QingToolbox 不直接覆盖自身文件，也不会抢先
-退出。用户手动下载更高版本安装器仍可原地覆盖，同版本 Repair 和 SemVer 降级保护继续有效。
-Development 和 ModuleTest 不访问真实宿主更新源。
+当前仍未完成：
 
-当前已发布 0.2.1-alpha：
-
-- Version：0.2.1-alpha
-- AssemblyVersion：0.2.1.0
-- FileVersion：0.2.1.0
-- 显示名称：QingToolbox 0.2.1-alpha Preview 2
-- Tag：v0.2.1-alpha
-- Release source SHA：44374fb96f0ac8d78f71540d2d30d86c1fe6f31a
-- GitHub Actions Run：30615658843（success）
-
-以下 0.2.0-alpha 条目仅保留为未发布的 Preview 2 内部开发目标历史，不代表官方 Tag、Release 或升级来源：
-
-目标版本：
-
-- Version：0.2.0-alpha
-- AssemblyVersion：0.2.0.0
-- FileVersion：0.2.0.0
-- 显示名称：QingToolbox Preview 2
-- 主题：Reliable Startup & Module Lifecycle
-
-Preview 2 自动化能力已经完成：官方旧安装器和 sidecar 校验、真实原地覆盖、用户状态与未知文件保留、固定 AppId、
-Repair、SemVer 降级保护、Host Payload Manifest、精确废弃文件清理、Startup Recovery 收尾以及隔离 GitHub Actions
-门禁。每个候选仍必须对精确最终 HEAD 调度并通过远程验证。
-
-当前必须完成的发布验收：
-
-1. 使用人工验收清单记录真实 Windows 普通用户环境。
-2. 人工验证 Preview 1 原地升级、登录启动、同版本 Repair 和卸载。
-3. 记录安装器 SHA256、Windows 版本、测试人员和非隐私证据位置。
-4. 保持未执行项目为 Not Run 或 Blocked，不以自动化结果替代人工结果。
-5. 剩余验收被明确推迟而非通过；阶段 A 可以继续，但不得进入正式模块替换、回滚或 0.3.0-alpha 发布。
-
-原始 Preview 2 规划明确不包含（历史范围）：
-
-- qmod 自动安装。
-- 模块自动替换或回滚。
-- 宿主应用内自更新；该能力后来由独立 Plan 013 完成并冻结。
-- 第三方更新源。
-- Windows Service、SYSTEM 或管理员自启。
-- 稳定版 Module API。
+- 代码签名与真实用户迁移验收。
+- 稳定 Module API、NuGet SDK、模块模板与 qtool CLI。
+- Rust 模块模板与端到端「新建 Tauri 模块」指南。
+- WPF 宿主的正式退役（M4）。
 
 后续路线以用户可见产品体验为优先：
 
 A. 推进真实用户可见工具。
-B. 改善模块信息展示与管理体验，但不开放冻结的 Production 模块事务边界。
+B. 改善模块信息展示与管理体验，但不开放冻结的模块事务边界。
 C. 完善设置体验。
 D. 继续现代化 UI，同时保持现有宿主、模块与 Web 安全边界。
 
-Plan 013 的 013A/013B/013C/013D 已完成并冻结；除 P0/P1 外，不再追加普通边缘加固。
-
-不得自动把后续主线切回 B1、B2.1、Web 激活协议、安装器供应链扩建、新的宿主更新状态机或 Update Helper。
+Plan 013 与 B1/B2.1 已完成并冻结；除 P0/P1 外不再追加普通边缘加固。
+不得自动把后续主线切回 B1、B2.1、Web 激活协议、安装器供应链扩建、
+新的宿主更新状态机或 Update Helper。
 
 每次开始工作先执行：
 
@@ -639,15 +364,13 @@ git log -15 --format=fuller
 
 提交沿用四段式风格，例如：
 
-[+] add verified Preview 1 to Preview 2 upgrade validation
+[+] add verified Tauri module delivery
+[fix] restore Tauri host dependencies in release validation
+[test] cover module lifecycle transitions in isolated profiles
+[docs] align module development entry points
 
-[fix] preserve owned payloads and startup state across installation
-
-[test] cover in-place upgrades, repair installs and downgrade guards
-
-[docs] define Preview 2 installation compatibility guarantees
-
-提交必须 UTF-8 无 BOM。推送到 origin/toolbox，不得 force push。只有精确最终 HEAD 的 GitHub Actions conclusion=success 才能报告远程验证通过。
+提交必须 UTF-8 无 BOM。推送到 origin/toolbox，不得 force push。
+只有精确最终 HEAD 的 GitHub Actions conclusion=success 才能报告远程验证通过。
 ```
 
 ## 11. 维护本文档
@@ -661,4 +384,5 @@ git log -15 --format=fuller
 - 明确延后的内容。
 - 当前版本和验证门禁。
 
-本文档是路线说明，不替代代码、测试、Release Notes 或实际 CI 结果。
+本文档是路线说明，不替代代码、测试、Release Notes 或实际 CI 结果。发布层面的事实以
+[`CHANGELOG.md`](../CHANGELOG.md)、[`docs/releases/`](releases/) 与 GitHub Actions 实际结论为准。

@@ -1,21 +1,75 @@
 # Changelog
 
+本文件按时间倒序记录 QingToolbox 的版本变更：最新版本在最上方。
+
+- 各版本的完整发布说明见 [`docs/releases/`](docs/releases/)。
+- Tag、安装包与 SHA256 sidecar 见 [GitHub Releases](https://github.com/QingMo-A/QingToolbox/releases)。
+- 当前发行线状态与路线见 [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md)。
+
 ## Unreleased
 
-### 0.2.9-alpha candidate (not published)
+### 0.3.1-alpha（开发中）
 
-- Reduces stalls when restoring the Shell, floating badge, and Web modules after long background sessions by suspending hidden WebView2 surfaces, pausing hidden native animations, coalescing deferred module events, and bounding concurrent module-window lifecycle work.
-- Enables explicit, user-confirmed Production updates for already installed modules from host-authorized official metadata, with strict package staging, runtime quiescing, atomic replacement, rollback, and cold-start recovery.
-- Accepts omitted or explicit-null maximum host-version metadata while retaining strict rejection of malformed bounds.
-- The host installer remains installer-only and does not bundle concrete modules.
-- Candidate commit, installer size/SHA256, and exact-HEAD Preview validation evidence remain to be recorded after the final `0.2.9-alpha` candidate gate.
+- 宿主版本前进到 `0.3.1-alpha`，开始 0.3.0-alpha 之后的迭代。
+- 修复 Windows 签出时的固定 qpdf 校验字节比较，避免换行符转换导致校验失败。
+- 在发布验证中恢复 Tauri 宿主依赖，确保 Release 校验链完整。
+- CI 发布烟测改为非交互执行，避免流水线等待输入。
+- 恢复独立的 Tauri 模块交付路径。
 - Real-user installation, upgrade, Repair, uninstall, signature/SmartScreen, and representative-environment acceptance remain unrecorded or CI-only until the acceptance checklist is completed.
+
+## 0.3.0-alpha - 2026-09-25
+
+首个 Rust/Tauri 2/Vue 3 宿主预览，在原有 QingToolbox Windows 产品身份下取代 WPF 宿主。**未签名**，Windows 可能提示未知发布者或触发 SmartScreen。
+
+- 模块改为进程隔离：每个模块运行在独立 Rust 进程中，通过版本化 JSON 行协议与宿主通信；旧 WPF DLL 模块不兼容。
+- 提供独立的 Load / Enable / Disable / Unload / Delete 动作；打开界面与一次性操作不会隐式启用后台工作。
+- 全新 Vue 工作区：自定义标题栏、无边框悬浮标，以及改进的字体应用与模块窗口行为。
+- 随包交付原生模块：Qing Launcher 0.3.0、QingTransfer 0.3.0、Screen Pin 0.2.0、Window Topmost 0.2.0、PowerGuard 0.2.0、Text Tools 0.2.0、Qing PDF 0.1.0，以及用于验证的 Web Module Canary 0.1.0。
+- Qing Launcher 0.3.0：居中透明浮层、桌面/自定义/首字母视图、拖拽排序与文件夹、原生图标加载、快捷键录制与内置 Everything 搜索反馈。
+- 沿用既有 QingToolbox 产品 AppId，因此可原地覆盖已有的 WPF 或 Tauri 安装，而不是产生第二条卸载记录。首次从 WPF 迁移时，安装器会先备份已注册安装与共享设置，并退役旧宿主的自启动注册。
+- 用户设置与模块数据保留。安装器保留 Tauri 载荷之外的旧 WPF 文件以便回滚；备份位于 `%LOCALAPPDATA%\QingToolbox-MigrationBackups`，确认迁移结果前请勿删除。
+- 安装包：`QingToolbox-0.3.0-alpha-win-x64-tauri-setup.exe` 及同名 SHA256。
+- 已知限制：未代码签名；真实用户 WPF 升级、修复安装、卸载与 SmartScreen 行为可能因环境而异。旧 WPF 模块更新目录不重定向到这些不兼容的原生包。
+
+## 0.2.9-alpha - 2026-08-21
+
+继已发布 `v0.2.8-alpha` 之后的宿主独立预览版本。重点降低长时间后台运行后恢复主面板、悬浮标与 Web 模块时的卡顿，并在 Production 中开放由宿主完整验证、用户明确确认的官方模块覆盖更新。
+
+- 通过挂起隐藏的 Shell 与模块 WebView2 表面、暂停隐藏的原生动画、合并延迟的模块事件，并限制模块窗口生命周期的并发，减少前台恢复卡顿。
+- 允许在 Production 与 Development 中，依据宿主授权的官方元数据对已安装模块执行用户确认更新：包含大小与 SHA256 校验、严格 `qmod.json` 暂存、运行时停用、原子替换、回滚与冷启动恢复。
+- 接受省略或显式为 null 的最大宿主版本约束，同时继续严格拒绝畸形边界。
+- 沿用针对上一公开版本 `v0.2.8-alpha` 的宿主自有资源精确清理；用户设置、模块、数据、缓存与未知文件不在清理范围内。
+- 宿主 Release 继续保持安装器独占；具体模块（含 Qing Launcher 0.2.2）继续以 `.qmod` 独立交付，不随宿主安装器或宿主 Release 捆绑。
+- 发布证据：预交接源代码提交 `d4b30d5d9672fc54f0b08446157d2456406c59d1`；Preview 验证运行 `32462342007` 通过，覆盖安装器往返、Repair、Web Ready 握手、用户状态保留与 `v0.2.8-alpha → v0.2.9-alpha` 原地升级。已验证安装器 `QingToolbox-0.2.9-alpha-win-x64-setup.exe`，58,299,475 字节，SHA256 `F5496DF3479322D6F46544BEBE78B22DF5DBFED39FD8BE5FE22EFF9212142CC7`。
+- 已知限制：仍未签名，SmartScreen 可能告警；官方模块更新由用户发起，不支持自动安装或同 ID 本地 `.qmod` 覆盖。
 
 ## 0.2.8-alpha - 2026-08-16
 
 - Added optional Web Module host window presentation and controlled external file-drop hooks.
 - Preserved Standard Web module windows while enabling transparent Overlay modules without changing the Web bridge protocol.
+- Preserved the host-owned WebUI asset cleanup and acknowledged Ready handshake introduced in `v0.2.7-alpha`.
 - Kept concrete modules independently distributed as `.qmod` packages outside the host installer and host Release.
+- 已知限制：仍未签名；模块自动安装与宿主安装器无关，需独立进行。
+
+## 0.2.7-alpha - 2026-08-15
+
+- 修复安装器升级遗留陈旧哈希 WebUI 资源、进而触发原生 WPF 回退的问题。安装器现在拥有并维护不可变的 WebUI 资源树，只清理上一宿主 payload manifest 中记录的废弃文件。
+- 升级验证要求 Web Shell 完成既有的 Ready 握手；仅显示可响应的原生回退不算升级成功。
+- 用户设置、模块、模块数据、缓存与未知用户文件不在宿主自有清理范围内。
+- 具体模块不随宿主安装器或宿主 Release 捆绑，继续以 `.qmod` 独立交付。
+- 已知限制：仍未签名；Production 模块自动安装尚不可用；Web 资源确实损坏或不可用时，按设计仍回退到原生 WPF 工作区。
+
+## 0.2.6-alpha - 2026-08-15
+
+> 该版本没有独立的发布说明文件（`docs/releases/` 中缺失 `0.2.6-alpha.md`）。以下条目依据 `v0.2.5-alpha..v0.2.6-alpha` 提交区间整理。
+
+- 建立 Web 模块 UI 宿主基础：模块后端桥、加载表面与图标、呈现上下文同步、关闭后重开，以及事件编组到 UI 线程。
+- 新增 Web 模块窗口的 overlay 呈现方式并保持置顶，同时不改动普通 Web 模块窗口行为与 Web 桥协议。
+- 修复隐藏 WebView 的加载死锁，以及预览升级后 Web 工作区未能保持就绪的问题。
+- 新增已安装 Web Shell 的回退诊断，并按最新结果归类其日志。
+- 修复本地启动器自修复行为。
+- 记录 Web 模块宿主版本边界与模块适配检查，并加入模块计划索引与 Android 移动端壳层路线文档。
+- 已知限制：仍未签名；Production 模块自动安装尚不可用。
 
 ## 0.2.5-alpha - 2026-08-11
 
@@ -162,7 +216,9 @@
 - Added Windows volume/File-ID ownership across candidate promotion and backup recovery, stable-handle journal I/O, physical LocksRoot binding, and shared no-follow tree traversal.
 - Added rogue-root, directory replacement, journal/lock junction, pre-lifecycle reparse, and corrupt-promoted-candidate crash recovery coverage.
 
-## Unreleased
+## Historical development log (untagged)
+
+> 以下条目在 0.2.x 发行线被拆分并打 Tag 之前累积，原样保留以便追溯。它们不属于任何已发布版本。
 
 - Preserved installed ownership markers and backups until the committed journal is durable, and made every post-commit cleanup failure non-rollbackable and recoverable.
 - Unified staging and transaction locks on crash-recoverable exclusive Windows handles, added stable-handle staging-to-candidate copying, strict tree verification, reserved module identities, and physically isolated roots.

@@ -1,5 +1,11 @@
 # 开发环境
 
+> 本文包含两条路径：**当前 Tauri 主线**（上半部分），以及**历史 WPF 宿主维护**
+> （从「旧 WPF 宿主维护环境」开始的下半部分）。
+>
+> 新开发请只使用 Tauri 主线。分支纪律、提交规范与验证流程见 [`../CONTRIBUTING.md`](../CONTRIBUTING.md)；
+> 环境隔离契约见 [`DEVELOPMENT_ENVIRONMENTS.md`](DEVELOPMENT_ENVIRONMENTS.md)。
+
 ## 当前主线：Rust + Tauri 2 + Vue 3
 
 工具箱本体的新开发环境位于 `QingToolbox.Tauri`。它使用 Rust/Tauri 2
@@ -22,6 +28,17 @@ pwsh ./scripts/verify-tauri.ps1
 旧 WPF 章节仅用于维护历史宿主和尚未切换的安装器；需要进入该路径时使用根目录
 `run-legacy-wpf.bat`，它不是新架构的默认入口。
 
+## Git commit messages
+
+提交信息规范见 [`../CONTRIBUTING.md`](../CONTRIBUTING.md) 的「提交信息规范」一节
+（四段式标签 `[+]` / `[-]` / `[fix]` / `[refactor]` / `[docs]` / `[style]` / `[chore]` / `[test]`，
+UTF-8 无 BOM）。
+
+---
+
+> **以下为历史 WPF 宿主维护内容。**
+> 仅用于维护历史安装链与数据迁移。当前 Tauri 宿主不会加载 WPF 模块，新开发请勿依赖本节。
+
 ## 旧 WPF 宿主维护环境
 
 - Visual Studio 2026
@@ -36,37 +53,6 @@ pwsh ./scripts/verify-tauri.ps1
 dotnet build
 dotnet run --project QingToolbox.Shell
 ```
-
-## Git commit messages
-
-Commit messages must describe the actual scope of the change. Use one tagged
-line for each logical change instead of compressing unrelated work into one
-generic summary line. When a commit contains multiple kinds of work, include
-multiple tagged lines.
-
-Allowed tags:
-
-```text
-[+]         Added functionality, files, or modules
-[-]         Removed functionality, files, or dependencies
-[fix]       Bug, build, or reference fixes
-[refactor]  Internal restructuring without behavior changes
-[docs]      Documentation changes
-[style]     UI, styling, animation, or formatting changes
-[chore]     Engineering configuration, dependencies, scripts, or maintenance
-[test]      Test changes
-```
-
-Example:
-
-```text
-[style] redesign shell dashboard
-[+] add qmod package import
-[docs] document module packaging workflow
-```
-
-The first line should summarize the primary change. Add further tagged lines
-for other meaningful changes included in the same commit.
 
 ## Deploy development modules
 
