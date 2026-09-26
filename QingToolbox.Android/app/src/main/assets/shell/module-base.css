@@ -1,0 +1,240 @@
+/*
+ * QingToolbox mobile module base stylesheet.
+ *
+ * Served by the shell to every module page, before the module's own CSS. The shell
+ * palette arrives as the --qing-* custom properties injected right above this sheet, so
+ * a module inherits the active theme without knowing anything about Android themes.
+ */
+
+:root {
+    --qing-bg: #14161c;
+    --qing-surface: #1c1f27;
+    --qing-surface-2: #232733;
+    --qing-text: #e8eaf0;
+    --qing-text-dim: #9aa2b4;
+    --qing-border: #333a4a;
+    --qing-primary: #7c5cff;
+    --qing-primary-soft: rgba(124, 92, 255, 0.16);
+    --qing-on-primary: #ffffff;
+    --qing-danger: #e0546a;
+    --qing-radius: 14px;
+    --qing-gap: 12px;
+}
+
+* {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--qing-bg);
+    color: var(--qing-text);
+    font-family: -apple-system, "Noto Sans SC", "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    padding: 14px 14px 28px;
+}
+
+.qing-card {
+    background: var(--qing-surface);
+    border: 1px solid var(--qing-border);
+    border-radius: var(--qing-radius);
+    padding: 14px;
+    margin-bottom: var(--qing-gap);
+}
+
+.qing-title {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0 0 4px;
+}
+
+.qing-subtitle {
+    font-size: 13px;
+    color: var(--qing-text-dim);
+    margin: 0;
+}
+
+.qing-label {
+    display: block;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--qing-text-dim);
+    margin: 0 0 6px;
+}
+
+.qing-input,
+.qing-textarea,
+.qing-select {
+    width: 100%;
+    background: var(--qing-bg);
+    color: var(--qing-text);
+    border: 1px solid var(--qing-border);
+    border-radius: 10px;
+    padding: 11px 12px;
+    font: inherit;
+    outline: none;
+}
+
+.qing-textarea {
+    min-height: 112px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.qing-input:focus,
+.qing-textarea:focus,
+.qing-select:focus {
+    border-color: var(--qing-primary);
+}
+
+.qing-toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 12px 0 0;
+}
+
+.qing-button {
+    flex: 1 1 auto;
+    min-height: 46px;
+    padding: 0 16px;
+    border-radius: 11px;
+    border: 1px solid var(--qing-border);
+    background: var(--qing-surface-2);
+    color: var(--qing-text);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.qing-button:active {
+    opacity: 0.82;
+}
+
+.qing-button[disabled] {
+    opacity: 0.45;
+}
+
+.qing-button-primary {
+    background: var(--qing-primary);
+    border-color: var(--qing-primary);
+    color: var(--qing-on-primary);
+}
+
+.qing-button-danger {
+    background: transparent;
+    border-color: var(--qing-danger);
+    color: var(--qing-danger);
+}
+
+.qing-segments {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+.qing-segments button {
+    flex: 1 1 46%;
+    min-height: 42px;
+    border-radius: 10px;
+    border: 1px solid var(--qing-border);
+    background: transparent;
+    color: var(--qing-text-dim);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.qing-segments button[aria-pressed="true"] {
+    border-color: var(--qing-primary);
+    color: var(--qing-primary);
+    background: var(--qing-primary-soft);
+}
+
+.qing-rows {
+    margin: 0;
+    padding: 0;
+}
+
+.qing-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 14px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--qing-border);
+}
+
+.qing-row:last-child {
+    border-bottom: none;
+}
+
+.qing-row-label {
+    color: var(--qing-text-dim);
+    font-size: 13px;
+    margin: 0;
+}
+
+.qing-row-value {
+    margin: 0;
+    text-align: right;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.qing-mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+    background: var(--qing-bg);
+    border: 1px solid var(--qing-border);
+    border-radius: 10px;
+    padding: 10px;
+    margin: 6px 0 0;
+}
+
+.qing-error {
+    color: var(--qing-danger);
+    font-size: 13px;
+    margin: 10px 0 0;
+}
+
+.qing-note {
+    color: var(--qing-text-dim);
+    font-size: 12px;
+    margin: 8px 0 0;
+}
+
+.qing-empty {
+    color: var(--qing-text-dim);
+    font-size: 13px;
+    text-align: center;
+    padding: 18px 0;
+}
+
+.qing-image {
+    display: block;
+    width: 100%;
+    max-width: 320px;
+    margin: 12px auto 0;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 8px;
+}
+
+.qing-hidden {
+    display: none !important;
+}

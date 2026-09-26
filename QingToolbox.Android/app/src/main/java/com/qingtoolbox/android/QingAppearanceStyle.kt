@@ -178,3 +178,16 @@ fun QingAppearanceStyle.primaryBrush(): Brush? =
     } else {
         null
     }
+
+/**
+ * Representative accent of an appearance, used wherever the theme has to be shown as a
+ * colour rather than applied — swatches in the appearance picker.
+ */
+val AppearanceTheme.swatchColor: Color
+    get() = when (this) {
+        AppearanceTheme.QING_DEFAULT -> Color(0xFF006C4C)
+        AppearanceTheme.NEON_CIRCUIT -> Color(0xFF006874)
+        AppearanceTheme.GREENLINE -> Color(0xFF426500)
+        AppearanceTheme.AURORA_FLOW -> Color(0xFF465D91)
+        AppearanceTheme.QING_NOVA -> Color(0xFF4C9AFF)
+    }

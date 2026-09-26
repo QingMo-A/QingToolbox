@@ -84,6 +84,12 @@ data class DeviceInfoSummaryLabels(
     val unavailable: String,
 )
 
+/**
+ * Formatting shared by the device page and the module bridge.
+ *
+ * Values are produced once here so the shell and any module that asks for a device
+ * snapshot render the same numbers in the same shape.
+ */
 object DeviceInfoFormat {
     fun abiList(abis: List<String>, unavailable: String): String =
         abis.map { it.trim() }.filter { it.isNotEmpty() }.ifEmpty { listOf(unavailable) }.joinToString(", ")

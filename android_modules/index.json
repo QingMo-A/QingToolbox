@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 1,
+  "generatedBy": "tools/pack_android_modules.py",
+  "modules": [
+    {
+      "id": "qing.device-info",
+      "version": "0.1.0",
+      "apiVersion": 1,
+      "runtimeType": "web",
+      "displayName": {
+        "en-US": "Device Info",
+        "zh-CN": "设备信息"
+      },
+      "description": {
+        "en-US": "Public system, hardware and app properties.",
+        "zh-CN": "查看公开的系统、硬件与应用信息。"
+      },
+      "capabilities": [
+        "device.info",
+        "clipboard.write"
+      ],
+      "file": "qing.device-info-0.1.0.qmod",
+      "sizeBytes": 2750,
+      "payloadBytes": 5945,
+      "sha256": "325af82bebdf29d5acae6d8318aa756bf55fcf5baddb10c7fa09be54ddb4b5ab",
+      "payloadHash": "e2fae1c89c317f02bff19d7d746da4cb5a36728653553dfc9055a025356f3479"
+    },
+    {
+      "id": "qing.file-hash",
+      "version": "0.1.0",
+      "apiVersion": 1,
+      "runtimeType": "web",
+      "displayName": {
+        "en-US": "File Hash",
+        "zh-CN": "文件哈希"
+      },
+      "description": {
+        "en-US": "Pick a file and calculate its MD5, SHA-1 and SHA-256.",
+        "zh-CN": "选择文件并计算 MD5、SHA-1 与 SHA-256。"
+      },
+      "capabilities": [
+        "file.hash",
+        "clipboard.write"
+      ],
+      "file": "qing.file-hash-0.1.0.qmod",
+      "sizeBytes": 2871,
+      "payloadBytes": 6712,
+      "sha256": "762ce6914e8a0d075f8a49e686386da0cc08a4858789128bf5f03d704b5f21bc",
+      "payloadHash": "9e15a3d86d8767c651e8e4fa797e63429aeec0f62eebc3dd8c3d0ed30fb6f2f9"
+    },
+    {
+      "id": "qing.qr-code",
+      "version": "0.1.0",
+      "apiVersion": 1,
+      "runtimeType": "web",
+      "displayName": {
+        "en-US": "QR Code",
+        "zh-CN": "二维码"
+      },
+      "description": {
+        "en-US": "Turn text into a QR code and share the image.",
+        "zh-CN": "将文本生成二维码并分享图片。"
+      },
+      "capabilities": [
+        "graphics.qr",
+        "graphics.share",
+        "clipboard.write"
+      ],
+      "file": "qing.qr-code-0.1.0.qmod",
+      "sizeBytes": 2717,
+      "payloadBytes": 6358,
+      "sha256": "457e0323bbf1e7442a6ba76e35255d790b887f3fd43047d9fc5e50aecb826a7c",
+      "payloadHash": "3b667f53e1d74f79b20a75323245ce7bca4739f8dec666650d664e659e196cc7"
+    },
+    {
+      "id": "qing.text-codec",
+      "version": "0.1.0",
+      "apiVersion": 1,
+      "runtimeType": "web",
+      "displayName": {
+        "en-US": "Text Codec",
+        "zh-CN": "文本编解码"
+      },
+      "description": {
+        "en-US": "Encode and decode Base64 or URL text.",
+        "zh-CN": "编解码 Base64 或 URL 文本。"
+      },
+      "capabilities": [
+        "text.codec",
+        "clipboard.write"
+      ],
+      "file": "qing.text-codec-0.1.0.qmod",
+      "sizeBytes": 2901,
+      "payloadBytes": 7275,
+      "sha256": "d148c72a9dbce7aa49ef1650fbad70bcce4165d8d2f5ffd18f47dceafc562b36",
+      "payloadHash": "4498f5a4cc139b6d6f87fbd6f03ae5f2de69e3c94035aca5a14f163c03a6e74f"
+    }
+  ]
+}

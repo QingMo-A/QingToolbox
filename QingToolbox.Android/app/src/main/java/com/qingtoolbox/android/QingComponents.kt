@@ -340,6 +340,8 @@ fun QingCheckbox(
 fun QingTopAppBar(
     title: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    navigationIcon: (@Composable () -> Unit)? = null,
+    actions: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val style = LocalQingAppearance.current
     val shape = RoundedCornerShape(
@@ -358,6 +360,8 @@ fun QingTopAppBar(
             .clip(shape)
             .border(style.borderWidth, style.cardBorderColor, shape),
         title = title,
+        navigationIcon = navigationIcon ?: {},
+        actions = actions ?: {},
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = containerColor,
             scrolledContainerColor = containerColor,

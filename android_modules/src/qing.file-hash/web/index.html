@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>File Hash</title>
+</head>
+<body>
+    <section class="qing-card">
+        <h1 class="qing-title" id="title"></h1>
+        <p class="qing-subtitle" id="subtitle"></p>
+        <div class="qing-toolbar">
+            <button type="button" class="qing-button qing-button-primary" id="pick"></button>
+        </div>
+        <p class="qing-error qing-hidden" id="error"></p>
+    </section>
+
+    <section class="qing-card">
+        <p class="qing-label" id="file-label"></p>
+        <p class="qing-empty" id="empty"></p>
+        <div id="file-details" class="qing-hidden">
+            <div class="qing-rows">
+                <div class="qing-row">
+                    <p class="qing-row-label" id="name-label"></p>
+                    <p class="qing-row-value" id="name-value"></p>
+                </div>
+                <div class="qing-row">
+                    <p class="qing-row-label" id="size-label"></p>
+                    <p class="qing-row-value" id="size-value"></p>
+                </div>
+            </div>
+            <div id="hashes"></div>
+            <div class="qing-toolbar">
+                <button type="button" class="qing-button" id="copy"></button>
+            </div>
+        </div>
+    </section>
+
+    <p class="qing-note" id="note"></p>
+
+    <script src="app.js"></script>
+</body>
+</html>

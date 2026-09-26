@@ -1,19 +1,22 @@
 package com.qingtoolbox.android
 
-import androidx.annotation.StringRes
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
-enum class TextCodecOperation(
-    @StringRes val labelRes: Int,
-) {
-    BASE64_ENCODE(R.string.operation_base64_encode),
-    BASE64_DECODE(R.string.operation_base64_decode),
-    URL_ENCODE(R.string.operation_url_encode),
-    URL_DECODE(R.string.operation_url_decode),
+/**
+ * The conversions the text codec performs.
+ *
+ * The names are the module-facing ones: a web module names an operation on the bridge and
+ * carries its own labels, so the shell never needs a display name for these.
+ */
+enum class TextCodecOperation {
+    BASE64_ENCODE,
+    BASE64_DECODE,
+    URL_ENCODE,
+    URL_DECODE,
 }
 
 enum class TextCodecError {

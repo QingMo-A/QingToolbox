@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Android shell
+
+- Added the Android module runtime: `.qmod` packages are imported through the system file picker, verified, and stored in app-private storage. Importing copies a module; it never runs it. Loading, unloading and deleting are separate actions on the module page.
+- Added a capability bridge as the only path from a module to Android. A module declares what it needs in its manifest; undeclared calls are refused, and every request to a host other than the module's own package is refused so a module is offline by construction.
+- Added the first-party Android module packages — Text Codec, Device Info, QR Code and File Hash — under `android_modules`, with a deterministic packer that signs each archive with a payload digest the shell verifies on import.
+- Added search and a loading-state filter (all / loaded / not loaded) to the modules page, and moved importing to a `+` action in the title bar.
+- Removed the four built-in module screens and their catalog strings: the shell now ships no tool of its own, matching the desktop host.
+- Removed the descriptive filler from the home page, the modules page and the title bar.
+- Guarded the module contract with unit tests that read the repository's real `.qmod` packages, so the packer and the importer cannot drift apart.
+
 ## 0.2.5-alpha - 2026-08-11
 
 - Added five composable appearance presets with distinct shared-control states across light and dark modes.

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>QR Code</title>
+</head>
+<body>
+    <section class="qing-card">
+        <h1 class="qing-title" id="title"></h1>
+        <p class="qing-subtitle" id="subtitle"></p>
+
+        <p class="qing-label" id="input-label" style="margin-top:14px"></p>
+        <textarea id="input" class="qing-textarea" spellcheck="false" autocapitalize="off"
+                  autocorrect="off"></textarea>
+
+        <div class="qing-toolbar">
+            <button type="button" class="qing-button qing-button-primary" id="generate"></button>
+            <button type="button" class="qing-button" id="clear"></button>
+        </div>
+        <p class="qing-error qing-hidden" id="error"></p>
+    </section>
+
+    <section class="qing-card">
+        <p class="qing-label" id="preview-label"></p>
+        <p class="qing-empty" id="empty"></p>
+        <img class="qing-image qing-hidden" id="image" alt="">
+        <div class="qing-toolbar qing-hidden" id="actions">
+            <button type="button" class="qing-button" id="share"></button>
+            <button type="button" class="qing-button" id="copy"></button>
+        </div>
+    </section>
+
+    <p class="qing-note" id="note"></p>
+
+    <script src="app.js"></script>
+</body>
+</html>

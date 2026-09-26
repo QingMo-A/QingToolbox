@@ -1,0 +1,20 @@
+{
+  "_note": "Source manifest. Keys starting with an underscore are authoring notes; the packer strips them and adds the computed payloadHash.",
+  "schemaVersion": 1,
+  "id": "qing.file-hash",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "displayName": {
+    "en-US": "File Hash",
+    "zh-CN": "文件哈希"
+  },
+  "description": {
+    "en-US": "Pick a file and calculate its MD5, SHA-1 and SHA-256.",
+    "zh-CN": "选择文件并计算 MD5、SHA-1 与 SHA-256。"
+  },
+  "runtimeType": "web",
+  "entry": "web/index.html",
+  "glyph": "\ud83e\uddee",
+  "accent": "#3B7BE0",
+  "capabilities": ["file.hash", "clipboard.write"]
+}
