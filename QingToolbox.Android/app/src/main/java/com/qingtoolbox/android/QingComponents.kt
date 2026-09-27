@@ -3,6 +3,7 @@ package com.qingtoolbox.android
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -23,6 +24,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -36,20 +38,30 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
-private val QingTransparent = Color.Transparent
+/**
+ * How far a disabled control fades.
+ *
+ * Material's own value for this is internal, so it is restated here. It has to match, or a
+ * disabled hand-painted button would not dim the same amount as the Material controls around
+ * it — which is exactly the kind of small inconsistency this file exists to avoid.
+ */
+private const val QingDisabledAlpha = 0.38f
 
 private fun qingShape(radius: androidx.compose.ui.unit.Dp): Shape =
     RoundedCornerShape(radius)
@@ -179,35 +191,59 @@ fun QingPrimaryButton(
     val style = LocalQingAppearance.current
     val shape = qingShape(style.controlCornerRadius)
     val brush = style.primaryBrush()
-    val backgroundModifier = if (brush != null && enabled) {
-        Modifier.background(brush, shape)
-    } else {
-        Modifier
+    if (brush == null) {
+        Button(
+            onClick = onClick,
+            modifier = modifier.defaultMinSize(minHeight = 48.dp),
+            enabled = enabled,
+            shape = shape,
+            border = BorderStroke(style.borderWidth, style.controlBorderColor),
+            elevation = ButtonDefaults.buttonElevation(
+                defaultElevation = style.controlElevation,
+                pressedElevation = style.controlElevation + style.pressedEmphasis.dp,
+            ),
+            content = content,
+        )
+        return
     }
-    Button(
-        onClick = onClick,
+    // Painted by hand rather than handed to `Button` as a container colour, for two reasons.
+    //
+    // Material's `Button` is a `Surface`, and a `Surface` draws its own fill over the whole
+    // of its shape. Painting the gradient with a `Modifier.background` underneath it therefore
+    // did not paint the button: the gradient showed only in the ring between the modifier's
+    // outline and the inset the Surface's content happened to occupy, so the label sat on a
+    // paler inner rectangle with a visible seam around it. The preview swatch never had the
+    // fault because it is a plain `Box` with no Surface of its own to collide with.
+    //
+    // `ButtonDefaults` also tints its container per elevation state, which would fight a
+    // gradient it cannot represent. Driving the whole control from a `Box` removes both
+    // problems instead of stacking workarounds on top of them.
+    Box(
         modifier = modifier
             .defaultMinSize(minHeight = 48.dp)
-            .then(backgroundModifier),
-        enabled = enabled,
-        shape = shape,
-        border = BorderStroke(style.borderWidth, style.controlBorderColor),
-        colors = if (brush != null && enabled) {
-            ButtonDefaults.buttonColors(
-                containerColor = QingTransparent,
-                // The fill under this text is the gradient, not `primary`, so `onPrimary`
-                // is the wrong ink for it — see `gradientContentColor`.
-                contentColor = style.gradientContentColor,
+            .clip(shape)
+            .background(brush)
+            .border(style.borderWidth, style.controlBorderColor, shape)
+            .clickable(
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick,
             )
-        } else {
-            ButtonDefaults.buttonColors()
-        },
-        elevation = ButtonDefaults.buttonElevation(
-            defaultElevation = style.controlElevation,
-            pressedElevation = style.controlElevation + style.pressedEmphasis.dp,
-        ),
-        content = content,
-    )
+            .padding(horizontal = 24.dp, vertical = 8.dp)
+            .alpha(if (enabled) 1f else QingDisabledAlpha),
+        contentAlignment = Alignment.Center,
+    ) {
+        // `Button` normally publishes its content colour for the label to inherit; painting
+        // the control by hand means supplying that here, or the text would keep whatever
+        // colour the surrounding card set.
+        CompositionLocalProvider(LocalContentColor provides style.gradientContentColor) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                content = content,
+            )
+        }
+    }
 }
 
 @Composable

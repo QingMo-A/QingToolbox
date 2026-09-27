@@ -21,3 +21,6 @@ coverage/
 .gradle/
 local.properties
 /QingToolbox.Android/**/build/
+
+# Kotlin compiler scratch space, written on failed compiles
+.kotlin/
