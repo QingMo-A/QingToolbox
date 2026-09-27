@@ -345,11 +345,7 @@ private fun HomeScreen(
     modifier: Modifier = Modifier,
 ) {
     val languageTag = currentLanguageTag()
-    val heroContentColor = if (LocalQingAppearance.current.primaryBrush() != null) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    }
+    val heroContentColor = LocalQingAppearance.current.contentColorOnAccent()
     val moduleRows = remember(modules) { modules.chunked(MODULE_GRID_COLUMNS) }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -370,7 +366,9 @@ private fun HomeScreen(
                         Icon(
                             imageVector = Icons.Outlined.AutoAwesome,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
+                            // Sits on the gradient like the headline beside it, so it takes
+                            // the same ink rather than `onPrimary`.
+                            tint = heroContentColor,
                         )
                     }
                     Column(modifier = Modifier.weight(1f)) {
@@ -712,11 +710,7 @@ private fun SettingsScreen(
     val cardCornerRadius = LocalQingAppearance.current.cardCornerRadius
     val controlCornerRadius = LocalQingAppearance.current.controlCornerRadius
     val controlBorderColor = LocalQingAppearance.current.controlBorderColor
-    val heroContentColor = if (LocalQingAppearance.current.primaryBrush() != null) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    }
+    val heroContentColor = LocalQingAppearance.current.contentColorOnAccent()
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
@@ -738,7 +732,9 @@ private fun SettingsScreen(
                         Icon(
                             imageVector = Icons.Outlined.Tune,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
+                            // Sits on the gradient like the headline beside it, so it takes
+                            // the same ink rather than `onPrimary`.
+                            tint = heroContentColor,
                         )
                     }
                     Column(modifier = Modifier.weight(1f)) {
@@ -781,7 +777,10 @@ private fun SettingsScreen(
                             Icon(
                                 imageVector = Icons.Outlined.Palette,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimary,
+                                // The swatch is an arbitrary accent, not the scheme's
+                                // `primary`, so no fixed role colour is guaranteed to sit on
+                                // it. Pick black or white from the swatch's own luminance.
+                                tint = inkOn(currentAppearance.swatchColor),
                             )
                         }
                     },

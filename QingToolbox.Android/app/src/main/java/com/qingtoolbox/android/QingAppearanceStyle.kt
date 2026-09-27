@@ -1,6 +1,8 @@
 package com.qingtoolbox.android
 
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Brush
@@ -32,6 +34,17 @@ data class QingAppearanceStyle(
     val focusEmphasis: Float,
     val primaryGradient: List<Color>,
     val usePrimaryGradient: Boolean,
+    /**
+     * Ink for content sitting on [primaryGradient].
+     *
+     * This cannot be `MaterialTheme.colorScheme.onPrimary`. `onPrimary` is defined as the
+     * ink for a background painted in `primary`, but a gradient is not `primary` — it is a
+     * separate, usually much brighter ramp. In a dark scheme `onPrimary` is a dark tint,
+     * so using it here produced grey text on bright silver and on the aurora sweep: text
+     * that read as dirty next to the surface it sat on. Each theme states the ink its own
+     * gradient needs instead, and themes without a gradient never read this.
+     */
+    val gradientContentColor: Color,
     val glowColor: Color,
     val glowStrength: Float,
     val navigationStyle: QingNavigationStyle,
@@ -51,6 +64,7 @@ data class QingAppearanceStyle(
             focusEmphasis = 0.20f,
             primaryGradient = listOf(Color(0xFF006C4C)),
             usePrimaryGradient = false,
+            gradientContentColor = Color.White,
             glowColor = Color.Transparent,
             glowStrength = 0f,
             navigationStyle = QingNavigationStyle.STANDARD,
@@ -82,6 +96,7 @@ internal fun qingAppearanceStyle(
             focusEmphasis = 0.20f,
             primaryGradient = listOf(primary),
             usePrimaryGradient = false,
+            gradientContentColor = colors.onPrimary,
             glowColor = Color.Transparent,
             glowStrength = 0f,
             navigationStyle = QingNavigationStyle.STANDARD,
@@ -101,6 +116,7 @@ internal fun qingAppearanceStyle(
             focusEmphasis = 0.28f,
             primaryGradient = listOf(primary, Color(0xFF0087FF)),
             usePrimaryGradient = true,
+            gradientContentColor = Color.White,
             glowColor = primary,
             glowStrength = 0.14f,
             navigationStyle = QingNavigationStyle.CIRCUIT,
@@ -120,6 +136,7 @@ internal fun qingAppearanceStyle(
             focusEmphasis = 0.24f,
             primaryGradient = listOf(primary, Color(0xFFB5F263)),
             usePrimaryGradient = false,
+            gradientContentColor = Color.White,
             glowColor = primary,
             glowStrength = 0.06f,
             navigationStyle = QingNavigationStyle.TERMINAL,
@@ -143,6 +160,7 @@ internal fun qingAppearanceStyle(
                 Color(0xFF9B7BFF),
             ),
             usePrimaryGradient = true,
+            gradientContentColor = Color.White,
             glowColor = Color(0xFF6C9DFF),
             glowStrength = 0.12f,
             navigationStyle = QingNavigationStyle.SOFT,
@@ -166,6 +184,7 @@ internal fun qingAppearanceStyle(
                 Color(0xFF7587E6),
             ),
             usePrimaryGradient = true,
+            gradientContentColor = Color.White,
             glowColor = Color(0xFF4C9AFF),
             glowStrength = 0.06f,
             navigationStyle = QingNavigationStyle.NOVA,
@@ -193,6 +212,10 @@ internal fun qingAppearanceStyle(
                 Color(0xFF9AA5B0),
             ),
             usePrimaryGradient = true,
+            // A bright silver ramp: dark ink is the only thing that stays legible on it, and
+            // the dark tint `onPrimary` resolves to in a dark scheme is what produced the
+            // grey text this replaced.
+            gradientContentColor = Color(0xFF1C2530),
             glowColor = Color.Transparent,
             glowStrength = 0f,
             navigationStyle = QingNavigationStyle.METAL,
@@ -220,6 +243,7 @@ internal fun qingAppearanceStyle(
                 Color(0xFFE73C7E),
             ),
             usePrimaryGradient = true,
+            gradientContentColor = Color.White,
             glowColor = Color(0xFF6F63FF),
             glowStrength = 0.18f,
             navigationStyle = QingNavigationStyle.AURORA,
@@ -234,6 +258,32 @@ fun QingAppearanceStyle.primaryBrush(): Brush? =
     } else {
         null
     }
+
+/**
+ * Ink for content drawn on this style's gradient, or on the flat `primaryContainer` when it
+ * has none.
+ *
+ * Both cases are the "filled with the accent" surface, so both are answered here rather than
+ * at each call site: they were previously resolved inline next to every hero card, which is
+ * how the primary button ended up reaching for `onPrimary` and painting grey on silver.
+ */
+@Composable
+fun QingAppearanceStyle.contentColorOnAccent(): Color =
+    if (primaryBrush() != null) gradientContentColor else MaterialTheme.colorScheme.onPrimaryContainer
+
+/**
+ * Black or white, whichever stays legible on [background].
+ *
+ * Used where the fill is an arbitrary accent rather than one of the scheme's roles — the
+ * appearance swatches. No role colour is guaranteed to contrast with those, so the choice is
+ * derived from the colour itself. The weights are the standard perceptual ones: the eye
+ * reads green as much brighter than blue at equal luminance, and a flat average would put
+ * white on mid-greens where it does not belong.
+ */
+fun inkOn(background: Color): Color {
+    val luminance = 0.299f * background.red + 0.587f * background.green + 0.114f * background.blue
+    return if (luminance > 0.6f) Color(0xFF1A1C1E) else Color.White
+}
 
 /**
  * Representative accent of an appearance, used wherever the theme has to be shown as a

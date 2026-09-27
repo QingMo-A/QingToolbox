@@ -195,7 +195,9 @@ fun QingPrimaryButton(
         colors = if (brush != null && enabled) {
             ButtonDefaults.buttonColors(
                 containerColor = QingTransparent,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
+                // The fill under this text is the gradient, not `primary`, so `onPrimary`
+                // is the wrong ink for it — see `gradientContentColor`.
+                contentColor = style.gradientContentColor,
             )
         } else {
             ButtonDefaults.buttonColors()
@@ -553,7 +555,10 @@ fun QingThemePreview(
                 shape = shape,
                 brush = primaryBrush,
                 color = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
+                // This swatch is what showed the defect most plainly: it paints the gradient
+                // and inked it with `onPrimary`, so in a dark scheme the label on a bright
+                // aurora sweep came out grey.
+                contentColor = style.contentColorOnAccent(),
                 modifier = Modifier.weight(1f),
             )
             PreviewSwatch(
