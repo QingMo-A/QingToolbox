@@ -17,7 +17,7 @@
 [![Material 3](https://img.shields.io/badge/Material%203-M3-757575?style=flat-square&logo=materialdesign&logoColor=white)](https://m3.material.io/)
 [![AGP](https://img.shields.io/badge/AGP-8.6.1-3DDC84?style=flat-square&logo=gradle&logoColor=white)](https://developer.android.com/build)
 
-[![Unit tests](https://img.shields.io/badge/unit%20tests-70%20passing-brightgreen?style=flat-square)](#测试)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-72%20passing-brightgreen?style=flat-square)](#测试)
 [![Modules](https://img.shields.io/badge/modules-4%20official-8957E5?style=flat-square)](android_modules)
 [![Branch](https://img.shields.io/badge/branch-toolbox--android-lightgrey?style=flat-square)](https://github.com/QingMo-A/QingToolbox/tree/toolbox-android)
 
@@ -84,7 +84,7 @@ QingToolbox Android 是 QingToolbox 的移动端外壳，与 Windows 桌面宿�
 **外壳**
 
 - 四个平级目的地：首页、模块、设备、设置；系统返回键语义正确。
-- 五套外观主题（Qing Default / Neon Circuit / Greenline / Aurora Flow / Qing Nova），各带独立的圆角、描边与主色梯度。
+- 七套外观主题（Qing Default / Neon Circuit / Greenline / Aurora Flow / Qing Nova / Brushed Metal / Aurora），各带独立的圆角、描边与主色梯度。
 - 简体中文与英文界面，可跟随系统或手动指定。
 - 目的地之间无过渡动画：交叉淡入会在整段动画期间保留上一屏，使切换读起来像卡顿而非精致。
 - 所有界面字符串均为资源引用，中英两套语言同步维护（由测试强制）。
@@ -111,7 +111,7 @@ Kotlin 宿主（单 Activity）
 ├─ QingToolboxApp                  四个目的地的导航与页面
 │   ├─ QingShellNavigation         导航动画策略（无过渡）
 │   ├─ QingComponents              通用组件与图标表面
-│   └─ QingAppearanceStyle         五套主题的几何与配色
+│   └─ QingAppearanceStyle         各主题的几何与配色
 ├─ QingToolboxViewModel            单向状态流
 └─ 模块宿主
     ├─ MobileModuleStore           导入、扫描、删除
@@ -230,11 +230,11 @@ QingToolbox/
 │  │  ├─ QingToolboxApp.kt         目的地导航与全部页面
 │  │  ├─ QingShellNavigation.kt    导航动画策略
 │  │  ├─ QingComponents.kt         通用 UI 组件
-│  │  ├─ QingAppearanceStyle.kt    五套主题的几何与配色定义
+│  │  ├─ QingAppearanceStyle.kt    各主题的几何与配色定义
 │  │  ├─ MobileModule*.kt          模块清单、存储、运行时、能力桥
 │  │  └─ QingTransfer*.kt          发现、协议、连接、元数据、会话
 │  ├─ app/src/main/assets/shell/   注入到每个模块页的宿主资源
-│  ├─ app/src/test/                单元测试（18 个测试类）
+│  ├─ app/src/test/                单元测试（19 个测试类）
 │  └─ docs/                        移动端专项文档
 ├─ android_modules/                # 官方 Android 模块包（.qmod）与目录
 ├─ plans/                          # 编号实现计划索引
@@ -254,7 +254,7 @@ QingToolbox/
 gradle :app:testDebugUnitTest
 ```
 
-当前 **70 个用例，18 个测试类**，全部通过。覆盖范围：
+当前 **72 个用例，19 个测试类**，全部通过。覆盖范围：
 
 | 领域 | 测试类 |
 | --- | --- |
@@ -288,7 +288,7 @@ gradle :app:testDebugUnitTest
 - 模块列表的搜索与加载状态筛选
 - 模块详情页的加载 / 卸载 / 删除
 - 离线 Web 模块运行时、资源供给与能力桥
-- 五套外观主题与中英双语
+- 七套外观主题与中英双语
 - 两台 Android 设备间的 QingTransfer：发现、确认、流式传输、SHA-256 校验、进度与取消
 
 **尚未实现**
