@@ -1,201 +1,391 @@
-# QingToolbox
+<div align="center">
 
-The Modules page provides read-only detection against the official per-module update metadata. Checks use isolated conditional-request caches and never download or install packages. See [module update detection](docs/MODULE_UPDATE_DETECTION.md).
+<img src="QingToolbox.Shell/Assets/Branding/QingToolbox.Mark.svg" alt="QingToolbox" width="112" height="112" />
 
-QingToolbox Shell 和模块宿主窗口共享可扩展的 WPF `WindowChrome` 标题栏基础设施。它保留系统拖动、缩放、系统菜单和标准窗口命令，并通过最大化按钮命中测试支持 Windows 11 Snap Layout；MainWindow 的自定义操作区提供主动切换桌面悬浮标的入口。
+# QingToolbox Android
 
-标题栏度量、窗口能力映射和 DPI 感知命中测试由共享窗口层统一管理。模块窗口标题可随语言切换原位更新；空扩展区不会占位。Shell 在 500 DIP 宽度下进入紧凑布局，但 Windows 11 Snap 弹层、多显示器及不同 DPI 显示器切换仍需在对应实体环境中验证。
+**Android 端的轻量模块化工具箱 · Kotlin + Jetpack Compose + Material 3**
 
-MainWindow 标题栏可由用户主动切换到单个桌面悬浮标。悬浮标会隐藏而不关闭现有 Shell 和模块窗口，单击、键盘或菜单可恢复原窗口，右键菜单可执行完整退出。窗口模式转换被串行协调，退出不会先闪现隐藏的 MainWindow。位置以显示器设备名和显示器工作区内相对比例保存在现有 `settings.json`，显示器消失时安全回退。
+宿主保持最小，工具按需以导入模块交付。
 
-主窗口关闭行为现在可以明确配置。首次关闭会询问是最小化到 Windows 通知区域还是完整退出，选择保存在现有 `settings.json`，设置页可随时改为重新询问。通知区域图标左键恢复 Shell，右键菜单提供打开、设置、桌面悬浮标和退出；图标可能最初位于 Windows 隐藏图标溢出区，并会在正常退出时移除。非退出状态始终保留主窗口、悬浮标或通知区域图标之一作为恢复入口，普通用户不需要进程终止脚本。
+[![Version](https://img.shields.io/badge/version-0.1.0--alpha-blue?style=flat-square)](#版本状态)
+[![License](https://img.shields.io/github/license/QingMo-A/QingToolbox?style=flat-square&color=green)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](#项目简介)
 
-`settings.json` 是共享用户设置文件。语言、悬浮标、登录启动和模块启动授权更新在实例级异步锁内合并，并通过同目录临时文件原子替换，避免并发更新互相覆盖；损坏文件会保留为有限数量的 `settings.corrupt-*.json` 备份。
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org/)
+[![Compose](https://img.shields.io/badge/Jetpack%20Compose-BOM%202024.09.03-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
+[![Material 3](https://img.shields.io/badge/Material%203-M3-757575?style=flat-square&logo=materialdesign&logoColor=white)](https://m3.material.io/)
+[![AGP](https://img.shields.io/badge/AGP-8.6.1-3DDC84?style=flat-square&logo=gradle&logoColor=white)](https://developer.android.com/build)
 
-QingToolbox 以当前 Windows 用户为范围保持单实例运行。Pipe Server 在 DI 前启动，二次启动会在有限预算内重试并等待 `OK` 确认；普通手动激活优先于尚未完成的后台启动显示模式，登录启动探测不会抢占焦点。用户可选择 HKCU 登录自启动以及主窗口、最小化或悬浮标显示模式；选择会可靠保存，失败则回滚，安装器默认不启用该功能。
+[![Unit tests](https://img.shields.io/badge/unit%20tests-70%20passing-brightgreen?style=flat-square)](#测试)
+[![Modules](https://img.shields.io/badge/modules-4%20official-8957E5?style=flat-square)](android_modules)
+[![Branch](https://img.shields.io/badge/branch-toolbox--android-lightgrey?style=flat-square)](https://github.com/QingMo-A/QingToolbox/tree/toolbox-android)
 
-模块的“随工具箱启动”必须由用户明确开启。授权除诊断用 manifest/入口 SHA256 外，还绑定递归覆盖依赖、原生库、配置、本地化和资源的完整载荷 SHA256；旧版仅入口授权必须重新确认。Shell 会先进入可恢复显示状态，再在 Load 前重新验证载荷并激活匹配模块，且不会自动打开模块窗口。模块文件变化后必须重新确认；Refresh 和 Import 仍只发现模块，不会触发加载。该校验用于启动授权一致性，不构成插件沙箱。
+[![Typing SVG](https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=500&size=16&pause=1400&color=3DDC84&center=true&vCenter=true&width=620&lines=Minimal+shell%2C+capability-gated+modules.;Offline+web+modules%2C+no+network+by+construction.;Kotlin+%2B+Compose+M3+for+Android+8.0%2B.)](https://github.com/QingMo-A/QingToolbox)
 
-无人值守启动期间的取消会在退出边界内安全收拢。单实例 Pipe 对输入执行严格长度限制，在激活请求被安全排队后立即应答；UI 激活失败、客户端断开或协议错误不会终止后续 Pipe 服务。退出时 Shell 会先拒绝新激活并停止 Pipe，再卸载模块和释放依赖服务。
+</div>
 
-QingToolbox 是面向 Windows 的轻量模块化工具箱。Shell 提供现代化界面、
-模块发现和生命周期管理，实际工具功能由独立模块按需提供。
+> **Alpha 状态提示**
+>
+> 当前发布为 Alpha，仅供自主开发与受控测试使用，**不上架任何应用商店**。
+> APK 使用调试签名，未做代码签名。请只从本仓库自行构建或获取安装包。
 
-当前 Alpha：**0.2.5-alpha**（发布 Tag：`v0.2.5-alpha`）。该版本新增可组合外观预设、受控字体选择与导入，并让 Vue 工作区和原生标题栏共享一致的字体与主题表现，同时延续宿主安全更新、
-真正的最近使用模块和一键启动体验，但仍不是正式稳定版，也不代表生产环境可用。
-正式下载仅提供 `QingToolbox-0.2.5-alpha-win-x64-setup.exe` 及其同名 SHA256；安装器
-尚未数字签名。TextTools、PowerGuard 和 WindowTopmost 继续独立交付，不随安装器提供。
+> **分支说明**
+>
+> 本分支（`toolbox-android`）的主线是 **Android 端**。
+> Windows 桌面宿主的正式文档位于 [`toolbox` 分支](https://github.com/QingMo-A/QingToolbox/tree/toolbox)；
+> 本仓库默认分支是 `toolbox`，因此直接打开仓库首页看到的将是 Windows 版本。
+> Windows 宿主的技术说明在本分支归档于 [`docs/WINDOWS_HOST_NOTES.md`](docs/WINDOWS_HOST_NOTES.md)。
 
-## 主要功能
+---
 
-- 扫描模块清单但不在启动或刷新时加载 DLL。
-- 模块导入后默认由用户手动加载、启用、停用和卸载；只有明确授权“随工具箱启动”的完整载荷匹配模块才会在启动阶段恢复。
-- 使用 collectible `AssemblyLoadContext` 支持进程内模块卸载。
-- 在独立窗口中承载模块提供的 WPF View。
-- Shell 与模块支持简体中文和英文。
-- 从 `.qmod` 包导入用户模块（Preview）。
-- 对已下载并校验的官方 `.qmod` 执行稳定句柄离线验证，并原子发布到环境隔离的 Verified Staging；候选目录在 Incoming 中完成全部认证，`Directory.Move` 与 committed 状态构成线性化提交点，提交后的 Caller 取消不能改写成功。完整 Release 身份控制共享，绑定物理 Staging 根的崩溃可恢复文件句柄锁保证 module/version 唯一发布；诊断 marker 清理失败不会改写已提交成功。暂存不等于安装，不接触用户模块目录，也不加载 DLL。
-- 阶段 B1 已建立仅供 Development/ModuleTest 使用的可恢复模块程序目录事务核心：严格 Journal、跨进程事务锁、同卷候选目录、原子备份与提升、静态复验、失败回滚和崩溃恢复。Production UI 与真实模块更新尚未接入，详见 [`docs/MODULE_UPDATE_TRANSACTION.md`](docs/MODULE_UPDATE_TRANSACTION.md)。
-- B1 事务所有权边界已加固：Marker 保留到 `Committed` 原子落盘之后，提交后清理失败绝不回滚；Verified Staging 到 candidate 使用稳定句柄复制，Journal 按物理根/环境/模块隔离，并通过五个真实子进程崩溃窗口验证，其中 copy 窗口已完成至少一个 payload 文件的落盘。
-- B1 的最终可信边界将事务绑定到宿主配置的唯一 Verified Root，并使用 Windows 卷序列号与 128-bit File ID 跟踪旧模块、candidate、backup 和 promoted 目录；内容完整性与目录所有权分别验证，外部替换的目录绝不会被自动移动或覆盖。
-- B1 的安全关键目录替换使用源目录句柄、目标父目录句柄和相对叶名执行 native rename，不再通过路径 `Directory.Move`；Journal temp 也由同一文件句柄通过 Namespace Handle 原子替换。双遍快照后的 `SecureTreeLease` 绑定文件身份、Hash 与 Manifest 同一次读取，最终 rename 后立即复核完整树。Runtime Restore 已开始后，即使返回 false、抛异常或 Progress Journal 写入失败，回滚仍查询并卸载实际 v2，再恢复 v1。当前 Journal 为 schema 4，真实旧 schema 3 按严格布局和现场迁移，否则保留为恢复现场。
-- B1 现为 **Engineering Complete — Frozen**，且仍仅限 Development/ModuleTest。B2.1 已接入真实 Shell 生命周期适配器、启动恢复执行门禁和固定来源的 Development/ModuleTest TextTools 金丝雀；Production 模块自动安装仍未开放。宿主自更新 Plan 013 已在原生 Production 工作区完成并冻结。Preview 2 未执行人工验收仍为 `Not Run`。详见 [`docs/MODULE_UPDATE_RUNTIME_ADAPTER.md`](docs/MODULE_UPDATE_RUNTIME_ADAPTER.md) 与 [`docs/TEXTTOOLS_UPDATE_CANARY.md`](docs/TEXTTOOLS_UPDATE_CANARY.md)。
+## 目录
 
-## 运行 Preview
+- [项目简介](#项目简介)
+- [设计原则](#设计原则)
+- [功能特性](#功能特性)
+- [架构总览](#架构总览)
+- [快速开始](#快速开始)
+- [模块体系](#模块体系)
+- [QingTransfer](#qingtransfer)
+- [项目结构](#项目结构)
+- [测试](#测试)
+- [版本状态](#版本状态)
+- [文档地图](#文档地图)
+- [安全模型](#安全模型)
+- [参与贡献](#参与贡献)
+- [License](#license)
 
-### 当前用户安装版
+---
 
-当前发布使用 `QingToolbox-0.2.5-alpha-win-x64-setup.exe`。安装器基于 Inno Setup，
-只为当前用户安装，不需要管理员权限，也不会触发 UAC。默认目录为：
+## 项目简介
 
-```text
-%LOCALAPPDATA%\Programs\QingToolbox
-```
+QingToolbox Android 是 QingToolbox 的移动端外壳，与 Windows 桌面宿主遵循同一条产品规则：**宿主不内置任何具体工具，每一个可见工具都以导入模块的形式交付**。
 
-安装器会根据 Windows UI 语言显示英文或简体中文，并创建本地化的开始菜单
-卸载入口；桌面快捷方式默认不勾选。安装包始终是 self-contained，因此不要求
-预先安装 .NET 10 Desktop Runtime。安装器当前没有代码签名，Windows
-SmartScreen 可能显示未知发布者警告。
+宿主只负责导航框架、主题外观、语言、模块发现与生命周期，以及局域网传输会话；具体能力全部由独立模块提供。模块以 Web 页面运行在受控容器中，只能通过能力桥访问系统，且必须先在清单里声明所需能力——不声明即无调用面。
 
-卸载可使用“Windows 设置 → 应用 → 已安装的应用 → QingToolbox → 卸载”，
-或开始菜单中与安装语言一致的卸载入口。卸载默认保留
-用户模块、模块数据和设置。需要完整清理时，请手动删除：
+- 目标平台：Android 8.0+（API 26），编译与目标 SDK 均为 API 35
+- 技术栈：Kotlin 2.0.21 + Jetpack Compose（BOM 2024.09.03）+ Material 3
+- 构建：AGP 8.6.1，JDK 17
+- 模块形态：`.qmod` 包（ZIP 容器，内含 `manifest.json` 与 `web/` 载荷）
+- 分发：侧载 APK，**不经过应用商店**
 
-```text
-%LOCALAPPDATA%\QingToolbox
-%APPDATA%\QingToolbox
-```
+## 设计原则
 
-### 正式分发方式
+1. **宿主不内置工具。** 宿主只提供壳、导航、主题与安全边界。
+2. **导入不等于执行。** 导入只做校验与落盘，模块以「未加载」状态出现；加载是用户另行做出的决定。
+3. **能力白名单。** 模块只能调用清单 `capabilities` 里声明的能力，其余一律拒绝。
+4. **默认离线。** 模块只能访问自身包内的资源，向任何其他主机发起的请求都会被拒绝。
+5. **窄接口。** 模块无法自行获取系统权限，一切系统访问都经过宿主的能力桥。
+6. **诚实的状态。** 未实现的能力在文档中明确标注为「未实现」，不以计划替代事实。
 
-后续正式 Windows Release 仅提供 `win-x64` 安装器及其同名 `.sha256`。安装器是
-QingToolbox 唯一受支持的正式分发方式；历史 Release 中已经存在的便携资产保持不变，
-但新版本不再生成、上传或宣传便携 ZIP。
+## 功能特性
 
-正式安装版可在原生“关于与更新”区域检查官方 Release，由用户明确下载并校验 SHA256，
-确认后把已复核的安装器交给现有 Inno Setup 完成原地升级。应用不会自行覆盖程序文件；
-手动运行更高版本安装器、同版本 Repair 和降级保护仍保持支持。非标准复制部署只提供官方
-Release 页面，不会猜测安装目录或自动启动安装器。
+**外壳**
 
-TextTools `0.1.1`、PowerGuard `0.1.0` 和 WindowTopmost `0.1.1` 已在 modules 提交
-`c4c1b8fe15a37c16b38192aab3b26735bc232be6` 单独完成适配与 `.qmod` 验证。宿主安装器和
-宿主 `0.2.5-alpha` Release 均不捆绑模块 DLL 或 `.qmod`；这些模块将由项目所有者通过独立模块
-交付路径提供。安装宿主、启动宿主或刷新模块不会自动加载或执行它们。
+- 四个平级目的地：首页、模块、设备、设置；系统返回键语义正确。
+- 五套外观主题（Qing Default / Neon Circuit / Greenline / Aurora Flow / Qing Nova），各带独立的圆角、描边与主色梯度。
+- 简体中文与英文界面，可跟随系统或手动指定。
+- 目的地之间无过渡动画：交叉淡入会在整段动画期间保留上一屏，使切换读起来像卡顿而非精致。
+- 所有界面字符串均为资源引用，中英两套语言同步维护（由测试强制）。
 
-开发环境运行：
+**模块运行时**
 
-```powershell
-dotnet build
-dotnet run --project QingToolbox.Shell
-```
+- 从系统文件选择器导入 `.qmod`，校验清单元数据与载荷摘要后写入应用私有目录。
+- 模块列表支持搜索与加载状态筛选；每个模块有详情页，可加载 / 卸载 / 删除。
+- 模块作为 Web 页面运行，资源由宿主离线供给，主题变量注入页面。
+- 能力桥按清单声明逐项放行；未声明能力与跨主机请求均被拒绝。
 
-## 模块目录
+**QingTransfer**
 
-- `QingToolbox.Shell.exe` 同目录下的 `Modules`：开发/随程序提供的模块。
-- `%LOCALAPPDATA%\QingToolbox\Modules`：用户导入模块。
-- `%APPDATA%\QingToolbox\Data`：模块运行数据。
-- `%APPDATA%\QingToolbox\settings.json`：用户设置。
+- 基于 DNS-SD 的局域网发现，无服务器、无中继、无账号。
+- 接收方确认后才开始传输。
+- 128 KB 缓冲区流式传输，完成后校验 SHA-256。
+- 传输过程支持进度与取消，接收文件可自动归入指定目录。
 
-开发目录优先于用户目录。Refresh Modules 只读取清单，不会加载程序集。
-
-## `.qmod` 安全提醒
-
-`.qmod` 本质是 ZIP 模块包。`0.2.5-alpha` 尚未实现包签名；模块加载后拥有
-当前用户权限，因此只应导入可信来源模块。格式和校验规则参见
-[`docs/QMOD_FORMAT.md`](docs/QMOD_FORMAT.md)。
-
-安全 Staging 的路径、ZIP Bomb、Manifest 和原子发布边界参见
-[`docs/QMOD_STAGING_SECURITY.md`](docs/QMOD_STAGING_SECURITY.md)。
-
-当前 Module API 为 **Experimental**，权限声明不构成系统级沙箱，独立 NuGet SDK
-和稳定兼容承诺尚未发布。开发状态与路线见
-[`docs/sdk/README.md`](docs/sdk/README.md)。
-
-## 开发和发布
-
-- 模块契约与本地化：[`docs/MODULE_DEVELOPMENT.md`](docs/MODULE_DEVELOPMENT.md)
-- 本地化：[`docs/LOCALIZATION.md`](docs/LOCALIZATION.md)
-- 开发环境：[`docs/DEVELOPMENT_SETUP.md`](docs/DEVELOPMENT_SETUP.md)
-- 0.2.5-alpha 发布说明：[`docs/releases/0.2.5-alpha.md`](docs/releases/0.2.5-alpha.md)
-- 0.2.4-alpha 历史发布说明：[`docs/releases/0.2.4-alpha.md`](docs/releases/0.2.4-alpha.md)
-- 0.2.3-alpha 历史发布说明：[`docs/releases/0.2.3-alpha.md`](docs/releases/0.2.3-alpha.md)
-- 0.2.2-alpha 历史发布说明：[`docs/releases/0.2.2-alpha.md`](docs/releases/0.2.2-alpha.md)
-- 0.2.1-alpha 历史发布说明：[`docs/releases/0.2.1-alpha.md`](docs/releases/0.2.1-alpha.md)
-- Preview 2 历史说明：[`docs/releases/0.2.0-alpha.md`](docs/releases/0.2.0-alpha.md)
-- 更新记录：[`CHANGELOG.md`](CHANGELOG.md)
-
-生成当前用户安装器（需要本机安装 Inno Setup 6）：
-
-```powershell
-./scripts/build-installer.ps1
-```
-
-安装器构建说明参见 [`installer/README.md`](installer/README.md)。安装器只包含
-QingToolbox 宿主，不包含 TextTools、PowerGuard、WindowTopmost 或其他具体模块。
-
-`toolbox` 分支的 Windows CI 会构建并校验安装器、执行模块 Smoke Test，并在
-隔离用户目录中进行静默安装—卸载往返测试。CI 上传的 Preview
-artifacts 仅用于验证，不会自动创建 GitHub Release、tag 或提交构建产物。
-Shell、任务栏、快捷方式和安装器现在统一使用正式 QingToolbox 品牌图标。
-
-## 品牌资产
-
-`QingToolbox.Shell/Assets/Branding/QingToolbox.Mark.svg` 是权威、可编辑的纯矢量源，
-`QingToolbox.ico` 是包含 16、20、24、32、40、48、64、128 和 256 像素帧的 Windows
-发布资产。图标采用蓝色圆角工具箱容器与白色几何 Q，不使用字体或第三方品牌素材。
-
-Windows Explorer 和任务栏可能缓存旧图标。验证新版本时可能需要重启 Explorer，旧
-快捷方式可能需要删除后重新创建；安装器测试建议先卸载旧 Preview 或使用干净环境。
-应用和安装器不会主动清理系统图标缓存，当前二进制仍未代码签名。
-
-发布资产也可在本地运行 `./scripts/verify-preview-assets.ps1` 重新计算并校验
-SHA256。CI 将中文 Inno Setup 翻译固定到已审核哈希，Roundtrip 使用
-`/NOICONS`，并在失败时上传隔离的安装和卸载日志。GitHub Actions 是发布门禁，
-但不会自动发布版本。
-
-Preview 的版本、文件版本、runtime、资产文件名和 CI artifact 名称统一由
-`Directory.Build.props` 与 `scripts/get-preview-release-metadata.ps1` 派生。
-CI 还会生成机器可读 manifest，记录构建源码 commit、安装器大小和 SHA256；
-官方 GitHub Actions 与 Inno 中文翻译均固定到不可变 commit。该流程
-继续只做发布门禁，不创建 Release 或 tag。
-
-## 首次使用
-
-QingToolbox 主程序不内置任何具体工具模块。首次启动后请前往“模块”页面，导入来自
-可信开发者或可信发布页面的 `.qmod` 文件；导入和刷新只发现并校验模块清单，不会加载
-模块 DLL，只有用户主动点击“加载”后才会载入程序集。用户模块目录为：
+## 架构总览
 
 ```text
-%LOCALAPPDATA%\QingToolbox\Modules
+Kotlin 宿主（单 Activity）
+├─ MainActivity                    唯一入口，承载 Compose 内容
+├─ QingToolboxApp                  四个目的地的导航与页面
+│   ├─ QingShellNavigation         导航动画策略（无过渡）
+│   ├─ QingComponents              通用组件与图标表面
+│   └─ QingAppearanceStyle         五套主题的几何与配色
+├─ QingToolboxViewModel            单向状态流
+└─ 模块宿主
+    ├─ MobileModuleStore           导入、扫描、删除
+    ├─ MobileModuleRuntime         运行时、离线资源供给、主题注入
+    ├─ MobileModuleHostBridge      暴露给模块页的能力桥
+    └─ MobileModuleWeb             Compose 侧的模块容器
+
+QingTransfer（设备页）
+├─ QingTransferDiscovery           DNS-SD 广告与发现
+├─ QingTransferProtocol            帧格式与元数据
+├─ QingTransferConnection          连接、传输、SHA-256 校验
+└─ QingTransferEndpointProbe       nonce 绑定的端点探测
+
+模块（每个 `.qmod` 一个 Web 页面）
+└─ 只能经由能力桥访问系统，且仅限清单已声明项
 ```
 
-模块加载后拥有当前用户权限，因此请勿导入来源不明的模块。
-导入成功后会自动进入“模块”页面并选中新模块，但仍保持未加载；只有用户主动点击
-“加载”才会载入 DLL。空工具箱模式不会显示无意义的零值统计，三步引导采用受约束的
-等宽布局。扫描失败时保留上一次成功发现的模块状态。
+数据流的关键约束：
 
-## Preview release candidate
+- 模块清单的 `capabilities` 数组是白名单，未声明即拒绝，无隐式默认。
+- 模块页面只能读取自身包内资源；跨主机请求被拒绝，因此模块**在结构上离线**。
+- 模块无法自行获取文件系统或网络权限，一切系统访问都经过宿主的能力桥。
+- 权限声明用于告知与约束调用面，**不构成强制沙箱**。
 
-最终 Preview 候选必须从干净且与 `origin/toolbox` 同步的 `toolbox` 分支构建：
+## 快速开始
 
-```powershell
-./scripts/build-preview-release-candidate.ps1
+### 使用者
+
+本项目不上架应用商店。构建或获取 APK 后侧载安装：
+
+```bash
+adb install -r app/build/outputs/apk/debug/build-<yyyyMMdd-HHmmss>.apk
 ```
 
-完整门禁、产物溯源和人工发布交接清单见
-[`docs/PREVIEW_RELEASE_PROCESS.md`](docs/PREVIEW_RELEASE_PROCESS.md)。该流程只生成并验证
-候选资产，不会创建 GitHub Release 或 tag。
+首次启动后进入「模块」页面，用顶栏的 `+` 导入 `.qmod` 模块包。导入与刷新只发现并校验清单，**只有**用户主动点击「加载」后模块才会运行。官方模块包见 [`android_modules/`](android_modules)。
 
-宿主开发与模块测试应使用项目本地隔离 Profile，参见
-[`docs/DEVELOPMENT_ENVIRONMENTS.md`](docs/DEVELOPMENT_ENVIRONMENTS.md)。
+### 开发环境
+
+需要 JDK 17、Android SDK Platform 35 与 build tools，并在 `QingToolbox.Android/local.properties` 中指向 SDK：
+
+```properties
+sdk.dir=C:/Android
+```
+
+本仓库**没有 Gradle wrapper**，因此需要 Gradle 8.8 及以上在 `PATH` 中（或自备 wrapper）。从 `QingToolbox.Android/` 目录执行：
+
+```bash
+# 单元测试
+gradle :app:testDebugUnitTest
+
+# 构建调试 APK
+gradle :app:assembleDebug
+
+# 构建并安装到已连接设备
+gradle :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/build-<时间戳>.apk
+```
+
+产物会写两份：无时间戳的 `app-debug.apk`，以及 `build-<yyyyMMdd-HHmmss>.apk`。**应当保留的是带时间戳那份**——当设备上同时存在多个包时，只有它能把两次构建区分开。
+
+## 模块体系
+
+官方 Android 模块位于 [`android_modules/`](android_modules)，均为 Web 运行时、独立能力边界：
+
+| 模块 | 模块 ID | 版本 | 能力边界 |
+| --- | --- | --- | --- |
+| 文本编解码 / Text Codec | `qing.text-codec` | 0.1.0 | `text.codec`、`clipboard.write` |
+| 设备信息 / Device Info | `qing.device-info` | 0.1.0 | `device.info`、`clipboard.write` |
+| 二维码 / QR Code | `qing.qr-code` | 0.1.0 | `graphics.qr`、`graphics.share`、`clipboard.write` |
+| 文件哈希 / File Hash | `qing.file-hash` | 0.1.0 | `file.hash`、`clipboard.write` |
+
+当前支持的能力名：
+
+| 能力 | 含义 |
+| --- | --- |
+| `text.codec` | 文本编解码 |
+| `device.info` | 读取公开的机型与系统信息 |
+| `file.hash` | 计算文件摘要（异步） |
+| `graphics.qr` | 生成二维码 |
+| `graphics.share` | 调起系统分享（异步） |
+| `clipboard.write` | 写入剪贴板 |
+
+`host.info` 与 `toast.show` 对模块始终可用，无需声明。
+
+模块导入流程：
+
+1. 打开应用，进入「模块」页面。
+2. 点顶栏的 `+`，打开系统文件选择器。
+3. 选中 `.qmod` 文件。它会先被校验，再复制进应用私有存储。
+4. 模块以「未加载」状态出现在列表里，此时不会执行任何代码。
+5. 需要使用时，在模块详情页主动点「加载」。
+
+包内另有 [`android_modules/index.json`](android_modules/index.json) 目录文件，记录每个包的 id、版本、能力、体积、整包 SHA-256 与载荷哈希。**宿主不读取它**——它的用途是让镜像、脚本或人可以独立校验下载到的东西。
+
+## QingTransfer
+
+「设备」目的地运行 QingTransfer：两台 Android 设备之间的局域网文件传输会话。
+
+当前行为：
+
+- 设备通过 DNS-SD 在局域网内互相广告与发现，无服务器、无中继、无账号。
+- 连接由接收方确认后才开始传输。
+- 文件通过 socket 以 128 KB 缓冲区流式传输，完成后校验 SHA-256。
+- 传输过程提供进度与取消，接收文件可自动归入选定目录。
+- 接收偏好（默认目录、是否自动接收）保存在本机，并做可写性检查。
+
+协议中带有平台字段，取值接受 `windows` 与 `android`，但**目前只实现了 Android 一端**。尚不存在 Windows 端点，因此 Android↔Windows 或 Windows↔Windows 传输**当前不可用**。
+
+## 项目结构
+
+```text
+QingToolbox/
+├─ QingToolbox.Android/            # Android 宿主（本分支主线）
+│  ├─ app/src/main/java/com/qingtoolbox/android/
+│  │  ├─ MainActivity.kt           唯一 Activity
+│  │  ├─ QingToolboxApp.kt         目的地导航与全部页面
+│  │  ├─ QingShellNavigation.kt    导航动画策略
+│  │  ├─ QingComponents.kt         通用 UI 组件
+│  │  ├─ QingAppearanceStyle.kt    五套主题的几何与配色定义
+│  │  ├─ MobileModule*.kt          模块清单、存储、运行时、能力桥
+│  │  └─ QingTransfer*.kt          发现、协议、连接、元数据、会话
+│  ├─ app/src/main/assets/shell/   注入到每个模块页的宿主资源
+│  ├─ app/src/test/                单元测试（18 个测试类）
+│  └─ docs/                        移动端专项文档
+├─ android_modules/                # 官方 Android 模块包（.qmod）与目录
+├─ plans/                          # 编号实现计划索引
+├─ docs/                           # 文档（含 Windows 宿主归档说明）
+├─ QingToolbox.Shell/  QingToolbox.Core/  QingToolbox.Abstractions/
+├─ QingToolbox.ModuleHost/  QingToolbox.ModuleLoader/
+└─ QingToolbox.DevTools.*/         # 独立开发验证工具（非应用运行时组成部分）
+```
+
+`QingToolbox.Shell` 及其后的项目属于 **Windows 宿主**，不参与 Android 构建。它们保留在本分支是因为两条线共享品牌资产与模块格式约定；Android 宿主不会引用或加载它们。
+
+## 测试
+
+从 `QingToolbox.Android/` 执行：
+
+```bash
+gradle :app:testDebugUnitTest
+```
+
+当前 **70 个用例，18 个测试类**，全部通过。覆盖范围：
+
+| 领域 | 测试类 |
+| --- | --- |
+| 模块包契约与清单校验 | `MobileModulePackageTest`、`PackagedAndroidModulesTest` |
+| 模块搜索与筛选 | `MobileModuleQueryTest` |
+| 能力规则 | `MobileModulePackageTest` |
+| 零依赖 JSON 读写 | `MobileJsonTest` |
+| QingTransfer 协议与元数据 | `QingTransferProtocolTest`、`QingTransferMetadataTest` |
+| 连接状态与端点探测 | `QingTransferConnectionStateTest`、`QingTransferEndpointProbeTest` |
+| 接收偏好 | `QingTransferReceivePreferencesTest` |
+| 资源完整性（中英同步） | `ResourceCompletenessTest` |
+| 启动契约与导航策略 | `StartupContractTest`、`QingShellNavigationTest` |
+| 工具类 | `TextCodecTest`、`FileHashDigestTest`、`QrCodeEncoderTest`、`DeviceInfoTest`、`AppLanguageTest`、`AppearanceThemeTest` |
+
+其中 `PackagedAndroidModulesTest` 会读取 `android_modules/` 里**真实的模块包**，因此 Python 打包器与 Kotlin 导入器是互相对照验证的，而不只是各测各的。
+
+## 版本状态
+
+| 项目 | 值 |
+| --- | --- |
+| 版本名 | `0.1.0-alpha` |
+| 版本号 | `1` |
+| minSdk / targetSdk | 26 / 35 |
+| compileSdk | 35 |
+| 分发方式 | 侧载 APK（**不上架应用商店**） |
+
+**已实现**
+
+- 四目的地导航与正确的系统返回键处理
+- 经系统文件选择器的模块导入、校验与私有目录存储
+- 模块列表的搜索与加载状态筛选
+- 模块详情页的加载 / 卸载 / 删除
+- 离线 Web 模块运行时、资源供给与能力桥
+- 五套外观主题与中英双语
+- 两台 Android 设备间的 QingTransfer：发现、确认、流式传输、SHA-256 校验、进度与取消
+
+**尚未实现**
+
+- QingTransfer 的 Windows 端点——因此跨平台传输当前不可用
+- 原生（进程外 DEX）模块通道
+- 模块更新、云端或账号同步、后台服务、远程控制
+- Root 或 hook 框架类能力
+
+## 文档地图
+
+| 文档 | 状态 | 说明 |
+| --- | --- | --- |
+| [`QingToolbox.Android/README.md`](QingToolbox.Android/README.md) | 当前 | Android 宿主详细说明：文件职责、构建步骤、测试明细。 |
+| [`QingToolbox.Android/docs/MOBILE_MODULE_RUNTIME.md`](QingToolbox.Android/docs/MOBILE_MODULE_RUNTIME.md) | 当前 | 移动端模块运行时：离线资源供给、能力桥边界、主题注入。 |
+| [`android_modules/README.md`](android_modules/README.md) | 当前 | 官方 Android 模块包清单、导入步骤与校验方式。 |
+| [`docs/WINDOWS_HOST_NOTES.md`](docs/WINDOWS_HOST_NOTES.md) | 归档 | Windows 宿主技术说明。**不要**作为 Android 开发依据。 |
+| [`plans/README.md`](plans/README.md) | 当前 | 编号实现计划索引，含移动端壳层路线。 |
+
+### 相关分支
+
+| 分支 | 内容 |
+| --- | --- |
+| `toolbox`（默认分支） | Windows 宿主：Rust/Tauri 2/Vue 3 与历史 WPF 路径。 |
+| `toolbox-android`（本分支） | Android 宿主主线。 |
+| `android_modules` | 官方 Android 模块源码与打包工具。 |
+| `modules` | 历史 WPF 进程内模块源码与模板。 |
+
+## 安全模型
+
+**已实现**
+
+- 模块清单的 `capabilities` 数组是白名单，未声明即拒绝调用。
+- 模块页面只能读取自身包内资源，跨主机请求被拒绝，因此模块在结构上离线。
+- 导入时校验清单元数据与载荷摘要，包写入应用私有目录。
+- 模块无法自行获取系统权限，全部系统访问经宿主能力桥转发。
+
+**明确不是安全机制的部分**
+
+- 能力声明用于约束调用面与告知用户，**不构成强制沙箱**。
+- `.qmod` 不支持包签名，因此只应导入可信来源的模块。
+- APK 使用调试签名，仅供自主开发与受控设备安装。
+
+## 参与贡献
+
+- 分支纪律：`toolbox-android` 承载 Android 宿主；`android_modules` 承载模块源码与打包工具。两条线独立维护，宿主提交不得顺手修改模块，模块变更也不得未经审查混入宿主提交。
+- 提交信息：使用 `[ui]` / `[docs]` / `[build]` / `[feat]` / `[fix]` / `[test]` 标签，正文用完整句子说明**为什么**改。
+- 验证要求：改 UI 必须在真机或模拟器上确认启动无崩溃；改资源必须同时更新中英两套字符串（由 `ResourceCompletenessTest` 强制）。
 
 ## License
 
-Windows 登录自启动的 Task Scheduler、注册表降级、关键启动路径与诊断说明见 [`docs/WINDOWS_STARTUP_RELIABILITY.md`](docs/WINDOWS_STARTUP_RELIABILITY.md)。
+QingToolbox 使用 [MIT License](LICENSE)。
 
-Official module updates can now be downloaded and integrity-verified manually without extraction or installation. See [`docs/MODULE_PACKAGE_DOWNLOAD.md`](docs/MODULE_PACKAGE_DOWNLOAD.md) for the security boundaries and staging workflow.
+---
 
+## Star 趋势
 
-QingToolbox 使用 [MIT License](LICENSE)。Shell 使用的 Nieobie Game Icon Pack
-图标遵循 CC0 1.0。
-Shell 通过显式 Shutdown 管理后台生命周期。通知区、悬浮标、模块窗口或模块运行时的单项清理失败不会阻止最终退出，普通用户不需要借助进程清理 BAT。
+<a href="https://star-history.com/#QingMo-A/QingToolbox&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=QingMo-A/QingToolbox&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=QingMo-A/QingToolbox&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=QingMo-A/QingToolbox&type=Date" width="640" />
+  </picture>
+</a>
+
+<br />
+
+![Visitors](https://komarev.com/ghpvc/?username=QingMo-A&repo=QingToolbox&label=visitors&color=3DDC84&style=flat-square)
+
+<!--
+  上面两组图表由第三方服务渲染（star-history.com / komarev.com）。
+  在部分网络环境下可能加载较慢或被拦截；如影响阅读可直接删除本节。
+  徽章使用 shields.io，若需离线文档体验也可整体替换为静态文本。
+-->
+
+---
+
+<details>
+<summary><b>English overview</b></summary>
+
+<br />
+
+QingToolbox Android is the mobile shell of QingToolbox, an Android app built on Kotlin 2.0.21 with Jetpack Compose and Material 3. It follows the same product rule as the Windows desktop host: the shell ships no tools of its own, and every visible capability arrives as an imported module.
+
+The shell owns four destinations — Home, Modules, Devices and Settings — plus theming, language and the module lifecycle. Modules are `.qmod` packages: a plain zip holding `manifest.json` and a `web/` payload. Importing verifies and copies the package into app-private storage and lists it as **not loaded**; loading is a separate decision the user makes on the module page.
+
+A module runs as a web page served offline by the shell and reaches the system only through a capability bridge. It declares what it needs in its manifest, and anything undeclared is refused. Requests to any host other than the module's own package are refused too, so a module is offline by construction.
+
+- Target platform: Android 8.0+ (API 26), compiled and targeted at API 35
+- Stack: Kotlin 2.0.21 + Jetpack Compose (BOM 2024.09.03) + Material 3
+- Module format: `.qmod` (ZIP container, unsigned)
+- Distribution: sideloaded APK; **not published to any app store**
+
+The Devices destination runs QingTransfer, a LAN file transfer between two Android devices using DNS-SD discovery, receiver approval, streaming transfer with SHA-256 verification, and progress and cancel. The protocol carries a platform field but **only the Android end is implemented** — there is no Windows endpoint yet.
+
+This branch, `toolbox-android`, carries the Android product line. The Windows desktop host lives on the `toolbox` branch, which is also this repository's default branch. Windows host notes are archived here at [`docs/WINDOWS_HOST_NOTES.md`](docs/WINDOWS_HOST_NOTES.md).
+
+This is an Alpha build for autonomous development and controlled testing, not a production release.
+
+</details>

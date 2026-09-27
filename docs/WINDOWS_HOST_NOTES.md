@@ -1,0 +1,129 @@
+# Windows 宿主技术说明（归档）
+
+> **状态：归档（Archived）**
+>
+> 本文档从 `toolbox-android` 分支的顶层 README 移入。它描述的是 **Windows 桌面宿主**，
+> 而不是本分支主线的 Android 外壳。
+>
+> 本分支（`toolbox-android`）的主线是 Android 端；Windows 宿主的正式文档与最新版本位于
+> [`toolbox` 分支](https://github.com/QingMo-A/QingToolbox/tree/toolbox)。
+> 本文保留在此仅为查阅便利，**不应作为 Android 端开发的依据**。
+
+---
+
+## 窗口与外壳
+
+QingToolbox Shell 和模块宿主窗口共享可扩展的 WPF `WindowChrome` 标题栏基础设施。它保留系统拖动、缩放、系统菜单和标准窗口命令，并通过最大化按钮命中测试支持 Windows 11 Snap Layout；MainWindow 的自定义操作区提供主动切换桌面悬浮标的入口。
+
+标题栏度量、窗口能力映射和 DPI 感知命中测试由共享窗口层统一管理。模块窗口标题可随语言切换原位更新；空扩展区不会占位。Shell 在 500 DIP 宽度下进入紧凑布局，但 Windows 11 Snap 弹层、多显示器及不同 DPI 显示器切换仍需在对应实体环境中验证。
+
+## 桌面悬浮标
+
+MainWindow 标题栏可由用户主动切换到单个桌面悬浮标。悬浮标会隐藏而不关闭现有 Shell 和模块窗口，单击、键盘或菜单可恢复原窗口，右键菜单可执行完整退出。窗口模式转换被串行协调，退出不会先闪现隐藏的 MainWindow。位置以显示器设备名和显示器工作区内相对比例保存在现有 `settings.json`，显示器消失时安全回退。
+
+## 关闭行为与通知区域
+
+主窗口关闭行为现在可以明确配置。首次关闭会询问是最小化到 Windows 通知区域还是完整退出，选择保存在现有 `settings.json`，设置页可随时改为重新询问。通知区域图标左键恢复 Shell，右键菜单提供打开、设置、桌面悬浮标和退出；图标可能最初位于 Windows 隐藏图标溢出区，并会在正常退出时移除。非退出状态始终保留主窗口、悬浮标或通知区域图标之一作为恢复入口，普通用户不需要进程终止脚本。
+
+## 用户设置
+
+`settings.json` 是共享用户设置文件。语言、悬浮标、登录启动和模块启动授权更新在实例级异步锁内合并，并通过同目录临时文件原子替换，避免并发更新互相覆盖；损坏文件会保留为有限数量的 `settings.corrupt-*.json` 备份。
+
+## 单实例与启动
+
+QingToolbox 以当前 Windows 用户为范围保持单实例运行。Pipe Server 在 DI 前启动，二次启动会在有限预算内重试并等待 `OK` 确认；普通手动激活优先于尚未完成的后台启动显示模式，登录启动探测不会抢占焦点。用户可选择 HKCU 登录自启动以及主窗口、最小化或悬浮标显示模式；选择会可靠保存，失败则回滚，安装器默认不启用该功能。
+
+无人值守启动期间的取消会在退出边界内安全收拢。单实例 Pipe 对输入执行严格长度限制，在激活请求被安全排队后立即应答；UI 激活失败、客户端断开或协议错误不会终止后续 Pipe 服务。退出时 Shell 会先拒绝新激活并停止 Pipe，再卸载模块和释放依赖服务。
+
+## 模块启动授权
+
+模块的“随工具箱启动”必须由用户明确开启。授权除诊断用 manifest/入口 SHA256 外，还绑定递归覆盖依赖、原生库、配置、本地化和资源的完整载荷 SHA256；旧版仅入口授权必须重新确认。Shell 会先进入可恢复显示状态，再在 Load 前重新验证载荷并激活匹配模块，且不会自动打开模块窗口。模块文件变化后必须重新确认；Refresh 和 Import 仍只发现模块，不会触发加载。该校验用于启动授权一致性，不构成插件沙箱。
+
+## 主要功能
+
+- 扫描模块清单但不在启动或刷新时加载 DLL。
+- 模块导入后默认由用户手动加载、启用、停用和卸载；只有明确授权“随工具箱启动”的完整载荷匹配模块才会在启动阶段恢复。
+- 使用 collectible `AssemblyLoadContext` 支持进程内模块卸载。
+- 在独立窗口中承载模块提供的 WPF View。
+- Shell 与模块支持简体中文和英文。
+- 从 `.qmod` 包导入用户模块（Preview）。
+- 对已下载并校验的官方 `.qmod` 执行稳定句柄离线验证，并原子发布到环境隔离的 Verified Staging；候选目录在 Incoming 中完成全部认证，`Directory.Move` 与 committed 状态构成线性化提交点，提交后的 Caller 取消不能改写成功。完整 Release 身份控制共享，绑定物理 Staging 根的崩溃可恢复文件句柄锁保证 module/version 唯一发布；诊断 marker 清理失败不会改写已提交成功。暂存不等于安装，不接触用户模块目录，也不加载 DLL。
+- 阶段 B1 已建立仅供 Development/ModuleTest 使用的可恢复模块程序目录事务核心：严格 Journal、跨进程事务锁、同卷候选目录、原子备份与提升、静态复验、失败回滚和崩溃恢复。Production UI 与真实模块更新尚未接入，详见 [`MODULE_UPDATE_TRANSACTION.md`](MODULE_UPDATE_TRANSACTION.md)。
+- B1 事务所有权边界已加固：Marker 保留到 `Committed` 原子落盘之后，提交后清理失败绝不回滚；Verified Staging 到 candidate 使用稳定句柄复制，Journal 按物理根/环境/模块隔离，并通过五个真实子进程崩溃窗口验证，其中 copy 窗口已完成至少一个 payload 文件的落盘。
+- B1 的最终可信边界将事务绑定到宿主配置的唯一 Verified Root，并使用 Windows 卷序列号与 128-bit File ID 跟踪旧模块、candidate、backup 和 promoted 目录；内容完整性与目录所有权分别验证，外部替换的目录绝不会被自动移动或覆盖。
+- B1 的安全关键目录替换使用源目录句柄、目标父目录句柄和相对叶名执行 native rename，不再通过路径 `Directory.Move`；Journal temp 也由同一文件句柄通过 Namespace Handle 原子替换。双遍快照后的 `SecureTreeLease` 绑定文件身份、Hash 与 Manifest 同一次读取，最终 rename 后立即复核完整树。Runtime Restore 已开始后，即使返回 false、抛异常或 Progress Journal 写入失败，回滚仍查询并卸载实际 v2，再恢复 v1。当前 Journal 为 schema 4，真实旧 schema 3 按严格布局和现场迁移，否则保留为恢复现场。
+- B1 现为 **Engineering Complete — Frozen**，且仍仅限 Development/ModuleTest。B2.1 已接入真实 Shell 生命周期适配器、启动恢复执行门禁和固定来源的 Development/ModuleTest TextTools 金丝雀；Production 模块自动安装仍未开放。宿主自更新 Plan 013 已在原生 Production 工作区完成并冻结。Preview 2 未执行人工验收仍为 `Not Run`。详见 [`MODULE_UPDATE_RUNTIME_ADAPTER.md`](MODULE_UPDATE_RUNTIME_ADAPTER.md) 与 [`TEXTTOOLS_UPDATE_CANARY.md`](TEXTTOOLS_UPDATE_CANARY.md)。
+
+## 模块目录
+
+- `QingToolbox.Shell.exe` 同目录下的 `Modules`：开发/随程序提供的模块。
+- `%LOCALAPPDATA%\QingToolbox\Modules`：用户导入模块。
+- `%APPDATA%\QingToolbox\Data`：模块运行数据。
+- `%APPDATA%\QingToolbox\settings.json`：用户设置。
+
+开发目录优先于用户目录。Refresh Modules 只读取清单，不会加载程序集。
+
+## 安装与分发
+
+当前发布使用安装器（基于 Inno Setup），只为当前用户安装，不需要管理员权限，也不会触发 UAC。默认目录为：
+
+```text
+%LOCALAPPDATA%\Programs\QingToolbox
+```
+
+安装器会根据 Windows UI 语言显示英文或简体中文，并创建本地化的开始菜单卸载入口；桌面快捷方式默认不勾选。安装包始终是 self-contained，因此不要求预先安装 .NET Desktop Runtime。安装器当前没有代码签名，Windows SmartScreen 可能显示未知发布者警告。
+
+卸载可使用“Windows 设置 → 应用 → 已安装的应用 → QingToolbox → 卸载”，或开始菜单中与安装语言一致的卸载入口。卸载默认保留用户模块、模块数据和设置。需要完整清理时，请手动删除：
+
+```text
+%LOCALAPPDATA%\QingToolbox
+%APPDATA%\QingToolbox
+```
+
+开发环境运行：
+
+```powershell
+dotnet build
+dotnet run --project QingToolbox.Shell
+```
+
+## 更新检测
+
+The Modules page provides read-only detection against the official per-module update metadata. Checks use isolated conditional-request caches and never download or install packages. See [module update detection](MODULE_UPDATE_DETECTION.md).
+
+Official module updates can now be downloaded and integrity-verified manually without extraction or installation. See [`MODULE_PACKAGE_DOWNLOAD.md`](MODULE_PACKAGE_DOWNLOAD.md) for the security boundaries and staging workflow.
+
+Windows 登录自启动的 Task Scheduler、注册表降级、关键启动路径与诊断说明见 [`WINDOWS_STARTUP_RELIABILITY.md`](WINDOWS_STARTUP_RELIABILITY.md)。
+
+## 品牌资产
+
+`QingToolbox.Shell/Assets/Branding/QingToolbox.Mark.svg` 是权威、可编辑的纯矢量源，`QingToolbox.ico` 是包含 16、20、24、32、40、48、64、128 和 256 像素帧的 Windows 发布资产。图标采用蓝色圆角工具箱容器与白色几何 Q，不使用字体或第三方品牌素材。
+
+Windows Explorer 和任务栏可能缓存旧图标。验证新版本时可能需要重启 Explorer，旧快捷方式可能需要删除后重新创建；安装器测试建议先卸载旧 Preview 或使用干净环境。应用和安装器不会主动清理系统图标缓存，当前二进制仍未代码签名。
+
+## 首次使用
+
+QingToolbox 主程序不内置任何具体工具模块。首次启动后请前往“模块”页面，导入来自可信开发者或可信发布页面的 `.qmod` 文件；导入和刷新只发现并校验模块清单，不会加载模块 DLL，只有用户主动点击“加载”后才会载入程序集。用户模块目录为：
+
+```text
+%LOCALAPPDATA%\QingToolbox\Modules
+```
+
+模块加载后拥有当前用户权限，因此请勿导入来源不明的模块。导入成功后会自动进入“模块”页面并选中新模块，但仍保持未加载；只有用户主动点击“加载”才会载入 DLL。空工具箱模式不会显示无意义的零值统计，三步引导采用受约束的等宽布局。扫描失败时保留上一次成功发现的模块状态。
+
+## `.qmod` 安全提醒
+
+`.qmod` 本质是 ZIP 模块包。当前版本尚未实现包签名；模块加载后拥有当前用户权限，因此只应导入可信来源模块。格式和校验规则参见 [`QMOD_FORMAT.md`](QMOD_FORMAT.md)。
+
+安全 Staging 的路径、ZIP Bomb、Manifest 和原子发布边界参见 [`QMOD_STAGING_SECURITY.md`](QMOD_STAGING_SECURITY.md)。
+
+Module API 为 **Experimental**，权限声明不构成系统级沙箱，独立 NuGet SDK 和稳定兼容承诺尚未发布。开发状态与路线见 [`sdk/README.md`](sdk/README.md)。
+
+## 更多文档
+
+- 模块契约与本地化：[`MODULE_DEVELOPMENT.md`](MODULE_DEVELOPMENT.md)
+- 本地化：[`LOCALIZATION.md`](LOCALIZATION.md)
+- 开发环境：[`DEVELOPMENT_SETUP.md`](DEVELOPMENT_SETUP.md)
+- 更新记录：[`../CHANGELOG.md`](../CHANGELOG.md)
+- 安装器说明：[`../installer/README.md`](../installer/README.md)
+- 编号实现计划索引：[`../plans/README.md`](../plans/README.md)
