@@ -132,6 +132,8 @@
     <string name="theme_greenline">Greenline</string>
     <string name="theme_aurora_flow">Aurora Flow</string>
     <string name="theme_qing_nova">Qing Nova</string>
+    <string name="theme_brushed_metal">拉丝金属</string>
+    <string name="theme_aurora">极光</string>
     <string name="open_item_content_description">打开%1$s</string>
     <string name="preview_primary">主色</string>
     <string name="preview_secondary">辅色</string>

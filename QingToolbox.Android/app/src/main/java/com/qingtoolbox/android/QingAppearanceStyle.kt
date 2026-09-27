@@ -14,6 +14,8 @@ enum class QingNavigationStyle {
     TERMINAL,
     SOFT,
     NOVA,
+    METAL,
+    AURORA,
 }
 
 @Immutable
@@ -169,6 +171,60 @@ internal fun qingAppearanceStyle(
             navigationStyle = QingNavigationStyle.NOVA,
             technicalMonospaceEnabled = true,
         )
+
+        // Brushed metal is defined by its edges, not its fill: a machined panel reads as
+        // metal because of the crisp bevel and the touching shadow under it. Hence the small
+        // radius, the strong border and the extra elevation, with no gradient wash. The type
+        // is monospace because the material it imitates is label-printed hardware.
+        AppearanceTheme.BRUSHED_METAL -> QingAppearanceStyle(
+            controlCornerRadius = 8.dp,
+            cardCornerRadius = 10.dp,
+            borderWidth = 1.dp,
+            cardBorderColor = Color(0xFF8B95A1).copy(alpha = 0.62f),
+            controlBorderColor = Color(0xFF8994A2).copy(alpha = 0.88f),
+            cardElevation = 3.dp,
+            controlElevation = 3.dp,
+            pressedEmphasis = 0.16f,
+            hoverEmphasis = 0.10f,
+            focusEmphasis = 0.22f,
+            primaryGradient = listOf(
+                Color(0xFFF8FAFC),
+                Color(0xFFBDC6D0),
+                Color(0xFF9AA5B0),
+            ),
+            usePrimaryGradient = true,
+            glowColor = Color.Transparent,
+            glowStrength = 0f,
+            navigationStyle = QingNavigationStyle.METAL,
+            technicalMonospaceEnabled = true,
+        )
+
+        // Aurora is the only theme whose identity is a moving gradient. The radius is large
+        // and the border nearly invisible so nothing competes with the sweep, and there is a
+        // glow to keep the gradient reading as light rather than paint.
+        AppearanceTheme.AURORA -> QingAppearanceStyle(
+            controlCornerRadius = 14.dp,
+            cardCornerRadius = 16.dp,
+            borderWidth = 1.dp,
+            cardBorderColor = Color(0xFF7D8CD8).copy(alpha = 0.34f),
+            controlBorderColor = Color(0xFF9BB8F0).copy(alpha = 0.46f),
+            cardElevation = 2.dp,
+            controlElevation = 1.dp,
+            pressedEmphasis = 0.10f,
+            hoverEmphasis = 0.08f,
+            focusEmphasis = 0.18f,
+            primaryGradient = listOf(
+                Color(0xFF23D5AB),
+                Color(0xFF23A6D5),
+                Color(0xFF6F63FF),
+                Color(0xFFE73C7E),
+            ),
+            usePrimaryGradient = true,
+            glowColor = Color(0xFF6F63FF),
+            glowStrength = 0.18f,
+            navigationStyle = QingNavigationStyle.AURORA,
+            technicalMonospaceEnabled = false,
+        )
     }
 }
 
@@ -190,4 +246,6 @@ val AppearanceTheme.swatchColor: Color
         AppearanceTheme.GREENLINE -> Color(0xFF426500)
         AppearanceTheme.AURORA_FLOW -> Color(0xFF465D91)
         AppearanceTheme.QING_NOVA -> Color(0xFF4C9AFF)
+        AppearanceTheme.BRUSHED_METAL -> Color(0xFF9AA5B0)
+        AppearanceTheme.AURORA -> Color(0xFF6F63FF)
     }

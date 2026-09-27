@@ -132,6 +132,8 @@
     <string name="theme_greenline">Greenline</string>
     <string name="theme_aurora_flow">Aurora Flow</string>
     <string name="theme_qing_nova">Qing Nova</string>
+    <string name="theme_brushed_metal">Brushed Metal</string>
+    <string name="theme_aurora">Aurora</string>
     <string name="open_item_content_description">Open %1$s</string>
     <string name="preview_primary">Primary</string>
     <string name="preview_secondary">Secondary</string>

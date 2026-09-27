@@ -159,6 +159,68 @@ private val QingNovaDark = darkColorScheme(
     onSurface = Color(0xFFE0F2F3),
 )
 
+private val BrushedMetalLight = lightColorScheme(
+    // Cool graphite rather than a neutral grey: the brushed panel in the source material is
+    // blue-cast, and a warm grey made the surfaces read as beige next to it.
+    primary = Color(0xFF3F4A57),
+    onPrimary = Color(0xFFF7F9FC),
+    primaryContainer = Color(0xFFD5DCE5),
+    onPrimaryContainer = Color(0xFF151B23),
+    secondary = Color(0xFF5A646F),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFE1E6EC),
+    onSecondaryContainer = Color(0xFF171C23),
+    background = Color(0xFFF1F3F6),
+    onBackground = Color(0xFF181C22),
+    surface = Color(0xFFF7F9FB),
+    onSurface = Color(0xFF181C22),
+)
+
+private val BrushedMetalDark = darkColorScheme(
+    primary = Color(0xFFB6C2D0),
+    onPrimary = Color(0xFF232C37),
+    primaryContainer = Color(0xFF3A4451),
+    onPrimaryContainer = Color(0xFFD5DCE5),
+    secondary = Color(0xFFAFBAC6),
+    onSecondary = Color(0xFF28313B),
+    secondaryContainer = Color(0xFF3C4653),
+    onSecondaryContainer = Color(0xFFE1E6EC),
+    background = Color(0xFF12161B),
+    onBackground = Color(0xFFDFE3E9),
+    surface = Color(0xFF191E24),
+    onSurface = Color(0xFFDFE3E9),
+)
+
+private val AuroraLight = lightColorScheme(
+    primary = Color(0xFF4B3FA6),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFE2DCFF),
+    onPrimaryContainer = Color(0xFF13005C),
+    secondary = Color(0xFF4E6B8C),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFD6E7FF),
+    onSecondaryContainer = Color(0xFF0A1B2E),
+    background = Color(0xFFF7F7FF),
+    onBackground = Color(0xFF1A1B25),
+    surface = Color(0xFFFCFBFF),
+    onSurface = Color(0xFF1A1B25),
+)
+
+private val AuroraDark = darkColorScheme(
+    primary = Color(0xFFC6BBFF),
+    onPrimary = Color(0xFF2A1C7A),
+    primaryContainer = Color(0xFF423396),
+    onPrimaryContainer = Color(0xFFE2DCFF),
+    secondary = Color(0xFFA5C8F5),
+    onSecondary = Color(0xFF0E2C49),
+    secondaryContainer = Color(0xFF274866),
+    onSecondaryContainer = Color(0xFFD6E7FF),
+    background = Color(0xFF0D1024),
+    onBackground = Color(0xFFE2E1F2),
+    surface = Color(0xFF141830),
+    onSurface = Color(0xFFE2E1F2),
+)
+
 @Composable
 fun QingToolboxTheme(
     appearance: AppearanceTheme,
@@ -175,6 +237,8 @@ fun QingToolboxTheme(
         AppearanceTheme.GREENLINE -> if (darkTheme) GreenlineDark else GreenlineLight
         AppearanceTheme.AURORA_FLOW -> if (darkTheme) AuroraFlowDark else AuroraFlowLight
         AppearanceTheme.QING_NOVA -> if (darkTheme) QingNovaDark else QingNovaLight
+        AppearanceTheme.BRUSHED_METAL -> if (darkTheme) BrushedMetalDark else BrushedMetalLight
+        AppearanceTheme.AURORA -> if (darkTheme) AuroraDark else AuroraLight
     }
 
     CompositionLocalProvider(

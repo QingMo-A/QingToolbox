@@ -300,6 +300,24 @@ fun QingSwitch(
             uncheckedTrackColor = scheme.surface,
             uncheckedBorderColor = uncheckedBorder,
         )
+        // Metal keeps the track recessive and lets the border carry the machined edge; the
+        // unchecked thumb is the bright part, like a polished slider in a dark channel.
+        QingNavigationStyle.METAL -> SwitchDefaults.colors(
+            checkedThumbColor = scheme.onPrimary,
+            checkedTrackColor = scheme.primary,
+            checkedBorderColor = checkedBorder,
+            uncheckedThumbColor = scheme.onPrimary,
+            uncheckedTrackColor = scheme.surfaceContainerHigh,
+            uncheckedBorderColor = uncheckedBorder,
+        )
+        QingNavigationStyle.AURORA -> SwitchDefaults.colors(
+            checkedThumbColor = scheme.onPrimary,
+            checkedTrackColor = scheme.primary,
+            checkedBorderColor = checkedBorder,
+            uncheckedThumbColor = scheme.primaryContainer,
+            uncheckedTrackColor = scheme.surfaceContainer,
+            uncheckedBorderColor = uncheckedBorder,
+        )
         QingNavigationStyle.STANDARD -> SwitchDefaults.colors(
             checkedThumbColor = scheme.onPrimary,
             checkedTrackColor = scheme.primary,
@@ -359,6 +377,8 @@ fun QingTopAppBar(
         QingNavigationStyle.TERMINAL -> MaterialTheme.colorScheme.surface
         QingNavigationStyle.SOFT -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.94f)
         QingNavigationStyle.NOVA -> MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
+        QingNavigationStyle.METAL -> MaterialTheme.colorScheme.surfaceContainerHigh
+        QingNavigationStyle.AURORA -> MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
         QingNavigationStyle.STANDARD -> MaterialTheme.colorScheme.background
     }
     TopAppBar(
@@ -398,6 +418,8 @@ fun QingNavigationBar(
         QingNavigationStyle.TERMINAL -> MaterialTheme.colorScheme.surface
         QingNavigationStyle.SOFT -> MaterialTheme.colorScheme.surfaceContainer
         QingNavigationStyle.NOVA -> MaterialTheme.colorScheme.surface.copy(alpha = 0.98f)
+        QingNavigationStyle.METAL -> MaterialTheme.colorScheme.surfaceContainerHigh
+        QingNavigationStyle.AURORA -> MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
         QingNavigationStyle.STANDARD -> MaterialTheme.colorScheme.surface
     }
     NavigationBar(
@@ -441,6 +463,18 @@ fun RowScope.QingNavigationBarItem(
             selectedIconColor = primary,
             selectedTextColor = primary,
             indicatorColor = primary.copy(alpha = 0.17f),
+        )
+        // Metal uses the container colour as the indicator so the selected tab reads as a
+        // recessed panel pressed into the bar, not a coloured highlight on top of it.
+        QingNavigationStyle.METAL -> NavigationBarItemDefaults.colors(
+            selectedIconColor = MaterialTheme.colorScheme.onSurface,
+            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+            indicatorColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        )
+        QingNavigationStyle.AURORA -> NavigationBarItemDefaults.colors(
+            selectedIconColor = primary,
+            selectedTextColor = primary,
+            indicatorColor = primary.copy(alpha = 0.20f),
         )
         QingNavigationStyle.STANDARD -> NavigationBarItemDefaults.colors()
     }

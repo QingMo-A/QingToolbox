@@ -34,6 +34,11 @@ enum class AppearanceTheme(
     GREENLINE("greenline", R.string.theme_greenline),
     AURORA_FLOW("aurora-flow", R.string.theme_aurora_flow),
     QING_NOVA("qing-nova", R.string.theme_qing_nova),
+    // The two below are appended, never inserted: the stored preference is the `id` string,
+    // and reordering the enum would not corrupt anything, but keeping additions at the end
+    // makes the persisted history readable in the file.
+    BRUSHED_METAL("brushed-metal", R.string.theme_brushed_metal),
+    AURORA("aurora", R.string.theme_aurora),
     ;
 
     companion object {
