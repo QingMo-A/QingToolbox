@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { invoke } from '@tauri-apps/api/core'
 import SettingsPage from './SettingsPage.vue'
 import { TauriTransport } from '../bridge/transport/TauriTransport'
 import { useAppStore } from '../app/store'
@@ -11,6 +12,8 @@ import { useToastStore } from '../app/toastStore'
 import { useModuleStore } from '../app/moduleStore'
 import type { LanguageCode, SettingsSnapshot } from '../contracts/settings'
 import type { ModuleSnapshot, ModuleSnapshotItem } from '../contracts/modules'
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 
 const wrappers: VueWrapper[] = []
 afterEach(() => wrappers.splice(0).forEach(wrapper => wrapper.unmount()))
@@ -107,6 +110,18 @@ describe('SettingsPage information architecture', () => {
       expect(inputs[0].attributes('disabled')).toBeDefined()
       expect(inputs[1].attributes('disabled')).toBeUndefined()
       expect(x.wrapper.get('.info-popup-duration button').attributes('disabled')).toBeUndefined()
+    } finally { available.mockRestore() }
+  })
+  it('opens a local information popup preview without a paired device', async () => {
+    const available = vi.spyOn(TauriTransport, 'isAvailable').mockReturnValue(true)
+    const nativeInvoke = vi.mocked(invoke)
+    nativeInvoke.mockClear().mockResolvedValue(undefined)
+    try {
+      const x = page()
+      await openSection(x.wrapper, 'Window')
+      await x.wrapper.get('.info-popup-settings .settings-card-title button').trigger('click')
+      await flushPromises()
+      expect(nativeInvoke).toHaveBeenCalledWith('show_info_popup_preview')
     } finally { available.mockRestore() }
   })
   it('shows Appearance, Language, and Navigation in General', () => { const text = page().wrapper.text(); expect(text).toContain('Appearance'); expect(text).toContain('Language'); expect(text).toContain('Navigation'); expect(text).toContain('Show logs in sidebar') })

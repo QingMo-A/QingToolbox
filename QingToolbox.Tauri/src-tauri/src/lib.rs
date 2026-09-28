@@ -66,6 +66,18 @@ struct InfoPopupQueue {
     exit_x: Option<i32>,
 }
 
+impl InfoPopupQueue {
+    fn enqueue(&mut self, item: device_pairing::ForwardedNotification) -> bool {
+        if self.pending.len() >= 16 { self.pending.pop_front(); }
+        self.pending.push_back(item);
+        if self.current.is_none() && !self.exiting {
+            self.current = self.pending.pop_front();
+            return self.current.is_some();
+        }
+        false
+    }
+}
+
 /// Process-wide state owned by the Rust host. Paths and module records stay on
 /// this side of the IPC boundary; the Vue layer only receives stable ids and
 /// display metadata.
@@ -84,6 +96,7 @@ pub struct HostState {
     close_prompt_active: AtomicBool,
     floating_badge_move_generation: AtomicU64,
     info_popup_move_generation: AtomicU64,
+    info_popup_preview_sequence: AtomicU64,
     info_popup: Mutex<InfoPopupQueue>,
     launcher_drop_protection: Mutex<launcher_overlay::DropProtection>,
     launcher_keyboard: Mutex<launcher_keyboard::Recording>,
@@ -113,6 +126,7 @@ impl HostState {
             close_prompt_active: AtomicBool::new(false),
             floating_badge_move_generation: AtomicU64::new(0),
             info_popup_move_generation: AtomicU64::new(0),
+            info_popup_preview_sequence: AtomicU64::new(0),
             info_popup: Mutex::new(InfoPopupQueue::default()),
             launcher_drop_protection: Mutex::new(launcher_overlay::DropProtection::default()),
             launcher_keyboard: Mutex::new(launcher_keyboard::Recording::default()),
@@ -2923,6 +2937,32 @@ fn get_info_popup_dismiss_seconds(
 }
 
 #[tauri::command]
+fn show_info_popup_preview(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+) -> Result<(), CommandError> {
+    ensure_main_window(&window)?;
+    if window.app_handle().get_webview_window(INFO_POPUP_WINDOW_LABEL).is_none() {
+        return Err(CommandError { code: "infoPopupUnavailable", message: "信息弹窗窗口不可用。".to_string() });
+    }
+    let english = state.settings.lock().map_err(|_| CommandError {
+        code: "stateUnavailable", message: "信息弹窗设置不可用。".to_string(),
+    })?.snapshot().language == "en-US";
+    let item = device_pairing::ForwardedNotification {
+        id: format!("preview-{}", state.info_popup_preview_sequence.fetch_add(1, Ordering::Relaxed)),
+        device_name: "QingToolbox".to_string(),
+        app_name: if english { "Preview" } else { "预览" }.to_string(),
+        title: if english { "Message popup test" } else { "信息弹窗测试" }.to_string(),
+        body: if english { "This is a local test message." } else { "这是一条本机生成的测试消息。" }.to_string(),
+    };
+    let show = state.info_popup.lock().map_err(|_| CommandError {
+        code: "stateUnavailable", message: "信息弹窗状态不可用。".to_string(),
+    })?.enqueue(item);
+    if show { present_info_popup(window.app_handle().clone()); }
+    Ok(())
+}
+
+#[tauri::command]
 fn dismiss_info_popup_item(
     window: WebviewWindow,
     state: State<'_, HostState>,
@@ -2985,12 +3025,7 @@ fn start_info_popup_pump(app: tauri::AppHandle) {
             let mut show = false;
             if let Ok(mut queue) = state.info_popup.lock() {
                 for item in incoming {
-                    if queue.pending.len() >= 16 { queue.pending.pop_front(); }
-                    queue.pending.push_back(item);
-                }
-                if queue.current.is_none() {
-                    queue.current = queue.pending.pop_front();
-                    show = queue.current.is_some();
+                    show |= queue.enqueue(item);
                 }
             }
             if show { present_info_popup(app.clone()); }
@@ -3155,6 +3190,7 @@ pub fn run() {
             get_devices_snapshot,
             get_info_popup_item,
             get_info_popup_dismiss_seconds,
+            show_info_popup_preview,
             dismiss_info_popup_item,
             set_devices_discovery_enabled,
             request_device_pairing,
@@ -3849,7 +3885,7 @@ fn install_close_behavior(window: &WebviewWindow) {
 mod tests {
     use super::{
         civil_date_from_days, module_id_from_window_label, module_window_label, now_rfc3339,
-        record_log, sanitize_launcher_drop_paths, startup_status_for, HostState,
+        record_log, sanitize_launcher_drop_paths, startup_status_for, HostState, InfoPopupQueue,
         MAX_SESSION_LOG_ENTRIES,
     };
     use std::{
@@ -3874,6 +3910,19 @@ mod tests {
     fn floating_badge_label_is_not_a_main_or_module_window() {
         assert_ne!(super::FLOATING_BADGE_WINDOW_LABEL, "main");
         assert!(module_id_from_window_label(super::FLOATING_BADGE_WINDOW_LABEL).is_none());
+    }
+
+    #[test]
+    fn preview_popup_uses_the_same_bounded_queue_as_device_messages() {
+        let mut queue = InfoPopupQueue::default();
+        let make = |id: &str| crate::device_pairing::ForwardedNotification {
+            id: id.to_string(), device_name: "QingToolbox".to_string(),
+            app_name: "预览".to_string(), title: "测试".to_string(), body: "示例".to_string(),
+        };
+        assert!(queue.enqueue(make("preview-1")));
+        assert!(!queue.enqueue(make("device-1")));
+        assert_eq!(queue.current.as_ref().unwrap().id, "preview-1");
+        assert_eq!(queue.pending.front().unwrap().id, "device-1");
     }
 
     #[test]

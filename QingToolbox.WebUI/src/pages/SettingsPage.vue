@@ -52,6 +52,7 @@ const windowWidth = ref('1100')
 const windowHeight = ref('720')
 const isSavingWindow = ref(false)
 const isSavingInfoPopup = ref(false)
+const isPreviewingInfoPopup = ref(false)
 const infoPopupDuration = ref('380')
 const infoPopupDismissSeconds = ref('15')
 const infoPopupCorners: InfoPopupCorner[] = ['rightTop', 'rightBottom', 'leftTop', 'leftBottom']
@@ -253,6 +254,13 @@ async function updateInfoPopup(update: Record<string, unknown>) {
   } catch { toast.show(t('settings.window.infoPopupFailed'), 'error') }
   finally { isSavingInfoPopup.value = false }
 }
+async function previewInfoPopup() {
+  if (hostMutationDisabled.value || isPreviewingInfoPopup.value || !TauriTransport.isAvailable()) return
+  isPreviewingInfoPopup.value = true
+  try { await invoke('show_info_popup_preview') }
+  catch { toast.show(t('settings.window.infoPopupPreviewFailed'), 'error') }
+  finally { isPreviewingInfoPopup.value = false }
+}
 function saveInfoPopupTimings() {
   if (!infoPopupDismissValid.value || settings.snapshot?.infoPopupAnimation !== false && !infoPopupDurationValid.value) return
   void updateInfoPopup({
@@ -367,7 +375,8 @@ async function repairStartup() {
               <div class="window-size-actions"><QButton :disabled="hostMutationDisabled || isSavingWindow" @click="useCurrentWindowSize">{{ t('settings.window.useCurrentSize') }}</QButton><QButton :disabled="hostMutationDisabled || isSavingWindow || !windowSizeValid" @click="saveWindowSize(false)">{{ t('settings.window.saveSize') }}</QButton><QButton :disabled="hostMutationDisabled || isSavingWindow || !windowSizeValid" @click="saveWindowSize(true)">{{ t('settings.window.applySize') }}</QButton></div>
             </article>
             <article v-if="settings.snapshot && TauriTransport.isAvailable()" class="settings-card info-popup-settings">
-              <h3>{{ t('settings.window.infoPopup') }}</h3>
+              <div class="settings-card-title"><h3>{{ t('settings.window.infoPopup') }}</h3>
+                <QButton :loading="isPreviewingInfoPopup" :disabled="hostMutationDisabled || isSavingInfoPopup" @click="previewInfoPopup">{{ t('settings.window.infoPopupPreview') }}</QButton></div>
               <div class="info-popup-corners" role="radiogroup" :aria-label="t('settings.window.infoPopupCorner')">
                 <button v-for="corner in infoPopupCorners" :key="corner" type="button" role="radio"
                   :aria-checked="(settings.snapshot.infoPopupCorner ?? 'rightTop') === corner"

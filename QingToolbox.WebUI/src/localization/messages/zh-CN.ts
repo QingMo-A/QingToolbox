@@ -418,6 +418,8 @@ export const zhCNMessages = {
   'settings.window.height': '高度（像素）',
   'settings.window.startupFullscreen': '启动时默认全屏',
   'settings.window.infoPopup': '信息弹窗',
+  'settings.window.infoPopupPreview': '测试弹窗',
+  'settings.window.infoPopupPreviewFailed': '测试弹窗无法显示。',
   'settings.window.infoPopupCorner': '弹窗位置',
   'settings.window.corner.rightTop': '右上',
   'settings.window.corner.rightBottom': '右下',

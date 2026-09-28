@@ -416,6 +416,8 @@ export const enUSMessages = {
   'settings.window.height': 'Height (pixels)',
   'settings.window.startupFullscreen': 'Start in fullscreen',
   'settings.window.infoPopup': 'Message popups',
+  'settings.window.infoPopupPreview': 'Test popup',
+  'settings.window.infoPopupPreviewFailed': 'The test popup could not be shown.',
   'settings.window.infoPopupCorner': 'Popup position',
   'settings.window.corner.rightTop': 'Top right',
   'settings.window.corner.rightBottom': 'Bottom right',
