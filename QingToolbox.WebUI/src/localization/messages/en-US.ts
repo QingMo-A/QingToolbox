@@ -356,6 +356,7 @@ export const enUSMessages = {
   'settings.appearance.system': 'Follow system',
   'settings.appearance.light': 'Light',
   'settings.appearance.dark': 'Dark',
+  'settings.appearance.themeFailed': 'The light or dark preference could not be saved.',
   'settings.appearancePreset.title': 'Interface style',
   'settings.appearancePreset.description': 'Choose a coordinated color and control treatment for the Web workspace.',
   'settings.appearancePreset.ariaLabel': 'Interface style preset',

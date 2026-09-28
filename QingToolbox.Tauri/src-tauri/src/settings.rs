@@ -34,6 +34,11 @@ pub struct SettingsSnapshot {
     pub settings_schema_version: u32,
     pub language: String,
     pub appearance_preset_id: String,
+    /// How much light the chosen palette is given. A preset names *which*
+    /// palette; this names the light or dark rendering of it. Hosts before the
+    /// split carried both in `appearance_preset_id`, which is why that field
+    /// still tolerates the theme words.
+    pub theme_mode: String,
     pub font_id: String,
     pub font_source: String,
     pub font_family_name: Option<String>,
@@ -62,6 +67,7 @@ pub struct SettingsSnapshot {
 pub struct SettingsUpdate {
     pub language: Option<String>,
     pub appearance_preset_id: Option<String>,
+    pub theme_mode: Option<String>,
     pub font_id: Option<String>,
     pub close_behavior: Option<String>,
     pub startup_presentation: Option<String>,
@@ -83,6 +89,7 @@ pub struct SettingsUpdate {
 struct Settings {
     language: String,
     appearance_preset_id: String,
+    theme_mode: String,
     font_id: String,
     font_source: String,
     font_family_name: Option<String>,
@@ -110,6 +117,7 @@ impl Default for Settings {
         Self {
             language: "system".to_string(),
             appearance_preset_id: "qing-default".to_string(),
+            theme_mode: "system".to_string(),
             font_id: "Default".to_string(),
             font_source: "default".to_string(),
             font_family_name: None,
@@ -143,6 +151,8 @@ struct SettingsDocument {
     language: Option<String>,
     #[serde(alias = "AppearancePresetId")]
     appearance_preset_id: Option<String>,
+    #[serde(alias = "ThemeMode")]
+    theme_mode: Option<String>,
     font_id: Option<String>,
     font_source: Option<String>,
     font_family_name: Option<String>,
@@ -177,6 +187,7 @@ impl From<&Settings> for SettingsDocument {
             settings_schema_version: Some(SETTINGS_SCHEMA_VERSION),
             language: Some(settings.language.clone()),
             appearance_preset_id: Some(settings.appearance_preset_id.clone()),
+            theme_mode: Some(settings.theme_mode.clone()),
             font_id: Some(settings.font_id.clone()),
             font_source: Some(settings.font_source.clone()),
             font_family_name: settings.font_family_name.clone(),
@@ -239,6 +250,7 @@ impl SettingsStore {
             settings_schema_version: SETTINGS_SCHEMA_VERSION,
             language: self.settings.language.clone(),
             appearance_preset_id: self.settings.appearance_preset_id.clone(),
+            theme_mode: self.settings.theme_mode.clone(),
             font_id: self.settings.font_id.clone(),
             font_source: self.settings.font_source.clone(),
             font_family_name: self.settings.font_family_name.clone(),
@@ -275,6 +287,9 @@ impl SettingsStore {
         }
         if let Some(value) = update.appearance_preset_id {
             candidate.appearance_preset_id = normalize_appearance(&value);
+        }
+        if let Some(value) = update.theme_mode {
+            candidate.theme_mode = normalize_theme_mode(&value);
         }
         if let Some(value) = update.font_id {
             // A user selection is an ID from the verified host catalog. The
@@ -471,6 +486,14 @@ fn settings_from_document(document: &SettingsDocument) -> Settings {
         appearance_preset_id: normalize_appearance(
             document.appearance_preset_id.as_deref().unwrap_or_default(),
         ),
+        theme_mode: document
+            .theme_mode
+            .as_deref()
+            .map(normalize_theme_mode)
+            .or_else(|| {
+                legacy_theme_mode(document.appearance_preset_id.as_deref().unwrap_or_default())
+            })
+            .unwrap_or_else(|| "system".to_string()),
         font_id: font.id,
         font_source: font.source,
         font_family_name: font.family_name,
@@ -509,6 +532,7 @@ fn settings_from_document(document: &SettingsDocument) -> Settings {
     let _ = document.settings_schema_version;
     settings.language = truncate(settings.language);
     settings.appearance_preset_id = truncate(settings.appearance_preset_id);
+    settings.theme_mode = truncate(settings.theme_mode);
     settings
 }
 
@@ -525,6 +549,41 @@ fn normalize_appearance(value: &str) -> String {
         | "light" | "dark" => value.trim().to_string(),
         _ => "qing-default".to_string(),
     }
+}
+
+fn normalize_theme_mode(value: &str) -> String {
+    match value.trim() {
+        "light" | "dark" | "system" => value.trim().to_string(),
+        _ => "system".to_string(),
+    }
+}
+
+/// The theme a host that predates the split would have written into
+/// `appearancePresetId` instead of into `themeMode`.
+fn legacy_theme_mode(preset_field: &str) -> Option<String> {
+    match preset_field.trim() {
+        "light" | "dark" | "system" => Some(preset_field.trim().to_string()),
+        _ => None,
+    }
+}
+
+/// The palette and light/dark pair a module window is drawn in.
+///
+/// `appearance_preset_id` still tolerates the theme words for the sake of
+/// settings written before the two were separated, so anything that is not one
+/// of the five palettes resolves to the fallback palette — the same reading the
+/// shell already applies, so the shell and its modules cannot disagree about
+/// what a given settings file means.
+pub fn module_appearance<'a>(preset: &'a str, theme: &'a str) -> (&'a str, &'a str) {
+    let preset = match preset {
+        "qing-default" | "neon-circuit" | "greenline" | "aurora-flow" | "qing-nova" => preset,
+        _ => "qing-default",
+    };
+    let theme = match theme {
+        "light" | "dark" | "system" => theme,
+        _ => "system",
+    };
+    (preset, theme)
 }
 
 fn normalize_close_behavior(value: Option<&Value>) -> String {
@@ -728,6 +787,7 @@ mod tests {
             settings_schema_version: Some(9),
             language: Some("zh-CN".to_string()),
             appearance_preset_id: Some("neon-circuit".to_string()),
+            theme_mode: Some("dark".to_string()),
             font_id: None,
             font_source: None,
             font_family_name: None,
@@ -754,10 +814,33 @@ mod tests {
         let settings = settings_from_document(&document);
         assert_eq!(settings.language, "zh-CN");
         assert_eq!(settings.appearance_preset_id, "neon-circuit");
+        assert_eq!(settings.theme_mode, "dark");
         assert_eq!(settings.close_behavior, "tray");
         assert_eq!(settings.startup_presentation, "main");
         assert_eq!(settings.recent_module_ids, vec!["a", "b"]);
         assert_eq!(settings.startup_module_ids, vec!["qing.launcher"]);
+    }
+
+    #[test]
+    fn a_pre_split_settings_file_still_yields_palette_and_theme() {
+        // A host before the split wrote "dark" where the palette belongs. It
+        // has to keep meaning what it meant: a theme, not a palette named dark.
+        let legacy = SettingsDocument {
+            appearance_preset_id: Some("dark".to_string()),
+            ..SettingsDocument::default()
+        };
+        let settings = settings_from_document(&legacy);
+        assert_eq!(settings.appearance_preset_id, "dark");
+        assert_eq!(settings.theme_mode, "dark");
+        assert_eq!(module_appearance("dark", "system"), ("qing-default", "system"));
+
+        // And the pair a module window is drawn in never carries a value the
+        // module cannot use.
+        assert_eq!(
+            module_appearance("neon-circuit", "light"),
+            ("neon-circuit", "light")
+        );
+        assert_eq!(module_appearance("nonsense", ""), ("qing-default", "system"));
     }
 
     #[test]

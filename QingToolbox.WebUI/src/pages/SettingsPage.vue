@@ -7,7 +7,7 @@ import { normalizeFont, normalizeFontOptions, type InfoPopupCorner, type Languag
 import { useAppStore } from '../app/store'
 import { useSettingsStore } from '../app/settingsStore'
 import { useModuleStore } from '../app/moduleStore'
-import { useThemeStore, type ThemeMode } from '../app/themeStore'
+import { useThemeStore, normalizeThemeMode, type ThemeMode } from '../app/themeStore'
 import { useAppearancePresetStore, normalizeAppearancePresetId, type AppearancePresetId } from '../design-system/tokens/appearancePresets'
 import { useToastStore } from '../app/toastStore'
 import QPage from '../design-system/components/QPage.vue'
@@ -131,6 +131,11 @@ watch(() => app.bridge, bridge => {
 watch(() => settings.snapshot?.appearancePresetId, value => {
   if (value !== undefined) appearance.set(value)
 }, { immediate: true })
+// The host owns the light/dark choice now because it has to hand it to module
+// windows, which live in their own WebViews and cannot read this document.
+watch(() => settings.snapshot?.themeMode, value => {
+  if (value !== undefined) theme.set(normalizeThemeMode(value))
+}, { immediate: true })
 watch(() => [settings.snapshot?.windowWidth, settings.snapshot?.windowHeight], ([width, height]) => {
   if (width !== undefined) windowWidth.value = String(width)
   if (height !== undefined) windowHeight.value = String(height)
@@ -167,6 +172,16 @@ async function selectLanguage(languageCode: LanguageCode) {
   } finally {
     isSynchronizingLanguage.value = false
   }
+}
+async function selectTheme(mode: ThemeMode) {
+  if (theme.mode === mode) return
+  // Applied locally first and never rolled back. The mode is a display
+  // preference the user just made, and the host is told about it only so module
+  // windows can follow; a write that fails is reported in place rather than
+  // snapping the interface back to the previous value under the cursor.
+  theme.set(mode)
+  if (app.bridge !== 'Connected' || !settings.snapshot) return
+  await settings.updateTheme(client, mode)
 }
 async function selectAppearancePreset(value: AppearancePresetId) {
   const next = normalizeAppearancePresetId(value)
@@ -330,7 +345,7 @@ async function repairStartup() {
         <main class="settings-section-content">
           <section v-if="activeSection === 'general'" aria-labelledby="settings-general-title">
             <header class="settings-section-heading"><h2 id="settings-general-title">{{ t('settings.section.general') }}</h2></header>
-            <article class="settings-card"><h3>{{ t('settings.appearance.title') }}</h3><div class="theme-switch settings-theme"><button v-for="mode in themes" :key="mode" type="button" :class="{ active: theme.mode === mode }" @click="theme.set(mode)">{{ t(themeModeLabelKey(mode)) }}</button></div></article>
+            <article class="settings-card"><h3>{{ t('settings.appearance.title') }}</h3><div class="theme-switch settings-theme"><button v-for="mode in themes" :key="mode" type="button" :class="{ active: theme.mode === mode }" @click="selectTheme(mode)">{{ t(themeModeLabelKey(mode)) }}</button></div><p v-if="settings.themeError" class="settings-inline-error">{{ t('settings.appearance.themeFailed') }}</p></article>
             <article class="settings-card appearance-preset-card">
               <div class="settings-card-title"><div><h3>{{ t('settings.appearancePreset.title') }}</h3></div><QButton class="appearance-restore-button" :disabled="appearancePresetId === 'qing-default' || appearanceControlsDisabled" @click="restoreDefaultAppearance">{{ t('settings.appearancePreset.restoreDefault') }}</QButton></div>
               <div class="appearance-preset-grid" role="radiogroup" :aria-label="t('settings.appearancePreset.ariaLabel')" :aria-busy="isSynchronizingAppearance">

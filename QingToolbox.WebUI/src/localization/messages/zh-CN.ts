@@ -358,6 +358,7 @@ export const zhCNMessages = {
   'settings.appearance.system': '跟随系统',
   'settings.appearance.light': '浅色',
   'settings.appearance.dark': '深色',
+  'settings.appearance.themeFailed': '无法保存明暗偏好。',
   'settings.appearancePreset.title': '界面风格',
   'settings.appearancePreset.description': '为 Web 工作区选择协调的颜色和控件样式。',
   'settings.appearancePreset.ariaLabel': '界面风格预设',

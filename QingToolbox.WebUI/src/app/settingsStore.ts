@@ -9,6 +9,7 @@ import type { SettingsClient } from '../bridge/clients/SettingsClient'
 
 const languageFailure = 'The language setting could not be updated.'
 const appearanceFailure = 'The appearance preset could not be updated.'
+const themeFailure = 'The theme setting could not be updated.'
 const fontFailure = 'The font setting could not be updated.'
 
 export const useSettingsStore = defineStore('settings', {
@@ -21,6 +22,7 @@ export const useSettingsStore = defineStore('settings', {
     languageError: '',
     isUpdatingAppearance: false,
     appearanceError: '',
+    themeError: '',
     isUpdatingFont: false,
     fontError: '',
     isRefreshingFonts: false,
@@ -91,6 +93,29 @@ export const useSettingsStore = defineStore('settings', {
         return 'failure' as const
       } finally {
         this.isUpdatingAppearance = false
+      }
+    },
+    async updateTheme(client: SettingsClient, themeMode: string) {
+      const previous = this.snapshot
+      if (!previous) return 'failure' as const
+      if (previous.themeMode === themeMode) return 'unchanged' as const
+      // Deliberately not gated on `isHostMutationBusy`. The caller has already
+      // applied the mode to the document and to `localStorage`, so declining the
+      // host write would leave the shell and its module windows disagreeing
+      // about the appearance until something else happened to revisit it. The
+      // host merges this one field into whatever else is being written, so two
+      // overlapping updates lose neither.
+      this.themeError = ''
+      try {
+        const snapshot = await client.setThemeMode(themeMode)
+        // Mirror the host only if no other update landed while this one was in
+        // flight. A snapshot that arrived in between is the more recent
+        // description of the host, and this mode is already in effect.
+        if (this.snapshot === previous) this.complete(snapshot)
+        return 'success' as const
+      } catch {
+        this.themeError = themeFailure
+        return 'failure' as const
       }
     },
     async updateFont(client: SettingsClient, fontId: string) {

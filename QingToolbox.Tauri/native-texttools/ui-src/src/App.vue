@@ -123,8 +123,8 @@ onBeforeUnmount(() => {
       <button class="icon-button" aria-label="关闭" title="关闭" @click="hideModuleWindow">×</button>
     </header>
 
-    <div v-if="error" class="alert danger"><span>{{ error }}</span><button aria-label="关闭提示" @click="error = ''">×</button></div>
-    <div v-else-if="notice" class="alert"><span>{{ notice }}</span><button aria-label="关闭提示" @click="notice = ''">×</button></div>
+    <div v-if="error" class="alert danger" role="alert"><span>{{ error }}</span><button aria-label="关闭提示" @click="error = ''">×</button></div>
+    <div v-else-if="notice" class="alert" role="status"><span>{{ notice }}</span><button aria-label="关闭提示" @click="notice = ''">×</button></div>
 
     <section class="editor-grid">
       <label class="editor-card"><span class="field-label">输入</span><textarea :value="state.input" :disabled="loading" spellcheck="false" placeholder="在这里输入文本…" @input="updateInput" /></label>
@@ -133,21 +133,21 @@ onBeforeUnmount(() => {
 
     <section class="actions-card">
       <div class="action-group">
-        <button class="primary" :disabled="disabled || !hasInput" @click="run('formatJson')">格式化 JSON</button>
-        <button :disabled="disabled || !hasInput" @click="run('minifyJson')">压缩 JSON</button>
-        <button :disabled="disabled || !hasInput" @click="run('base64Encode')">Base64 编码</button>
-        <button :disabled="disabled || !hasInput" @click="run('base64Decode')">Base64 解码</button>
-        <button :disabled="disabled || !hasInput" @click="run('urlEncode')">URL 编码</button>
-        <button :disabled="disabled || !hasInput" @click="run('urlDecode')">URL 解码</button>
-        <button :disabled="disabled || !hasInput" @click="run('uppercase')">转大写</button>
-        <button :disabled="disabled || !hasInput" @click="run('lowercase')">转小写</button>
-        <button :disabled="disabled || !hasInput" @click="run('removeEmptyLines')">删除空行</button>
+        <button class="q-button is-primary" :disabled="disabled || !hasInput" @click="run('formatJson')">格式化 JSON</button>
+        <button class="q-button" :disabled="disabled || !hasInput" @click="run('minifyJson')">压缩 JSON</button>
+        <button class="q-button" :disabled="disabled || !hasInput" @click="run('base64Encode')">Base64 编码</button>
+        <button class="q-button" :disabled="disabled || !hasInput" @click="run('base64Decode')">Base64 解码</button>
+        <button class="q-button" :disabled="disabled || !hasInput" @click="run('urlEncode')">URL 编码</button>
+        <button class="q-button" :disabled="disabled || !hasInput" @click="run('urlDecode')">URL 解码</button>
+        <button class="q-button" :disabled="disabled || !hasInput" @click="run('uppercase')">转大写</button>
+        <button class="q-button" :disabled="disabled || !hasInput" @click="run('lowercase')">转小写</button>
+        <button class="q-button" :disabled="disabled || !hasInput" @click="run('removeEmptyLines')">删除空行</button>
       </div>
       <div class="utility-group">
-        <button :disabled="disabled || !hasOutput" @click="run('copyOutput')">复制结果</button>
-        <button :disabled="disabled || !hasOutput" @click="run('copyOutputToInput')">输出到输入</button>
-        <button :disabled="disabled || (!hasInput && !hasOutput)" @click="run('swap')">交换</button>
-        <button :disabled="disabled || (!hasInput && !hasOutput)" @click="run('clear')">清空</button>
+        <button class="q-button is-ghost" :disabled="disabled || !hasOutput" @click="run('copyOutput')">复制结果</button>
+        <button class="q-button is-ghost" :disabled="disabled || !hasOutput" @click="run('copyOutputToInput')">输出到输入</button>
+        <button class="q-button is-ghost" :disabled="disabled || (!hasInput && !hasOutput)" @click="run('swap')">交换</button>
+        <button class="q-button is-ghost" :disabled="disabled || (!hasInput && !hasOutput)" @click="run('clear')">清空</button>
       </div>
     </section>
 

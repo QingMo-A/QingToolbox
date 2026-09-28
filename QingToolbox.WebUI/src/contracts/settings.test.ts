@@ -49,6 +49,14 @@ describe('settings snapshot contract', () => {
   it('rejects a malformed host preset id', () => {
     expect(isSettingsSnapshot({ ...valid, appearancePresetId: { value: 'neon-circuit' } })).toBe(false)
   })
+  it('accepts an optional host theme mode and leaves unknown values for UI normalization', () => {
+    expect(isSettingsSnapshot({ ...valid, themeMode: 'dark' })).toBe(true)
+    expect(isSettingsSnapshot({ ...valid, themeMode: 'light' })).toBe(true)
+    expect(isSettingsSnapshot({ ...valid, themeMode: 'a-mode-from-a-newer-host' })).toBe(true)
+  })
+  it('rejects a malformed host theme mode', () => {
+    expect(isSettingsSnapshot({ ...valid, themeMode: { value: 'dark' } })).toBe(false)
+  })
   it('accepts a safe font projection and normalizes unknown ids to Default', () => {
     const imported = { id: `imported:${'a'.repeat(64)}`, source: 'imported', displayName: 'Imported Sans', familyName: 'Imported Sans', resourceUrl: `https://app.qingtoolbox.local/user-fonts/${'a'.repeat(64)}.ttf` }
     expect(isSettingsSnapshot({ ...valid, font: imported, fonts: [imported] })).toBe(true)

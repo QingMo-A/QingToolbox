@@ -1,0 +1,18 @@
+/* The module page is its own document inside its own WebView, so nothing the
+   shell paints reaches it: no inherited custom properties, no cascade, no
+   `data-` attributes. The two files below are therefore imported rather than
+   copied.
+
+   Importing keeps one source of truth for every appearance. Any future change
+   to the shell's palette reaches this module on its next build. A copy is a
+   fork, and forks drift: the stylesheet this module used before was exactly
+   that — a hand-typed palette that had already diverged from the shell's
+   before anyone noticed.
+
+   Only the tokens and the control language are shared. The shell's component
+   box models live in `styles/main.css` beside its page selectors, so pulling
+   them in would drag the shell's page layout into the module as well. This
+   module states its own box models in `styles.css` and takes only the colour
+   language from here — which is the part an appearance preset actually owns. */
+@import '../../../../QingToolbox.WebUI/src/design-system/tokens/tokens.css';
+@import '../../../../QingToolbox.WebUI/src/design-system/tokens/appearancePresets.css';

@@ -35,6 +35,11 @@ export interface SettingsSnapshot {
   generatedAt: string
   /** Host-selected workspace appearance. Older hosts may omit this field. */
   appearancePresetId?: string
+  /**
+   * Host-selected light/dark choice, independent of the palette above. Older
+   * hosts folded the two into `appearancePresetId` and may omit this field.
+   */
+  themeMode?: string
   /** Host-selected font. Older hosts may omit this field and use the built-in Default. */
   font?: SettingsFont
   /** Safe system/imported catalog; paths are never included. */
@@ -136,6 +141,7 @@ export const isSettingsFontImportResponse = (value: unknown): value is SettingsF
 export const isSettingsSnapshot = (value: unknown): value is SettingsSnapshot =>
   isRecord(value) && date(value.generatedAt) &&
   (!('appearancePresetId' in value) || typeof value.appearancePresetId === 'string') &&
+  (!('themeMode' in value) || typeof value.themeMode === 'string') &&
   (!('font' in value) || value.font === null || isFont(value.font)) &&
   (!('fonts' in value) || value.fonts === null || Array.isArray(value.fonts) && value.fonts.every(isFont)) &&
   isLanguage(value.language) &&

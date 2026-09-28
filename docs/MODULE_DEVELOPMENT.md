@@ -115,12 +115,49 @@ Rules:
 - `invoke_module_window` and `hide_module_window` derive the module identity from the **window label**.
   A page can never supply an arbitrary module ID or filesystem path, and the manifest `operations`
   allowlist is still applied before the Rust runtime forwards the request.
-- `get_module_window_context` returns the module ID, name, version, validated icon, protocol version, and
-  operation names. It never returns the module directory, executable path, or data directory.
+- `get_module_window_context` returns the module ID, name, version, validated icon, protocol version,
+  `appearancePreset`, `theme`, and operation names. It never returns the module directory, executable
+  path, or data directory.
 - Wait for the host-owned presentation context before rendering language- or appearance-sensitive content.
   Do not implement a second module splash screen — the host owns the startup surface.
 - The `module-*` capability grants only Tauri core IPC. Filesystem and process permissions are **not**
   inherited by the WebView.
+
+#### Appearance
+
+A module page is its own document in its own WebView, so nothing the shell paints reaches it: no inherited
+custom properties, no cascade, no `data-` attributes. The appearance travels in one direction only, and the
+host owns it.
+
+The shell's stylesheets are therefore **imported, never copied**. `tokens.css` holds the palette and
+`appearancePresets.css` the five presets and the control vocabulary; importing them keeps one source of
+truth, so a change to the shell's palette reaches the module on its next build. A hand-typed palette is a
+fork, and forks drift.
+
+```css
+/* src/theme.css, imported last so a preset wins over the module's own styles */
+@import '../../../../QingToolbox.WebUI/src/design-system/tokens/tokens.css';
+@import '../../../../QingToolbox.WebUI/src/design-system/tokens/appearancePresets.css';
+```
+
+Do not import `styles/main.css`. Its component box models sit beside the shell's page selectors, so it
+would bring the shell's layout along with its colours. State the module's own box models locally and take
+only the colour language from the tokens — and state them explicitly rather than leaning on the browser's
+defaults, which follow `color-scheme` and will be the one thing that does not follow when the appearance
+changes under an open window.
+
+Two `data-` attributes on the root element select the appearance. The host writes them **before the page's
+scripts run**, and rewrites them through `eval` whenever the user changes the appearance, so a module that
+is already open follows along without listening for anything. A module that only imports the stylesheets
+therefore needs no appearance code at all. A page opened with no host to write them — a development
+server, or a window whose injection did not take — asks `get_module_window_context` and applies the answer
+before mounting. Copy `native-texttools/ui-src/src/hostTheme.ts` for that, and mount in its callback so the
+window never paints in one appearance and then corrects itself in front of the user.
+
+- Values are checked against fixed sets: the five preset ids, and `system` / `light` / `dark`.
+- Only `qing-default` is affected by `theme`. The other four presets are dark by construction, so a module
+  must apply both attributes and let the stylesheets decide which of them matters.
+- Verify all five presets in both themes, including changing the appearance while the window is open.
 
 ### 5. Build and package
 

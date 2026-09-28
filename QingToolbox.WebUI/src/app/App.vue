@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { inject, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useThemeStore } from './themeStore'
+import { useThemeStore, normalizeThemeMode } from './themeStore'
 import { useAppearancePresetStore } from '../design-system/tokens/appearancePresets'
 import { useAppStore } from './store'
 import { useSettingsStore } from './settingsStore'
@@ -51,6 +51,12 @@ watch(() => app.bridge, bridge => {
 }, { immediate: true })
 watch(() => settings.snapshot?.appearancePresetId, presetId => {
   if (presetId !== undefined) appearance.set(presetId)
+}, { immediate: true })
+// Applied here rather than only on the settings page: the host owns the mode
+// because module windows have to be told about it, so whatever it reports wins
+// over the copy this window cached in local storage for its first paint.
+watch(() => settings.snapshot?.themeMode, mode => {
+  if (mode !== undefined) theme.set(normalizeThemeMode(mode))
 }, { immediate: true })
 watch(() => settings.snapshot?.font, font => {
   void applyFontPresentation(font)

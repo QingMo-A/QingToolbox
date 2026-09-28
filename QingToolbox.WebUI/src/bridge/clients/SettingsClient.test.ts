@@ -49,6 +49,15 @@ describe('SettingsClient appearance preset mutation', () => {
   })
 })
 
+describe('SettingsClient theme mode mutation', () => {
+  it('uses the host command and preserves the mode in the response', async () => {
+    const request = vi.fn().mockResolvedValue({ ...snapshot, themeMode: 'dark' })
+    const client = new SettingsClient({ request } as any)
+    await expect(client.setThemeMode('dark')).resolves.toMatchObject({ themeMode: 'dark' })
+    expect(request).toHaveBeenCalledWith('settings.setThemeMode', { themeMode: 'dark' })
+  })
+})
+
 describe('SettingsClient current window size', () => {
   it('reads logical dimensions with no payload and rejects malformed responses', async () => {
     const request = vi.fn().mockResolvedValueOnce({ width: 1366, height: 768 }).mockResolvedValueOnce({ width: -1, height: 768 })

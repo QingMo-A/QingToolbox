@@ -7,9 +7,9 @@ use tauri::{
 };
 
 use crate::{
-    fonts, module_window_label,
+    fonts, module_id_from_window_label, module_window_label,
     paths::{module_data_directory, resolve_existing_asset},
-    HostState,
+    settings, HostState,
 };
 
 const MAX_ASSET_BYTES: u64 = 8 * 1024 * 1024;
@@ -209,6 +209,57 @@ fn html_escape(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// The appearance the shell is using at this moment, as a palette and a
+/// light/dark preference. The lock is released before the caller uses the
+/// values, so a window is never built while the settings lock is held.
+fn module_appearance_of(state: &HostState) -> Result<(String, String), String> {
+    let store = state
+        .settings
+        .lock()
+        .map_err(|_| "工具箱设置状态不可用。".to_string())?;
+    let snapshot = store.snapshot();
+    let (preset, theme) =
+        settings::module_appearance(&snapshot.appearance_preset_id, &snapshot.theme_mode);
+    Ok((preset.to_string(), theme.to_string()))
+}
+
+/// The script that puts the shell's appearance onto a module document.
+///
+/// It runs in two places: as an initialization script, so the first paint is
+/// already right, and again through `eval` when the user changes the appearance
+/// while a module is open. Stating it once is what keeps those two paths from
+/// drifting apart.
+///
+/// It sets exactly two `data-` attributes. A module's stylesheet scopes its
+/// tokens to those attributes, so setting them is the entire contract — which
+/// is why a module needs no code of its own to follow the shell, including
+/// modules written before this existed.
+fn appearance_script(preset: &str, theme: &str) -> String {
+    // Both ids are validated against closed sets before they reach here, but
+    // they are encoded rather than interpolated so that remains true even if
+    // one of those guards is later loosened.
+    let preset = serde_json::to_string(preset).unwrap_or_else(|_| "\"qing-default\"".to_string());
+    let theme = serde_json::to_string(theme).unwrap_or_else(|_| "\"system\"".to_string());
+    format!(
+        "(() => {{ const root = document.documentElement; \
+         root.dataset.appearancePreset = {preset}; root.dataset.theme = {theme}; }})();"
+    )
+}
+
+/// Repaint every open module window after the shell's appearance changed.
+///
+/// Windows are updated in place rather than reloaded. A module may be halfway
+/// through something, and discarding that because the user picked a different
+/// colour would be a far worse trade than swapping a stylesheet.
+pub fn refresh_module_appearance<R: Runtime>(app: &AppHandle<R>, preset: &str, theme: &str) {
+    let script = appearance_script(preset, theme);
+    for (label, window) in app.webview_windows() {
+        if module_id_from_window_label(&label).is_some() {
+            let _ = window.eval(&script);
+        }
+    }
+}
+
 /// Open or focus a module-owned Web surface. The frontend supplies only the
 /// discovered module id; the entry route is read from the backend index.
 pub fn open_module_window<R: Runtime>(
@@ -253,11 +304,15 @@ pub fn open_module_window<R: Runtime>(
         .map_err(|_| "模块 WebView 数据目录不可用。".to_string())?
         .join("tauri-webview");
     let overlay = module_id == crate::launcher_overlay::MODULE_ID;
+    let (appearance_preset, theme) = module_appearance_of(state)?;
     let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::CustomProtocol(url))
         .title(format!("QingToolbox · {}", record.name))
         .inner_size(960.0, 680.0)
         .resizable(true)
         .data_directory(webview_data_directory)
+        // Before any page script runs, so a module never paints once in the
+        // wrong appearance and then corrects itself in front of the user.
+        .initialization_script(appearance_script(&appearance_preset, &theme))
         // Do not expose the blank WebView2 surface while the module's HTML,
         // CSS and bridge are still loading. The page-load callback reveals the
         // window only after the first document has finished, which avoids the
@@ -409,7 +464,10 @@ fn error_response(status: StatusCode, message: &'static str) -> Response<Vec<u8>
 
 #[cfg(test)]
 mod tests {
-    use super::{format_pin_document, parse_route, valid_pin_token, ScreenPinWindowRecord};
+    use super::{
+        appearance_script, format_pin_document, parse_route, valid_pin_token,
+        ScreenPinWindowRecord,
+    };
 
     #[test]
     fn route_parser_rejects_traversal_and_encoded_paths() {
@@ -444,5 +502,17 @@ mod tests {
         assert!(document.contains("pin-&amp;&lt;&quot;"));
         assert!(document.contains("data:image/png;base64,AAAA"));
         assert!(!document.contains("<img src=\"data:image/png;base64,AAAA\"><"));
+    }
+
+    #[test]
+    fn the_appearance_script_names_both_attributes_and_encodes_its_input() {
+        let script = appearance_script("neon-circuit", "dark");
+        assert!(script.contains("root.dataset.appearancePreset = \"neon-circuit\""));
+        assert!(script.contains("root.dataset.theme = \"dark\""));
+
+        // A value carrying a quote would otherwise close the literal and turn
+        // the rest into code, so the encoding is asserted rather than assumed.
+        let hostile = appearance_script("x\"; alert(1); //", "system");
+        assert!(hostile.contains("\"x\\\"; alert(1); //\""));
     }
 }

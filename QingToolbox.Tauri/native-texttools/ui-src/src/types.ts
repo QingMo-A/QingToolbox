@@ -4,6 +4,9 @@ export interface ModuleContext {
   version: string
   iconDataUrl: string | null
   protocolVersion: number
+  /** Appearances the shell can be drawn in. Absent from hosts that predate module theming. */
+  appearancePreset?: string
+  theme?: string
   operations: string[]
 }
 

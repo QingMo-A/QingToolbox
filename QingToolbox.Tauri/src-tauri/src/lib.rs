@@ -903,6 +903,19 @@ fn update_settings(
     match settings.update(update) {
         Ok(snapshot) => {
             record_log(&state, "Information", "Settings", "Settings updated.");
+            let changed = snapshot.appearance_preset_id != previous.appearance_preset_id
+                || snapshot.theme_mode != previous.theme_mode;
+            // Released before any window is touched. Repainting a module must
+            // not happen with the settings lock held: the eval could reach a
+            // module that reads its own context, which needs the same lock.
+            drop(settings);
+            if changed {
+                let (preset, theme) = settings::module_appearance(
+                    &snapshot.appearance_preset_id,
+                    &snapshot.theme_mode,
+                );
+                web::refresh_module_appearance(window.app_handle(), preset, theme);
+            }
             Ok(snapshot)
         }
         Err(error) => {
@@ -1389,6 +1402,11 @@ struct ModuleWindowContext {
     version: String,
     icon_data_url: Option<String>,
     protocol_version: u16,
+    /// The palette and light/dark pair the shell is using. A module window is
+    /// told these rather than reading them, so following the shell costs a
+    /// module no code at all.
+    appearance_preset: String,
+    theme: String,
     operations: Vec<String>,
 }
 
@@ -1882,12 +1900,24 @@ fn get_module_window_context(
             code: "moduleNotFound",
             message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
         })?;
+    let (appearance_preset, theme) = {
+        let store = state.settings.lock().map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "工具箱设置状态不可用。".to_string(),
+        })?;
+        let snapshot = store.snapshot();
+        let (preset, theme) =
+            settings::module_appearance(&snapshot.appearance_preset_id, &snapshot.theme_mode);
+        (preset.to_string(), theme.to_string())
+    };
     Ok(ModuleWindowContext {
         module_id,
         name,
         version,
         icon_data_url,
         protocol_version: protocol::PROTOCOL_VERSION,
+        appearance_preset,
+        theme,
         operations,
     })
 }
@@ -2752,7 +2782,7 @@ fn module_window_label(module_id: &str) -> String {
     format!("module-{encoded}")
 }
 
-fn module_id_from_window_label(label: &str) -> Option<String> {
+pub(crate) fn module_id_from_window_label(label: &str) -> Option<String> {
     let encoded = label.strip_prefix("module-")?;
     if encoded.is_empty()
         || encoded.len() % 2 != 0

@@ -1,4 +1,10 @@
 <!doctype html>
+<!-- The appearance is deliberately not named here. It is selected by
+     `data-appearance-preset` and `data-theme` on the root element, the host
+     writes those before this page's scripts run and rewrites them whenever the
+     user changes the appearance, and a value named here would be a second
+     source for something the host already owns. `src/hostTheme.ts` supplies the
+     fallback for a page opened with no host to write them. -->
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />

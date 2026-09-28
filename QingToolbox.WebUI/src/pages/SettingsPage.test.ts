@@ -33,6 +33,7 @@ type PageOptions = {
   currentSizeImpl?: () => Promise<{ width: number; height: number }>
   startupImpl?: (value: 'MainWindow'|'Minimized'|'FloatingBadge') => Promise<SettingsSnapshot>
   appearanceImpl?: (value: string) => Promise<SettingsSnapshot>
+  themeImpl?: (value: string) => Promise<SettingsSnapshot>
   fontImpl?: (value: string) => Promise<SettingsSnapshot>
   importFontImpl?: () => Promise<{ disposition: 'Imported'|'Cancelled', snapshot: SettingsSnapshot }>
   launchImpl?: (value: boolean) => Promise<SettingsSnapshot>
@@ -57,15 +58,16 @@ function page(options: PageOptions = {}) {
   const applyWindowSize = vi.fn(async () => undefined)
   const setStartupPresentationMode = vi.fn(options.startupImpl ?? (async value => ({ ...snapshot, startupPresentationMode: value })))
   const setAppearancePreset = vi.fn(options.appearanceImpl ?? (async value => ({ ...snapshot, appearancePresetId: value })))
+  const setThemeMode = vi.fn(options.themeImpl ?? (async value => ({ ...snapshot, themeMode: value })))
   const setFont = vi.fn(options.fontImpl ?? (async value => ({ ...snapshot, font: snapshot.fonts?.find(font => font.id === value) ?? snapshot.font })))
   const importFont = vi.fn(options.importFontImpl ?? (async () => ({ disposition: 'Cancelled' as const, snapshot })))
   const setLaunchAtLogin = vi.fn(options.launchImpl ?? (async value => ({ ...snapshot, launchAtLogin: value, generatedAt: '2026-07-25T13:00:00Z' })))
   const repairStartupRegistration = vi.fn(options.repairImpl ?? (async () => ({ ...snapshot, launchAtLogin: true, canRepairStartup: false, generatedAt: '2026-07-25T13:00:00Z' })))
   const getModuleSnapshot = vi.fn(options.moduleImpl ?? (async () => ({ generatedAt: '2026-07-25T12:01:00Z', modules: [] })))
   const openRepository = vi.fn(async () => undefined)
-  const wrapper = mount(SettingsPage, { global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setWindowSize, getCurrentWindowSize, setStartupFullscreen, applyWindowSize, setStartupPresentationMode, setAppearancePreset, setFont, importFont, setLaunchAtLogin, repairStartupRegistration, openRepository }, moduleClient: { getSnapshot: getModuleSnapshot } } } })
+  const wrapper = mount(SettingsPage, { global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setWindowSize, getCurrentWindowSize, setStartupFullscreen, applyWindowSize, setStartupPresentationMode, setAppearancePreset, setThemeMode, setFont, importFont, setLaunchAtLogin, repairStartupRegistration, openRepository }, moduleClient: { getSnapshot: getModuleSnapshot } } } })
   wrappers.push(wrapper)
-  return { wrapper, app, settings, modules: useModuleStore(), getSnapshot, getModuleSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setWindowSize, getCurrentWindowSize, setStartupFullscreen, applyWindowSize, setStartupPresentationMode, setAppearancePreset, setFont, importFont, setLaunchAtLogin, repairStartupRegistration, openRepository, theme: useThemeStore(), toast: useToastStore() }
+  return { wrapper, app, settings, modules: useModuleStore(), getSnapshot, getModuleSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setWindowSize, getCurrentWindowSize, setStartupFullscreen, applyWindowSize, setStartupPresentationMode, setAppearancePreset, setThemeMode, setFont, importFont, setLaunchAtLogin, repairStartupRegistration, openRepository, theme: useThemeStore(), toast: useToastStore() }
 }
 
 async function openSection(wrapper: VueWrapper, title: string) {
@@ -150,6 +152,36 @@ describe('SettingsPage information architecture', () => {
   it('renders all interface presets and applies one immediately', async () => { const x = page(); const group = x.wrapper.get('[aria-label="Interface style preset"]'); expect(group.findAll('[role="radio"]')).toHaveLength(5); await group.findAll('[role="radio"]')[1].trigger('click'); expect(document.documentElement.dataset.appearancePreset).toBe('neon-circuit'); expect(x.settings.snapshot?.appearancePresetId).toBe('neon-circuit'); expect(x.setAppearancePreset).toHaveBeenCalledWith('neon-circuit') })
   it('restores the default interface preset without changing page layout', async () => { const x = page(); const group = x.wrapper.get('[aria-label="Interface style preset"]'); await group.findAll('[role="radio"]')[2].trigger('click'); await flushPromises(); expect(x.settings.snapshot?.appearancePresetId).toBe('greenline'); await x.wrapper.get('.appearance-restore-button').trigger('click'); await flushPromises(); expect(x.setAppearancePreset).toHaveBeenLastCalledWith('qing-default'); expect(x.settings.snapshot?.appearancePresetId).toBe('qing-default'); expect(x.wrapper.find('.settings-workspace').exists()).toBe(true) })
   it('normalizes an unknown host preset to qing-default', async () => { const x = page(); x.settings.complete({ ...snapshot, appearancePresetId: 'untrusted-theme' }); await x.wrapper.vm.$nextTick(); expect(x.wrapper.get('[aria-label="Interface style preset"]').findAll('[role="radio"]')[0].attributes('aria-checked')).toBe('true') })
+  it('applies the light or dark mode immediately and tells the host', async () => {
+    const x = page()
+    x.theme.set('system')
+    await x.wrapper.vm.$nextTick()
+    await x.wrapper.findAll('.settings-theme button')[1].trigger('click')
+    await flushPromises()
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(x.setThemeMode).toHaveBeenCalledWith('light')
+    expect(x.settings.snapshot?.themeMode).toBe('light')
+    expect(x.settings.themeError).toBe('')
+  })
+  it('keeps the chosen mode and reports in place when the host write fails', async () => {
+    const x = page({ themeImpl: () => Promise.reject(new Error('offline')) })
+    x.theme.set('system')
+    await x.wrapper.vm.$nextTick()
+    await x.wrapper.findAll('.settings-theme button')[2].trigger('click')
+    await flushPromises()
+    expect(x.theme.mode).toBe('dark')
+    expect(x.settings.snapshot?.themeMode).toBeUndefined()
+    expect(x.settings.themeError).toBe('The theme setting could not be updated.')
+    expect(x.wrapper.get('.settings-theme').element.parentElement?.textContent).toContain('The light or dark preference could not be saved.')
+  })
+  it('adopts the host mode when the snapshot disagrees with local storage', async () => {
+    const x = page()
+    x.theme.set('light')
+    x.settings.complete({ ...snapshot, themeMode: 'dark' })
+    await x.wrapper.vm.$nextTick()
+    expect(x.theme.mode).toBe('dark')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+  })
   it('groups searchable system and imported fonts and applies the selected font', async () => {
     const x = page(); const card = x.wrapper.get('.font-settings-card')
     expect(card.get('[aria-label="Workspace font"]').findAll('[role="radio"]')).toHaveLength(2)
