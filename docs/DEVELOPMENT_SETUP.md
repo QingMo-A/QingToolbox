@@ -25,8 +25,8 @@ pwsh ./scripts/verify-tauri.ps1
 `pwsh ./scripts/build-tauri-installer.ps1 -SkipBuild -Smoke`；它复用该目录，
 使用独立迁移 AppId 执行安装/卸载 smoke，不会覆盖旧 WPF 安装。
 
-旧 WPF 章节仅用于维护历史宿主和尚未切换的安装器；需要进入该路径时使用根目录
-`run-legacy-wpf.bat`，它不是新架构的默认入口。
+旧 WPF 开发启动入口已退役；以下历史章节仅用于辨认尚待迁移的源码和发布脚本，
+不再作为新架构的开发步骤。
 
 ## Git commit messages
 

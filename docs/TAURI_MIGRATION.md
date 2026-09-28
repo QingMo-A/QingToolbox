@@ -244,7 +244,7 @@ the first release.
   is explicitly waived for the alpha, not silently treated as complete.
 
 - The repository's default `run-latest.bat` now launches the Tauri Release
-  candidate. The legacy WPF maintenance path is explicit (`run-legacy-wpf.bat`)
+  candidate. The legacy WPF maintenance launcher has since been retired
   and is not referenced by the Tauri host or its module packages.
 
 The current migration slice has passed the repository's full Windows validation

@@ -159,19 +159,12 @@ run-tauri-dev.bat
 | `run-tauri-portable.bat` | 生成可体验的 portable 预览目录（含逐文件 SHA256 manifest） |
 | `run-tauri-installer.bat` | 构建并烟测安装器候选 |
 | `run-tauri-module-packages.bat` | 打包 `resources/modules` 中的固定 Rust 进程模块 |
-| `run-legacy-wpf.bat` | 显式进入历史 WPF 宿主维护路径 |
 
-这些入口都只作用于新 Tauri 宿主，不会替换或改写已有的 WPF 安装。
+这些入口都只作用于新 Tauri 宿主。旧 WPF 开发启动入口已经退役。
 
-需要开发宿主与调试模块时，请使用项目本地隔离 Profile，不要把开发数据写入正式安装目录：
-
-```powershell
-pwsh ./scripts/start-dev-host.ps1 -Profile Shell2      # Development 环境
-pwsh ./scripts/start-module-test-host.ps1 -Profile Demo # ModuleTest 环境
-pwsh ./scripts/reset-local-profile.ps1 -Environment Development -Profile Shell2
-```
-
-沙箱实例的窗口标题会显示 `QingToolbox [DEV: <Profile>]` 或 `QingToolbox [MODULE TEST: <Profile>]`，避免与正式安装混淆。详见 [`docs/DEVELOPMENT_ENVIRONMENTS.md`](docs/DEVELOPMENT_ENVIRONMENTS.md)。
+开发版由 `run-tauri-dev.bat` 启动，窗口标题标为 `QingToolbox [Dev]`，
+并使用独立的 `QingToolbox.Dev` 模块、设置与数据目录，不会读取正式版的模块安装目录。
+旧 WPF 本地 Profile 脚本仅为尚未退役的历史发布链保留，不用于当前开发。
 
 ### 模块开发
 

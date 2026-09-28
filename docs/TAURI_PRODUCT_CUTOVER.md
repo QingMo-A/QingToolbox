@@ -72,8 +72,9 @@ Legacy DLL modules cannot be loaded by the Rust process-module runtime.
   installer flow. Do not use the old publishing BAT to publish a Tauri build.
 - Remove the WPF shell, in-process loader/ABI and dependent legacy-only projects
   after checking shared dependencies; retain shared Vue assets and module data.
-- Retire `run-legacy-wpf.bat`, the old WPF build/installer scripts and their
-  legacy-only CI jobs. Git history remains the source rollback path.
+- The `run-legacy-wpf.bat` development launcher has been retired. The old WPF
+  build/installer scripts and legacy-only CI jobs remain until their publishing
+  path is replaced; Git history remains the source rollback path.
 - Choose the public Tauri release version and complete signing with a valid
   publisher certificate or signing service. No usable code-signing certificate
   was found in the local user/machine certificate stores during this handoff.
