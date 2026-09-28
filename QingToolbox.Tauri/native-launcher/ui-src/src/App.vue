@@ -13,6 +13,7 @@ import {
   setModuleHotkey,
   setHotkeyRecording,
   type EverythingResult,
+  type EverythingRuntimeStatus,
   type EverythingSearchMode,
   type EverythingSearchResponse,
   type LauncherItem,
@@ -86,6 +87,8 @@ const error = ref('')
 const everythingResults = ref<EverythingResult[]>([])
 const everythingStatus = ref<EverythingSearchResponse['status']>('idle')
 const everythingError = ref('')
+const runtimeStatus = ref<EverythingRuntimeStatus['status'] | 'checking'>('checking')
+const runtimeStatusError = ref('')
 const selectedEverythingIndex = ref(-1)
 const resultMenu = ref<{ result: EverythingResult; x: number; y: number } | null>(null)
 const draggedId = ref<string | null>(null)
@@ -101,6 +104,8 @@ const hotkeySaving = ref(false)
 const hotkeyError = ref('')
 const hotkeyInput = ref<HTMLInputElement | null>(null)
 let everythingDebounceTimer: number | undefined
+let runtimeStatusTimer: number | undefined
+let runtimeStatusPending = false
 let everythingRequestSerial = 0
 let unlistenStateChanged: UnlistenFn | undefined
 
@@ -388,6 +393,41 @@ function everythingStatusLabel(): string {
   if (everythingStatus.value === 'error') return 'Everything 搜索暂时不可用'
   if (!search.value.query) return '输入关键词开始搜索'
   return `${everythingResults.value.length} 个结果`
+}
+
+const runtimeStatusLabel = computed(() => ({
+  checking: 'Everything 检查中',
+  ready: 'Everything 已初始化',
+  indexing: 'Everything 索引未就绪',
+  unavailable: 'Everything 不可用',
+  error: 'Everything 状态异常',
+})[runtimeStatus.value])
+
+const runtimeStatusTitle = computed(() => runtimeStatus.value === 'indexing'
+  ? `${runtimeStatusError.value || 'Everything 正在建立索引。'}预计完成时间暂不可获取。`
+  : runtimeStatusError.value || runtimeStatusLabel.value)
+
+async function refreshEverythingRuntimeStatus(): Promise<void> {
+  if (disposed || runtimeStatusPending) return
+  runtimeStatusPending = true
+  try {
+    const response = await invokeModule<EverythingRuntimeStatus>('getEverythingStatus')
+    if (disposed) return
+    runtimeStatus.value = response.status
+    runtimeStatusError.value = response.error ?? ''
+  } catch (reason) {
+    if (disposed) return
+    runtimeStatus.value = 'error'
+    runtimeStatusError.value = messageOf(reason)
+  } finally {
+    runtimeStatusPending = false
+    if (!disposed) {
+      runtimeStatusTimer = window.setTimeout(
+        () => { void refreshEverythingRuntimeStatus() },
+        runtimeStatus.value === 'indexing' ? 5000 : 30000,
+      )
+    }
+  }
 }
 
 function scheduleEverythingSearch(): void {
@@ -730,7 +770,7 @@ onMounted(() => {
   if (recentContainer.value) recentObserver.observe(recentContainer.value)
   reveal(document.hasFocus())
   window.addEventListener('keydown', onWindowKeydown)
-  void load()
+  void load().then(() => { if (!disposed) void refreshEverythingRuntimeStatus() })
   void listen<{ reason?: string }>('qmod:module-state-changed', async ({ payload }) => {
     if (payload.reason === 'externalDrop') {
       query.value = ''
@@ -752,6 +792,7 @@ onBeforeUnmount(() => {
   recentObserver?.disconnect()
   stopHotkeyRecording()
   if (everythingDebounceTimer !== undefined) window.clearTimeout(everythingDebounceTimer)
+  if (runtimeStatusTimer !== undefined) window.clearTimeout(runtimeStatusTimer)
   unlistenStateChanged?.()
   unlistenStateChanged = undefined
   window.removeEventListener('keydown', onWindowKeydown)
@@ -766,8 +807,12 @@ onBeforeUnmount(() => {
         <div class="brand-mark" aria-hidden="true">
           <LauncherIcon name="grid" />
         </div>
-        <div>
+        <div class="brand-heading">
           <h1>启动台</h1>
+          <span class="everything-runtime-status" :class="`is-${runtimeStatus}`" role="status" aria-live="polite" :title="runtimeStatusTitle">
+            <span class="everything-runtime-dot" aria-hidden="true"></span>
+            {{ runtimeStatusLabel }}
+          </span>
         </div>
       </div>
       <div class="top-actions">

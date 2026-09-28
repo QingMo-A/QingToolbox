@@ -3,6 +3,7 @@
   "name": "Qing Launcher",
   "description": "Rust-powered application launchpad for QingToolbox.",
   "version": "0.3.0",
+  "apiVersion": 1,
   "author": "QingMo-A",
   "entry": "bin/qing-launcher-module.exe",
   "runtimeType": "Process",
@@ -28,6 +29,7 @@
     "setFolderOrder",
     "deleteFolder",
     "searchEverything",
+    "getEverythingStatus",
     "openEverythingResult",
     "openEverythingResultFolder",
     "copyEverythingResultPath"

@@ -4,6 +4,9 @@ import { computed } from 'vue'
 type QIconName =
   | 'home'
   | 'modules'
+  | 'devices'
+  | 'desktopDevice'
+  | 'phoneDevice'
   | 'running'
   | 'logs'
   | 'settings'
@@ -29,6 +32,7 @@ const props = defineProps<{ name: QIconName; size?: number }>()
 const fluentGlyphs: Partial<Record<QIconName, string>> = {
   home: '\uE80F',
   modules: '\uE71D',
+  devices: '\uE772',
   running: '\uE768',
   logs: '\uE9D9',
   settings: '\uE713',
@@ -61,7 +65,15 @@ const fluentGlyph = computed(() => fluentGlyphs[props.name])
     aria-hidden="true"
     focusable="false"
   >
-    <template v-if="name === 'refresh'">
+    <template v-if="name === 'desktopDevice'">
+      <rect x="2.5" y="3.5" width="15" height="10.5" rx="1.5" />
+      <path d="M10 14v2.5M6.5 16.5h7" />
+    </template>
+    <template v-else-if="name === 'phoneDevice'">
+      <rect x="5.5" y="1.8" width="9" height="16.4" rx="1.8" />
+      <path d="M8.5 4.2h3M9.8 15.8h.4" />
+    </template>
+    <template v-else-if="name === 'refresh'">
       <path d="M16.5 7A7 7 0 1 0 17 11" />
       <path d="M13 3h4v4" />
     </template>

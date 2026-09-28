@@ -83,7 +83,11 @@ pub fn default_option() -> FontOption {
 }
 
 pub fn option_for_id(id: &str) -> Option<FontOption> {
-    catalog().into_iter().find(|option| option.id == id)
+    option_from_catalog(id, &catalog())
+}
+
+fn option_from_catalog(id: &str, options: &[FontOption]) -> Option<FontOption> {
+    options.iter().find(|option| option.id == id).cloned()
 }
 
 /// Normalize a legacy or newly selected font into a catalog entry. Missing or
@@ -466,6 +470,23 @@ mod tests {
             normalize_selection(Some("system:Consolas"), Some("system"), None).source,
             "system"
         );
+    }
+
+    #[test]
+    fn imported_selection_keeps_its_verified_catalog_source() {
+        let hash = "a".repeat(64);
+        let imported = FontOption {
+            id: format!("imported:{hash}"),
+            source: "imported".to_string(),
+            display_name: "Imported Font".to_string(),
+            family_name: None,
+            resource_url: Some(format!("http://qfont.localhost/user-fonts/font-{hash}.ttf")),
+        };
+        let options = vec![default_option(), imported.clone()];
+        let selected = option_from_catalog(&imported.id, &options).expect("catalog font");
+        assert_eq!(selected.source, "imported");
+        assert_eq!(selected.resource_url, imported.resource_url);
+        assert!(option_from_catalog("imported:missing", &options).is_none());
     }
 
     #[test]

@@ -18,9 +18,11 @@ tauri-build = { version = "=2.6.3", features = [] }
 [dependencies]
 base64 = "0.22"
 getrandom = "=0.3.4"
+mdns-sd = { version = "=0.21.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "=0.10.9"
+snow = { version = "=0.9.6", default-features = false, features = ["default-resolver"] }
 tauri = { version = "=2.11.5", features = ["tray-icon"] }
 tauri-plugin-dialog = "=2.7.2"
 tauri-plugin-global-shortcut = "=2.3.2"
@@ -32,7 +34,7 @@ tauri-plugin-autostart = "=2.5.1"
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "=0.38.2"
-windows-sys = { version = "=0.60.2", features = ["Win32_Networking_WinHttp", "Win32_System_Registry", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "=0.60.2", features = ["Win32_Foundation", "Win32_Networking_WinHttp", "Win32_Security_Cryptography", "Win32_System_Registry", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 codegen-units = 1

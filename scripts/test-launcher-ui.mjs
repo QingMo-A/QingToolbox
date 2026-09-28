@@ -7,12 +7,13 @@ import { spawn } from 'node:child_process'
 import { verifyLauncherDrag } from './launcher-drag-check.mjs'
 
 const root = resolve('QingToolbox.Tauri/native-launcher/ui-src/dist')
-const fixture = `window.__callbacks={}; window.__listeners={}; window.__callbackId=0; window.__hides=0;
+const fixture = `window.__callbacks={}; window.__listeners={}; window.__callbackId=0; window.__hides=0; window.__runtimeReady=false;
 window.__emit=(event,payload)=>{for(const handler of window.__listeners[event]??[])window.__callbacks[handler]?.({event,id:handler,payload})};
 window.__TAURI_INTERNALS__={transformCallback:fn=>{window.__callbacks[++window.__callbackId]=fn;return window.__callbackId},unregisterCallback:()=>{},invoke:async(cmd,args)=>{
  if(cmd==='plugin:event|listen'){(window.__listeners[args.event]??=[]).push(args.handler);return args.handler}
  if(cmd==='hide_module_window'){window.__hides++;return}
  if(cmd==='get_module_window_context')return {name:'Qing Launcher',version:'test',operations:[],iconDataUrl:null};
+ if(cmd==='invoke_module_window' && args.method==='getEverythingStatus')return window.__runtimeReady?{status:'ready'}:{status:'indexing',error:'Everything 索引尚未建立。'};
  if(cmd==='invoke_module_window')return {sortMode:'custom',items:[],folders:[],customOrder:[],recent:[],hotkey:{ctrl:true,alt:true,shift:false,win:false,virtualKey:76,keyLabel:'L'},hotkeyStatus:'HostManaged',active:true};
  return null;
 }};`
@@ -49,6 +50,8 @@ try {
  let target
  await waitFor(async()=>{try{target=(await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(t=>t.url.startsWith(`http://127.0.0.1:${server.address().port}`));return !!target}catch{return false}})
  await waitFor(()=>evaluate(target,`!!document.querySelector('.launcher-shell') && !document.querySelector('.loading-card')`))
+ await waitFor(()=>evaluate(target,`document.querySelector('.everything-runtime-status')?.classList.contains('is-indexing') && document.querySelector('.everything-runtime-status')?.innerText.includes('索引未就绪')`))
+ await evaluate(target,'window.__runtimeReady=true')
  await verifyLauncherDrag(target,{evaluate,mouse,delay,waitFor})
  await evaluate(target, `(() => {
    window.__desktopState = { sortMode:'desktop', items:[{id:'desk-one',name:'桌面应用',iconKey:null,source:'desktop',lastLaunchedAt:null}], folders:[], customOrder:[], recent:[], hotkey:{ctrl:true,alt:true,shift:false,win:false,virtualKey:76,keyLabel:'L'},hotkeyStatus:'HostManaged',active:true };
@@ -178,6 +181,8 @@ try {
  await mouse(target,'mousePressed',8,8);await mouse(target,'mouseReleased',8,8)
  if(await evaluate(target,'window.__hides')!==2)throw new Error('Dismissal did not recover after drop')
  console.log('Launcher transparent centering, blank click and external-drop protection passed.')
+ await waitFor(()=>evaluate(target,`document.querySelector('.everything-runtime-status')?.classList.contains('is-ready') && document.querySelector('.everything-runtime-status')?.innerText.includes('已初始化')`),10000)
+ console.log('Everything header status changed from indexing to initialized.')
  const screenshot=await cdp(target,'Page.captureScreenshot',{format:'png'})
  mkdirSync('artifacts/ui-check',{recursive:true});writeFileSync('artifacts/ui-check/launcher.png',Buffer.from(screenshot.data,'base64'))
  console.log('Launcher browser interaction checks passed.')

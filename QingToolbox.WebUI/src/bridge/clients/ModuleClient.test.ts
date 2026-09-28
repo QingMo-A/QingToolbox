@@ -13,6 +13,19 @@ describe('ModuleClient lifecycle commands',()=>{
     request.mockResolvedValue({...result,packagePath:'C:/private/module.qmod'})
     await expect(new ModuleClient({request} as any).importModule()).rejects.toThrow('validation failed')
   })
+  it('accepts only an opaque API mismatch confirmation and never exposes a package path',async()=>{
+    const prompt={disposition:'RequiresConfirmation',token:'opaque-token',moduleId:'qing.future',moduleName:'Future',apiVersion:2,hostApiVersion:1,operation:'import'}
+    const request=vi.fn().mockResolvedValue(prompt)
+    const client=new ModuleClient({request} as any)
+    await expect(client.importModule()).resolves.toEqual(prompt)
+    request.mockResolvedValue({...prompt,packagePath:'C:/private.qmod'})
+    await expect(client.importModule()).rejects.toThrow('validation failed')
+    request.mockResolvedValue({disposition:'Imported',importedModuleId:'qing.future',snapshot:{generatedAt:new Date().toISOString(),modules:[{id:'incomplete'}]}})
+    await expect(client.confirmIncompatibleImport('opaque-token')).rejects.toThrow('validation failed')
+    expect(request).toHaveBeenLastCalledWith('modules.confirmIncompatibleImport',{token:'opaque-token'})
+    await client.cancelPendingImport('opaque-token')
+    expect(request).toHaveBeenLastCalledWith('modules.cancelPendingImport',{token:'opaque-token'})
+  })
   it('sends module management commands with only the module ID',async()=>{
     const result={disposition:'Succeeded',snapshot}
     const request=vi.fn().mockResolvedValue(result)

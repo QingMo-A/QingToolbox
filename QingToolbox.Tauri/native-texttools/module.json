@@ -3,6 +3,7 @@
   "name": "Text Tools",
   "description": "Lightweight text conversion and formatting tools.",
   "version": "0.2.0",
+  "apiVersion": 1,
   "author": "QingMo-A",
   "minimumHostVersion": "0.1.0",
   "entry": "bin/qing-texttools-module.exe",

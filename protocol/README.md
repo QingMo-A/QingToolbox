@@ -27,6 +27,19 @@ The normative JSON Schema is
 The Tauri module manifest profile is described by
 [`module-manifest.tauri.v1.schema.json`](module-manifest.tauri.v1.schema.json).
 
+New `module.json` and `qmod.json` files declare the same independent integer
+`apiVersion`. The current host API is **1**. This governs compatibility of
+host-provided module capabilities and is checked before a module is loaded.
+An unsupported version is shown at import for explicit user confirmation; if
+stored, the module remains invalid and cannot run. Malformed or conflicting
+versions are rejected. Process modules installed before this field existed are
+treated as v1 for compatibility. The package's
+`moduleApiVersion: "tauri-process-v1"` identifies the qmod package profile,
+not this API version. The wire
+`protocolVersion` below remains a separate envelope-format version.
+The v1 host capability contract is documented in
+[`module-api.v1.md`](module-api.v1.md).
+
 The envelope uses `protocolVersion`, `messageType`, `requestId` and `payload`.
 The `messageType` namespace identifies the direction and operation (for
 example `module.hello.request`, `module.hello.response` or

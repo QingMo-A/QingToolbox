@@ -39,6 +39,10 @@ const showDiagnostics = computed(() => app.snapshot?.environmentKind === 'Develo
           <b class="q-sidebar-icon"><QIcon name="modules" /></b>
           <span>{{ t('navigation.modules') }}</span>
         </RouterLink>
+        <RouterLink to="/devices" :title="t('navigation.devices')" :aria-label="t('navigation.devices')">
+          <b class="q-sidebar-icon"><QIcon name="devices" /></b>
+          <span>{{ t('navigation.devices') }}</span>
+        </RouterLink>
         <RouterLink to="/running" :title="t('navigation.running')" :aria-label="t('navigation.running')">
           <b class="q-sidebar-icon"><QIcon name="running" /></b>
           <span>{{ t('navigation.running') }}</span>

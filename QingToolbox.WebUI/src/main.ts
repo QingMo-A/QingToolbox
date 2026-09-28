@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './app/App.vue'
 import FloatingBadge from './floating-badge/FloatingBadge.vue'
+import InfoPopupSurface from './info-popup/InfoPopupSurface.vue'
 import { router } from './app/router'
 import { useAppStore } from './app/store'
 import { useModuleStore } from './app/moduleStore'
@@ -26,8 +27,14 @@ import './design-system/tokens/appearancePresets.css'
 applyAppearancePreset(readAppearancePreset())
 
 const isFloatingBadge = new URL(window.location.href).searchParams.get('surface') === 'floating-badge'
+const isInfoPopup = new URL(window.location.href).searchParams.get('surface') === 'info-popup'
 
-if (isFloatingBadge) {
+if (isInfoPopup) {
+  document.documentElement.classList.add('info-popup-document')
+  const theme = localStorage.getItem('qing.theme')
+  document.documentElement.dataset.theme = theme === 'dark' || theme === 'light' ? theme : 'system'
+  createApp(InfoPopupSurface).mount('#app')
+} else if (isFloatingBadge) {
   document.documentElement.classList.add('floating-badge-document')
   createApp(FloatingBadge).mount('#app')
 } else {

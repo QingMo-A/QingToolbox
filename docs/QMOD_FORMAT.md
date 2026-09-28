@@ -15,8 +15,11 @@ exactly one `qmod.json` (schema [`qmod.tauri.v1.schema.json`](../protocol/qmod.t
 Do not wrap the package contents in an extra top-level directory.
 
 Secure staging `qmod.json` schema 1 contains `schemaVersion`, `moduleId`,
-`version`, `moduleApiVersion`, and `entryManifest`; `entryManifest` must be the
-root `module.json`. See [`QMOD_STAGING_SECURITY.md`](QMOD_STAGING_SECURITY.md).
+`version`, integer `apiVersion`, `moduleApiVersion`, and `entryManifest`;
+`entryManifest` must be the root `module.json`. The `apiVersion` must match
+`module.json` and the package builder writes it into each build artifact.
+For older packages only, a missing `apiVersion` means v1. A mismatch is never
+resolved by user confirmation. See [`QMOD_STAGING_SECURITY.md`](QMOD_STAGING_SECURITY.md).
 
 ## Existing WPF profile (legacy)
 

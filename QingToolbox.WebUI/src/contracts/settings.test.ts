@@ -28,6 +28,17 @@ describe('settings snapshot contract', () => {
     expect(isSettingsSnapshot({ ...valid, language: invalidLanguage })).toBe(false)
   })
   it('rejects invalid logs preference', () => expect(isSettingsSnapshot({ ...valid, showLogsInSidebar: 'yes' })).toBe(false))
+  it('accepts bounded window defaults and rejects malformed dimensions', () => {
+    expect(isSettingsSnapshot({ ...valid, windowWidth: 1440, windowHeight: 900, startupFullscreen: true })).toBe(true)
+    expect(isSettingsSnapshot({ ...valid, windowWidth: 100 })).toBe(false)
+    expect(isSettingsSnapshot({ ...valid, windowHeight: 900.5 })).toBe(false)
+    expect(isSettingsSnapshot({ ...valid, startupFullscreen: 'true' })).toBe(false)
+  })
+  it('accepts only a bounded information popup display time', () => {
+    expect(isSettingsSnapshot({ ...valid, infoPopupDismissSeconds: 15 })).toBe(true)
+    expect(isSettingsSnapshot({ ...valid, infoPopupDismissSeconds: 2 })).toBe(false)
+    expect(isSettingsSnapshot({ ...valid, infoPopupDismissSeconds: 61 })).toBe(false)
+  })
   it.each(['Close', 'Minimize', ''])('rejects close behavior %s', mainWindowCloseBehavior => expect(isSettingsSnapshot({ ...valid, mainWindowCloseBehavior })).toBe(false))
   it.each(['Badge', 'Hidden', ''])('rejects presentation %s', startupPresentationMode => expect(isSettingsSnapshot({ ...valid, startupPresentationMode })).toBe(false))
   it('rejects invalid startup booleans', () => expect(isSettingsSnapshot({ ...valid, launchAtLogin: 'no' })).toBe(false))

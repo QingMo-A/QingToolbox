@@ -4,14 +4,30 @@ import type { ModuleSummary, ModuleRuntimeSnapshot } from './tauriTypes'
 
 const module: ModuleSummary = { id: 'qing.launcher', name: 'Qing Launcher', description: null, version: '1', author: null, uiKind: 'Web', runtimeType: 'process', runtimeIsolation: null, source: 'bundled', iconDataUrl: null, valid: true, issues: [] }
 const runtime = (state: ModuleRuntimeSnapshot['state']): ModuleRuntimeSnapshot => ({ moduleId: module.id, state, generation: 1, lastError: null })
+const openMock = vi.hoisted(() => vi.fn())
 const invokeMock = vi.hoisted(() => vi.fn(async (command: string) => {
+  if (command === 'get_host_info') return { version: '0.3.1-alpha', deviceName: 'QING-PC', apiVersion: 1, environmentKind: 'Development', environmentDisplayName: 'QingToolbox [Dev]' }
   if (command === 'list_modules') return { payload: { modules: [] } }
   if (command === 'get_all_module_runtime') return []
   if (command === 'get_settings') return { startupModuleIds: [] }
+  if (command === 'inspect_module_package') return { id: 'qing.future', name: 'Future', version: '2.0.0', apiVersion: 2, hostApiVersion: 1, compatible: false, sha256: 'a'.repeat(64) }
+  if (command === 'import_module') return { id: 'qing.future' }
   return {}
 }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }))
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: openMock }))
 describe('Tauri module action states', () => {
+  it('reports the native development environment instead of presenting it as Production', async () => {
+    const response = await new TauriTransport().request({ protocolVersion: 4, requestId: 'snapshot', command: 'app.getSnapshot', payload: {} })
+    expect(response.success).toBe(true)
+    expect(response.payload).toMatchObject({ environmentKind: 'Development', environmentDisplayName: 'QingToolbox [Dev]', deviceName: 'QING-PC', apiVersion: 1 })
+  })
+  it('opens only the fixed project repository through the host command', async () => {
+    invokeMock.mockClear()
+    const response = await new TauriTransport().request({ protocolVersion: 4, requestId: 'repository', command: 'app.openRepository', payload: {} })
+    expect(response.success).toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith('open_project_repository')
+  })
   it('routes load, enable, disable, unload and delete to distinct host actions', async () => {
     for (const [command, native, extra] of [
       ['modules.load', 'start_module', {}],
@@ -25,6 +41,19 @@ describe('Tauri module action states', () => {
       expect(response.success).toBe(true)
       expect(invokeMock.mock.calls[0]).toEqual([native, { moduleId: module.id, ...extra }])
     }
+  })
+  it('previews an incompatible package, then imports only after its opaque confirmation', async () => {
+    openMock.mockResolvedValueOnce('C:/future.qmod')
+    invokeMock.mockClear()
+    const transport = new TauriTransport()
+    const preview = await transport.request({ protocolVersion: 4, requestId: 'pick', command: 'modules.import', payload: {} })
+    expect(preview.payload).toMatchObject({ disposition: 'RequiresConfirmation', apiVersion: 2, hostApiVersion: 1 })
+    expect(invokeMock).not.toHaveBeenCalledWith('import_module', expect.anything())
+    const token = (preview.payload as {token:string}).token
+    await transport.request({ protocolVersion: 4, requestId: 'confirm', command: 'modules.confirmIncompatibleImport', payload: { token } })
+    expect(invokeMock).toHaveBeenCalledWith('import_module', { sourcePath: 'C:/future.qmod', expectedSha256: 'a'.repeat(64), allowIncompatibleApi: true })
+    const replay = await transport.request({ protocolVersion: 4, requestId: 'replay', command: 'modules.confirmIncompatibleImport', payload: { token } })
+    expect(replay.success).toBe(false)
   })
   it('unloaded modules only offer load, not open or activate', () => {
     for (const state of [undefined, runtime('notStarted'), runtime('stopped'), runtime('failed')]) {

@@ -861,7 +861,8 @@ fn main() {
                     );
                     continue;
                 };
-                if method == "searchEverything" && !lifecycle_active {
+                if matches!(method, "searchEverything" | "getEverythingStatus") && !lifecycle_active
+                {
                     write_error(
                         &mut stdout,
                         "module.invoke.response",
@@ -1189,6 +1190,12 @@ fn handle_method(
                 )
             })
         }
+        "getEverythingStatus" => serde_json::to_value(everything.status()).map_err(|_| {
+            (
+                "serialization_failed",
+                "Everything status could not be serialized".to_string(),
+            )
+        }),
         "searchEverything" => {
             let query = payload
                 .get("query")
@@ -2338,6 +2345,33 @@ mod tests {
             before
         );
         assert!(runtime.open_result("C:\\arbitrary.txt").is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn everything_status_reports_missing_runtime_without_changing_launcher_state() {
+        let mut store = test_store();
+        let before = serde_json::to_value(store.state()).expect("state JSON");
+        let mut desktop_loaded = true;
+        let root = env::temp_dir().join(format!(
+            "qing-launcher-everything-status-missing-{}",
+            unique_id("test")
+        ));
+        let mut runtime = EverythingRuntime::new(root.clone(), root.join("data"));
+        let response = handle_method(
+            "getEverythingStatus",
+            Value::Null,
+            &mut store,
+            &mut desktop_loaded,
+            &mut runtime,
+        )
+        .expect("contained Everything status");
+        assert_eq!(response["status"], "unavailable");
+        assert!(response.get("estimatedSeconds").is_none());
+        assert_eq!(
+            serde_json::to_value(store.state()).expect("state JSON"),
+            before
+        );
         let _ = fs::remove_dir_all(root);
     }
 

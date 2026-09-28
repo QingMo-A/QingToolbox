@@ -196,7 +196,8 @@ try {
     $env:QING_TAURI_STARTUP_PRESENTATION = 'main'
     $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
     if (-not $npm) { throw 'npm.cmd was not found.' }
-    $process = Start-Process -FilePath $npm.Source -WorkingDirectory $tauriRoot -ArgumentList @('run', 'tauri', '--', 'dev') -WindowStyle Hidden -PassThru
+    $devConfig = Join-Path $rustRoot 'tauri.dev.conf.json'
+    $process = Start-Process -FilePath $npm.Source -WorkingDirectory $tauriRoot -ArgumentList @('run', 'tauri', '--', 'dev', '--config', $devConfig) -WindowStyle Hidden -PassThru
     Start-Sleep -Milliseconds 1800
     if ($process.HasExited) {
         throw "Tauri Debug host exited during startup with code $($process.ExitCode)."

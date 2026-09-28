@@ -3,6 +3,7 @@
   "name": "Window Topmost",
   "description": "Select a visible window and toggle whether it stays always on top.",
   "version": "0.2.0",
+  "apiVersion": 1,
   "author": "QingMo-A",
   "minimumHostVersion": "0.1.0",
   "entry": "bin/qing-windowtopmost-module.exe",

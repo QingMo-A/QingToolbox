@@ -8,6 +8,7 @@ use std::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 
+use crate::module_api;
 use crate::paths::{
     canonical_manifest_path, canonical_module_directory, resolve_existing_asset, summarize_root,
     ModuleRoot, ModuleRootSummary, ModuleSource,
@@ -39,6 +40,8 @@ pub struct ModuleSummary {
     pub name: String,
     pub description: Option<String>,
     pub version: String,
+    /// Effective host API version; absent in legacy v1 manifests.
+    pub api_version: Option<u32>,
     pub author: Option<String>,
     pub ui_kind: Option<String>,
     pub runtime_type: Option<String>,
@@ -112,6 +115,10 @@ struct RawManifest {
     minimum_host_version: Option<String>,
     #[allow(dead_code)]
     default_language: Option<String>,
+    // Keep presence distinct from JSON null: only an absent field is the
+    // historical v1 compatibility case.
+    #[serde(flatten)]
+    extra: BTreeMap<String, serde_json::Value>,
 }
 
 pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
@@ -298,6 +305,23 @@ fn validate_manifest(
     let id = manifest.id.as_deref().unwrap_or("").trim().to_string();
     let name = manifest.name.as_deref().unwrap_or("").trim().to_string();
     let version = manifest.version.as_deref().unwrap_or("").trim().to_string();
+    let api_version = match module_api::requested_version(manifest.extra.get("apiVersion")) {
+        Ok(version) if version == module_api::API_VERSION => Some(version),
+        Ok(version) => {
+            issues.push(issue(
+                "apiVersionUnsupported",
+                format!(
+                    "模块需要 API v{version}；当前工具箱仅支持 API v{}。",
+                    module_api::API_VERSION
+                ),
+            ));
+            Some(version)
+        }
+        Err(_) => {
+            issues.push(issue("apiVersionInvalid", "模块 apiVersion 必须是正整数。"));
+            None
+        }
+    };
 
     if id.is_empty() {
         issues.push(issue("missingId", "缺少模块 id。"));
@@ -456,6 +480,7 @@ fn validate_manifest(
         },
         description: clean_optional(manifest.description.as_deref()),
         version: version_or_placeholder(&version),
+        api_version,
         author: clean_optional(manifest.author.as_deref()),
         ui_kind: clean_optional(manifest.ui_kind.as_deref()),
         runtime_type: clean_optional(manifest.runtime_type.as_deref()),
@@ -594,6 +619,7 @@ fn invalid_summary(id: String, source: ModuleSource, code: &str, message: String
         name: id,
         description: None,
         version: "—".to_string(),
+        api_version: None,
         author: None,
         ui_kind: None,
         runtime_type: None,
@@ -741,13 +767,49 @@ mod tests {
     fn discovers_valid_manifest_without_loading_entry() {
         let (temp, root) = temp_module(
             "demo",
-            r#"{"id":"demo.test","name":"Demo","version":"1.0.0","entry":"entry.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#,
+            r#"{"id":"demo.test","name":"Demo","version":"1.0.0","apiVersion":1,"entry":"entry.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#,
         );
         let result = discover_modules(&[root]);
         assert_eq!(result.payload.modules.len(), 1);
         assert!(result.payload.modules[0].valid);
+        assert_eq!(result.payload.modules[0].api_version, Some(1));
         assert!(result.records.contains_key("demo.test"));
         let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn legacy_process_manifest_without_api_version_remains_v1() {
+        let (temp, root) = temp_module(
+            "legacy-process",
+            r#"{"id":"demo.legacy","name":"Legacy Process","version":"1.0.0","entry":"entry.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#,
+        );
+        let result = discover_modules(&[root]);
+        assert!(result.payload.modules[0].valid);
+        assert_eq!(result.payload.modules[0].api_version, Some(1));
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn unsupported_or_malformed_api_version_cannot_load() {
+        for (value, expected_issue) in [
+            ("2", "apiVersionUnsupported"),
+            ("\"1\"", "apiVersionInvalid"),
+            ("null", "apiVersionInvalid"),
+            ("0", "apiVersionInvalid"),
+        ] {
+            let manifest = format!(
+                r#"{{"id":"demo.api","name":"API Test","version":"1.0.0","apiVersion":{value},"entry":"entry.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}}"#
+            );
+            let (temp, root) = temp_module("api-test", &manifest);
+            let result = discover_modules(&[root]);
+            assert!(!result.payload.modules[0].valid);
+            assert!(result.records.is_empty());
+            assert!(result.payload.modules[0]
+                .issues
+                .iter()
+                .any(|issue| issue.code == expected_issue));
+            let _ = fs::remove_dir_all(temp);
+        }
     }
 
     #[test]

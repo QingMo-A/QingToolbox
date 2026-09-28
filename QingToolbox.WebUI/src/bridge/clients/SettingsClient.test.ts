@@ -49,6 +49,16 @@ describe('SettingsClient appearance preset mutation', () => {
   })
 })
 
+describe('SettingsClient current window size', () => {
+  it('reads logical dimensions with no payload and rejects malformed responses', async () => {
+    const request = vi.fn().mockResolvedValueOnce({ width: 1366, height: 768 }).mockResolvedValueOnce({ width: -1, height: 768 })
+    const client = new SettingsClient({ request } as any)
+    await expect(client.getCurrentWindowSize()).resolves.toEqual({ width: 1366, height: 768 })
+    expect(request).toHaveBeenCalledWith('settings.getCurrentWindowSize', {})
+    await expect(client.getCurrentWindowSize()).rejects.toThrow('Window size response validation failed.')
+  })
+})
+
 describe('SettingsClient font mutations', () => {
   it('uses the exact font command and payload', async () => {
     const request = vi.fn().mockResolvedValue({ ...snapshot, font: { id: 'Default', source: 'default', displayName: 'Default' }, fonts: [] })

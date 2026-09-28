@@ -40,6 +40,22 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": false
+      },
+      {
+        "label": "info-popup",
+        "title": "QingToolbox 消息",
+        "url": "index.html?surface=info-popup",
+        "width": 390,
+        "height": 150,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "focus": false,
+        "focusable": false,
+        "skipTaskbar": true,
+        "visible": false
       }
     ],
     "security": {

@@ -32,7 +32,7 @@ function page(module = item(), clientOverrides: Record<string, unknown> = {}, st
   else if (state.status === 'error') store.fail(new Error('Bridge.Internal: secret failure'))
   else if (state.status === 'idle') store.status = 'idle'
   const snapshot = () => ({ generatedAt: new Date().toISOString(), modules: [module] })
-  const client = { getSnapshot: vi.fn(async () => snapshot()), importModule: vi.fn(async () => ({ disposition: 'Cancelled', importedModuleId: null, snapshot: snapshot() })), load: vi.fn(async () => snapshot()), activate: vi.fn(async () => snapshot()), open: vi.fn(async () => snapshot()), deactivate: vi.fn(async () => snapshot()), unload: vi.fn(async () => snapshot()), setStartupAuthorization: vi.fn(async () => snapshot()), openDirectory: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: snapshot() })), remove: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: { generatedAt: new Date().toISOString(), modules: [] } })), checkUpdate: vi.fn(async () => snapshot()), downloadUpdate: vi.fn(async () => snapshot()), installVerifiedUpdate: vi.fn(async () => ({ disposition: 'Installed', sourceVersion: module.version, targetVersion: module.targetVersion ?? module.version, snapshot: snapshot() })), ...clientOverrides }
+  const client = { getSnapshot: vi.fn(async () => snapshot()), importModule: vi.fn(async () => ({ disposition: 'Cancelled', importedModuleId: null, snapshot: snapshot() })), confirmIncompatibleImport: vi.fn(), cancelPendingImport: vi.fn(async () => undefined), load: vi.fn(async () => snapshot()), activate: vi.fn(async () => snapshot()), open: vi.fn(async () => snapshot()), deactivate: vi.fn(async () => snapshot()), unload: vi.fn(async () => snapshot()), setStartupAuthorization: vi.fn(async () => snapshot()), openDirectory: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: snapshot() })), remove: vi.fn(async () => ({ disposition: 'Succeeded', snapshot: { generatedAt: new Date().toISOString(), modules: [] } })), checkUpdate: vi.fn(async () => snapshot()), downloadUpdate: vi.fn(async () => snapshot()), installVerifiedUpdate: vi.fn(async () => ({ disposition: 'Installed', sourceVersion: module.version, targetVersion: module.targetVersion ?? module.version, snapshot: snapshot() })), ...clientOverrides }
   const wrapper = mount(ModulesPage, { attachTo: document.body, global: { plugins: [pinia], provide: { moduleClient: client } } }); mounted.push(wrapper)
   return { wrapper, client, app, store }
 }
@@ -84,6 +84,39 @@ describe('ModulesPage lifecycle controls', () => {
     const button = wrapper.get('.wpf-page-header .module-import-button')
     expect(button.attributes('aria-busy')).toBe('false')
     expect(button.attributes('disabled')).toBeUndefined()
+  })
+
+  it('asks before storing an incompatible API package and keeps it unloadable after confirmation', async () => {
+    const prompt = { disposition: 'RequiresConfirmation', token: 'opaque-1', moduleId: 'qing.future', moduleName: 'Future Module', apiVersion: 2, hostApiVersion: 1, operation: 'import' }
+    const future = item({ id: 'qing.future', displayName: 'Future Module', isValid: false, canLoad: false, isExecutionBlocked: true, errors: ['API v2 is unsupported'] })
+    const importModule = vi.fn(async () => prompt)
+    const confirmIncompatibleImport = vi.fn(async () => ({ disposition: 'Imported', importedModuleId: future.id, snapshot: { generatedAt: new Date().toISOString(), modules: [future] } }))
+    const { wrapper, store } = page(item(), { importModule, confirmIncompatibleImport })
+    await wrapper.get('.wpf-page-header .module-import-button').trigger('click')
+    await flushPromises()
+    const dialog = document.querySelector<HTMLElement>('.q-modal-card')!
+    expect(dialog.getAttribute('role')).toBe('dialog')
+    expect(dialog.textContent).toContain('v2')
+    expect(dialog.textContent).toContain('v1')
+    expect(store.selectedModuleId).not.toBe('qing.future')
+    dialog.querySelectorAll<HTMLButtonElement>('.q-modal-actions button')[1].click()
+    await flushPromises()
+    expect(confirmIncompatibleImport).toHaveBeenCalledWith('opaque-1')
+    expect(store.selectedModuleId).toBe('qing.future')
+    expect(store.selectedModule?.canLoad).toBe(false)
+    expect(useToastStore().kind).toBe('warning')
+  })
+
+  it('lets the user cancel an incompatible API package without importing it', async () => {
+    const prompt = { disposition: 'RequiresConfirmation', token: 'opaque-2', moduleId: 'qing.future', moduleName: 'Future Module', apiVersion: 2, hostApiVersion: 1, operation: 'import' }
+    const cancelPendingImport = vi.fn(async () => undefined)
+    const { wrapper, client } = page(item(), { importModule: vi.fn(async () => prompt), cancelPendingImport })
+    await wrapper.get('.wpf-page-header .module-import-button').trigger('click')
+    await flushPromises()
+    document.querySelectorAll<HTMLButtonElement>('.q-modal-actions button')[0].click()
+    await flushPromises()
+    expect(cancelPendingImport).toHaveBeenCalledWith('opaque-2')
+    expect(client.confirmIncompatibleImport).not.toHaveBeenCalled()
   })
 
   it('offers localized import from the empty module state', async () => {

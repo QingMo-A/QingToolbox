@@ -7,6 +7,7 @@
     "id",
     "name",
     "version",
+    "apiVersion",
     "entry",
     "runtimeType",
     "runtimeIsolation",
@@ -30,6 +31,10 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 64
+    },
+    "apiVersion": {
+      "description": "Host/module capability compatibility version; independent of protocolVersion and qmod moduleApiVersion.",
+      "const": 1
     },
     "author": {
       "type": "string",

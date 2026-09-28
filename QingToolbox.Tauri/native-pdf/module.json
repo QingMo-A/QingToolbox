@@ -3,6 +3,7 @@
   "name": "Qing PDF",
   "description": "Merge, split, extract, and rotate PDF files locally.",
   "version": "0.1.0",
+  "apiVersion": 1,
   "author": "QingMo-A",
   "minimumHostVersion": "0.1.0",
   "entry": "bin/qing-pdf-module.exe",

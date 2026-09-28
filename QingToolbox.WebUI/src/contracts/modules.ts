@@ -19,6 +19,15 @@ export interface ModuleImportResult {
   importedModuleId: string|null
   snapshot: ModuleSnapshot
 }
+export interface ModuleImportPrompt {
+  disposition: 'RequiresConfirmation'
+  token: string
+  moduleId: string
+  moduleName: string
+  apiVersion: number
+  hostApiVersion: number
+  operation: 'import'|'replace'
+}
 export interface ModuleManagementResult {
   disposition: 'Succeeded'|'SucceededWithWarning'
   snapshot: ModuleSnapshot
@@ -71,6 +80,15 @@ export const isModuleImportResult = (value: any): value is ModuleImportResult =>
   (value.disposition === 'Imported' ? typeof value.importedModuleId === 'string' && value.importedModuleId.length > 0 : value.importedModuleId === null) &&
   isModuleSnapshot(value.snapshot) &&
   (value.disposition !== 'Imported' || value.snapshot.modules.some((module: ModuleSnapshotItem) => module.id === value.importedModuleId))
+export const isModuleImportPrompt = (value: any): value is ModuleImportPrompt => !!value &&
+  typeof value === 'object' && Object.keys(value).length === 7 &&
+  value.disposition === 'RequiresConfirmation' &&
+  typeof value.token === 'string' && value.token.length > 0 &&
+  typeof value.moduleId === 'string' && value.moduleId.length > 0 &&
+  typeof value.moduleName === 'string' && value.moduleName.length > 0 &&
+  Number.isInteger(value.apiVersion) && value.apiVersion > 0 &&
+  Number.isInteger(value.hostApiVersion) && value.hostApiVersion > 0 &&
+  (value.operation === 'import' || value.operation === 'replace')
 export const isModuleManagementResult = (value: any): value is ModuleManagementResult => !!value &&
   typeof value === 'object' && Object.keys(value).length === 2 &&
   Object.prototype.hasOwnProperty.call(value, 'disposition') && Object.prototype.hasOwnProperty.call(value, 'snapshot') &&

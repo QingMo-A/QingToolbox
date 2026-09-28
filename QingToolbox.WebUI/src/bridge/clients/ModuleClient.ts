@@ -1,18 +1,26 @@
 import type { RequestClient } from '../protocol/RequestClient'
-import { isModuleImportResult, isModuleManagementResult, isModuleSnapshot, isModuleUpdateInstallResult, type ModuleImportResult, type ModuleManagementResult, type ModuleSnapshot, type ModuleUpdateInstallResult } from '../../contracts/modules'
+import { isModuleImportPrompt, isModuleImportResult, isModuleManagementResult, isModuleSnapshot, isModuleUpdateInstallResult, type ModuleImportPrompt, type ModuleImportResult, type ModuleManagementResult, type ModuleSnapshot, type ModuleUpdateInstallResult } from '../../contracts/modules'
 
 export class ModuleClient {
   constructor(private readonly requests: RequestClient) {}
   getSnapshot() { return this.requestSnapshot('modules.getSnapshot') }
-  async importModule(): Promise<ModuleImportResult> {
+  async importModule(): Promise<ModuleImportResult | ModuleImportPrompt> {
     const value = await this.requests.request<unknown>('modules.import', {})
-    if (!isModuleImportResult(value)) throw new Error('Module import result validation failed.')
+    if (!isModuleImportResult(value) && !isModuleImportPrompt(value)) throw new Error('Module import result validation failed.')
     return value
   }
-  async replaceFromPicker(moduleId: string): Promise<ModuleImportResult> {
+  async replaceFromPicker(moduleId: string): Promise<ModuleImportResult | ModuleImportPrompt> {
     const value = await this.requests.request<unknown>('modules.updateFromPicker', { moduleId })
-    if (!isModuleImportResult(value)) throw new Error('Module replacement result validation failed.')
+    if (!isModuleImportResult(value) && !isModuleImportPrompt(value)) throw new Error('Module replacement result validation failed.')
     return value
+  }
+  async confirmIncompatibleImport(token: string): Promise<ModuleImportResult> {
+    const value = await this.requests.request<unknown>('modules.confirmIncompatibleImport', { token })
+    if (!isModuleImportResult(value) || value.disposition !== 'Imported') throw new Error('Module confirmation result validation failed.')
+    return value
+  }
+  async cancelPendingImport(token: string): Promise<void> {
+    await this.requests.request<unknown>('modules.cancelPendingImport', { token })
   }
   load(moduleId: string) { return this.requestSnapshot('modules.load', { moduleId }) }
   activate(moduleId: string) { return this.requestSnapshot('modules.activate', { moduleId }) }

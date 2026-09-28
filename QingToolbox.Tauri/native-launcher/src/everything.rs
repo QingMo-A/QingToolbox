@@ -134,6 +134,14 @@ pub struct EverythingSearchResponse {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EverythingRuntimeStatus {
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EverythingErrorKind {
     Unavailable,
@@ -335,6 +343,32 @@ impl EverythingRuntime {
         })
     }
 
+    /// Check the private index, not merely whether its IPC process exists.
+    /// ES waits for the database to load before -get-result-count succeeds;
+    /// the runtime does not expose a trustworthy completion ETA.
+    pub fn status(&mut self) -> EverythingRuntimeStatus {
+        let result = self.ensure_ready().and_then(|_| {
+            let es = self
+                .active_es
+                .as_ref()
+                .ok_or_else(|| EverythingError::ipc("Everything IPC 客户端不可用。"))?;
+            match self.indexed_entry_count(es)? {
+                0 => Err(EverythingError::indexing("Everything 索引尚未建立。")),
+                _ => Ok(()),
+            }
+        });
+        match result {
+            Ok(()) => EverythingRuntimeStatus {
+                status: "ready",
+                error: None,
+            },
+            Err(error) => EverythingRuntimeStatus {
+                status: error.status(),
+                error: Some(error.message),
+            },
+        }
+    }
+
     pub fn open_result(&mut self, result_id: &str) -> Result<(), EverythingError> {
         let result = self.lookup_result(result_id)?;
         if result.is_directory {
@@ -402,6 +436,18 @@ impl EverythingRuntime {
             // Everything instance.
             self.active_everything = Some(self.runtime_directory.join("Everything.exe"));
             return Ok(());
+        }
+
+        // An instance we just started may not have created its IPC endpoint
+        // yet. Poll it instead of spawning a duplicate on every status check.
+        if let Some(child) = self.owned_process.as_mut() {
+            if matches!(child.try_wait(), Ok(None)) {
+                return Err(EverythingError::indexing(
+                    "Everything 正在初始化索引，请稍后重试。",
+                ));
+            }
+            self.owned_process = None;
+            self.owned_instance = false;
         }
 
         let use_service = env::var("QING_LAUNCHER_EVERYTHING_SERVICE")

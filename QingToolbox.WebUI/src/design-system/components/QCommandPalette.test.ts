@@ -74,12 +74,12 @@ async function palette(open = true) {
 }
 
 describe('QCommandPalette', () => {
-  it('opens one native dialog, focuses search, and exposes six pages plus running modules', async () => {
+  it('opens one native dialog, focuses search, and exposes seven pages plus running modules', async () => {
     const { wrapper } = await palette()
     expect(HTMLDialogElement.prototype.showModal).toHaveBeenCalledTimes(1)
     expect(wrapper.get('dialog').attributes('aria-labelledby')).toBe('quick-open-title')
     expect(document.activeElement).toBe(wrapper.get('input').element)
-    expect(wrapper.findAll('[role="option"]')).toHaveLength(7)
+    expect(wrapper.findAll('[role="option"]')).toHaveLength(8)
     expect(wrapper.text()).toContain('Running now')
   })
 
@@ -101,8 +101,8 @@ describe('QCommandPalette', () => {
     const iconNames = wrapper.findAll('section')[0]
       .findAllComponents(QIcon)
       .map((icon: VueWrapper) => (icon.props() as { name: string }).name)
-    expect(iconNames).toEqual(['home', 'modules', 'running', 'logs', 'settings', 'diagnostics'])
-    expect(new Set(iconNames).size).toBe(6)
+    expect(iconNames).toEqual(['home', 'modules', 'devices', 'running', 'logs', 'settings', 'diagnostics'])
+    expect(new Set(iconNames).size).toBe(7)
   })
 
   it('projects a module icon through the reusable image component and keeps its 34px palette slot', async () => {
@@ -207,7 +207,7 @@ describe('QCommandPalette', () => {
 
     await input.trigger('keydown', { key: 'ArrowUp' })
     await flushPromises()
-    expect(input.attributes('aria-activedescendant')).toBe('quick-open-result-6')
+    expect(input.attributes('aria-activedescendant')).toBe('quick-open-result-7')
 
     await input.trigger('keydown', { key: 'ArrowDown' })
     await flushPromises()
@@ -247,11 +247,11 @@ describe('QCommandPalette', () => {
     expect(wrapper.get('[role="option"]').attributes('aria-selected')).toBe('true')
   })
 
-  it('shows all six localized page titles and descriptions and updates while open', async () => {
+  it('shows all seven localized page titles and descriptions and updates while open', async () => {
     const { wrapper, settings } = await palette()
     expect(wrapper.text()).toContain('Home'); expect(wrapper.text()).toContain('Development diagnostics')
     settings.complete(settingsSnapshot('system', 'zh-CN')); await flushPromises()
-    for (const value of ['首页','模块','运行中模块','会话日志','设置','开发诊断','浏览和管理已安装模块']) expect(wrapper.text()).toContain(value)
+    for (const value of ['首页','模块','设备','运行中模块','会话日志','设置','开发诊断','浏览和管理已安装模块']) expect(wrapper.text()).toContain(value)
     expect(wrapper.get('input').attributes('aria-label')).toBe('搜索页面和模块')
     expect(wrapper.get('input').attributes('placeholder')).toBe('搜索页面和模块')
     expect(wrapper.get('#quick-open-results').attributes('aria-label')).toBe('快速打开结果')

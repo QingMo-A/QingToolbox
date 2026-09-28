@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import type { SettingsClient } from '../bridge/clients/SettingsClient'
 import type { ModuleClient } from '../bridge/clients/ModuleClient'
-import { normalizeFont, normalizeFontOptions, type LanguageCode, type MainWindowCloseBehavior, type SettingsFont, type StartupPresentationMode } from '../contracts/settings'
+import { normalizeFont, normalizeFontOptions, type InfoPopupCorner, type LanguageCode, type MainWindowCloseBehavior, type SettingsFont, type StartupPresentationMode } from '../contracts/settings'
 import { useAppStore } from '../app/store'
 import { useSettingsStore } from '../app/settingsStore'
 import { useModuleStore } from '../app/moduleStore'
@@ -16,8 +17,10 @@ import QBadge from '../design-system/components/QBadge.vue'
 import QSkeleton from '../design-system/components/QSkeleton.vue'
 import QHostUpdatePanel from '../design-system/components/QHostUpdatePanel.vue'
 import brandMark from '../assets/QingToolbox.Mark.svg'
+import { projectAuthor, projectRepositoryUrl } from '../contracts/project'
 import { useLocalization } from '../localization/localization'
 import { bridgeStateKey } from '../presentation/workspacePresentation'
+import { TauriTransport } from '../bridge/transport/TauriTransport'
 import {
   closeBehaviorPresentation,
   settingsSections,
@@ -45,10 +48,32 @@ const isSynchronizingFont = ref(false)
 const themes: ThemeMode[] = ['system', 'light', 'dark']
 const closeBehaviors: MainWindowCloseBehavior[] = ['Ask', 'MinimizeToNotificationArea', 'ExitApplication']
 const startupPresentations: StartupPresentationMode[] = ['MainWindow', 'Minimized', 'FloatingBadge']
+const windowWidth = ref('1100')
+const windowHeight = ref('720')
+const isSavingWindow = ref(false)
+const isSavingInfoPopup = ref(false)
+const infoPopupDuration = ref('380')
+const infoPopupDismissSeconds = ref('15')
+const infoPopupCorners: InfoPopupCorner[] = ['rightTop', 'rightBottom', 'leftTop', 'leftBottom']
+const infoPopupDurationValid = computed(() => {
+  const value = Number(infoPopupDuration.value)
+  return Number.isInteger(value) && value >= 100 && value <= 2000
+})
+const infoPopupDismissValid = computed(() => {
+  const value = Number(infoPopupDismissSeconds.value)
+  return Number.isInteger(value) && value >= 3 && value <= 60
+})
+const windowSizeValid = computed(() => {
+  const width = Number(windowWidth.value)
+  const height = Number(windowHeight.value)
+  return Number.isInteger(width) && width >= 760 && width <= 7680 &&
+    Number.isInteger(height) && height >= 520 && height <= 4320
+})
 
 const hasSnapshot = computed(() => settings.snapshot !== null)
 const refreshed = computed(() => settings.generatedAt ? new Date(settings.generatedAt).toLocaleTimeString(currentLocale.value) : null)
 const productVersion = computed(() => app.snapshot?.hostVersion || '0.2.1-alpha')
+const moduleApiVersion = computed(() => app.snapshot?.apiVersion ? `v${app.snapshot.apiVersion}` : '—')
 const environment = computed(() => app.snapshot?.environmentDisplayName || app.mode || 'Development')
 const hostControlsDisabled = computed(() => app.bridge !== 'Connected')
 const languageControlsDisabled = computed(() => hostControlsDisabled.value || settings.status === 'loading' || settings.isHostMutationBusy || isSynchronizingLanguage.value)
@@ -94,11 +119,26 @@ async function refresh() {
   catch (error) { settings.fail(error) }
 }
 
+async function openRepository() {
+  try { await client.openRepository() }
+  catch { toast.show(t('settings.about.openRepositoryFailed'), 'error') }
+}
+
 watch(() => app.bridge, bridge => {
   if (bridge === 'Connected' && settings.status === 'idle') void refresh()
 }, { immediate: true })
 watch(() => settings.snapshot?.appearancePresetId, value => {
   if (value !== undefined) appearance.set(value)
+}, { immediate: true })
+watch(() => [settings.snapshot?.windowWidth, settings.snapshot?.windowHeight], ([width, height]) => {
+  if (width !== undefined) windowWidth.value = String(width)
+  if (height !== undefined) windowHeight.value = String(height)
+}, { immediate: true })
+watch(() => settings.snapshot?.infoPopupDurationMs, value => {
+  if (value !== undefined) infoPopupDuration.value = String(value)
+}, { immediate: true })
+watch(() => settings.snapshot?.infoPopupDismissSeconds, value => {
+  if (value !== undefined) infoPopupDismissSeconds.value = String(value)
 }, { immediate: true })
 
 const yesNo = (value: boolean) => t(value ? 'settings.startup.yes' : 'settings.startup.no')
@@ -191,6 +231,58 @@ async function selectCloseBehavior(value: MainWindowCloseBehavior) {
   if (result === 'success') toast.show(t('settings.toast.closeSaved'), 'success')
   else if (result === 'failure') toast.show(t('settings.toast.closeFailed'), 'error')
 }
+async function saveWindowSize(apply: boolean) {
+  if (!settings.snapshot || hostMutationDisabled.value || settings.isHostMutationBusy || isSavingWindow.value) return
+  if (!windowSizeValid.value) { toast.show(t('settings.window.sizeInvalid'), 'error'); return }
+  isSavingWindow.value = true
+  try {
+    settings.complete(await client.setWindowSize(Number(windowWidth.value), Number(windowHeight.value)))
+    if (apply) await client.applyWindowSize()
+    toast.show(t(apply ? 'settings.window.sizeApplied' : 'settings.window.sizeSaved'), 'success')
+  } catch {
+    toast.show(t('settings.window.sizeFailed'), 'error')
+  } finally { isSavingWindow.value = false }
+}
+async function updateInfoPopup(update: Record<string, unknown>) {
+  if (!settings.snapshot || hostMutationDisabled.value || isSavingInfoPopup.value || !TauriTransport.isAvailable()) return
+  isSavingInfoPopup.value = true
+  try {
+    await invoke('update_settings', { update })
+    settings.complete(await client.getSnapshot())
+    toast.show(t('settings.window.infoPopupSaved'), 'success')
+  } catch { toast.show(t('settings.window.infoPopupFailed'), 'error') }
+  finally { isSavingInfoPopup.value = false }
+}
+function saveInfoPopupTimings() {
+  if (!infoPopupDismissValid.value || settings.snapshot?.infoPopupAnimation !== false && !infoPopupDurationValid.value) return
+  void updateInfoPopup({
+    infoPopupDismissSeconds: Number(infoPopupDismissSeconds.value),
+    ...(settings.snapshot?.infoPopupAnimation === false ? {} : { infoPopupDurationMs: Number(infoPopupDuration.value) }),
+  })
+}
+async function useCurrentWindowSize() {
+  if (!settings.snapshot || hostMutationDisabled.value || settings.isHostMutationBusy || isSavingWindow.value) return
+  isSavingWindow.value = true
+  try {
+    const size = await client.getCurrentWindowSize()
+    windowWidth.value = String(size.width)
+    windowHeight.value = String(size.height)
+    toast.show(t('settings.window.currentSizeLoaded'), 'success')
+  } catch { toast.show(t('settings.window.currentSizeFailed'), 'error') }
+  finally { isSavingWindow.value = false }
+}
+async function toggleStartupFullscreen(event: Event) {
+  if (!settings.snapshot || hostMutationDisabled.value || settings.isHostMutationBusy || isSavingWindow.value) return
+  isSavingWindow.value = true
+  try {
+    settings.complete(await client.setStartupFullscreen(!settings.snapshot.startupFullscreen))
+    toast.show(t('settings.window.fullscreenSaved'), 'success')
+  } catch {
+    (event.target as HTMLInputElement).checked = Boolean(settings.snapshot?.startupFullscreen)
+    toast.show(t('settings.window.fullscreenFailed'), 'error')
+  }
+  finally { isSavingWindow.value = false }
+}
 async function selectStartupPresentation(value: StartupPresentationMode) {
   if (!settings.snapshot || hostMutationDisabled.value || settings.isUpdatingStartupPresentation || settings.snapshot.startupPresentationMode === value) return
   const result = await settings.updateStartupPresentation(client, value)
@@ -265,6 +357,33 @@ async function repairStartup() {
 
           <section v-else-if="activeSection === 'window'" aria-labelledby="settings-window-title">
             <header class="settings-section-heading"><h2 id="settings-window-title">{{ t('settings.section.window') }}</h2></header>
+            <article v-if="settings.snapshot" class="settings-card window-size-card">
+              <h3>{{ t('settings.window.startupSize') }}</h3>
+              <div class="window-size-fields">
+                <label><span>{{ t('settings.window.width') }}</span><input v-model="windowWidth" type="number" min="760" max="7680" step="1" inputmode="numeric" :disabled="hostMutationDisabled || isSavingWindow" /></label>
+                <label><span>{{ t('settings.window.height') }}</span><input v-model="windowHeight" type="number" min="520" max="4320" step="1" inputmode="numeric" :disabled="hostMutationDisabled || isSavingWindow" /></label>
+              </div>
+              <label class="window-fullscreen-choice"><input type="checkbox" :checked="settings.snapshot.startupFullscreen ?? false" :disabled="hostMutationDisabled || isSavingWindow" @change="toggleStartupFullscreen" />{{ t('settings.window.startupFullscreen') }}</label>
+              <div class="window-size-actions"><QButton :disabled="hostMutationDisabled || isSavingWindow" @click="useCurrentWindowSize">{{ t('settings.window.useCurrentSize') }}</QButton><QButton :disabled="hostMutationDisabled || isSavingWindow || !windowSizeValid" @click="saveWindowSize(false)">{{ t('settings.window.saveSize') }}</QButton><QButton :disabled="hostMutationDisabled || isSavingWindow || !windowSizeValid" @click="saveWindowSize(true)">{{ t('settings.window.applySize') }}</QButton></div>
+            </article>
+            <article v-if="settings.snapshot && TauriTransport.isAvailable()" class="settings-card info-popup-settings">
+              <h3>{{ t('settings.window.infoPopup') }}</h3>
+              <div class="info-popup-corners" role="radiogroup" :aria-label="t('settings.window.infoPopupCorner')">
+                <button v-for="corner in infoPopupCorners" :key="corner" type="button" role="radio"
+                  :aria-checked="(settings.snapshot.infoPopupCorner ?? 'rightTop') === corner"
+                  :disabled="hostMutationDisabled || isSavingInfoPopup"
+                  @click="updateInfoPopup({ infoPopupCorner: corner })">{{ t(`settings.window.corner.${corner}`) }}</button>
+              </div>
+              <label class="window-fullscreen-choice"><input type="checkbox"
+                :checked="settings.snapshot.infoPopupAnimation ?? true"
+                :disabled="hostMutationDisabled || isSavingInfoPopup"
+                @change="updateInfoPopup({ infoPopupAnimation: ($event.target as HTMLInputElement).checked })" />{{ t('settings.window.infoPopupAnimation') }}</label>
+              <div class="info-popup-duration"><label><span>{{ t('settings.window.infoPopupDuration') }}</span><input v-model="infoPopupDuration" type="number" min="100" max="2000" step="10"
+                :disabled="hostMutationDisabled || isSavingInfoPopup || settings.snapshot.infoPopupAnimation === false" /></label>
+                <label><span>{{ t('settings.window.infoPopupDismissSeconds') }}</span><input v-model="infoPopupDismissSeconds" type="number" min="3" max="60" step="1"
+                  :disabled="hostMutationDisabled || isSavingInfoPopup" /></label>
+                <QButton :disabled="hostMutationDisabled || isSavingInfoPopup || !infoPopupDismissValid || settings.snapshot.infoPopupAnimation !== false && !infoPopupDurationValid" @click="saveInfoPopupTimings">{{ t('settings.window.infoPopupSave') }}</QButton></div>
+            </article>
             <article v-if="settings.snapshot" class="settings-card"><h3>{{ t('settings.window.closeBehavior') }}</h3><div class="close-behavior-group" role="radiogroup" :aria-label="t('settings.window.ariaLabel')" :aria-busy="settings.isUpdatingCloseBehavior"><button v-for="value in closeBehaviors" :key="value" type="button" role="radio" :aria-checked="settings.snapshot.mainWindowCloseBehavior === value" :disabled="hostMutationDisabled || settings.isUpdatingCloseBehavior" @click="selectCloseBehavior(value)"><span class="close-radio" /><span><strong>{{ t(closeBehaviorPresentation(value).labelKey) }}</strong></span></button></div><p v-if="settings.isUpdatingCloseBehavior" class="settings-saving">{{ t('settings.language.saving') }}</p><p v-else-if="settings.closeBehaviorError" class="settings-inline-error">{{ t('settings.window.unchanged') }}</p><p v-else-if="settings.snapshot.closeBehaviorMessage" class="settings-host-message">{{ settings.snapshot.closeBehaviorMessage }}</p></article>
             <div v-else class="settings-host-placeholder"><template v-if="settings.status === 'loading'"><QSkeleton v-for="item in 3" :key="item" /></template><template v-else-if="settings.status === 'error'"><QIcon name="statusDanger" :size="26" /><h3>{{ t('settings.window.unavailable') }}</h3><p>{{ t('settings.error.hostUnreadable') }}</p><QButton v-if="app.bridge === 'Connected'" @click="refresh">{{ t('settings.page.retry') }}</QButton></template><template v-else><QIcon name="statusInfo" :size="26" /><h3>{{ t('settings.error.waiting') }}</h3><p>{{ t('settings.window.waiting') }}</p></template></div>
           </section>
@@ -282,7 +401,7 @@ async function repairStartup() {
           <section v-else aria-labelledby="settings-about-title">
             <header class="settings-section-heading"><h2 id="settings-about-title">{{ t('settings.section.about') }}</h2></header>
             <article class="settings-card settings-about" :aria-label="t('settings.about.ariaLabel')"><img :src="brandMark" alt="" aria-hidden="true" /><div><div class="settings-about-title"><strong>QingToolbox</strong><span>{{ t('settings.about.preview') }}</span></div><small>{{ productVersion }}</small></div></article>
-            <article class="settings-card"><h3>{{ t('settings.about.workspace') }}</h3><dl class="settings-values"><div><dt>{{ t('settings.about.environment') }}</dt><dd>{{ environment }}</dd></div><div><dt>{{ t('settings.about.bridge') }}</dt><dd><QBadge :tone="app.bridge === 'Connected' ? 'success' : 'warning'">{{ bridgeLabel }}</QBadge></dd></div></dl></article>
+            <article class="settings-card"><h3>{{ t('settings.about.workspace') }}</h3><dl class="settings-values"><div><dt>{{ t('settings.about.environment') }}</dt><dd>{{ environment }}</dd></div><div><dt>{{ t('settings.about.bridge') }}</dt><dd><QBadge :tone="app.bridge === 'Connected' ? 'success' : 'warning'">{{ bridgeLabel }}</QBadge></dd></div><div><dt>{{ t('settings.about.author') }}</dt><dd>{{ projectAuthor }}</dd></div><div><dt>{{ t('settings.about.apiVersion') }}</dt><dd>{{ moduleApiVersion }}</dd></div><div><dt>{{ t('settings.about.repository') }}</dt><dd><a class="settings-repository-link" :href="projectRepositoryUrl" target="_blank" rel="noopener noreferrer" @click.prevent="openRepository">{{ projectRepositoryUrl }}</a></dd></div></dl></article>
             <QHostUpdatePanel v-if="app.snapshot?.environmentKind === 'Production'" />
           </section>
         </main>
@@ -292,6 +411,21 @@ async function repairStartup() {
 </template>
 
 <style scoped>
+.window-size-fields { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 15px; }
+.window-size-fields label { display: grid; gap: 6px; min-width: 120px; color: var(--q-text-2); font-size: 12px; }
+.window-size-fields input { width: 140px; min-height: 38px; padding: 0 10px; border: 1px solid var(--q-border); border-radius: 9px; background: var(--q-surface-soft); color: var(--q-text); font: inherit; font-size: 14px; }
+.window-size-fields input:focus-visible { outline: 2px solid var(--q-brand); outline-offset: 1px; }
+.window-fullscreen-choice { display: flex; align-items: center; gap: 8px; margin-top: 17px; color: var(--q-text); font-size: 13px; cursor: pointer; }
+.window-fullscreen-choice input { accent-color: var(--q-brand); width: 16px; height: 16px; }
+.window-size-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.info-popup-corners { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.info-popup-corners button { min-height: 36px; border: 1px solid var(--q-border); border-radius: 9px; background: var(--q-surface-soft); color: var(--q-text-2); cursor: pointer; }
+.info-popup-corners button[aria-checked="true"] { border-color: var(--q-brand); background: var(--q-brand-soft); color: var(--q-brand); }
+.info-popup-corners button:disabled { opacity: .55; cursor: default; }
+.info-popup-duration { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-top: 14px; }
+.info-popup-duration label { display: grid; gap: 6px; color: var(--q-text-2); font-size: 12px; }
+.info-popup-duration input { width: 135px; min-height: 36px; padding: 0 10px; border: 1px solid var(--q-border); border-radius: 9px; background: var(--q-surface-soft); color: var(--q-text); }
+.info-popup-duration input:disabled { opacity: .48; }
 .font-settings-card {
   font-family: inherit;
 }

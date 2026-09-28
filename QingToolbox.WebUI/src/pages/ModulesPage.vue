@@ -3,7 +3,7 @@ import { computed, inject, onBeforeUnmount, onMounted, reactive, ref, watch } fr
 import type { ModuleClient } from '../bridge/clients/ModuleClient'
 import { useAppStore } from '../app/store'
 import { useModuleStore, type ModuleFilter } from '../app/moduleStore'
-import type { ModuleSnapshotItem } from '../contracts/modules'
+import type { ModuleImportPrompt, ModuleImportResult, ModuleSnapshotItem } from '../contracts/modules'
 import { useToastStore } from '../app/toastStore'
 import QPage from '../design-system/components/QPage.vue'
 import QButton from '../design-system/components/QButton.vue'
@@ -11,6 +11,8 @@ import QBadge from '../design-system/components/QBadge.vue'
 import QEmptyState from '../design-system/components/QEmptyState.vue'
 import QSkeleton from '../design-system/components/QSkeleton.vue'
 import QIcon from '../design-system/components/QIcon.vue'
+import QModal from '../design-system/components/QModal.vue'
+import QModalLabel from '../design-system/components/QModalLabel.vue'
 import ModuleIcon from '../modules/ModuleIcon.vue'
 import {
   summarizeModuleStates,
@@ -34,6 +36,8 @@ const toast = useToastStore()
 const { t } = useLocalization()
 const isImporting = ref(false)
 const replacingModuleId = ref<string | null>(null)
+const pendingApiPrompt = ref<ModuleImportPrompt | null>(null)
+const isConfirmingApiImport = ref(false)
 const isTauriFrontend = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 const removeConfirmationModuleId = ref<string|null>(null)
 const installConfirmationModuleId = ref<string|null>(null)
@@ -82,21 +86,55 @@ async function importModule() {
   isImporting.value = true
   try {
     const result = await client.importModule()
+    if (result.disposition === 'RequiresConfirmation') { pendingApiPrompt.value = result; return }
     if (result.disposition === 'Cancelled') return
-    const imported = result.snapshot.modules.find(module => module.id === result.importedModuleId)
-    if (!imported) throw new Error('Imported module is missing from the host snapshot.')
-    store.complete(result.snapshot)
-    store.selectedModuleId = imported.id
-    if (!store.visibleModules.some(module => module.id === imported.id)) {
-      store.searchQuery = ''
-      store.stateFilter = 'all'
-    }
+    const imported = applyImportedModule(result)
     toast.show(t('modules.toast.imported', { name: imported.displayName }), 'success')
   } catch {
     toast.show(t('modules.toast.importFailed'), 'error')
     await resyncAfterOperationFailure()
   } finally {
     isImporting.value = false
+  }
+}
+
+function applyImportedModule(result: ModuleImportResult): ModuleSnapshotItem {
+  const imported = result.snapshot.modules.find(module => module.id === result.importedModuleId)
+  if (!imported) throw new Error('Imported module is missing from the host snapshot.')
+  store.complete(result.snapshot)
+  store.selectedModuleId = imported.id
+  if (!store.visibleModules.some(module => module.id === imported.id)) {
+    store.searchQuery = ''
+    store.stateFilter = 'all'
+  }
+  return imported
+}
+
+async function cancelApiImport() {
+  if (isConfirmingApiImport.value || !pendingApiPrompt.value) return
+  const token = pendingApiPrompt.value.token
+  pendingApiPrompt.value = null
+  try { await client.cancelPendingImport(token) } catch { /* A new selection invalidates the token too. */ }
+}
+
+async function confirmApiImport() {
+  const prompt = pendingApiPrompt.value
+  if (!prompt || isConfirmingApiImport.value) return
+  isConfirmingApiImport.value = true
+  if (prompt.operation === 'import') isImporting.value = true
+  else replacingModuleId.value = prompt.moduleId
+  try {
+    const result = await client.confirmIncompatibleImport(prompt.token)
+    const imported = applyImportedModule(result)
+    toast.show(t(prompt.operation === 'replace' ? 'modules.apiMismatch.updatedDisabled' : 'modules.apiMismatch.installedDisabled', { name: imported.displayName }), 'warning')
+  } catch {
+    toast.show(t(prompt.operation === 'replace' ? 'modules.management.updateFailed' : 'modules.toast.importFailed'), 'error')
+    await resyncAfterOperationFailure()
+  } finally {
+    pendingApiPrompt.value = null
+    isConfirmingApiImport.value = false
+    isImporting.value = false
+    replacingModuleId.value = null
   }
 }
 
@@ -162,6 +200,7 @@ async function replaceModuleFromPicker(module: ModuleSnapshotItem) {
   replacingModuleId.value = module.id
   try {
     const result = await client.replaceFromPicker(module.id)
+    if (result.disposition === 'RequiresConfirmation') { pendingApiPrompt.value = result; return }
     if (result.disposition === 'Cancelled') return
     store.complete(result.snapshot)
     store.selectedModuleId = module.id
@@ -526,10 +565,22 @@ onBeforeUnmount(() => {
         </section>
       </aside>
     </div>
+    <QModal :open="pendingApiPrompt !== null" :title="t('modules.apiMismatch.title')" :busy="isConfirmingApiImport" :close-label="t('modules.apiMismatch.cancel')" @close="cancelApiImport">
+      <template v-if="pendingApiPrompt">
+        <QModalLabel>{{ t('modules.apiMismatch.module', { name: pendingApiPrompt.moduleName }) }}</QModalLabel>
+        <div class="module-api-comparison"><span>{{ t('modules.apiMismatch.package') }} <strong>v{{ pendingApiPrompt.apiVersion }}</strong></span><span aria-hidden="true">≠</span><span>{{ t('modules.apiMismatch.host') }} <strong>v{{ pendingApiPrompt.hostApiVersion }}</strong></span></div>
+        <QModalLabel>{{ t('modules.apiMismatch.installOnly') }}</QModalLabel>
+      </template>
+      <template #actions>
+        <QButton :disabled="isConfirmingApiImport" @click="cancelApiImport">{{ t('modules.apiMismatch.cancel') }}</QButton>
+        <QButton variant="primary" :loading="isConfirmingApiImport" @click="confirmApiImport">{{ t('modules.apiMismatch.continue') }}</QButton>
+      </template>
+    </QModal>
   </QPage>
 </template>
 
 <style scoped>
+.module-api-comparison{display:flex;align-items:center;flex-wrap:wrap;gap:9px;padding:11px 12px;border:1px solid color-mix(in srgb,var(--q-warning) 28%,var(--q-border));border-radius:10px;background:color-mix(in srgb,var(--q-warning) 7%,var(--q-surface));color:var(--q-text-2);font-size:12px}.module-api-comparison strong{margin-left:4px;color:var(--q-text);font-size:14px}
 .module-page-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 0; }
 .module-page-actions .q-button { flex: 0 0 auto; margin-top: 0; white-space: nowrap; }
 .module-import-button { min-width: 136px; gap: 7px; }

@@ -11,6 +11,7 @@ export class TauriTransport implements Transport {
   private disposed = false
   private sessionToken: string | null = null
   private activationNonce: string | null = null
+  private pendingModuleSelection: { token: string; sourcePath: string; sha256: string; kind: 'import' | 'replace'; moduleId: string } | null = null
   private readonly eventCleanups = new Set<() => void>()
 
   static isAvailable(): boolean {
@@ -53,6 +54,7 @@ export class TauriTransport implements Transport {
     this.disposed = true
     this.sessionToken = null
     this.activationNonce = null
+    this.pendingModuleSelection = null
     for (const cleanup of [...this.eventCleanups]) cleanup()
   }
 
@@ -60,12 +62,12 @@ export class TauriTransport implements Transport {
     switch (message.command) {
       case 'web.ready': {
         const [host, listed, runtime] = await Promise.all([
-          invoke<{ version: string }>('get_host_info'),
+          invoke<TauriHostInfo>('get_host_info'),
           invoke<{ payload: ModuleListPayload }>('list_modules'),
           invoke<ModuleRuntimeSnapshot[]>('get_all_module_runtime'),
         ])
         this.activationNonce = crypto.randomUUID() + crypto.randomUUID()
-        return { activationNonce: this.activationNonce, snapshot: appSnapshot(host.version, listed.payload.modules, runtime) }
+        return { activationNonce: this.activationNonce, snapshot: appSnapshot(host, listed.payload.modules, runtime) }
       }
       case 'app.ping': {
         if (message.payload.activationNonce === this.activationNonce) {
@@ -77,15 +79,18 @@ export class TauriTransport implements Transport {
       }
       case 'app.getSnapshot': {
         const [host, listed, runtime] = await Promise.all([
-          invoke<{ version: string }>('get_host_info'),
+          invoke<TauriHostInfo>('get_host_info'),
           invoke<{ payload: ModuleListPayload }>('list_modules'),
           invoke<ModuleRuntimeSnapshot[]>('get_all_module_runtime'),
         ])
-        return appSnapshot(host.version, listed.payload.modules, runtime)
+        return appSnapshot(host, listed.payload.modules, runtime)
       }
+      case 'app.openRepository': await invoke('open_project_repository'); return { opened: true }
       case 'modules.getSnapshot': return this.moduleSnapshot()
       case 'modules.import': return this.importModule()
       case 'modules.updateFromPicker': return this.updateModuleFromPicker(requiredString(message.payload.moduleId))
+      case 'modules.confirmIncompatibleImport': return this.confirmIncompatibleImport(requiredString(message.payload.token))
+      case 'modules.cancelPendingImport': this.cancelPendingImport(requiredString(message.payload.token)); return { cancelled: true }
       case 'modules.load': await invoke('start_module', { moduleId: requiredString(message.payload.moduleId) }); return this.moduleSnapshot()
       case 'modules.open': await invoke('open_module', { moduleId: requiredString(message.payload.moduleId) }); return this.moduleSnapshot()
       case 'modules.activate': await invoke('set_module_active', { moduleId: requiredString(message.payload.moduleId), active: true }); return this.moduleSnapshot()
@@ -108,6 +113,16 @@ export class TauriTransport implements Transport {
       case 'settings.setLanguage': return this.updateSettings({ language: requiredString(message.payload.languageCode) })
       case 'settings.setAppearancePreset': return this.updateSettings({ appearancePresetId: requiredString(message.payload.appearancePresetId) })
       case 'settings.setMainWindowCloseBehavior': return this.updateSettings({ closeBehavior: closeBehaviorToRust(requiredString(message.payload.mainWindowCloseBehavior)) })
+      case 'settings.setWindowSize': return this.updateSettings({ windowWidth: requiredDimension(message.payload.width, 760, 7680), windowHeight: requiredDimension(message.payload.height, 520, 4320) })
+      case 'settings.getCurrentWindowSize':
+        if (Object.keys(message.payload).length !== 0) throw new Error('InvalidPayload: unexpected fields.')
+        return invoke<{ width: number; height: number }>('get_main_window_size')
+      case 'settings.setStartupFullscreen':
+        if (typeof message.payload.enabled !== 'boolean') throw new Error('InvalidPayload: a boolean is required.')
+        return this.updateSettings({ startupFullscreen: message.payload.enabled })
+      case 'settings.applyWindowSize':
+        if (Object.keys(message.payload).length !== 0) throw new Error('InvalidPayload: unexpected fields.')
+        await invoke('apply_saved_window_size'); return { applied: true }
       case 'settings.setStartupPresentationMode': return this.updateSettings({ startupPresentation: startupToRust(requiredString(message.payload.startupPresentationMode)) })
       case 'settings.setShowLogsInSidebar': return this.updateSettings({ showLogsInSidebar: Boolean(message.payload.showLogsInSidebar) })
       case 'settings.setLaunchAtLogin': return this.updateSettings({ launchAtLogin: Boolean(message.payload.enabled) })
@@ -134,17 +149,45 @@ export class TauriTransport implements Transport {
   }
 
   private async importModule() {
+    this.pendingModuleSelection = null
     const selected = await open({ title: '导入 QingToolbox 模块', multiple: false, directory: false, filters: [{ name: 'QingToolbox module', extensions: ['qmod'] }] })
     if (!selected || Array.isArray(selected)) return { disposition: 'Cancelled', importedModuleId: null, snapshot: await this.moduleSnapshot() }
-    const imported = await invoke<{ id: string }>('import_module', { sourcePath: selected })
+    const preview = await invoke<ModulePackagePreview>('inspect_module_package', { sourcePath: selected })
+    if (!preview.compatible) return this.pendingPrompt('import', selected, preview)
+    const imported = await invoke<{ id: string }>('import_module', { sourcePath: selected, expectedSha256: preview.sha256, allowIncompatibleApi: false })
     return { disposition: 'Imported', importedModuleId: imported.id, snapshot: await this.moduleSnapshot() }
   }
 
   private async updateModuleFromPicker(moduleId: string) {
+    this.pendingModuleSelection = null
     const selected = await open({ title: '选择模块更新包', multiple: false, directory: false, filters: [{ name: 'QingToolbox module', extensions: ['qmod'] }] })
     if (!selected || Array.isArray(selected)) return { disposition: 'Cancelled', importedModuleId: null, snapshot: await this.moduleSnapshot() }
-    const updated = await invoke<{ id: string }>('update_module', { moduleId, sourcePath: selected })
+    const preview = await invoke<ModulePackagePreview>('inspect_module_package', { sourcePath: selected })
+    if (preview.id !== moduleId) throw new Error('ModuleIdentityMismatch: selected package does not match the installed module.')
+    if (!preview.compatible) return this.pendingPrompt('replace', selected, preview)
+    const updated = await invoke<{ id: string }>('update_module', { moduleId, sourcePath: selected, expectedSha256: preview.sha256, allowIncompatibleApi: false })
     return { disposition: 'Imported', importedModuleId: updated.id, snapshot: await this.moduleSnapshot() }
+  }
+
+  private pendingPrompt(kind: 'import' | 'replace', sourcePath: string, preview: ModulePackagePreview) {
+    const token = crypto.randomUUID()
+    this.pendingModuleSelection = { token, sourcePath, sha256: preview.sha256, kind, moduleId: preview.id }
+    return { disposition: 'RequiresConfirmation', token, moduleId: preview.id, moduleName: preview.name, apiVersion: preview.apiVersion, hostApiVersion: preview.hostApiVersion, operation: kind }
+  }
+
+  private async confirmIncompatibleImport(token: string) {
+    const selection = this.pendingModuleSelection
+    if (!selection || selection.token !== token) throw new Error('ImportConfirmationExpired: choose the package again.')
+    this.pendingModuleSelection = null
+    const parameters = { sourcePath: selection.sourcePath, expectedSha256: selection.sha256, allowIncompatibleApi: true }
+    const imported = selection.kind === 'replace'
+      ? await invoke<{ id: string }>('update_module', { moduleId: selection.moduleId, ...parameters })
+      : await invoke<{ id: string }>('import_module', parameters)
+    return { disposition: 'Imported', importedModuleId: imported.id, snapshot: await this.moduleSnapshot() }
+  }
+
+  private cancelPendingImport(token: string) {
+    if (this.pendingModuleSelection?.token === token) this.pendingModuleSelection = null
   }
 
   private async importFont() {
@@ -177,11 +220,16 @@ export class TauriTransport implements Transport {
 }
 
 function requiredString(value: unknown): string { if (typeof value !== 'string' || !value.trim()) throw new Error('InvalidPayload: a non-empty string is required.'); return value }
-function appSnapshot(version: string, modules: ModuleSummary[], runtime: ModuleRuntimeSnapshot[]) {
+function requiredDimension(value: unknown, min: number, max: number): number { if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) throw new Error('InvalidPayload: window size is out of range.'); return value }
+type ModulePackagePreview = { id: string; name: string; version: string; apiVersion: number; hostApiVersion: number; compatible: boolean; sha256: string }
+type TauriHostInfo = { version: string; deviceName?: string | null; apiVersion?: number; environmentKind?: 'Development' | 'Production'; environmentDisplayName?: string }
+function appSnapshot(host: TauriHostInfo, modules: ModuleSummary[], runtime: ModuleRuntimeSnapshot[]) {
   return {
-    environmentKind: 'Production',
-    environmentDisplayName: 'Tauri',
-    hostVersion: version,
+    environmentKind: host.environmentKind === 'Development' ? 'Development' : 'Production',
+    environmentDisplayName: host.environmentDisplayName ?? 'QingToolbox',
+    hostVersion: host.version,
+    deviceName: host.deviceName ?? null,
+    ...(Number.isInteger(host.apiVersion) && (host.apiVersion ?? 0) > 0 ? { apiVersion: host.apiVersion } : {}),
     protocolVersion: 4,
     totalModuleCount: modules.length,
     validModuleCount: modules.filter(item => item.valid).length,
@@ -200,7 +248,7 @@ function toWebSettings(value: TauriSettingsSnapshot, startup?: StartupRegistrati
   const current = fonts.find(font => font.id === value.fontId) ?? defaultFont
   if (!fonts.some(font => font.id === defaultFont.id)) fonts.unshift(defaultFont)
   const registration = startup ?? { canConfigure: true, registered: value.launchAtLogin, canRepair: false, status: 'Unavailable', message: '无法读取登录启动注册状态。' }
-  return { generatedAt: new Date().toISOString(), appearancePresetId: value.appearancePresetId, font: current, fonts, language: { code, effectiveCode: code === 'en-US' ? 'en-US' : 'zh-CN', displayName: code === 'en-US' ? 'English' : '系统默认', options: [{ code: 'system', displayName: 'System', nativeName: '系统默认' }, { code: 'zh-CN', displayName: 'Chinese', nativeName: '简体中文' }, { code: 'en-US', displayName: 'English', nativeName: 'English' }] }, showLogsInSidebar: value.showLogsInSidebar, mainWindowCloseBehavior: value.closeBehavior === 'exit' ? 'ExitApplication' : value.closeBehavior === 'tray' ? 'MinimizeToNotificationArea' : 'Ask', closeBehaviorMessage: '', launchAtLogin: value.launchAtLogin, canConfigureLaunchAtLogin: registration.canConfigure, canRepairStartup: registration.canRepair, startupPresentationMode: value.startupPresentation === 'tray' ? 'FloatingBadge' : value.startupPresentation === 'minimized' ? 'Minimized' : 'MainWindow', startupBackend: 'Tauri autostart', startupStatus: registration.status, startupMessage: registration.message }
+  return { generatedAt: new Date().toISOString(), appearancePresetId: value.appearancePresetId, font: current, fonts, language: { code, effectiveCode: code === 'en-US' ? 'en-US' : 'zh-CN', displayName: code === 'en-US' ? 'English' : '系统默认', options: [{ code: 'system', displayName: 'System', nativeName: '系统默认' }, { code: 'zh-CN', displayName: 'Chinese', nativeName: '简体中文' }, { code: 'en-US', displayName: 'English', nativeName: 'English' }] }, showLogsInSidebar: value.showLogsInSidebar, mainWindowCloseBehavior: value.closeBehavior === 'exit' ? 'ExitApplication' : value.closeBehavior === 'tray' ? 'MinimizeToNotificationArea' : 'Ask', windowWidth: value.windowWidth, windowHeight: value.windowHeight, startupFullscreen: value.startupFullscreen, infoPopupCorner: value.infoPopupCorner ?? 'rightTop', infoPopupAnimation: value.infoPopupAnimation ?? true, infoPopupDurationMs: value.infoPopupDurationMs ?? 380, infoPopupDismissSeconds: value.infoPopupDismissSeconds ?? 15, closeBehaviorMessage: '', launchAtLogin: value.launchAtLogin, canConfigureLaunchAtLogin: registration.canConfigure, canRepairStartup: registration.canRepair, startupPresentationMode: value.startupPresentation === 'tray' ? 'FloatingBadge' : value.startupPresentation === 'minimized' ? 'Minimized' : 'MainWindow', startupBackend: 'Tauri autostart', startupStatus: registration.status, startupMessage: registration.message }
 }
 function toWebFont(font: FontOption): FontOption { return { id: font.id, source: font.source, displayName: font.displayName, familyName: font.familyName ?? null, resourceUrl: font.resourceUrl ?? null } }
 function closeBehaviorToRust(value: string) { return value === 'ExitApplication' ? 'exit' : value === 'MinimizeToNotificationArea' ? 'tray' : 'ask' }

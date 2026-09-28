@@ -10,6 +10,9 @@ import QPage from '../design-system/components/QPage.vue'
 import QButton from '../design-system/components/QButton.vue'
 import QBadge from '../design-system/components/QBadge.vue'
 import QIcon from '../design-system/components/QIcon.vue'
+import QModal from '../design-system/components/QModal.vue'
+import QModalInput from '../design-system/components/QModalInput.vue'
+import QModalLabel from '../design-system/components/QModalLabel.vue'
 
 type DiagnosticAction = 'ping' | 'snapshot' | null
 
@@ -18,6 +21,10 @@ const store = useAppStore()
 const activeAction = ref<DiagnosticAction>(null)
 type DiagnosticNotice={key:TranslationKey;parameters?:TranslationParameters;tone:'success'|'warning'|'danger'}
 const actionNotice=ref<DiagnosticNotice|null>(null)
+type ModalDemo = 'controls' | 'api' | null
+const modalDemo = ref<ModalDemo>(null)
+const modalInput = ref('')
+const modalOutcome = ref<{ kind: 'controls'; value: string } | { kind: 'api' } | null>(null)
 const {currentLocale,t}=useLocalization()
 const bridgeLabel=(value:string)=>{const key=bridgeStateKey(value);return key?t(key):value}
 
@@ -60,6 +67,23 @@ async function refreshSnapshot() {
 }
 
 function reload() { window.location.reload() }
+
+function openModalDemo(kind: Exclude<ModalDemo, null>) {
+  modalInput.value = ''
+  modalDemo.value = kind
+}
+
+function closeModalDemo() { modalDemo.value = null }
+
+function confirmControlsDemo() {
+  modalOutcome.value = { kind: 'controls', value: modalInput.value.trim() || '—' }
+  closeModalDemo()
+}
+
+function confirmApiDemo() {
+  modalOutcome.value = { kind: 'api' }
+  closeModalDemo()
+}
 </script>
 
 <template>
@@ -81,7 +105,26 @@ function reload() { window.location.reload() }
 
         <section class="diagnostics-panel diagnostics-activity" aria-labelledby="activity-title"><header><div><h2 id="activity-title">{{t('diagnostics.activity')}}</h2><p>{{t('diagnostics.activityHint')}}</p></div></header><dl class="diagnostics-activity-grid"><div><dt>{{t('diagnostics.lastSnapshot')}}</dt><dd>{{store.snapshot?localTime(store.snapshot.generatedAt):t('diagnostics.notAvailable')}}</dd></div><div><dt>{{t('diagnostics.lastEvent')}}</dt><dd>{{store.lastEvent}}</dd></div><div><dt>{{t('diagnostics.lastPing')}}</dt><dd>{{store.pingMs===null?t('diagnostics.notRun'):`${store.pingMs} ms`}}</dd></div></dl></section>
 
-        <section class="diagnostics-tools" aria-labelledby="tools-title"><header><h2 id="tools-title">{{t('diagnostics.tools')}}</h2><p>{{t('diagnostics.toolsHint')}}</p></header><div class="diagnostics-tool-groups"><section><h3>{{t('diagnostics.hostChecks')}}</h3><article><div><strong>{{t('diagnostics.ping')}}</strong><p>{{t('diagnostics.pingHint')}}</p></div><QButton :disabled="hostActionsDisabled" @click="ping"><QIcon name="statusInfo" />{{t(activeAction==='ping'?'diagnostics.pinging':'diagnostics.ping')}}</QButton></article><article><div><strong>{{t('diagnostics.refresh')}}</strong><p>{{t('diagnostics.refreshHint')}}</p></div><QButton :disabled="hostActionsDisabled" @click="refreshSnapshot"><QIcon name="refresh" />{{t(activeAction==='snapshot'?'diagnostics.refreshing':'diagnostics.refresh')}}</QButton></article></section><section><h3>{{t('diagnostics.web')}}</h3><article><div><strong>{{t('diagnostics.reload')}}</strong><p>{{t('diagnostics.reloadHint')}}</p></div><QButton @click="reload"><QIcon name="refresh" />{{t('diagnostics.reload')}}</QButton></article></section></div></section>
+        <section class="diagnostics-tools" aria-labelledby="tools-title"><header><h2 id="tools-title">{{t('diagnostics.tools')}}</h2><p>{{t('diagnostics.toolsHint')}}</p></header><div class="diagnostics-tool-groups"><section><h3>{{t('diagnostics.hostChecks')}}</h3><article><div><strong>{{t('diagnostics.ping')}}</strong><p>{{t('diagnostics.pingHint')}}</p></div><QButton :disabled="hostActionsDisabled" @click="ping"><QIcon name="statusInfo" />{{t(activeAction==='ping'?'diagnostics.pinging':'diagnostics.ping')}}</QButton></article><article><div><strong>{{t('diagnostics.refresh')}}</strong><p>{{t('diagnostics.refreshHint')}}</p></div><QButton :disabled="hostActionsDisabled" @click="refreshSnapshot"><QIcon name="refresh" />{{t(activeAction==='snapshot'?'diagnostics.refreshing':'diagnostics.refresh')}}</QButton></article></section><section><h3>{{t('diagnostics.web')}}</h3><article><div><strong>{{t('diagnostics.reload')}}</strong><p>{{t('diagnostics.reloadHint')}}</p></div><QButton @click="reload"><QIcon name="refresh" />{{t('diagnostics.reload')}}</QButton></article><article><div><strong>{{t('diagnostics.modalControls')}}</strong><p>{{t('diagnostics.modalControlsHint')}}</p></div><QButton @click="openModalDemo('controls')">{{t('diagnostics.openModal')}}</QButton></article><article><div><strong>{{t('diagnostics.modalApi')}}</strong><p>{{t('diagnostics.modalApiHint')}}</p></div><QButton @click="openModalDemo('api')">{{t('diagnostics.openModal')}}</QButton></article></section></div><p v-if="modalOutcome" class="diagnostics-modal-outcome" role="status">{{ modalOutcome.kind === 'controls' ? t('diagnostics.modalInputResult', { value: modalOutcome.value }) : t('diagnostics.modalApiResult') }}</p></section>
     </div>
   </QPage>
+
+  <QModal :open="modalDemo === 'controls'" :title="t('diagnostics.modalControlsTitle')" :close-label="t('diagnostics.modalCancel')" @close="closeModalDemo">
+    <QModalLabel>{{t('diagnostics.modalControlsBody')}}</QModalLabel>
+    <QModalInput v-model="modalInput" :label="t('diagnostics.modalInputLabel')" :placeholder="t('diagnostics.modalInputPlaceholder')" />
+    <template #actions><QButton @click="closeModalDemo">{{t('diagnostics.modalCancel')}}</QButton><QButton variant="primary" @click="confirmControlsDemo">{{t('diagnostics.modalConfirm')}}</QButton></template>
+  </QModal>
+
+  <QModal :open="modalDemo === 'api'" :title="t('diagnostics.modalApiTitle')" :close-label="t('diagnostics.modalCancel')" @close="closeModalDemo">
+    <QModalLabel>{{t('diagnostics.modalApiBody')}}</QModalLabel>
+    <div class="diagnostics-api-comparison"><span>{{t('diagnostics.modalPackage')}} <strong>v2</strong></span><span aria-hidden="true">≠</span><span>{{t('diagnostics.modalHost')}} <strong>v1</strong></span></div>
+    <QModalLabel>{{t('diagnostics.modalApiSafe')}}</QModalLabel>
+    <template #actions><QButton @click="closeModalDemo">{{t('diagnostics.modalCancel')}}</QButton><QButton variant="primary" @click="confirmApiDemo">{{t('diagnostics.modalContinue')}}</QButton></template>
+  </QModal>
 </template>
+
+<style scoped>
+.diagnostics-modal-outcome{margin:12px 0 0;color:var(--q-brand);font-size:12px;font-weight:600}
+.diagnostics-api-comparison{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border:1px solid var(--q-border);border-radius:10px;background:var(--q-surface-soft);color:var(--q-text-2);font-size:13px}
+.diagnostics-api-comparison strong{color:var(--q-text)}
+</style>

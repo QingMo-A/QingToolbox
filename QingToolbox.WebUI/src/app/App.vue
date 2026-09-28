@@ -61,7 +61,7 @@ watchEffect(() => {
   }
   document.documentElement.lang = currentLocale.value
   const titleKey = routeTitleKeyByPath[route.path as keyof typeof routeTitleKeyByPath]
-  document.title = `${titleKey ? t(titleKey) : t('app.productName')} · ${t('app.productName')}`
+  document.title = `${titleKey ? t(titleKey) : t('app.productName')} · ${t('app.productName')}${app.snapshot?.environmentKind === 'Development' ? ' [Dev]' : ''}`
 })
 </script>
 

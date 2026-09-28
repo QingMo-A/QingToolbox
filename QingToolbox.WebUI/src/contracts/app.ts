@@ -2,7 +2,7 @@ export const protocolVersion = 4
 declare const __QING_ASSET_BUILD_ID__: string
 export const assetBuildId = __QING_ASSET_BUILD_ID__
 
-export interface AppSnapshot { environmentKind:string; environmentDisplayName:string; hostVersion:string; protocolVersion:number; totalModuleCount:number; validModuleCount:number; runningModuleCount:number; generatedAt:string }
+export interface AppSnapshot { environmentKind:string; environmentDisplayName:string; hostVersion:string; deviceName?:string|null; apiVersion?:number; protocolVersion:number; totalModuleCount:number; validModuleCount:number; runningModuleCount:number; generatedAt:string }
 export interface ReadyPayload { assetBuildId:string; documentReadyState:'complete'; transportMode:'WebView'|'Mock' }
 export interface ReadyChallenge { activationNonce:string; snapshot:AppSnapshot }
 export interface PingResponse { pong:true; hostTime:string; sessionToken?:string|null; activated:true }
@@ -21,7 +21,7 @@ export function isBridgeEvent(value:unknown): value is BridgeEvent {
 }
 const validDate=(value:unknown)=>typeof value==='string'&&!Number.isNaN(Date.parse(value))
 const count=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)&&Number.isInteger(value)&&value>=0
-export function isAppSnapshot(value:unknown):value is AppSnapshot{return isRecord(value)&&typeof value.environmentKind==='string'&&typeof value.environmentDisplayName==='string'&&typeof value.hostVersion==='string'&&value.protocolVersion===protocolVersion&&count(value.totalModuleCount)&&count(value.validModuleCount)&&count(value.runningModuleCount)&&validDate(value.generatedAt)}
+export function isAppSnapshot(value:unknown):value is AppSnapshot{return isRecord(value)&&typeof value.environmentKind==='string'&&typeof value.environmentDisplayName==='string'&&typeof value.hostVersion==='string'&&(value.deviceName===undefined||value.deviceName===null||typeof value.deviceName==='string')&&(value.apiVersion===undefined||(typeof value.apiVersion==='number'&&count(value.apiVersion)&&value.apiVersion>0))&&value.protocolVersion===protocolVersion&&count(value.totalModuleCount)&&count(value.validModuleCount)&&count(value.runningModuleCount)&&validDate(value.generatedAt)}
 export function isReadyChallenge(value:unknown):value is ReadyChallenge{return isRecord(value)&&typeof value.activationNonce==='string'&&value.activationNonce.length>=32&&value.activationNonce.length<=256&&isAppSnapshot(value.snapshot)}
 const token=(value:unknown)=>typeof value==='string'&&value.length>=64&&value.length<=256
 export function isPingResponse(value:unknown):value is PingResponse{return isRecord(value)&&value.pong===true&&value.activated===true&&validDate(value.hostTime)&&(value.sessionToken===undefined||value.sessionToken===null||token(value.sessionToken))}

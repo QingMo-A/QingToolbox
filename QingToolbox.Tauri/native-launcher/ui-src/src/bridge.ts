@@ -58,6 +58,11 @@ export type EverythingSearchResponse = {
   error?: string
 }
 
+export type EverythingRuntimeStatus = {
+  status: 'ready' | 'indexing' | 'unavailable' | 'error'
+  error?: string
+}
+
 /** The prefix is intentionally tiny and explicit; everything after it stays
  * untouched so native Everything syntax such as `*.exe` keeps working. */
 export function parseSearchMode(value: string): ParsedSearch {

@@ -69,8 +69,8 @@ describe('QSidebarLayout localization and icons', () => {
 
   it('shows diagnostics only for a Development host', async () => {
     const pinia=createPinia(); setActivePinia(pinia); const app=useAppStore(); const wrapper=mount(QSidebarLayout,{global:{plugins:[pinia],stubs:{RouterLink:{props:['to'],template:'<a :data-to="to"><slot/></a>'}}}})
-    expect(wrapper.findAll('a').map(link=>link.attributes('data-to'))).toEqual(['/','/modules','/running','/logs','/settings'])
+    expect(wrapper.findAll('a').map(link=>link.attributes('data-to'))).toEqual(['/','/modules','/devices','/running','/logs','/settings'])
     app.rebuild({environmentKind:'Development',environmentDisplayName:'Development',hostVersion:'1',protocolVersion:4,totalModuleCount:0,validModuleCount:0,runningModuleCount:0,generatedAt:new Date().toISOString()}); await wrapper.vm.$nextTick()
-    expect(wrapper.findAll('a').map(link=>link.attributes('data-to'))).toEqual(['/','/modules','/running','/logs','/diagnostics','/settings'])
+    expect(wrapper.findAll('a').map(link=>link.attributes('data-to'))).toEqual(['/','/modules','/devices','/running','/logs','/diagnostics','/settings'])
   })
 })

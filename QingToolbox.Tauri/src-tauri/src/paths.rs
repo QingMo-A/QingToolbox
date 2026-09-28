@@ -7,6 +7,20 @@ use serde::Serialize;
 
 const MAX_RELATIVE_PATH_LENGTH: usize = 512;
 
+/// Debug hosts have their own module, settings, and module-data namespace.
+/// A release host always keeps the existing QingToolbox paths for upgrades.
+pub fn is_development() -> bool {
+    cfg!(debug_assertions)
+}
+
+fn profile_directory_name() -> &'static str {
+    if is_development() {
+        "QingToolbox.Dev"
+    } else {
+        "QingToolbox"
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ModuleSource {
@@ -143,12 +157,12 @@ pub fn user_data_root() -> Option<PathBuf> {
             })
         })
     }?;
-    Some(PathBuf::from(base).join("QingToolbox"))
+    Some(PathBuf::from(base).join(profile_directory_name()))
 }
 
-/// Shared settings location used by the legacy host as well. Keeping the
-/// file under the roaming profile lets the Tauri host pick up preferences
-/// without moving or deleting the existing WPF data during migration.
+/// Release builds keep the roaming settings path used by the legacy host for
+/// migration. Debug builds use their own profile so development cannot change
+/// an installed host's preferences.
 pub fn settings_path() -> Option<PathBuf> {
     let base = if cfg!(windows) {
         env::var_os("APPDATA").or_else(|| env::var_os("LOCALAPPDATA"))
@@ -159,7 +173,7 @@ pub fn settings_path() -> Option<PathBuf> {
     }?;
     Some(
         PathBuf::from(base)
-            .join("QingToolbox")
+            .join(profile_directory_name())
             .join("settings.json"),
     )
 }
@@ -189,7 +203,7 @@ pub fn module_data_directory(module_id: &str) -> Result<PathBuf, PathError> {
     }
     .ok_or(PathError::Missing)?;
     Ok(PathBuf::from(base)
-        .join("QingToolbox")
+        .join(profile_directory_name())
         .join("Data")
         .join(module_id))
 }

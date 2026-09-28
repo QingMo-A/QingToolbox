@@ -22,7 +22,7 @@ const query = ref('')
 const activeIndex = ref(-1)
 let previousFocus: HTMLElement | null = null
 
-type PageIconName = 'home' | 'modules' | 'running' | 'logs' | 'settings' | 'diagnostics'
+type PageIconName = 'home' | 'modules' | 'devices' | 'running' | 'logs' | 'settings' | 'diagnostics'
 type PageResultDefinition = { kind: 'page'; titleKey: TranslationKey; descriptionKey: TranslationKey; path: string; icon: PageIconName }
 type PageResult = { kind: 'page'; title: string; description: string; englishTitle: string; englishDescription: string; path: string; icon: PageIconName }
 type ModuleResult = { kind: 'module'; module: ModuleSnapshotItem }
@@ -31,6 +31,7 @@ type Result = PageResult | ModuleResult
 const pageDefinitions: PageResultDefinition[] = [
   { kind: 'page', titleKey: 'navigation.home', descriptionKey: 'page.home.description', path: '/', icon: 'home' },
   { kind: 'page', titleKey: 'navigation.modules', descriptionKey: 'page.modules.description', path: '/modules', icon: 'modules' },
+  { kind: 'page', titleKey: 'navigation.devices', descriptionKey: 'page.devices.description', path: '/devices', icon: 'devices' },
   { kind: 'page', titleKey: 'navigation.running', descriptionKey: 'page.running.description', path: '/running', icon: 'running' },
   { kind: 'page', titleKey: 'navigation.logs', descriptionKey: 'page.logs.description', path: '/logs', icon: 'logs' },
   { kind: 'page', titleKey: 'navigation.settings', descriptionKey: 'page.settings.description', path: '/settings', icon: 'settings' },

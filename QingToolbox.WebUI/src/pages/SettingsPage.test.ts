@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import SettingsPage from './SettingsPage.vue'
+import { TauriTransport } from '../bridge/transport/TauriTransport'
 import { useAppStore } from '../app/store'
 import { useSettingsStore } from '../app/settingsStore'
 import { useThemeStore } from '../app/themeStore'
@@ -19,13 +20,14 @@ const languageOptions = [
   { code: 'zh-CN' as const, displayName: 'Simplified Chinese', nativeName: '简体中文' },
   { code: 'en-US' as const, displayName: 'English', nativeName: 'English' },
 ]
-const snapshot: SettingsSnapshot = { generatedAt: '2026-07-25T12:00:00Z', appearancePresetId: 'qing-default', font: { id: 'Default', source: 'default', displayName: 'Default', familyName: null, resourceUrl: null }, fonts: [{ id: 'Default', source: 'default', displayName: 'Default', familyName: null, resourceUrl: null }, { id: 'system:Inter', source: 'system', displayName: 'Inter', familyName: 'Inter', resourceUrl: null }, { id: `imported:${'c'.repeat(64)}`, source: 'imported', displayName: 'Imported Sans', familyName: 'Imported Sans', resourceUrl: `https://app.qingtoolbox.local/user-fonts/${'c'.repeat(64)}.ttf` }], language: { code: 'en-US', effectiveCode: 'en-US', displayName: 'English', options: languageOptions }, showLogsInSidebar: true, mainWindowCloseBehavior: 'Ask', closeBehaviorMessage: 'Ask before closing.', launchAtLogin: false, canConfigureLaunchAtLogin: true, canRepairStartup: false, startupPresentationMode: 'FloatingBadge', startupBackend: 'Registry Run', startupStatus: 'Healthy', startupMessage: 'Registration is healthy.' }
+const snapshot: SettingsSnapshot = { generatedAt: '2026-07-25T12:00:00Z', appearancePresetId: 'qing-default', font: { id: 'Default', source: 'default', displayName: 'Default', familyName: null, resourceUrl: null }, fonts: [{ id: 'Default', source: 'default', displayName: 'Default', familyName: null, resourceUrl: null }, { id: 'system:Inter', source: 'system', displayName: 'Inter', familyName: 'Inter', resourceUrl: null }, { id: `imported:${'c'.repeat(64)}`, source: 'imported', displayName: 'Imported Sans', familyName: 'Imported Sans', resourceUrl: `https://app.qingtoolbox.local/user-fonts/${'c'.repeat(64)}.ttf` }], language: { code: 'en-US', effectiveCode: 'en-US', displayName: 'English', options: languageOptions }, showLogsInSidebar: true, mainWindowCloseBehavior: 'Ask', windowWidth: 1100, windowHeight: 720, startupFullscreen: false, closeBehaviorMessage: 'Ask before closing.', launchAtLogin: false, canConfigureLaunchAtLogin: true, canRepairStartup: false, startupPresentationMode: 'FloatingBadge', startupBackend: 'Registry Run', startupStatus: 'Healthy', startupMessage: 'Registration is healthy.' }
 const moduleItem: ModuleSnapshotItem = { id: 'hello', displayName: 'Hello', displayDescription: 'English host metadata', version: '1.0.0', author: 'QingMo', runtimeType: 'InProcess', loadMode: 'Manual', runtimeState: 'NotLoaded', isValid: true, errorCount: 0, errors: [], permissions: [], minimumHostVersion: '0.2.0', isUserInstalled: true, canRemove: true, canLoad: true, canActivate: false, canOpen: false, canDeactivate: false, canUnload: false, isBusy: false, isExecutionBlocked: false, isStartupEnabled: false, startupAuthorizationState: 'NotEnabled' as const, canChangeStartupAuthorization: true, isStartupAuthorizationBusy: false, updateStatus: 'NotChecked', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: true, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'NotDownloaded', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0, canInstallVerifiedUpdate: false }
 type PageOptions = {
   bridge?: 'Connecting'|'Connected'|'Unavailable'; status?: 'idle'|'loading'|'ready'|'error'; hasSnapshot?: boolean
   languageImpl?: (value: LanguageCode) => Promise<SettingsSnapshot>
   getImpl?: () => Promise<SettingsSnapshot>; logsImpl?: (value: boolean) => Promise<SettingsSnapshot>
   closeImpl?: (value: 'Ask'|'MinimizeToNotificationArea'|'ExitApplication') => Promise<SettingsSnapshot>
+  currentSizeImpl?: () => Promise<{ width: number; height: number }>
   startupImpl?: (value: 'MainWindow'|'Minimized'|'FloatingBadge') => Promise<SettingsSnapshot>
   appearanceImpl?: (value: string) => Promise<SettingsSnapshot>
   fontImpl?: (value: string) => Promise<SettingsSnapshot>
@@ -38,7 +40,7 @@ type PageOptions = {
 function page(options: PageOptions = {}) {
   const pinia = createPinia(); setActivePinia(pinia)
   const app = useAppStore(); app.bridge = options.bridge ?? 'Connected'; app.mode = 'Development'
-  app.snapshot = { environmentKind: 'Development', environmentDisplayName: 'Development', hostVersion: '0.2.0-alpha', protocolVersion: 4, totalModuleCount: 0, validModuleCount: 0, runningModuleCount: 0, generatedAt: snapshot.generatedAt }
+  app.snapshot = { environmentKind: 'Development', environmentDisplayName: 'Development', hostVersion: '0.2.0-alpha', apiVersion: 1, protocolVersion: 4, totalModuleCount: 0, validModuleCount: 0, runningModuleCount: 0, generatedAt: snapshot.generatedAt }
   const settings = useSettingsStore(); const status = options.status ?? 'ready'; const hasSnapshot = options.hasSnapshot ?? status === 'ready'
   if (hasSnapshot) settings.complete(snapshot)
   if (status === 'loading') settings.begin(); else if (status === 'error') settings.fail(new Error('offline')); else settings.status = status
@@ -46,6 +48,10 @@ function page(options: PageOptions = {}) {
   const setLanguage = vi.fn(options.languageImpl ?? (async value => ({ ...snapshot, language: { ...snapshot.language, code: value, effectiveCode: value === 'system' ? 'en-US' : value, displayName: languageOptions.find(option => option.code === value)!.displayName } })))
   const setShowLogsInSidebar = vi.fn(options.logsImpl ?? (async value => ({ ...snapshot, showLogsInSidebar: value })))
   const setMainWindowCloseBehavior = vi.fn(options.closeImpl ?? (async value => ({ ...snapshot, mainWindowCloseBehavior: value })))
+  const setWindowSize = vi.fn(async (width: number, height: number) => ({ ...snapshot, windowWidth: width, windowHeight: height }))
+  const getCurrentWindowSize = vi.fn(options.currentSizeImpl ?? (async () => ({ width: 1366, height: 768 })))
+  const setStartupFullscreen = vi.fn(async (enabled: boolean) => ({ ...snapshot, startupFullscreen: enabled }))
+  const applyWindowSize = vi.fn(async () => undefined)
   const setStartupPresentationMode = vi.fn(options.startupImpl ?? (async value => ({ ...snapshot, startupPresentationMode: value })))
   const setAppearancePreset = vi.fn(options.appearanceImpl ?? (async value => ({ ...snapshot, appearancePresetId: value })))
   const setFont = vi.fn(options.fontImpl ?? (async value => ({ ...snapshot, font: snapshot.fonts?.find(font => font.id === value) ?? snapshot.font })))
@@ -53,9 +59,10 @@ function page(options: PageOptions = {}) {
   const setLaunchAtLogin = vi.fn(options.launchImpl ?? (async value => ({ ...snapshot, launchAtLogin: value, generatedAt: '2026-07-25T13:00:00Z' })))
   const repairStartupRegistration = vi.fn(options.repairImpl ?? (async () => ({ ...snapshot, launchAtLogin: true, canRepairStartup: false, generatedAt: '2026-07-25T13:00:00Z' })))
   const getModuleSnapshot = vi.fn(options.moduleImpl ?? (async () => ({ generatedAt: '2026-07-25T12:01:00Z', modules: [] })))
-  const wrapper = mount(SettingsPage, { global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, setAppearancePreset, setFont, importFont, setLaunchAtLogin, repairStartupRegistration }, moduleClient: { getSnapshot: getModuleSnapshot } } } })
+  const openRepository = vi.fn(async () => undefined)
+  const wrapper = mount(SettingsPage, { global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setWindowSize, getCurrentWindowSize, setStartupFullscreen, applyWindowSize, setStartupPresentationMode, setAppearancePreset, setFont, importFont, setLaunchAtLogin, repairStartupRegistration, openRepository }, moduleClient: { getSnapshot: getModuleSnapshot } } } })
   wrappers.push(wrapper)
-  return { wrapper, app, settings, modules: useModuleStore(), getSnapshot, getModuleSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setStartupPresentationMode, setAppearancePreset, setFont, importFont, setLaunchAtLogin, repairStartupRegistration, theme: useThemeStore(), toast: useToastStore() }
+  return { wrapper, app, settings, modules: useModuleStore(), getSnapshot, getModuleSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setWindowSize, getCurrentWindowSize, setStartupFullscreen, applyWindowSize, setStartupPresentationMode, setAppearancePreset, setFont, importFont, setLaunchAtLogin, repairStartupRegistration, openRepository, theme: useThemeStore(), toast: useToastStore() }
 }
 
 async function openSection(wrapper: VueWrapper, title: string) {
@@ -69,6 +76,39 @@ describe('SettingsPage information architecture', () => {
   it('provides exactly four native section buttons', () => { const buttons = page().wrapper.findAll('.settings-section-nav button'); expect(buttons).toHaveLength(4); expect(buttons.map(x => x.element.tagName)).toEqual(['BUTTON','BUTTON','BUTTON','BUTTON']); expect(buttons.map(x => x.text())).toEqual(expect.arrayContaining([expect.stringContaining('General'), expect.stringContaining('Window'), expect.stringContaining('Startup'), expect.stringContaining('About')])) })
   it('marks the active section accessibly', async () => { const x = page(); expect(x.wrapper.findAll('.settings-section-nav button')[0].attributes('aria-current')).toBe('page'); await openSection(x.wrapper, 'About'); expect(x.wrapper.findAll('.settings-section-nav button')[3].attributes('aria-current')).toBe('page') })
   it('does not request a snapshot when switching sections', async () => { const x = page(); await openSection(x.wrapper, 'Window'); await openSection(x.wrapper, 'Startup'); await openSection(x.wrapper, 'About'); expect(x.getSnapshot).not.toHaveBeenCalled() })
+  it('saves bounded startup dimensions and applies them only when requested', async () => {
+    const x = page(); await openSection(x.wrapper, 'Window')
+    const inputs = x.wrapper.findAll('.window-size-fields input')
+    await inputs[0].setValue('1440'); await inputs[1].setValue('900')
+    await x.wrapper.findAll('.window-size-actions button')[1].trigger('click'); await flushPromises()
+    expect(x.setWindowSize).toHaveBeenCalledWith(1440, 900)
+    expect(x.applyWindowSize).not.toHaveBeenCalled()
+    await x.wrapper.findAll('.window-size-actions button')[2].trigger('click'); await flushPromises()
+    expect(x.applyWindowSize).toHaveBeenCalledTimes(1)
+    await x.wrapper.get('.window-fullscreen-choice input').setValue(true); await flushPromises()
+    expect(x.setStartupFullscreen).toHaveBeenCalledWith(true)
+  })
+  it('fills the size inputs from the current window without saving', async () => {
+    const x = page(); await openSection(x.wrapper, 'Window')
+    await x.wrapper.findAll('.window-size-actions button')[0].trigger('click'); await flushPromises()
+    expect(x.getCurrentWindowSize).toHaveBeenCalledTimes(1)
+    expect(x.wrapper.findAll('.window-size-fields input').map(input => (input.element as HTMLInputElement).value)).toEqual(['1366', '768'])
+    expect(x.setWindowSize).not.toHaveBeenCalled()
+    expect(x.settings.snapshot?.windowWidth).toBe(1100)
+  })
+  it('disables animation duration but keeps the popup display time editable', async () => {
+    const available = vi.spyOn(TauriTransport, 'isAvailable').mockReturnValue(true)
+    try {
+      const x = page()
+      x.settings.complete({ ...snapshot, infoPopupCorner: 'leftBottom', infoPopupAnimation: false, infoPopupDurationMs: 600 })
+      await openSection(x.wrapper, 'Window')
+      expect(x.wrapper.get('.info-popup-corners [aria-checked="true"]').text()).toBe('Bottom left')
+      const inputs = x.wrapper.findAll('.info-popup-duration input')
+      expect(inputs[0].attributes('disabled')).toBeDefined()
+      expect(inputs[1].attributes('disabled')).toBeUndefined()
+      expect(x.wrapper.get('.info-popup-duration button').attributes('disabled')).toBeUndefined()
+    } finally { available.mockRestore() }
+  })
   it('shows Appearance, Language, and Navigation in General', () => { const text = page().wrapper.text(); expect(text).toContain('Appearance'); expect(text).toContain('Language'); expect(text).toContain('Navigation'); expect(text).toContain('Show logs in sidebar') })
   it('renders the three host-provided language choices and confirmed selection', () => { const wrapper = page().wrapper; const group=wrapper.get('[aria-label="Language preference"]'); expect(group.findAll('[role="radio"]')).toHaveLength(3); expect(group.text()).toContain('Follow system'); expect(group.text()).toContain('简体中文'); expect(group.text()).toContain('English'); expect(group.findAll('[role="radio"]').map(option=>option.attributes('aria-checked'))).toEqual(['false','false','true']); expect(wrapper.text()).toContain('Effective languageEnglish') })
   it('does not request the already configured language', async()=>{const x=page();await x.wrapper.get('[aria-label="Language preference"]').findAll('[role="radio"]')[2].trigger('click');expect(x.setLanguage).not.toHaveBeenCalled()})
@@ -141,7 +181,7 @@ describe('SettingsPage information architecture', () => {
   it('keeps repair non-optimistic, locks only startup controls, and applies the returned full snapshot',async()=>{let resolve!:(value:SettingsSnapshot)=>void;const pending=new Promise<SettingsSnapshot>(done=>resolve=done);const x=page({repairImpl:()=>pending});x.settings.complete({...snapshot,canRepairStartup:true,startupStatus:'Degraded'});await openSection(x.wrapper,'Startup');const repair=x.wrapper.findAll('.startup-health-actions button').find(button=>button.text().includes('Repair startup'))!;await repair.trigger('click');expect(x.repairStartupRegistration).toHaveBeenCalledTimes(1);expect(x.settings.snapshot?.canRepairStartup).toBe(true);expect(x.settings.snapshot?.launchAtLogin).toBe(false);expect(x.wrapper.text()).toContain('Repairing…');expect(x.wrapper.get('.windows-startup-card [role="switch"]').attributes('disabled')).toBeDefined();expect(x.wrapper.get('[aria-label="Startup presentation mode"]').findAll('button').every(button=>button.attributes('disabled')!==undefined)).toBe(true);await openSection(x.wrapper,'General');expect(x.wrapper.findAll('.settings-theme button').every(button=>button.attributes('disabled')===undefined)).toBe(true);await openSection(x.wrapper,'Window');expect(x.wrapper.findAll('[role="radio"]').every(button=>button.attributes('disabled')===undefined)).toBe(true);resolve({...snapshot,launchAtLogin:true,canRepairStartup:false,startupStatus:'Healthy'});await flushPromises();expect(x.settings.snapshot?.launchAtLogin).toBe(true);expect(x.settings.snapshot?.canRepairStartup).toBe(false);expect(x.toast.message).toBe('Windows startup registration repaired.')})
   it('accepts a repaired cleanup state that remains disabled',async()=>{const x=page({repairImpl:async()=>({...snapshot,launchAtLogin:false,canRepairStartup:false,startupStatus:'Disabled'})});x.settings.complete({...snapshot,launchAtLogin:true,canRepairStartup:true,startupStatus:'CleanupPending'});await openSection(x.wrapper,'Startup');await x.wrapper.findAll('.startup-health-actions button').find(button=>button.text().includes('Repair startup'))!.trigger('click');await flushPromises();expect(x.settings.snapshot).toMatchObject({launchAtLogin:false,canRepairStartup:false,startupStatus:'Disabled'});expect(x.toast.message).toBe('Windows startup registration repaired.')})
   it('preserves startup state and hides sensitive repair failures',async()=>{const x=page({repairImpl:async()=>{throw new Error('HKCU\\private\\path')}});x.settings.complete({...snapshot,canRepairStartup:true,startupStatus:'Degraded'});await openSection(x.wrapper,'Startup');await x.wrapper.findAll('.startup-health-actions button').find(button=>button.text().includes('Repair startup'))!.trigger('click');await flushPromises();expect(x.settings.snapshot?.canRepairStartup).toBe(true);expect(x.toast.message).toBe('The Windows startup registration could not be repaired.');expect(x.wrapper.text()).not.toContain('HKCU')})
-  it('shows brand, Preview, host version, environment, and bridge in About', async () => { const x = page(); await openSection(x.wrapper, 'About'); const text = x.wrapper.text(); expect(text).toContain('QingToolbox'); expect(text).toContain('Preview'); expect(text).toContain('0.2.0-alpha'); expect(text).toContain('Development'); expect(text).toContain('Connected'); expect(x.wrapper.find('.settings-about img').exists()).toBe(true) })
+  it('shows brand, author, host API version, repository, environment, and bridge in About', async () => { const x = page(); await openSection(x.wrapper, 'About'); const text = x.wrapper.text(); expect(text).toContain('QingToolbox'); expect(text).toContain('Preview'); expect(text).toContain('0.2.0-alpha'); expect(text).toContain('QingMo-A'); expect(text).toContain('Module API version'); expect(text).toContain('v1'); expect(text).toContain('Development'); expect(text).toContain('Connected'); expect(x.wrapper.find('.settings-about img').exists()).toBe(true); const link=x.wrapper.get('.settings-repository-link'); expect(link.attributes('href')).toBe('https://github.com/QingMo-A/QingToolbox'); await link.trigger('click'); expect(x.openRepository).toHaveBeenCalledTimes(1) })
   it('keeps About available without a Settings snapshot', async () => { const x = page({ bridge: 'Connecting', status: 'idle', hasSnapshot: false }); await openSection(x.wrapper, 'About'); expect(x.wrapper.text()).not.toContain('Modular Windows toolbox.'); expect(x.wrapper.text()).toContain('Connecting') })
   it('keeps old content visible while refreshing', () => { const x = page({ status: 'loading', hasSnapshot: true }); expect(x.wrapper.text()).toContain('English'); expect(x.wrapper.text()).toContain('Refreshing host configuration…'); expect(x.wrapper.find('.settings-host-placeholder').exists()).toBe(false) })
   it('keeps old content visible after refresh failure and offers Retry', () => { const x = page({ status: 'error', hasSnapshot: true }); expect(x.wrapper.text()).toContain('English'); expect(x.wrapper.text()).toContain('Settings refresh failed.'); expect(x.wrapper.get('.settings-snapshot-notice button').text()).toBe('Retry') })

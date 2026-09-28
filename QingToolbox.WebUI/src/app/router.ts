@@ -1,6 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import HomePage from '../pages/HomePage.vue'
 import ModulesPage from '../pages/ModulesPage.vue'
+import DevicesPage from '../pages/DevicesPage.vue'
 import RunningModulesPage from '../pages/RunningModulesPage.vue'
 import LogsPage from '../pages/LogsPage.vue'
 import SettingsPage from '../pages/SettingsPage.vue'
@@ -10,6 +11,7 @@ import type { TranslationKey } from '../localization/messages/en-US'
 export const routeTitleKeyByPath = {
   '/': 'navigation.home',
   '/modules': 'navigation.modules',
+  '/devices': 'navigation.devices',
   '/running': 'navigation.running',
   '/logs': 'navigation.logs',
   '/settings': 'navigation.settings',
@@ -19,6 +21,7 @@ export const routeTitleKeyByPath = {
 export const router = createRouter({ history: createWebHashHistory(), scrollBehavior:()=>({top:0}), routes: [
   { path: '/', component: HomePage, meta:{titleKey:routeTitleKeyByPath['/']} },
   { path: '/modules', component: ModulesPage, meta:{titleKey:routeTitleKeyByPath['/modules']} },
+  { path: '/devices', component: DevicesPage, meta:{titleKey:routeTitleKeyByPath['/devices']} },
   { path: '/running', component: RunningModulesPage, meta:{titleKey:routeTitleKeyByPath['/running']} },
   { path: '/logs', component: LogsPage, meta:{titleKey:routeTitleKeyByPath['/logs']} },
   { path: '/settings', component: SettingsPage, meta:{titleKey:routeTitleKeyByPath['/settings']} },

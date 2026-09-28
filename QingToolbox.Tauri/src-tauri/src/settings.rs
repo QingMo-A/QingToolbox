@@ -17,6 +17,12 @@ const MAX_STARTUP_MODULES: usize = 32;
 const MAX_STRING_LENGTH: usize = 128;
 const MAX_HOTKEY_LENGTH: usize = 64;
 const MAX_CORRUPT_BACKUPS: usize = 3;
+pub const DEFAULT_WINDOW_WIDTH: u32 = 1100;
+pub const DEFAULT_WINDOW_HEIGHT: u32 = 720;
+pub const MIN_WINDOW_WIDTH: u32 = 760;
+pub const MIN_WINDOW_HEIGHT: u32 = 520;
+pub const MAX_WINDOW_WIDTH: u32 = 7680;
+pub const MAX_WINDOW_HEIGHT: u32 = 4320;
 
 /// The small public settings surface shared by the Rust host and Vue shell.
 /// It deliberately contains preferences, not filesystem paths or executable
@@ -34,6 +40,13 @@ pub struct SettingsSnapshot {
     pub fonts: Vec<fonts::FontOption>,
     pub close_behavior: String,
     pub startup_presentation: String,
+    pub window_width: u32,
+    pub window_height: u32,
+    pub startup_fullscreen: bool,
+    pub info_popup_corner: String,
+    pub info_popup_animation: bool,
+    pub info_popup_duration_ms: u32,
+    pub info_popup_dismiss_seconds: u32,
     pub toggle_hotkey: String,
     pub launch_at_login: bool,
     pub show_logs_in_sidebar: bool,
@@ -52,6 +65,13 @@ pub struct SettingsUpdate {
     pub font_id: Option<String>,
     pub close_behavior: Option<String>,
     pub startup_presentation: Option<String>,
+    pub window_width: Option<u32>,
+    pub window_height: Option<u32>,
+    pub startup_fullscreen: Option<bool>,
+    pub info_popup_corner: Option<String>,
+    pub info_popup_animation: Option<bool>,
+    pub info_popup_duration_ms: Option<u32>,
+    pub info_popup_dismiss_seconds: Option<u32>,
     pub toggle_hotkey: Option<String>,
     pub launch_at_login: Option<bool>,
     pub show_logs_in_sidebar: Option<bool>,
@@ -68,6 +88,13 @@ struct Settings {
     font_family_name: Option<String>,
     close_behavior: String,
     startup_presentation: String,
+    window_width: u32,
+    window_height: u32,
+    startup_fullscreen: bool,
+    info_popup_corner: String,
+    info_popup_animation: bool,
+    info_popup_duration_ms: u32,
+    info_popup_dismiss_seconds: u32,
     toggle_hotkey: String,
     launch_at_login: bool,
     show_logs_in_sidebar: bool,
@@ -90,6 +117,13 @@ impl Default for Settings {
             // A first launch of the standalone Tauri host should be visible.
             // Existing legacy settings still map FloatingBadge to `tray`.
             startup_presentation: "main".to_string(),
+            window_width: DEFAULT_WINDOW_WIDTH,
+            window_height: DEFAULT_WINDOW_HEIGHT,
+            startup_fullscreen: false,
+            info_popup_corner: "rightTop".to_string(),
+            info_popup_animation: true,
+            info_popup_duration_ms: 380,
+            info_popup_dismiss_seconds: 15,
             toggle_hotkey: "Ctrl+Alt+Space".to_string(),
             launch_at_login: false,
             show_logs_in_sidebar: false,
@@ -116,6 +150,13 @@ struct SettingsDocument {
     close_behavior: Option<Value>,
     #[serde(alias = "StartupPresentationMode")]
     startup_presentation: Option<Value>,
+    window_width: Option<u32>,
+    window_height: Option<u32>,
+    startup_fullscreen: Option<bool>,
+    info_popup_corner: Option<String>,
+    info_popup_animation: Option<bool>,
+    info_popup_duration_ms: Option<u32>,
+    info_popup_dismiss_seconds: Option<u32>,
     #[serde(alias = "ToggleHotkey", alias = "GlobalHotkey")]
     toggle_hotkey: Option<String>,
     #[serde(alias = "LaunchAtLogin")]
@@ -141,6 +182,13 @@ impl From<&Settings> for SettingsDocument {
             font_family_name: settings.font_family_name.clone(),
             close_behavior: Some(Value::String(settings.close_behavior.clone())),
             startup_presentation: Some(Value::String(settings.startup_presentation.clone())),
+            window_width: Some(settings.window_width),
+            window_height: Some(settings.window_height),
+            startup_fullscreen: Some(settings.startup_fullscreen),
+            info_popup_corner: Some(settings.info_popup_corner.clone()),
+            info_popup_animation: Some(settings.info_popup_animation),
+            info_popup_duration_ms: Some(settings.info_popup_duration_ms),
+            info_popup_dismiss_seconds: Some(settings.info_popup_dismiss_seconds),
             toggle_hotkey: Some(settings.toggle_hotkey.clone()),
             launch_at_login: Some(settings.launch_at_login),
             show_logs_in_sidebar: Some(settings.show_logs_in_sidebar),
@@ -197,6 +245,13 @@ impl SettingsStore {
             fonts: fonts::catalog(),
             close_behavior: self.settings.close_behavior.clone(),
             startup_presentation: self.settings.startup_presentation.clone(),
+            window_width: self.settings.window_width,
+            window_height: self.settings.window_height,
+            startup_fullscreen: self.settings.startup_fullscreen,
+            info_popup_corner: self.settings.info_popup_corner.clone(),
+            info_popup_animation: self.settings.info_popup_animation,
+            info_popup_duration_ms: self.settings.info_popup_duration_ms,
+            info_popup_dismiss_seconds: self.settings.info_popup_dismiss_seconds,
             toggle_hotkey: self.settings.toggle_hotkey.clone(),
             launch_at_login: self.settings.launch_at_login,
             show_logs_in_sidebar: self.settings.show_logs_in_sidebar,
@@ -206,6 +261,14 @@ impl SettingsStore {
     }
 
     pub fn update(&mut self, update: SettingsUpdate) -> Result<SettingsSnapshot, SettingsError> {
+        self.update_with_font_resolver(update, fonts::option_for_id)
+    }
+
+    fn update_with_font_resolver(
+        &mut self,
+        update: SettingsUpdate,
+        resolve_font: fn(&str) -> Option<fonts::FontOption>,
+    ) -> Result<SettingsSnapshot, SettingsError> {
         let mut candidate = self.settings.clone();
         if let Some(value) = update.language {
             candidate.language = normalize_language(&value);
@@ -214,7 +277,10 @@ impl SettingsStore {
             candidate.appearance_preset_id = normalize_appearance(&value);
         }
         if let Some(value) = update.font_id {
-            let selection = fonts::normalize_selection(Some(&value), None, None);
+            // A user selection is an ID from the verified host catalog. The
+            // imported source is not part of SettingsUpdate, so normalizing
+            // it as a persisted record with no source would reset it to Default.
+            let selection = resolve_font(&value).unwrap_or_else(fonts::default_option);
             candidate.font_id = selection.id;
             candidate.font_source = selection.source;
             candidate.font_family_name = selection.family_name;
@@ -225,6 +291,48 @@ impl SettingsStore {
         if let Some(value) = update.startup_presentation {
             candidate.startup_presentation =
                 normalize_startup_presentation(Some(&Value::String(value)));
+        }
+        if let Some(value) = update.window_width {
+            if !(MIN_WINDOW_WIDTH..=MAX_WINDOW_WIDTH).contains(&value) {
+                return Err(SettingsError {
+                    code: "windowSizeInvalid",
+                    message: "窗口宽度超出允许范围。".to_string(),
+                });
+            }
+            candidate.window_width = value;
+        }
+        if let Some(value) = update.window_height {
+            if !(MIN_WINDOW_HEIGHT..=MAX_WINDOW_HEIGHT).contains(&value) {
+                return Err(SettingsError {
+                    code: "windowSizeInvalid",
+                    message: "窗口高度超出允许范围。".to_string(),
+                });
+            }
+            candidate.window_height = value;
+        }
+        if let Some(value) = update.startup_fullscreen {
+            candidate.startup_fullscreen = value;
+        }
+        if let Some(value) = update.info_popup_corner {
+            if !matches!(value.as_str(), "rightTop" | "rightBottom" | "leftTop" | "leftBottom") {
+                return Err(SettingsError { code: "popupCornerInvalid", message: "信息弹窗位置无效。".to_string() });
+            }
+            candidate.info_popup_corner = value;
+        }
+        if let Some(value) = update.info_popup_animation {
+            candidate.info_popup_animation = value;
+        }
+        if let Some(value) = update.info_popup_duration_ms {
+            if !(100..=2000).contains(&value) {
+                return Err(SettingsError { code: "popupDurationInvalid", message: "动画时长须为 100–2000 毫秒。".to_string() });
+            }
+            candidate.info_popup_duration_ms = value;
+        }
+        if let Some(value) = update.info_popup_dismiss_seconds {
+            if !(3..=60).contains(&value) {
+                return Err(SettingsError { code: "popupDismissInvalid", message: "弹窗显示时间须为 3–60 秒。".to_string() });
+            }
+            candidate.info_popup_dismiss_seconds = value;
         }
         if let Some(value) = update.toggle_hotkey {
             candidate.toggle_hotkey = normalize_hotkey(&value);
@@ -370,6 +478,23 @@ fn settings_from_document(document: &SettingsDocument) -> Settings {
         startup_presentation: normalize_startup_presentation(
             document.startup_presentation.as_ref(),
         ),
+        window_width: document
+            .window_width
+            .filter(|value| (MIN_WINDOW_WIDTH..=MAX_WINDOW_WIDTH).contains(value))
+            .unwrap_or(DEFAULT_WINDOW_WIDTH),
+        window_height: document
+            .window_height
+            .filter(|value| (MIN_WINDOW_HEIGHT..=MAX_WINDOW_HEIGHT).contains(value))
+            .unwrap_or(DEFAULT_WINDOW_HEIGHT),
+        startup_fullscreen: document.startup_fullscreen.unwrap_or(false),
+        info_popup_corner: document.info_popup_corner.as_deref()
+            .filter(|value| matches!(*value, "rightTop" | "rightBottom" | "leftTop" | "leftBottom"))
+            .unwrap_or("rightTop").to_string(),
+        info_popup_animation: document.info_popup_animation.unwrap_or(true),
+        info_popup_duration_ms: document.info_popup_duration_ms
+            .filter(|value| (100..=2000).contains(value)).unwrap_or(380),
+        info_popup_dismiss_seconds: document.info_popup_dismiss_seconds
+            .filter(|value| (3..=60).contains(value)).unwrap_or(15),
         toggle_hotkey: normalize_hotkey(document.toggle_hotkey.as_deref().unwrap_or_default()),
         launch_at_login: document.launch_at_login.unwrap_or(false),
         show_logs_in_sidebar: document.show_logs_in_sidebar.unwrap_or(false),
@@ -608,6 +733,13 @@ mod tests {
             font_family_name: None,
             close_behavior: Some(Value::Number(1.into())),
             startup_presentation: Some(Value::String("MainWindow".to_string())),
+            window_width: None,
+            window_height: None,
+            startup_fullscreen: None,
+            info_popup_corner: None,
+            info_popup_animation: None,
+            info_popup_duration_ms: None,
+            info_popup_dismiss_seconds: None,
             toggle_hotkey: Some("Ctrl+Alt+Space".to_string()),
             launch_at_login: Some(true),
             show_logs_in_sidebar: Some(true),
@@ -642,6 +774,99 @@ mod tests {
         assert_eq!(snapshot.language, "en-US");
         let reloaded = SettingsStore::from_path(Some(path));
         assert_eq!(reloaded.snapshot().appearance_preset_id, "dark");
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn window_defaults_are_persisted_and_invalid_dimensions_do_not_change_them() {
+        let (directory, path) = test_path("window-size");
+        let mut store = SettingsStore::from_path(Some(path.clone()));
+        assert_eq!(store.snapshot().window_width, DEFAULT_WINDOW_WIDTH);
+        assert_eq!(store.snapshot().window_height, DEFAULT_WINDOW_HEIGHT);
+        assert!(!store.snapshot().startup_fullscreen);
+        store
+            .update(SettingsUpdate {
+                window_width: Some(1440),
+                window_height: Some(900),
+                startup_fullscreen: Some(true),
+                ..SettingsUpdate::default()
+            })
+            .expect("save window defaults");
+        assert_eq!(
+            store
+                .update(SettingsUpdate {
+                    window_width: Some(100),
+                    ..SettingsUpdate::default()
+                })
+                .unwrap_err()
+                .code,
+            "windowSizeInvalid"
+        );
+        let reloaded = SettingsStore::from_path(Some(path));
+        assert_eq!(reloaded.snapshot().window_width, 1440);
+        assert_eq!(reloaded.snapshot().window_height, 900);
+        assert!(reloaded.snapshot().startup_fullscreen);
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn info_popup_corner_and_animation_are_persisted_with_bounded_duration() {
+        let (directory, path) = test_path("info-popup");
+        let mut store = SettingsStore::from_path(Some(path.clone()));
+        assert_eq!(store.snapshot().info_popup_corner, "rightTop");
+        assert!(store.snapshot().info_popup_animation);
+        store.update(SettingsUpdate {
+            info_popup_corner: Some("leftBottom".to_string()),
+            info_popup_animation: Some(false),
+            info_popup_duration_ms: Some(900),
+            info_popup_dismiss_seconds: Some(28),
+            ..SettingsUpdate::default()
+        }).unwrap();
+        assert_eq!(store.update(SettingsUpdate {
+            info_popup_duration_ms: Some(20), ..SettingsUpdate::default()
+        }).unwrap_err().code, "popupDurationInvalid");
+        assert_eq!(store.update(SettingsUpdate {
+            info_popup_dismiss_seconds: Some(2), ..SettingsUpdate::default()
+        }).unwrap_err().code, "popupDismissInvalid");
+        let reloaded = SettingsStore::from_path(Some(path));
+        assert_eq!(reloaded.snapshot().info_popup_corner, "leftBottom");
+        assert!(!reloaded.snapshot().info_popup_animation);
+        assert_eq!(reloaded.snapshot().info_popup_duration_ms, 900);
+        assert_eq!(reloaded.snapshot().info_popup_dismiss_seconds, 28);
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn selecting_an_imported_font_preserves_its_source_in_the_saved_settings() {
+        let (directory, path) = test_path("imported-font");
+        let mut store = SettingsStore::from_path(Some(path.clone()));
+        let id = format!("imported:{}", "a".repeat(64));
+        let selected = store
+            .update_with_font_resolver(
+                SettingsUpdate {
+                    font_id: Some(id.clone()),
+                    ..SettingsUpdate::default()
+                },
+                |font_id| {
+                    font_id.starts_with("imported:").then(|| fonts::FontOption {
+                        id: font_id.to_string(),
+                        source: "imported".to_string(),
+                        display_name: "Imported Font".to_string(),
+                        family_name: None,
+                        resource_url: Some(format!(
+                            "http://qfont.localhost/user-fonts/font-{}.ttf",
+                            "a".repeat(64)
+                        )),
+                    })
+                },
+            )
+            .expect("select imported font");
+        assert_eq!(selected.font_id, id);
+        assert_eq!(selected.font_source, "imported");
+        let saved: Value = serde_json::from_slice(&fs::read(&path).expect("saved file"))
+            .expect("saved settings JSON");
+        assert_eq!(saved["fontId"].as_str(), Some(id.as_str()));
+        assert_eq!(saved["fontSource"].as_str(), Some("imported"));
         let _ = fs::remove_dir_all(directory);
     }
 

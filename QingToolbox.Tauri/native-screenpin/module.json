@@ -3,6 +3,7 @@
   "name": "Screen Pin",
   "description": "Capture bounded screen regions and keep them in a local pin board.",
   "version": "0.2.0",
+  "apiVersion": 1,
   "author": "QingMo-A",
   "minimumHostVersion": "0.1.0",
   "entry": "bin/qing-screenpin-module.exe",

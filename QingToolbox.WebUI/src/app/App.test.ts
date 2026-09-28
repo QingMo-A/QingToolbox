@@ -119,4 +119,11 @@ describe('App Quick Open integration', () => {
     await wrapper.vm.$nextTick(); await flushPromises()
     expect(router.currentRoute.value.path).toBe('/')
   })
+
+  it('marks a Development host in the window title', async () => {
+    const { wrapper } = app()
+    useAppStore().rebuild({ environmentKind: 'Development', environmentDisplayName: 'QingToolbox [Dev]', hostVersion: '1', protocolVersion: 4, totalModuleCount: 0, validModuleCount: 0, runningModuleCount: 0, generatedAt: new Date().toISOString() })
+    await wrapper.vm.$nextTick()
+    expect(document.title).toBe('Home · QingToolbox [Dev]')
+  })
 })

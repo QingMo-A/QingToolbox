@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -7,10 +7,13 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 
 use crate::{
-    modules::discover_modules,
+    module_api,
+    modules::{discover_modules, ModuleSummary},
     paths::{user_modules_root, ModuleRoot, ModuleSource},
     valid_module_id,
 };
@@ -36,6 +39,18 @@ pub struct ModuleImportResult {
     pub previous_version: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModulePackagePreview {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub api_version: u32,
+    pub host_api_version: u32,
+    pub compatible: bool,
+    pub sha256: String,
+}
+
 #[derive(Debug)]
 pub struct ImportError {
     pub code: &'static str,
@@ -54,7 +69,10 @@ impl std::error::Error for ImportError {}
 #[serde(rename_all = "camelCase")]
 struct ManifestIdentity {
     id: Option<String>,
+    name: Option<String>,
     version: Option<String>,
+    #[serde(flatten)]
+    extra: BTreeMap<String, Value>,
 }
 
 #[derive(Debug)]
@@ -72,18 +90,158 @@ struct PackageMetadata {
     module_id: Option<String>,
     version: Option<String>,
     module_api_version: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_api_version")]
+    api_version: Option<u32>,
     entry_manifest: Option<String>,
+}
+
+fn deserialize_present_api_version<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    let version = value
+        .as_u64()
+        .and_then(|number| u32::try_from(number).ok())
+        .filter(|version| *version > 0)
+        .ok_or_else(|| serde::de::Error::custom("apiVersion must be a positive integer"))?;
+    Ok(Some(version))
+}
+
+pub fn preview_qmod(source_path: &str) -> Result<ModulePackagePreview, ImportError> {
+    let source = canonical_source(source_path)?;
+    let plan = inspect_archive(&source)?;
+    let manifest = parse_manifest(&plan.manifest)?;
+    let id = manifest
+        .id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| valid_module_id(id))
+        .ok_or_else(|| ImportError {
+            code: "manifestInvalid",
+            message: "模块 manifest 的 id 无效。".to_string(),
+        })?;
+    if id != plan.module_id {
+        return Err(ImportError {
+            code: "manifestInvalid",
+            message: "模块 manifest 身份校验失败。".to_string(),
+        });
+    }
+    let api_version = manifest_api_version(&manifest)?;
+    validate_package_metadata(
+        plan.metadata.as_ref(),
+        id,
+        manifest.version.as_deref(),
+        api_version,
+    )?;
+    Ok(ModulePackagePreview {
+        id: id.to_string(),
+        name: manifest.name.as_deref().unwrap_or(id).trim().to_string(),
+        version: manifest.version.as_deref().unwrap_or("").trim().to_string(),
+        api_version,
+        host_api_version: module_api::API_VERSION,
+        compatible: api_version == module_api::API_VERSION,
+        sha256: sha256_file(&source)?,
+    })
+}
+
+fn manifest_api_version(manifest: &ManifestIdentity) -> Result<u32, ImportError> {
+    module_api::requested_version(manifest.extra.get("apiVersion")).map_err(|_| ImportError {
+        code: "apiVersionInvalid",
+        message: "模块 apiVersion 必须是正整数。".to_string(),
+    })
+}
+
+fn sha256_file(path: &Path) -> Result<String, ImportError> {
+    let mut file = File::open(path).map_err(|error| ImportError {
+        code: "packageUnavailable",
+        message: format!("无法打开模块包：{error}"),
+    })?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer).map_err(|error| ImportError {
+            code: "packageUnreadable",
+            message: format!("无法读取模块包：{error}"),
+        })?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn check_package_fingerprint(source: &Path, expected: Option<&str>) -> Result<(), ImportError> {
+    if let Some(expected) = expected {
+        if expected.len() != 64
+            || !expected.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || sha256_file(source)? != expected.to_ascii_lowercase()
+        {
+            return Err(ImportError {
+                code: "packageChanged",
+                message: "模块包在确认后已变化，请重新选择并检查。".to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn check_api_confirmation(api_version: u32, allowed: bool) -> Result<(), ImportError> {
+    if api_version != module_api::API_VERSION && !allowed {
+        return Err(ImportError {
+            code: "apiVersionConfirmationRequired",
+            message: format!(
+                "模块需要 API v{api_version}，当前工具箱仅支持 v{}；请确认是否仍要安装。",
+                module_api::API_VERSION
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn check_confirmation_fingerprint(
+    allowed: bool,
+    expected: Option<&str>,
+) -> Result<(), ImportError> {
+    if allowed && expected.is_none() {
+        return Err(ImportError {
+            code: "packageConfirmationMissing",
+            message: "请重新选择并确认模块包。".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn publishable_summary(
+    summary: &ModuleSummary,
+    indexed: bool,
+    allow_incompatible_api: bool,
+) -> bool {
+    (summary.valid && indexed)
+        || (allow_incompatible_api
+            && summary.issues.len() == 1
+            && summary.issues[0].code == "apiVersionUnsupported")
 }
 
 /// Import a new Tauri process-profile module into the backend-owned user root.
 /// The operation only extracts and validates files; it never starts the
 /// resulting executable. Existing module directories are never overwritten.
-pub fn import_qmod(source_path: &str) -> Result<ModuleImportResult, ImportError> {
+pub fn import_qmod_confirmed(
+    source_path: &str,
+    expected_sha256: Option<&str>,
+    allow_incompatible_api: bool,
+) -> Result<ModuleImportResult, ImportError> {
     let modules_root = user_modules_root().ok_or_else(|| ImportError {
         code: "moduleRootUnavailable",
         message: "用户模块目录不可用。".to_string(),
     })?;
-    import_qmod_into(source_path, &modules_root)
+    import_qmod_into_with_options(
+        source_path,
+        &modules_root,
+        expected_sha256,
+        allow_incompatible_api,
+    )
 }
 
 /// Replace an already-installed user module with a validated package. The
@@ -91,9 +249,11 @@ pub fn import_qmod(source_path: &str) -> Result<ModuleImportResult, ImportError>
 /// bundled modules and reparse-point destinations are never replaced. The
 /// staged tree is atomically swapped into place and the old tree is retained
 /// only until the new rename succeeds, so a failed update can roll back.
-pub fn update_qmod(
+pub fn update_qmod_confirmed(
     source_path: &str,
     expected_module_id: &str,
+    expected_sha256: Option<&str>,
+    allow_incompatible_api: bool,
 ) -> Result<ModuleImportResult, ImportError> {
     if !valid_module_id(expected_module_id) {
         return Err(ImportError {
@@ -105,7 +265,13 @@ pub fn update_qmod(
         code: "moduleRootUnavailable",
         message: "用户模块目录不可用。".to_string(),
     })?;
-    update_qmod_into(source_path, expected_module_id, &modules_root)
+    update_qmod_into_with_options(
+        source_path,
+        expected_module_id,
+        &modules_root,
+        expected_sha256,
+        allow_incompatible_api,
+    )
 }
 
 fn update_qmod_into(
@@ -113,7 +279,18 @@ fn update_qmod_into(
     expected_module_id: &str,
     modules_root: &Path,
 ) -> Result<ModuleImportResult, ImportError> {
+    update_qmod_into_with_options(source_path, expected_module_id, modules_root, None, false)
+}
+
+fn update_qmod_into_with_options(
+    source_path: &str,
+    expected_module_id: &str,
+    modules_root: &Path,
+    expected_sha256: Option<&str>,
+    allow_incompatible_api: bool,
+) -> Result<ModuleImportResult, ImportError> {
     let source = canonical_source(source_path)?;
+    check_package_fingerprint(&source, expected_sha256)?;
     let plan = inspect_archive(&source)?;
     let manifest = parse_manifest(&plan.manifest)?;
     let module_id = manifest
@@ -136,7 +313,10 @@ fn update_qmod_into(
         plan.metadata.as_ref(),
         &module_id,
         manifest.version.as_deref(),
+        manifest_api_version(&manifest)?,
     )?;
+    check_confirmation_fingerprint(allow_incompatible_api, expected_sha256)?;
+    check_api_confirmation(manifest_api_version(&manifest)?, allow_incompatible_api)?;
 
     fs::create_dir_all(modules_root).map_err(|error| ImportError {
         code: "moduleRootUnavailable",
@@ -195,6 +375,7 @@ fn update_qmod_into(
         message: format!("无法创建模块更新临时目录：{error}"),
     })?;
     extract_archive(&source, &staging_module)?;
+    check_package_fingerprint(&source, expected_sha256)?;
     let discovered = discover_modules(&[ModuleRoot {
         source: ModuleSource::User,
         path: staging_parent.clone(),
@@ -208,7 +389,11 @@ fn update_qmod_into(
             code: "manifestInvalid",
             message: "模块清单未能通过新宿主校验。".to_string(),
         })?;
-    if !summary.valid || !discovered.records.contains_key(&module_id) {
+    if !publishable_summary(
+        &summary,
+        discovered.records.contains_key(&module_id),
+        allow_incompatible_api,
+    ) {
         let detail = summary
             .issues
             .first()
@@ -257,7 +442,17 @@ fn import_qmod_into(
     source_path: &str,
     modules_root: &Path,
 ) -> Result<ModuleImportResult, ImportError> {
+    import_qmod_into_with_options(source_path, modules_root, None, false)
+}
+
+fn import_qmod_into_with_options(
+    source_path: &str,
+    modules_root: &Path,
+    expected_sha256: Option<&str>,
+    allow_incompatible_api: bool,
+) -> Result<ModuleImportResult, ImportError> {
     let source = canonical_source(source_path)?;
+    check_package_fingerprint(&source, expected_sha256)?;
     let plan = inspect_archive(&source)?;
     let manifest = parse_manifest(&plan.manifest)?;
     let module_id = manifest
@@ -281,7 +476,10 @@ fn import_qmod_into(
         plan.metadata.as_ref(),
         &module_id,
         manifest.version.as_deref(),
+        manifest_api_version(&manifest)?,
     )?;
+    check_confirmation_fingerprint(allow_incompatible_api, expected_sha256)?;
+    check_api_confirmation(manifest_api_version(&manifest)?, allow_incompatible_api)?;
 
     fs::create_dir_all(modules_root).map_err(|error| ImportError {
         code: "moduleRootUnavailable",
@@ -312,6 +510,7 @@ fn import_qmod_into(
     })?;
 
     extract_archive(&source, &staging_module)?;
+    check_package_fingerprint(&source, expected_sha256)?;
     let discovered = discover_modules(&[ModuleRoot {
         source: ModuleSource::User,
         path: staging_parent.clone(),
@@ -325,7 +524,11 @@ fn import_qmod_into(
             code: "manifestInvalid",
             message: "模块清单未能通过新宿主校验。".to_string(),
         })?;
-    if !summary.valid || !discovered.records.contains_key(&module_id) {
+    if !publishable_summary(
+        &summary,
+        discovered.records.contains_key(&module_id),
+        allow_incompatible_api,
+    ) {
         let detail = summary
             .issues
             .first()
@@ -520,6 +723,7 @@ fn validate_package_metadata(
     metadata: Option<&PackageMetadata>,
     module_id: &str,
     manifest_version: Option<&str>,
+    manifest_api_version: u32,
 ) -> Result<(), ImportError> {
     let Some(metadata) = metadata else {
         // Older process-profile packages did not carry this envelope. The
@@ -536,6 +740,7 @@ fn validate_package_metadata(
             .zip(manifest_version)
             .is_some_and(|(left, right)| left.trim() == right.trim())
         && metadata.module_api_version.as_deref() == Some("tauri-process-v1")
+        && metadata.api_version.unwrap_or(module_api::API_VERSION) == manifest_api_version
         && metadata.entry_manifest.as_deref() == Some("module.json");
     if valid {
         Ok(())
@@ -752,7 +957,7 @@ fn is_reserved_device(component: &str) -> bool {
     )
 }
 
-fn is_reparse_point(metadata: &fs::Metadata) -> bool {
+pub(crate) fn is_reparse_point(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -856,7 +1061,7 @@ mod tests {
     fn valid_process_package_is_published_without_execution() {
         let sandbox = TestDir::new("qmod-valid");
         let package = sandbox.path().join("demo.qmod");
-        let manifest = br#"{"id":"qing.test","name":"Test Module","version":"1.0.0","entry":"bin/test.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","uiKind":"None","loadMode":"Manual","operations":[]}"#;
+        let manifest = br#"{"id":"qing.test","name":"Test Module","version":"1.0.0","apiVersion":1,"entry":"bin/test.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","uiKind":"None","loadMode":"Manual","operations":[]}"#;
         write_qmod(
             &package,
             &[
@@ -875,6 +1080,118 @@ mod tests {
         assert!(modules_root.join("qing.test/module.json").is_file());
         assert!(modules_root.join("qing.test/bin/test.exe").is_file());
         assert!(!modules_root.join(".qmod-import-").exists());
+    }
+
+    #[test]
+    fn incompatible_api_package_is_rejected_before_install() {
+        let sandbox = TestDir::new("qmod-api-incompatible");
+        let package = sandbox.path().join("incompatible.qmod");
+        let manifest = br#"{"id":"qing.test","name":"Test","version":"1.0.0","apiVersion":2,"entry":"bin/test.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#;
+        let metadata = br#"{"schemaVersion":1,"moduleId":"qing.test","version":"1.0.0","moduleApiVersion":"tauri-process-v1","apiVersion":2,"entryManifest":"module.json"}"#;
+        write_qmod(
+            &package,
+            &[
+                ("qmod.json", metadata),
+                ("module.json", manifest),
+                ("bin/test.exe", b"x"),
+            ],
+        );
+        let modules_root = sandbox.path().join("modules");
+        let preview = preview_qmod(&package.to_string_lossy()).expect("preview");
+        assert_eq!(
+            (
+                preview.api_version,
+                preview.host_api_version,
+                preview.compatible
+            ),
+            (2, 1, false)
+        );
+        let error = import_qmod_into(&package.to_string_lossy(), &modules_root)
+            .expect_err("unsupported API version must not install");
+        assert_eq!(error.code, "apiVersionConfirmationRequired");
+        assert!(!modules_root.join("qing.test").exists());
+        assert_eq!(
+            import_qmod_into_with_options(&package.to_string_lossy(), &modules_root, None, true)
+                .unwrap_err()
+                .code,
+            "packageConfirmationMissing"
+        );
+        let installed = import_qmod_into_with_options(
+            &package.to_string_lossy(),
+            &modules_root,
+            Some(&preview.sha256),
+            true,
+        )
+        .expect("explicitly confirmed incompatible package may be stored");
+        assert_eq!(installed.id, "qing.test");
+        let discovered = discover_modules(&[ModuleRoot {
+            source: ModuleSource::User,
+            path: modules_root,
+        }]);
+        assert!(!discovered.payload.modules[0].valid);
+        assert!(discovered.records.is_empty());
+    }
+
+    #[test]
+    fn changed_package_and_conflicting_identity_api_cannot_use_confirmation() {
+        let sandbox = TestDir::new("qmod-api-identity");
+        let package = sandbox.path().join("module.qmod");
+        let manifest = br#"{"id":"qing.test","name":"Test","version":"1.0.0","apiVersion":2,"entry":"bin/test.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#;
+        let wrong_metadata = br#"{"schemaVersion":1,"moduleId":"qing.test","version":"1.0.0","moduleApiVersion":"tauri-process-v1","apiVersion":1,"entryManifest":"module.json"}"#;
+        write_qmod(
+            &package,
+            &[
+                ("qmod.json", wrong_metadata),
+                ("module.json", manifest),
+                ("bin/test.exe", b"x"),
+            ],
+        );
+        assert_eq!(
+            preview_qmod(&package.to_string_lossy()).unwrap_err().code,
+            "packageMetadataInvalid"
+        );
+        assert_eq!(
+            import_qmod_into_with_options(
+                &package.to_string_lossy(),
+                &sandbox.path().join("modules"),
+                None,
+                true
+            )
+            .unwrap_err()
+            .code,
+            "packageMetadataInvalid"
+        );
+
+        let correct_metadata = br#"{"schemaVersion":1,"moduleId":"qing.test","version":"1.0.0","moduleApiVersion":"tauri-process-v1","apiVersion":2,"entryManifest":"module.json"}"#;
+        write_qmod(
+            &package,
+            &[
+                ("qmod.json", correct_metadata),
+                ("module.json", manifest),
+                ("bin/test.exe", b"x"),
+            ],
+        );
+        let preview = preview_qmod(&package.to_string_lossy()).expect("valid preview");
+        let modified_manifest = br#"{"id":"qing.test","name":"Modified","version":"1.0.0","apiVersion":2,"entry":"bin/test.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#;
+        write_qmod(
+            &package,
+            &[
+                ("qmod.json", correct_metadata),
+                ("module.json", modified_manifest),
+                ("bin/test.exe", b"x"),
+            ],
+        );
+        assert_eq!(
+            import_qmod_into_with_options(
+                &package.to_string_lossy(),
+                &sandbox.path().join("modules"),
+                Some(&preview.sha256),
+                true
+            )
+            .unwrap_err()
+            .code,
+            "packageChanged"
+        );
     }
 
     #[test]
@@ -909,6 +1226,98 @@ mod tests {
         assert_eq!(result.version, "2.0.0");
         assert_eq!(fs::read(installed.join("bin/test.exe")).unwrap(), b"new");
         assert!(!modules_root.join(".qmod-backup-").exists());
+    }
+
+    #[test]
+    fn incompatible_update_requires_confirmation_and_can_be_replaced_later() {
+        let sandbox = TestDir::new("qmod-update-api-confirmation");
+        let modules_root = sandbox.path().join("modules");
+        let installed = modules_root.join("qing.test");
+        fs::create_dir_all(installed.join("bin")).expect("installed module");
+        let old_manifest = br#"{"id":"qing.test","name":"Old","version":"1.0.0","apiVersion":1,"entry":"bin/test.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#;
+        fs::write(installed.join("module.json"), old_manifest).expect("old manifest");
+        fs::write(installed.join("bin/test.exe"), b"old").expect("old entry");
+
+        let incompatible_package = sandbox.path().join("incompatible.qmod");
+        let incompatible_manifest = br#"{"id":"qing.test","name":"New","version":"2.0.0","apiVersion":2,"entry":"bin/test.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#;
+        let incompatible_metadata = br#"{"schemaVersion":1,"moduleId":"qing.test","version":"2.0.0","moduleApiVersion":"tauri-process-v1","apiVersion":2,"entryManifest":"module.json"}"#;
+        write_qmod(
+            &incompatible_package,
+            &[
+                ("qmod.json", incompatible_metadata),
+                ("module.json", incompatible_manifest),
+                ("bin/test.exe", b"new"),
+            ],
+        );
+        let preview = preview_qmod(&incompatible_package.to_string_lossy()).expect("preview");
+        assert_eq!(
+            update_qmod_into(
+                &incompatible_package.to_string_lossy(),
+                "qing.test",
+                &modules_root
+            )
+            .unwrap_err()
+            .code,
+            "apiVersionConfirmationRequired"
+        );
+        assert_eq!(fs::read(installed.join("bin/test.exe")).unwrap(), b"old");
+        update_qmod_into_with_options(
+            &incompatible_package.to_string_lossy(),
+            "qing.test",
+            &modules_root,
+            Some(&preview.sha256),
+            true,
+        )
+        .expect("confirmed update");
+        assert_eq!(fs::read(installed.join("bin/test.exe")).unwrap(), b"new");
+        let discovered = discover_modules(&[ModuleRoot {
+            source: ModuleSource::User,
+            path: modules_root.clone(),
+        }]);
+        assert!(!discovered.payload.modules[0].valid);
+        assert!(discovered.records.is_empty());
+
+        let compatible_package = sandbox.path().join("compatible.qmod");
+        let compatible_manifest = br#"{"id":"qing.test","name":"Compatible","version":"3.0.0","apiVersion":1,"entry":"bin/test.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#;
+        let compatible_metadata = br#"{"schemaVersion":1,"moduleId":"qing.test","version":"3.0.0","moduleApiVersion":"tauri-process-v1","apiVersion":1,"entryManifest":"module.json"}"#;
+        write_qmod(
+            &compatible_package,
+            &[
+                ("qmod.json", compatible_metadata),
+                ("module.json", compatible_manifest),
+                ("bin/test.exe", b"compatible"),
+            ],
+        );
+        update_qmod_into(
+            &compatible_package.to_string_lossy(),
+            "qing.test",
+            &modules_root,
+        )
+        .expect("invalid installation remains replaceable");
+        assert_eq!(
+            fs::read(installed.join("bin/test.exe")).unwrap(),
+            b"compatible"
+        );
+    }
+
+    #[test]
+    fn explicit_null_package_api_is_not_legacy_absence() {
+        let sandbox = TestDir::new("qmod-null-api");
+        let package = sandbox.path().join("null.qmod");
+        let manifest = br#"{"id":"qing.test","name":"Test","version":"1.0.0","apiVersion":1,"entry":"bin/test.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#;
+        let metadata = br#"{"schemaVersion":1,"moduleId":"qing.test","version":"1.0.0","moduleApiVersion":"tauri-process-v1","apiVersion":null,"entryManifest":"module.json"}"#;
+        write_qmod(
+            &package,
+            &[
+                ("qmod.json", metadata),
+                ("module.json", manifest),
+                ("bin/test.exe", b"x"),
+            ],
+        );
+        assert_eq!(
+            preview_qmod(&package.to_string_lossy()).unwrap_err().code,
+            "packageMetadataInvalid"
+        );
     }
 
     #[test]

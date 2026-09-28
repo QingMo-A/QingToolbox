@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, VecDeque},
     fs,
     path::PathBuf,
     process::Command,
@@ -20,11 +20,14 @@ use tauri::{
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 mod fonts;
+mod devices;
+mod device_pairing;
 mod host_update;
 mod importer;
 mod launcher_keyboard;
 mod launcher_outside_click;
 mod launcher_overlay;
+mod module_api;
 mod modules;
 mod paths;
 pub mod protocol;
@@ -33,7 +36,10 @@ mod settings;
 mod web;
 
 use host_update::HostUpdateSnapshot;
-use importer::{import_qmod, update_qmod, ModuleImportResult};
+use importer::{
+    import_qmod_confirmed, preview_qmod, update_qmod_confirmed, ModuleImportResult,
+    ModulePackagePreview,
+};
 use modules::{discover_modules, ModuleListPayload};
 use paths::{resolve_module_roots, user_modules_root, ModuleRoot, ModuleSource};
 use protocol::ProtocolEnvelope;
@@ -50,6 +56,15 @@ const MAX_SESSION_LOG_ENTRIES: usize = 256;
 const MODULE_STATE_CHANGED_EVENT: &str = "qmod:module-state-changed";
 const DEFAULT_LAUNCHER_HOTKEY: &str = "Ctrl+Alt+L";
 const FLOATING_BADGE_WINDOW_LABEL: &str = "floating-badge";
+const INFO_POPUP_WINDOW_LABEL: &str = "info-popup";
+
+#[derive(Default)]
+struct InfoPopupQueue {
+    current: Option<device_pairing::ForwardedNotification>,
+    pending: VecDeque<device_pairing::ForwardedNotification>,
+    exiting: bool,
+    exit_x: Option<i32>,
+}
 
 /// Process-wide state owned by the Rust host. Paths and module records stay on
 /// this side of the IPC boundary; the Vue layer only receives stable ids and
@@ -68,9 +83,12 @@ pub struct HostState {
     session_logs: Mutex<Vec<SessionLogEntry>>,
     close_prompt_active: AtomicBool,
     floating_badge_move_generation: AtomicU64,
+    info_popup_move_generation: AtomicU64,
+    info_popup: Mutex<InfoPopupQueue>,
     launcher_drop_protection: Mutex<launcher_overlay::DropProtection>,
     launcher_keyboard: Mutex<launcher_keyboard::Recording>,
     launcher_outside_click: Mutex<Option<launcher_outside_click::Observer>>,
+    devices: devices::DeviceManager,
 }
 
 impl HostState {
@@ -94,9 +112,12 @@ impl HostState {
             session_logs: Mutex::new(Vec::new()),
             close_prompt_active: AtomicBool::new(false),
             floating_badge_move_generation: AtomicU64::new(0),
+            info_popup_move_generation: AtomicU64::new(0),
+            info_popup: Mutex::new(InfoPopupQueue::default()),
             launcher_drop_protection: Mutex::new(launcher_overlay::DropProtection::default()),
             launcher_keyboard: Mutex::new(launcher_keyboard::Recording::default()),
             launcher_outside_click: Mutex::new(None),
+            devices: devices::DeviceManager::new(paths::user_data_root().as_deref()),
         }
     }
 }
@@ -112,8 +133,12 @@ impl Default for HostState {
 struct HostInfo {
     product_name: &'static str,
     version: &'static str,
+    device_name: Option<String>,
     backend: &'static str,
     protocol_version: &'static str,
+    api_version: u32,
+    environment_kind: &'static str,
+    environment_display_name: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -199,9 +224,70 @@ fn get_host_info() -> HostInfo {
     HostInfo {
         product_name: "QingToolbox",
         version: env!("CARGO_PKG_VERSION"),
+        device_name: std::env::var("COMPUTERNAME")
+            .ok()
+            .and_then(|value| {
+                let name = value.trim();
+                (!name.is_empty() && name.chars().count() <= 255).then(|| name.to_owned())
+            }),
         backend: "rust",
         protocol_version: "1",
+        api_version: module_api::API_VERSION,
+        environment_kind: if paths::is_development() {
+            "Development"
+        } else {
+            "Production"
+        },
+        environment_display_name: if paths::is_development() {
+            "QingToolbox [Dev]"
+        } else {
+            "QingToolbox"
+        },
     }
+}
+
+const PROJECT_REPOSITORY_URL: &str = "https://github.com/QingMo-A/QingToolbox";
+
+#[tauri::command]
+fn open_project_repository(window: WebviewWindow) -> Result<(), CommandError> {
+    ensure_main_window(&window)?;
+    open_project_repository_in_browser().map_err(|_| CommandError {
+        code: "repositoryOpenFailed",
+        message: "无法在浏览器中打开项目仓库。".to_string(),
+    })
+}
+
+#[cfg(windows)]
+fn open_project_repository_in_browser() -> Result<(), ()> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let verb = "open\0".encode_utf16().collect::<Vec<_>>();
+    let url = format!("{PROJECT_REPOSITORY_URL}\0")
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    // ShellExecute uses the user's default HTTPS association. No caller URL
+    // is accepted: this command can open only the project's fixed repository.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            url.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if (result as isize) > 32 {
+        Ok(())
+    } else {
+        Err(())
+    }
+}
+
+#[cfg(not(windows))]
+fn open_project_repository_in_browser() -> Result<(), ()> {
+    Err(())
 }
 
 #[tauri::command]
@@ -507,6 +593,9 @@ fn control_main_window(
     ensure_main_window(&window)?;
     let result = match action {
         MainWindowAction::Minimize => window.minimize(),
+        MainWindowAction::ToggleMaximize if window.is_fullscreen().unwrap_or(false) => {
+            window.set_fullscreen(false)
+        }
         MainWindowAction::ToggleMaximize => window.is_maximized().and_then(|maximized| {
             if maximized {
                 window.unmaximize()
@@ -816,6 +905,64 @@ fn update_settings(
     }
 }
 
+/// Resize only the main window to the persisted windowed dimensions. A user
+/// explicitly applying them also leaves maximized/fullscreen mode.
+#[tauri::command]
+fn apply_saved_window_size(
+    state: State<'_, HostState>,
+    window: WebviewWindow,
+) -> Result<(), CommandError> {
+    ensure_main_window(&window)?;
+    let snapshot = state
+        .settings
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "工具箱设置状态不可用。".to_string(),
+        })?
+        .snapshot();
+    window
+        .set_fullscreen(false)
+        .and_then(|_| window.unmaximize())
+        .and_then(|_| {
+            window.set_size(tauri::LogicalSize::new(
+                snapshot.window_width as f64,
+                snapshot.window_height as f64,
+            ))
+        })
+        .map_err(|error| CommandError {
+            code: "windowUnavailable",
+            message: format!("无法调整工具箱窗口：{error}"),
+        })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MainWindowSize {
+    width: u32,
+    height: u32,
+}
+
+/// Return logical (DPI-independent) inner dimensions, matching Tauri's
+/// window configuration and the saved startup size.
+#[tauri::command]
+fn get_main_window_size(window: WebviewWindow) -> Result<MainWindowSize, CommandError> {
+    ensure_main_window(&window)?;
+    let physical = window.inner_size().map_err(|error| CommandError {
+        code: "windowUnavailable",
+        message: format!("无法读取工具箱窗口尺寸：{error}"),
+    })?;
+    let scale = window.scale_factor().map_err(|error| CommandError {
+        code: "windowUnavailable",
+        message: format!("无法读取窗口缩放比例：{error}"),
+    })?;
+    let logical = physical.to_logical::<f64>(scale);
+    Ok(MainWindowSize {
+        width: logical.width.round() as u32,
+        height: logical.height.round() as u32,
+    })
+}
+
 /// Toggle whether a discovered module may be started with the host. The
 /// setting is persisted by Rust and the frontend can only submit a validated
 /// module id plus a boolean preference.
@@ -886,16 +1033,39 @@ fn set_module_startup_authorization(
 /// publishes a new process-profile module without executing it. Module launch
 /// commands continue to use manifest-owned records and opaque ids.
 #[tauri::command]
+fn inspect_module_package(
+    window: WebviewWindow,
+    source_path: String,
+) -> Result<ModulePackagePreview, CommandError> {
+    ensure_main_window(&window)?;
+    preview_qmod(&source_path).map_err(|error| CommandError {
+        code: error.code,
+        message: error.message,
+    })
+}
+
+#[tauri::command]
 fn import_module(
     state: State<'_, HostState>,
     window: WebviewWindow,
     source_path: String,
+    expected_sha256: Option<String>,
+    allow_incompatible_api: Option<bool>,
 ) -> Result<ModuleImportResult, CommandError> {
     ensure_main_window(&window)?;
-    let result = import_qmod(&source_path).map_err(|error| CommandError {
-        code: error.code,
-        message: error.message,
-    })?;
+    let allow = allow_incompatible_api.unwrap_or(false);
+    if allow && expected_sha256.is_none() {
+        return Err(CommandError {
+            code: "packageConfirmationMissing",
+            message: "请重新选择并确认模块包。".to_string(),
+        });
+    }
+    let result = import_qmod_confirmed(&source_path, expected_sha256.as_deref(), allow).map_err(
+        |error| CommandError {
+            code: error.code,
+            message: error.message,
+        },
+    )?;
     // Refresh the in-memory discovery index so the newly imported module is
     // immediately visible. A successful package publication remains valid even
     // if this best-effort UI index refresh cannot acquire its mutex.
@@ -927,7 +1097,7 @@ fn open_module_directory(
             message: "模块 id 无效。".to_string(),
         });
     }
-    let directory = state
+    let indexed_directory = state
         .module_index
         .lock()
         .map_err(|_| CommandError {
@@ -935,11 +1105,14 @@ fn open_module_directory(
             message: "模块索引状态不可用。".to_string(),
         })?
         .get(&module_id)
-        .map(|record| record.directory.clone())
-        .ok_or_else(|| CommandError {
-            code: "moduleNotFound",
-            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
-        })?;
+        .map(|record| record.directory.clone());
+    // A confirmed API-incompatible installation is visible in discovery, but
+    // intentionally has no executable runtime record. It must still be
+    // manageable from the Modules page.
+    let directory = match indexed_directory {
+        Some(directory) => directory,
+        None => resolve_user_module_directory(&module_id)?,
+    };
     if !directory.is_dir() {
         return Err(CommandError {
             code: "moduleDirectoryMissing",
@@ -979,7 +1152,8 @@ fn remove_module(
             message: "模块 id 无效。".to_string(),
         });
     }
-    let record = state
+    let canonical_directory = resolve_user_module_directory(&module_id)?;
+    let user_runtime = state
         .module_index
         .lock()
         .map_err(|_| CommandError {
@@ -987,52 +1161,24 @@ fn remove_module(
             message: "模块索引状态不可用。".to_string(),
         })?
         .get(&module_id)
-        .cloned()
-        .ok_or_else(|| CommandError {
-            code: "moduleNotFound",
-            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
-        })?;
-    if record.source != ModuleSource::User {
-        return Err(CommandError {
-            code: "moduleRemoveUnsupported",
-            message: "内置模块不能被删除。".to_string(),
-        });
-    }
-    let user_root = user_modules_root().ok_or_else(|| CommandError {
-        code: "moduleRootUnavailable",
-        message: "用户模块目录不可用。".to_string(),
-    })?;
-    let canonical_root = fs::canonicalize(&user_root).map_err(|error| CommandError {
-        code: "moduleRootUnavailable",
-        message: format!("无法验证用户模块目录：{error}"),
-    })?;
-    let canonical_directory =
-        fs::canonicalize(&record.directory).map_err(|error| CommandError {
-            code: "moduleDirectoryMissing",
-            message: format!("无法验证模块目录：{error}"),
-        })?;
-    if !canonical_directory.starts_with(&canonical_root) || canonical_directory == canonical_root {
-        return Err(CommandError {
-            code: "moduleBoundaryViolation",
-            message: "模块目录不在用户模块根目录内。".to_string(),
-        });
-    }
-
-    let label = module_window_label(&module_id);
-    if let Some(module_window) = app.get_webview_window(&label) {
-        if module_id == launcher_overlay::MODULE_ID {
-            let _ = launcher_keyboard::stop(window.app_handle());
-            let _ = module_window.destroy();
-        } else {
-            let _ = module_window.close();
+        .is_some_and(|record| record.source == ModuleSource::User);
+    if user_runtime {
+        let label = module_window_label(&module_id);
+        if let Some(module_window) = app.get_webview_window(&label) {
+            if module_id == launcher_overlay::MODULE_ID {
+                let _ = launcher_keyboard::stop(window.app_handle());
+                let _ = module_window.destroy();
+            } else {
+                let _ = module_window.close();
+            }
         }
-    }
-    if let Ok(mut runtime) = state.runtime.lock() {
-        let _ = runtime.stop(&module_id);
-    }
-    let _ = clear_module_hotkey_binding(&app, &state, &module_id);
-    if module_id == "qing.screenpin" {
-        close_screenpin_windows(&app, &state);
+        if let Ok(mut runtime) = state.runtime.lock() {
+            let _ = runtime.stop(&module_id);
+        }
+        let _ = clear_module_hotkey_binding(&app, &state, &module_id);
+        if module_id == "qing.screenpin" {
+            close_screenpin_windows(&app, &state);
+        }
     }
     fs::remove_dir_all(&canonical_directory).map_err(|error| CommandError {
         code: "moduleRemoveFailed",
@@ -1062,14 +1208,24 @@ fn update_module(
     window: WebviewWindow,
     module_id: String,
     source_path: String,
+    expected_sha256: Option<String>,
+    allow_incompatible_api: Option<bool>,
 ) -> Result<ModuleImportResult, CommandError> {
     ensure_main_window(&window)?;
+    let allow = allow_incompatible_api.unwrap_or(false);
+    if allow && expected_sha256.is_none() {
+        return Err(CommandError {
+            code: "packageConfirmationMissing",
+            message: "请重新选择并确认模块包。".to_string(),
+        });
+    }
     if !valid_module_id(&module_id) {
         return Err(CommandError {
             code: "moduleIdInvalid",
             message: "模块 id 无效。".to_string(),
         });
     }
+    let _installed_user_directory = resolve_user_module_directory(&module_id)?;
     let record = state
         .module_index
         .lock()
@@ -1078,24 +1234,19 @@ fn update_module(
             message: "模块索引状态不可用。".to_string(),
         })?
         .get(&module_id)
-        .cloned()
-        .ok_or_else(|| CommandError {
-            code: "moduleNotFound",
-            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
-        })?;
-    if record.source != ModuleSource::User {
-        return Err(CommandError {
-            code: "moduleUpdateUnsupported",
-            message: "内置模块不能从模块窗口覆盖更新。".to_string(),
-        });
-    }
+        .filter(|record| record.source == ModuleSource::User)
+        .cloned();
 
-    let previous_state = state
-        .runtime
-        .lock()
-        .ok()
-        .map(|mut runtime| runtime.snapshot(&module_id).state)
-        .unwrap_or(ModuleRuntimeState::NotStarted);
+    let previous_state = if record.is_some() {
+        state
+            .runtime
+            .lock()
+            .ok()
+            .map(|mut runtime| runtime.snapshot(&module_id).state)
+            .unwrap_or(ModuleRuntimeState::NotStarted)
+    } else {
+        ModuleRuntimeState::NotStarted
+    };
     let was_running = matches!(
         previous_state,
         ModuleRuntimeState::Starting
@@ -1106,42 +1257,46 @@ fn update_module(
 
     // Closing a Web window first releases WebView2 file handles and prevents
     // an old qmod asset tree from remaining visible while it is replaced.
-    let label = module_window_label(&module_id);
-    if let Some(module_window) = app.get_webview_window(&label) {
-        if module_id == launcher_overlay::MODULE_ID {
-            let _ = launcher_keyboard::stop(window.app_handle());
-            let _ = module_window.destroy();
-        } else {
-            let _ = module_window.close();
+    if record.is_some() {
+        let label = module_window_label(&module_id);
+        if let Some(module_window) = app.get_webview_window(&label) {
+            if module_id == launcher_overlay::MODULE_ID {
+                let _ = launcher_keyboard::stop(window.app_handle());
+                let _ = module_window.destroy();
+            } else {
+                let _ = module_window.close();
+            }
         }
+        if let Ok(mut runtime) = state.runtime.lock() {
+            let _ = runtime.stop(&module_id);
+        }
+        let _ = clear_module_hotkey_binding(&app, &state, &module_id);
     }
-    if let Ok(mut runtime) = state.runtime.lock() {
-        let _ = runtime.stop(&module_id);
-    }
-    let _ = clear_module_hotkey_binding(&app, &state, &module_id);
 
-    let result = match update_qmod(&source_path, &module_id) {
-        Ok(result) => result,
-        Err(error) => {
-            // An invalid package should not leave a previously running user
-            // module stopped. The old record is still valid whenever the
-            // atomic replacement has not committed; a best-effort restart is
-            // harmless after a committed replacement as well because the
-            // directory identity remains the same.
-            if was_running {
-                if let Ok(mut runtime) = state.runtime.lock() {
-                    let _ = runtime.start(&module_id, &record);
-                    if previous_state == ModuleRuntimeState::Running {
-                        let _ = runtime.set_active(&module_id, true);
+    let result =
+        match update_qmod_confirmed(&source_path, &module_id, expected_sha256.as_deref(), allow) {
+            Ok(result) => result,
+            Err(error) => {
+                // An invalid package should not leave a previously running user
+                // module stopped. The old record is still valid whenever the
+                // atomic replacement has not committed; a best-effort restart is
+                // harmless after a committed replacement as well because the
+                // directory identity remains the same.
+                if was_running {
+                    if let (Some(record), Ok(mut runtime)) = (record.as_ref(), state.runtime.lock())
+                    {
+                        let _ = runtime.start(&module_id, record);
+                        if previous_state == ModuleRuntimeState::Running {
+                            let _ = runtime.set_active(&module_id, true);
+                        }
                     }
                 }
+                return Err(CommandError {
+                    code: error.code,
+                    message: error.message,
+                });
             }
-            return Err(CommandError {
-                code: error.code,
-                message: error.message,
-            });
-        }
-    };
+        };
     let discovery = discover_modules(&state.roots);
     if let Ok(mut index) = state.module_index.lock() {
         *index = discovery.records;
@@ -1160,6 +1315,45 @@ fn update_module(
 struct CommandError {
     code: &'static str,
     message: String,
+}
+
+fn resolve_user_module_directory(module_id: &str) -> Result<PathBuf, CommandError> {
+    if !valid_module_id(module_id) {
+        return Err(CommandError {
+            code: "moduleIdInvalid",
+            message: "模块 id 无效。".to_string(),
+        });
+    }
+    let root = user_modules_root().ok_or_else(|| CommandError {
+        code: "moduleDirectoryMissing",
+        message: "用户模块目录不可用。".to_string(),
+    })?;
+    let canonical_root = fs::canonicalize(&root).map_err(|_| CommandError {
+        code: "moduleDirectoryMissing",
+        message: "用户模块目录不存在。".to_string(),
+    })?;
+    let candidate = canonical_root.join(module_id);
+    let metadata = fs::symlink_metadata(&candidate).map_err(|_| CommandError {
+        code: "moduleNotFound",
+        message: "未找到已安装的用户模块。".to_string(),
+    })?;
+    if !metadata.is_dir() || importer::is_reparse_point(&metadata) {
+        return Err(CommandError {
+            code: "moduleDirectoryInvalid",
+            message: "模块目录不安全。".to_string(),
+        });
+    }
+    let canonical_directory = fs::canonicalize(&candidate).map_err(|_| CommandError {
+        code: "moduleDirectoryInvalid",
+        message: "无法解析模块目录。".to_string(),
+    })?;
+    if canonical_directory.parent() != Some(canonical_root.as_path()) {
+        return Err(CommandError {
+            code: "moduleDirectoryInvalid",
+            message: "模块目录超出用户模块位置。".to_string(),
+        });
+    }
+    Ok(canonical_directory)
 }
 
 fn ensure_main_window(window: &WebviewWindow) -> Result<(), CommandError> {
@@ -2691,6 +2885,217 @@ fn get_all_module_runtime(
     Ok(runtime.snapshots())
 }
 
+#[tauri::command]
+fn get_devices_snapshot(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+) -> Result<devices::DeviceSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    Ok(state.devices.snapshot())
+}
+
+fn ensure_info_popup_window(window: &WebviewWindow) -> Result<(), CommandError> {
+    if window.label() == INFO_POPUP_WINDOW_LABEL { Ok(()) } else {
+        Err(CommandError { code: "infoPopupUnauthorized", message: "仅信息弹窗可读取消息。".to_string() })
+    }
+}
+
+#[tauri::command]
+fn get_info_popup_item(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+) -> Result<Option<device_pairing::ForwardedNotification>, CommandError> {
+    ensure_info_popup_window(&window)?;
+    Ok(state.info_popup.lock().map_err(|_| CommandError {
+        code: "stateUnavailable", message: "信息弹窗状态不可用。".to_string(),
+    })?.current.clone())
+}
+
+#[tauri::command]
+fn get_info_popup_dismiss_seconds(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+) -> Result<u32, CommandError> {
+    ensure_info_popup_window(&window)?;
+    Ok(state.settings.lock().map_err(|_| CommandError {
+        code: "stateUnavailable", message: "信息弹窗设置不可用。".to_string(),
+    })?.snapshot().info_popup_dismiss_seconds)
+}
+
+#[tauri::command]
+fn dismiss_info_popup_item(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    id: String,
+) -> Result<(), CommandError> {
+    ensure_info_popup_window(&window)?;
+    let exit_x = {
+        let mut queue = state.info_popup.lock().map_err(|_| CommandError {
+            code: "stateUnavailable", message: "信息弹窗状态不可用。".to_string(),
+        })?;
+        if queue.exiting || queue.current.as_ref().is_none_or(|current| current.id != id) {
+            return Ok(());
+        }
+        queue.exiting = true;
+        queue.exit_x
+    };
+    state.info_popup_move_generation.fetch_add(1, Ordering::AcqRel);
+    let app = window.app_handle().clone();
+    thread::spawn(move || {
+        let config = app.state::<HostState>().settings.lock().ok().map(|store| store.snapshot());
+        if let Some(window) = app.get_webview_window(INFO_POPUP_WINDOW_LABEL) {
+            if let Some(config) = config {
+                if config.info_popup_animation {
+                    if let (Some(exit_x), Ok(position)) = (exit_x, window.outer_position()) {
+                        let duration = Duration::from_millis(u64::from(config.info_popup_duration_ms));
+                        let started = std::time::Instant::now();
+                        loop {
+                            let progress = (started.elapsed().as_secs_f64() / duration.as_secs_f64()).min(1.0);
+                            // The reverse path accelerates out through the same screen edge.
+                            let eased = progress.powi(3);
+                            let x = position.x as f64 + (exit_x - position.x) as f64 * eased;
+                            let _ = window.set_position(tauri::PhysicalPosition::new(x.round() as i32, position.y));
+                            if progress >= 1.0 { break; }
+                            thread::sleep(Duration::from_millis(16));
+                        }
+                    }
+                }
+            }
+            let _ = window.hide();
+        }
+        let has_next = {
+            let state = app.state::<HostState>();
+            let Ok(mut queue) = state.info_popup.lock() else { return };
+            if queue.current.as_ref().is_none_or(|current| current.id != id) { return; }
+            queue.current = queue.pending.pop_front();
+            queue.exiting = false;
+            queue.exit_x = None;
+            queue.current.is_some()
+        };
+        if has_next { present_info_popup(app); }
+    });
+    Ok(())
+}
+
+fn start_info_popup_pump(app: tauri::AppHandle) {
+    thread::spawn(move || loop {
+        let state = app.state::<HostState>();
+        let incoming = state.devices.take_notifications();
+        if !incoming.is_empty() {
+            let mut show = false;
+            if let Ok(mut queue) = state.info_popup.lock() {
+                for item in incoming {
+                    if queue.pending.len() >= 16 { queue.pending.pop_front(); }
+                    queue.pending.push_back(item);
+                }
+                if queue.current.is_none() {
+                    queue.current = queue.pending.pop_front();
+                    show = queue.current.is_some();
+                }
+            }
+            if show { present_info_popup(app.clone()); }
+        }
+        thread::sleep(Duration::from_millis(250));
+    });
+}
+
+fn present_info_popup(app: tauri::AppHandle) {
+    let generation = app.state::<HostState>().info_popup_move_generation.fetch_add(1, Ordering::AcqRel) + 1;
+    thread::spawn(move || {
+        let Some(window) = app.get_webview_window(INFO_POPUP_WINDOW_LABEL) else { return };
+        let Some(monitor) = window.current_monitor().ok().flatten()
+            .or_else(|| window.primary_monitor().ok().flatten()) else { return };
+        let Ok(size) = window.outer_size() else { return };
+        let config = match app.state::<HostState>().settings.lock() {
+            Ok(settings) => settings.snapshot(),
+            Err(_) => return,
+        };
+        let left = config.info_popup_corner.starts_with("left");
+        let bottom = config.info_popup_corner.ends_with("Bottom");
+        let origin = monitor.position();
+        let screen = monitor.size();
+        let end_x = if left { origin.x + 24 } else {
+            origin.x + screen.width as i32 - size.width as i32 - 24
+        };
+        let end_y = if bottom {
+            origin.y + screen.height as i32 - size.height as i32 - 80
+        } else { origin.y + 24 };
+        let start_x = if left { origin.x - size.width as i32 } else {
+            origin.x + screen.width as i32
+        };
+        if let Ok(mut queue) = app.state::<HostState>().info_popup.lock() {
+            queue.exit_x = Some(start_x);
+        }
+        let target = tauri::PhysicalPosition::new(end_x, end_y);
+        if !config.info_popup_animation {
+            let _ = window.set_position(target);
+            let _ = window.show();
+        } else {
+            let _ = window.set_position(tauri::PhysicalPosition::new(start_x, end_y));
+            let _ = window.show();
+        }
+        let _ = app.emit_to(EventTarget::webview_window(INFO_POPUP_WINDOW_LABEL), "qing:info-popup-changed", ());
+        if config.info_popup_animation {
+            let duration = Duration::from_millis(u64::from(config.info_popup_duration_ms));
+            let started = std::time::Instant::now();
+            loop {
+                if app.state::<HostState>().info_popup_move_generation.load(Ordering::Acquire) != generation { return; }
+                let progress = (started.elapsed().as_secs_f64() / duration.as_secs_f64()).min(1.0);
+                let eased = 1.0 - (1.0 - progress).powi(3);
+                let x = start_x as f64 + (end_x - start_x) as f64 * eased;
+                let _ = window.set_position(tauri::PhysicalPosition::new(x.round() as i32, end_y));
+                if progress >= 1.0 { break; }
+                thread::sleep(Duration::from_millis(16));
+            }
+        }
+    });
+}
+
+#[tauri::command]
+fn set_devices_discovery_enabled(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    enabled: bool,
+) -> Result<devices::DeviceSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    Ok(state.devices.set_enabled(enabled))
+}
+
+#[tauri::command]
+fn request_device_pairing(window: WebviewWindow, state: State<'_, HostState>, device_id: String) -> Result<devices::DeviceSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    state.devices.request_pairing(&device_id).map_err(|message| CommandError { code: "devicePairingFailed", message })?;
+    Ok(state.devices.snapshot())
+}
+
+#[tauri::command]
+fn decide_device_pairing(window: WebviewWindow, state: State<'_, HostState>, session_id: String, approve: bool) -> Result<devices::DeviceSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    state.devices.decide_pairing(&session_id, approve).map_err(|message| CommandError { code: "devicePairingFailed", message })?;
+    Ok(state.devices.snapshot())
+}
+
+#[tauri::command]
+fn decide_device_action(window: WebviewWindow, state: State<'_, HostState>, session_id: String, approve: bool) -> Result<devices::DeviceSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    state.devices.decide_action(&session_id, approve).map_err(|message| CommandError { code: "deviceActionFailed", message })?;
+    Ok(state.devices.snapshot())
+}
+
+#[tauri::command]
+fn set_device_relationship(window: WebviewWindow, state: State<'_, HostState>, peer_id: String, intimate: bool) -> Result<devices::DeviceSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    state.devices.set_relationship(&peer_id, intimate).map_err(|message| CommandError { code: "deviceRelationshipFailed", message })?;
+    Ok(state.devices.snapshot())
+}
+
+#[tauri::command]
+fn revoke_device_pairing(window: WebviewWindow, state: State<'_, HostState>, peer_id: String) -> Result<devices::DeviceSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    state.devices.revoke_pairing(&peer_id).map_err(|message| CommandError { code: "deviceRelationshipFailed", message })?;
+    Ok(state.devices.snapshot())
+}
+
 pub fn run() {
     let mut builder = tauri::Builder::default();
     builder = builder.plugin(tauri_plugin_dialog::init());
@@ -2747,6 +3152,17 @@ pub fn run() {
         .manage(HostState::new())
         .invoke_handler(tauri::generate_handler![
             get_host_info,
+            get_devices_snapshot,
+            get_info_popup_item,
+            get_info_popup_dismiss_seconds,
+            dismiss_info_popup_item,
+            set_devices_discovery_enabled,
+            request_device_pairing,
+            decide_device_pairing,
+            decide_device_action,
+            set_device_relationship,
+            revoke_device_pairing,
+            open_project_repository,
             get_host_update_snapshot,
             check_host_update,
             download_host_update,
@@ -2759,8 +3175,11 @@ pub fn run() {
             set_font,
             import_font,
             update_settings,
+            apply_saved_window_size,
+            get_main_window_size,
             set_module_startup_authorization,
             import_module,
+            inspect_module_package,
             update_module,
             open_module_directory,
             remove_module,
@@ -2788,6 +3207,8 @@ pub fn run() {
             get_all_module_runtime
         ])
         .setup(|app| {
+            app.state::<HostState>().devices.restore_enabled();
+            start_info_popup_pump(app.handle().clone());
             start_runtime_supervisor(app.handle().clone());
             start_authorized_modules(app.handle(), &app.state::<HostState>());
             record_log(
@@ -2797,7 +3218,10 @@ pub fn run() {
                 "QingToolbox session started.",
             );
 
-            register_toggle_hotkey(app);
+            // The development host must not take the production host's global shortcut.
+            if !paths::is_development() {
+                register_toggle_hotkey(app);
+            }
             sync_persisted_autostart(app);
 
             let menu = MenuBuilder::new(app)
@@ -2812,7 +3236,11 @@ pub fn run() {
                 .ok_or_else(|| "default window icon is unavailable".to_string())?;
             TrayIconBuilder::with_id("main")
                 .icon(icon)
-                .tooltip("QingToolbox")
+                .tooltip(if paths::is_development() {
+                    "QingToolbox [Dev]"
+                } else {
+                    "QingToolbox"
+                })
                 .menu(&menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id().as_ref() {
@@ -2824,11 +3252,15 @@ pub fn run() {
                 .build(app)?;
 
             if let Some(window) = app.get_webview_window("main") {
+                if paths::is_development() {
+                    window.set_title("QingToolbox [Dev]")?;
+                }
                 install_close_behavior(&window);
                 if let Some(badge) = app.get_webview_window(FLOATING_BADGE_WINDOW_LABEL) {
                     apply_floating_badge_position(app.handle(), &badge);
                     install_floating_badge_close_behavior(&badge);
                 }
+                apply_saved_window_defaults(app.handle(), &window);
                 apply_startup_presentation(app.handle(), &window);
             }
             Ok(())
@@ -2841,6 +3273,7 @@ pub fn run() {
                 tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
             ) {
                 stop_all_modules(app);
+                app.state::<HostState>().devices.stop();
             }
         });
 }
@@ -3267,6 +3700,27 @@ fn apply_startup_presentation<R: tauri::Runtime>(
             show_floating_badge(app);
         }
         _ => show_main_window(app),
+    }
+}
+
+fn apply_saved_window_defaults<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    window: &WebviewWindow<R>,
+) {
+    if let Some(snapshot) = app.try_state::<HostState>().and_then(|state| {
+        state
+            .settings
+            .lock()
+            .ok()
+            .map(|settings| settings.snapshot())
+    }) {
+        let _ = window.set_size(tauri::LogicalSize::new(
+            snapshot.window_width as f64,
+            snapshot.window_height as f64,
+        ));
+        if snapshot.startup_fullscreen {
+            let _ = window.set_fullscreen(true);
+        }
     }
 }
 

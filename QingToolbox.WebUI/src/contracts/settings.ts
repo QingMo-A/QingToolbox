@@ -5,6 +5,7 @@ export type StartupPresentationMode = 'MainWindow'|'Minimized'|'FloatingBadge'
 export type LanguageCode = 'system'|'zh-CN'|'en-US'
 export type EffectiveLanguageCode = 'zh-CN'|'en-US'
 export type FontSource = 'default'|'system'|'imported'
+export type InfoPopupCorner = 'rightTop'|'rightBottom'|'leftTop'|'leftBottom'
 export const DEFAULT_FONT_ID = 'Default'
 
 export interface SettingsFont {
@@ -41,6 +42,13 @@ export interface SettingsSnapshot {
   language: SettingsLanguage
   showLogsInSidebar: boolean
   mainWindowCloseBehavior: MainWindowCloseBehavior
+  windowWidth?: number
+  windowHeight?: number
+  startupFullscreen?: boolean
+  infoPopupCorner?: InfoPopupCorner
+  infoPopupAnimation?: boolean
+  infoPopupDurationMs?: number
+  infoPopupDismissSeconds?: number
   closeBehaviorMessage: string
   launchAtLogin: boolean
   canConfigureLaunchAtLogin: boolean
@@ -133,6 +141,13 @@ export const isSettingsSnapshot = (value: unknown): value is SettingsSnapshot =>
   isLanguage(value.language) &&
   typeof value.showLogsInSidebar === 'boolean' &&
   (value.mainWindowCloseBehavior === 'Ask' || value.mainWindowCloseBehavior === 'MinimizeToNotificationArea' || value.mainWindowCloseBehavior === 'ExitApplication') &&
+  (value.windowWidth === undefined || typeof value.windowWidth === 'number' && Number.isInteger(value.windowWidth) && value.windowWidth >= 760 && value.windowWidth <= 7680) &&
+  (value.windowHeight === undefined || typeof value.windowHeight === 'number' && Number.isInteger(value.windowHeight) && value.windowHeight >= 520 && value.windowHeight <= 4320) &&
+  (value.startupFullscreen === undefined || typeof value.startupFullscreen === 'boolean') &&
+  (value.infoPopupCorner === undefined || ['rightTop', 'rightBottom', 'leftTop', 'leftBottom'].includes(value.infoPopupCorner as string)) &&
+  (value.infoPopupAnimation === undefined || typeof value.infoPopupAnimation === 'boolean') &&
+  (value.infoPopupDurationMs === undefined || typeof value.infoPopupDurationMs === 'number' && Number.isInteger(value.infoPopupDurationMs) && value.infoPopupDurationMs >= 100 && value.infoPopupDurationMs <= 2000) &&
+  (value.infoPopupDismissSeconds === undefined || typeof value.infoPopupDismissSeconds === 'number' && Number.isInteger(value.infoPopupDismissSeconds) && value.infoPopupDismissSeconds >= 3 && value.infoPopupDismissSeconds <= 60) &&
   typeof value.closeBehaviorMessage === 'string' && typeof value.launchAtLogin === 'boolean' &&
   typeof value.canConfigureLaunchAtLogin === 'boolean' && typeof value.canRepairStartup === 'boolean' &&
   (value.startupPresentationMode === 'MainWindow' || value.startupPresentationMode === 'Minimized' || value.startupPresentationMode === 'FloatingBadge') &&

@@ -72,6 +72,10 @@ if ([string]$manifest.id -ne $ModuleId -or
     [string]$manifest.runtimeIsolation -ne 'OutOfProcess') {
     throw "Tauri module manifest identity/runtime is invalid for '$ModuleId'."
 }
+if (($manifest.apiVersion -isnot [int] -and $manifest.apiVersion -isnot [long]) -or
+    [long]$manifest.apiVersion -ne 1) {
+    throw "Tauri module '$ModuleId' must declare apiVersion as the integer 1."
+}
 
 # The version is presentation data in the manifest, but it also becomes part
 # of the package filename. Keep it a bounded release token so a malformed
@@ -137,6 +141,7 @@ try {
         moduleId = [string]$manifest.id
         version = $version
         moduleApiVersion = 'tauri-process-v1'
+        apiVersion = [int]$manifest.apiVersion
         entryManifest = 'module.json'
     }
     $metadataBytes = [Text.Encoding]::UTF8.GetBytes(($metadata | ConvertTo-Json -Compress))
@@ -183,6 +188,7 @@ if ($Smoke) {
             [string]$metadata.moduleId -cne [string]$manifest.id -or
             [string]$metadata.version -cne $version -or
             [string]$metadata.moduleApiVersion -cne 'tauri-process-v1' -or
+            [int]$metadata.apiVersion -ne [int]$manifest.apiVersion -or
             [string]$metadata.entryManifest -cne 'module.json') {
             throw 'Generated qmod.json does not match the module manifest.'
         }

@@ -3,8 +3,11 @@ import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import mark from '../../assets/QingToolbox.Mark.svg'
 import { useLocalization } from '../../localization/localization'
+import { useAppStore } from '../../app/store'
 
 const { currentLocale } = useLocalization()
+const app = useAppStore()
+const isDevelopment = computed(() => app.snapshot?.environmentKind === 'Development')
 const error = ref('')
 const labels = computed(() => currentLocale.value === 'en-US'
   ? { floatingBadge: 'Floating window', minimize: 'Minimize', toggleMaximize: 'Maximize / Restore', close: 'Close' }
@@ -23,7 +26,7 @@ function drag(event: MouseEvent) {
   <header class="q-titlebar" @contextmenu.prevent>
     <div class="q-titlebar-drag" @mousedown="drag" @dblclick="act('toggleMaximize')">
       <img :src="mark" alt="" draggable="false" />
-      <span>QingToolbox</span>
+      <span>QingToolbox<template v-if="isDevelopment"> [Dev]</template></span>
       <small v-if="error" role="status">{{ error }}</small>
     </div>
     <div class="q-titlebar-actions">

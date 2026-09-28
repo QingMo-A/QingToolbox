@@ -57,7 +57,7 @@ Key rules that are easy to get wrong:
 ### 3. Manifest
 
 The authoritative schema is [`../protocol/module-manifest.tauri.v1.schema.json`](../protocol/module-manifest.tauri.v1.schema.json).
-Required fields: `id`, `name`, `version`, `entry`, `runtimeType`, `runtimeIsolation`, `loadMode`.
+Required fields for new packages: `id`, `name`, `version`, `apiVersion`, `entry`, `runtimeType`, `runtimeIsolation`, `loadMode`.
 
 Minimal example:
 
@@ -67,6 +67,7 @@ Minimal example:
   "name": "Example",
   "description": "Example Tauri process module.",
   "version": "0.1.0",
+  "apiVersion": 1,
   "author": "your-name",
   "entry": "bin/qing-example.exe",
   "runtimeType": "Process",
@@ -83,6 +84,7 @@ Minimal example:
 
 Field notes:
 
+- `apiVersion` is the integer compatibility contract for host-provided module capabilities. The current host supports **1** only. New packages declare the same value in `module.json` and `qmod.json`. A module requiring another version is listed as incompatible and cannot load. Import/update asks the user whether to store it anyway; cancellation keeps the old installation unchanged. Confirmation does not bypass other manifest errors. Older process modules without this field are interpreted as v1 so installed modules keep working. It is independent of the wire `protocolVersion`, module release `version`, and the historical `qmod.json` package-profile string `moduleApiVersion`.
 - `id` must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`. The install directory must be named **exactly** after it.
 - `entry` must be a relative `.exe` path. Absolute paths, traversal, and drive-colon forms are rejected.
 - `runtimeType` must be `Process` and `runtimeIsolation` must be `OutOfProcess`. The legacy host's DLL
