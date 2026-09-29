@@ -201,6 +201,8 @@ pwsh ./scripts/package-tauri-modules.ps1 -SkipBuild -Smoke
 | Qing PDF | `qing.pdf` | 0.1.0 | 固定 qpdf 运行时，合并 / 均分 / 提取 / 旋转 |
 | Web Module Canary | `qing.canary` | 0.1.0 | 兼容性验证用测试模块，非通用工具 |
 
+开发分支正在把 QingTransfer 的独立窗口收进“设备”页：设备条目提供文件传输入口，原 Rust 收发进程作为内部引擎保留，不再单独打包新版 `.qmod`。上表记录已发布的 0.3.0-alpha 模块版本，不代表这项迁移已发布或完成真实双端验收。
+
 模块目录约定：
 
 - `QingToolbox.exe` 同目录下的 `resources/modules`：随程序提供的模块（只读）。

@@ -25,7 +25,6 @@ $moduleIds = @(
     'qing.canary',
     'qing.launcher',
     'qing.pdf',
-    'qing.qingtransfer',
     'qing.texttools',
     'qing.windowtopmost',
     'qing.powerguard',

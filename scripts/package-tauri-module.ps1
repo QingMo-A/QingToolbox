@@ -26,7 +26,6 @@ $buildScripts = @{
     'qing.canary' = 'build-tauri-canary.ps1'
     'qing.launcher' = 'build-tauri-launcher.ps1'
     'qing.pdf' = 'build-tauri-pdf.ps1'
-    'qing.qingtransfer' = 'build-tauri-transfer.ps1'
     'qing.texttools' = 'build-tauri-texttools.ps1'
     'qing.windowtopmost' = 'build-tauri-windowtopmost.ps1'
     'qing.powerguard' = 'build-tauri-powerguard.ps1'

@@ -160,6 +160,12 @@ pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
                 .and_then(|name| name.to_str())
                 .unwrap_or("unknown-module")
                 .to_string();
+            // The transfer engine is now host-owned. An older user-installed
+            // QingTransfer package must not shadow the bundled process, whose
+            // discovery identity is required by the Devices page.
+            if root.source == ModuleSource::User && directory_name.eq_ignore_ascii_case("qing.qingtransfer") {
+                continue;
+            }
             // The WPF updater owns this journal/staging directory in the
             // shared user module root. Preserve it for recovery, but never
             // display or execute its contents as an installed module.
@@ -248,7 +254,12 @@ pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
                     },
                 );
             }
-            modules.push(summary);
+            // QingTransfer is now the Devices page's transfer engine, not a
+            // second user-facing tool card. Keep its validated runtime record
+            // so the device action can start it on demand.
+            if summary.id != "qing.qingtransfer" {
+                modules.push(summary);
+            }
         }
     }
 

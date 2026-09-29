@@ -96,6 +96,7 @@ struct Peer {
     capabilities: Vec<String>,
     addresses: Vec<IpAddr>,
     port: u16,
+    device_id: Option<String>,
     online: bool,
     last_seen: Option<String>,
 }
@@ -265,6 +266,7 @@ struct SharedState {
     incoming_file: Option<IncomingFile>,
     receive: ReceiveSettings,
     transfer: Option<TransferProgress>,
+    last_completed: Option<String>,
     last_error: Option<String>,
 }
 
@@ -282,6 +284,7 @@ struct TransferApp {
     data_directory: PathBuf,
     discovery: Mutex<Option<DiscoveryRuntime>>,
     friendly_name: String,
+    device_id: Option<String>,
 }
 
 impl TransferApp {
@@ -297,6 +300,10 @@ impl TransferApp {
                     .or_else(|_| env::var("HOSTNAME"))
                     .unwrap_or_else(|_| "QingToolbox".to_string())
             }));
+        let device_id = env::var("QINGTOOLBOX_DEVICE_ID")
+            .ok()
+            .filter(|value| value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .map(|value| value.to_ascii_lowercase());
         Self {
             state: Arc::new(Mutex::new(SharedState {
                 receive,
@@ -307,6 +314,7 @@ impl TransferApp {
             data_directory,
             discovery: Mutex::new(None),
             friendly_name,
+            device_id,
         }
     }
 
@@ -347,12 +355,15 @@ impl TransferApp {
                 &env::var("COMPUTERNAME").unwrap_or_else(|_| self.friendly_name.clone()),
             )
         );
-        let properties = [
+        let mut properties = vec![
             ("v", "1"),
             ("pf", "windows"),
             ("name", self.friendly_name.as_str()),
             ("cap", "file"),
         ];
+        if let Some(device_id) = &self.device_id {
+            properties.push(("id", device_id.as_str()));
+        }
         let service = match ServiceInfo::new(
             SERVICE_TYPE,
             &instance_name,
@@ -462,6 +473,7 @@ impl TransferApp {
                 "total": value.total,
                 "receiving": value.receiving,
             })),
+            "lastCompleted": state.last_completed,
             "lastError": state.last_error,
         })
     }
@@ -501,6 +513,15 @@ impl TransferApp {
                 self.begin_send_file(&path)?;
                 Ok(self.snapshot())
             }
+            "inspectFile" => {
+                let path = validate_existing_file(&required_string(payload, "path")?)?;
+                let size = fs::metadata(&path)
+                    .map_err(|error| io_error("file_unavailable", "文件不可用", error))?
+                    .len();
+                Ok(
+                    json!({ "name": path.file_name().and_then(|name| name.to_str()).unwrap_or("file"), "size": size }),
+                )
+            }
             "acceptIncomingConnection" => {
                 let session = lock_recover(&self.state).session.clone();
                 if let Some(session) = session {
@@ -533,6 +554,27 @@ impl TransferApp {
                         "当前没有等待接收的文件。",
                     ));
                 }
+                session.file_decision.set(FileDecision::Accept(destination));
+                Ok(self.snapshot())
+            }
+            "acceptIncomingFileDefault" => {
+                let (session, destination) = {
+                    let state = lock_recover(&self.state);
+                    let session = state.session.clone().ok_or_else(|| {
+                        ModuleError::new("no_incoming_file", "当前没有等待接收的文件。")
+                    })?;
+                    let offer = state.incoming_file.as_ref().ok_or_else(|| {
+                        ModuleError::new("no_incoming_file", "当前没有等待接收的文件。")
+                    })?;
+                    let destination = default_destination(&state.receive, &offer.name, false)
+                        .ok_or_else(|| {
+                            ModuleError::new(
+                                "default_directory_unavailable",
+                                "默认接收文件夹不可用。",
+                            )
+                        })?;
+                    (session, destination)
+                };
                 session.file_decision.set(FileDecision::Accept(destination));
                 Ok(self.snapshot())
             }
@@ -652,6 +694,7 @@ impl TransferApp {
                 total: metadata.len(),
                 receiving: false,
             });
+            state.last_completed = None;
             session
         };
         let app = Arc::clone(self);
@@ -689,6 +732,7 @@ impl TransferApp {
             capabilities: vec!["file".to_string()],
             addresses: remote.map(|address| vec![address.ip()]).unwrap_or_default(),
             port: remote.map(|address| address.port()).unwrap_or_default(),
+            device_id: hello.device_id.clone(),
             online: true,
             last_seen: Some(unix_time_millis().to_string()),
         };
@@ -786,7 +830,10 @@ impl TransferApp {
 
     fn clear_transfer(&self, error: Option<String>) {
         let mut state = lock_recover(&self.state);
-        state.transfer = None;
+        let finished = state.transfer.take();
+        if error.is_none() {
+            state.last_completed = finished.map(|value| value.name);
+        }
         state.incoming_file = None;
         if let Some(error) = error {
             state.last_error = Some(error);
@@ -1011,6 +1058,7 @@ fn peer_json(peer: &Peer) -> Value {
         "capabilities": peer.capabilities,
         "addresses": peer.addresses.iter().map(ToString::to_string).collect::<Vec<_>>(),
         "port": peer.port,
+        "deviceId": peer.device_id,
         "online": peer.online,
         "lastSeen": peer.last_seen,
     })
@@ -1112,6 +1160,10 @@ fn parse_peer(info: &ResolvedService, own_fullname: &str) -> Option<Peer> {
         return None;
     }
     let display_name = safe_field(info.get_property_val_str("name"), MAX_DISPLAY_NAME_LENGTH)?;
+    let device_id = info
+        .get_property_val_str("id")
+        .filter(|value| value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .map(str::to_ascii_lowercase);
     let capability_text = safe_field(info.get_property_val_str("cap"), MAX_FIELD_LENGTH)?;
     let capabilities = capability_text
         .split(',')
@@ -1143,6 +1195,7 @@ fn parse_peer(info: &ResolvedService, own_fullname: &str) -> Option<Peer> {
         capabilities,
         addresses,
         port: info.get_port(),
+        device_id,
         online: true,
         last_seen: Some(unix_time_millis().to_string()),
     })
@@ -1188,6 +1241,14 @@ fn accept_loop(app: Arc<TransferApp>, listener: TcpListener, stop: Arc<AtomicBoo
     while !stop.load(Ordering::Acquire) && !app.process_stop.load(Ordering::Acquire) {
         match listener.accept() {
             Ok((mut stream, _)) => {
+                // The listener is non-blocking so shutdown can be observed without
+                // hanging the module. On Windows an accepted socket can retain that
+                // mode; the session reader would then interpret WSAEWOULDBLOCK as a
+                // disconnect before the peer has time to send its first file offer.
+                if stream.set_nonblocking(false).is_err() {
+                    let _ = stream.shutdown(Shutdown::Both);
+                    continue;
+                }
                 let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
                 let _ = stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT));
                 match read_wire(&mut stream) {
@@ -1242,6 +1303,7 @@ fn connect_worker(app: Arc<TransferApp>, peer: Peer, cancel: Arc<AtomicBool>) {
                 let hello = WireMessage::Hello(HelloWire {
                     platform: "windows".to_string(),
                     name: app.friendly_name.clone(),
+                    device_id: app.device_id.clone(),
                 });
                 if write_wire(&mut stream, &hello).is_err() {
                     last_error = "无法发送连接请求。".to_string();
@@ -1370,11 +1432,12 @@ fn receive_offer(
             total: offer.size,
             receiving: true,
         });
+        state.last_completed = None;
     }
     session.file_decision.clear();
     let automatic = {
         let state = lock_recover(&app.state);
-        automatic_destination(&state.receive, &offer.name)
+        default_destination(&state.receive, &offer.name, true)
     };
     let decision = automatic
         .map(FileDecision::Accept)
@@ -1557,6 +1620,7 @@ fn send_wire(session: &Arc<Session>, message: &WireMessage) -> io::Result<()> {
 struct HelloWire {
     platform: String,
     name: String,
+    device_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1581,9 +1645,12 @@ enum WireMessage {
 
 fn write_wire(stream: &mut impl Write, message: &WireMessage) -> io::Result<()> {
     let value = match message {
-        WireMessage::Hello(value) => {
-            json!({ "type": "hello", "v": NETWORK_PROTOCOL_VERSION, "pf": value.platform, "name": value.name })
-        }
+        WireMessage::Hello(value) => match &value.device_id {
+            Some(device_id) => json!({ "type": "hello", "v": NETWORK_PROTOCOL_VERSION,
+                    "pf": value.platform, "name": value.name, "id": device_id }),
+            None => json!({ "type": "hello", "v": NETWORK_PROTOCOL_VERSION,
+                    "pf": value.platform, "name": value.name }),
+        },
         WireMessage::Probe(nonce) => {
             json!({ "type": "probe", "v": NETWORK_PROTOCOL_VERSION, "nonce": nonce })
         }
@@ -1657,13 +1724,27 @@ fn decode_wire(payload: &[u8]) -> Option<WireMessage> {
                 Some(WireMessage::ProbeAck(nonce))
             }
         }
-        "hello" if exact_keys(object, &["type", "v", "pf", "name"]) => {
+        "hello"
+            if exact_keys(object, &["type", "v", "pf", "name", "id"])
+                || exact_keys(object, &["type", "v", "pf", "name"]) =>
+        {
             let platform = safe_field(object.get("pf")?.as_str(), MAX_FIELD_LENGTH)?;
             let name = safe_field(object.get("name")?.as_str(), MAX_DISPLAY_NAME_LENGTH)?;
             if platform != "windows" && platform != "android" {
                 return None;
             }
-            Some(WireMessage::Hello(HelloWire { platform, name }))
+            let device_id = object
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_ascii_lowercase);
+            if device_id.as_ref().is_some_and(|id| !is_device_id(id)) {
+                return None;
+            }
+            Some(WireMessage::Hello(HelloWire {
+                platform,
+                name,
+                device_id,
+            }))
         }
         "file_offer" if exact_keys(object, &["type", "v", "name", "size"]) => {
             let name = object.get("name")?.as_str()?.to_string();
@@ -1693,6 +1774,13 @@ fn exact_keys(object: &Map<String, Value>, expected: &[&str]) -> bool {
 
 fn is_probe_nonce(value: &str) -> bool {
     value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn is_device_id(value: &str) -> bool {
+    value.len() == 32
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 fn is_sha256(value: &str) -> bool {
@@ -1775,8 +1863,12 @@ fn validate_path_string(raw: &str, message: &str) -> Result<(), ModuleError> {
     Ok(())
 }
 
-fn automatic_destination(settings: &ReceiveSettings, name: &str) -> Option<PathBuf> {
-    if !settings.auto_accept || !settings.use_default_directory {
+fn default_destination(
+    settings: &ReceiveSettings,
+    name: &str,
+    require_auto_accept: bool,
+) -> Option<PathBuf> {
+    if !settings.use_default_directory || require_auto_accept && !settings.auto_accept {
         return None;
     }
     let directory = settings.default_directory.as_deref()?.to_string();
@@ -1882,6 +1974,25 @@ mod tests {
     }
 
     #[test]
+    fn hello_carries_a_valid_discovery_identity() {
+        let value = serde_json::to_vec(&json!({
+            "type": "hello", "v": 1, "pf": "android", "name": "Phone",
+            "id": "0123456789abcdef0123456789abcdef"
+        }))
+        .unwrap();
+        assert!(
+            matches!(decode_wire(&value), Some(WireMessage::Hello(HelloWire {
+            device_id: Some(id), ..
+        })) if id == "0123456789abcdef0123456789abcdef")
+        );
+        let invalid = serde_json::to_vec(&json!({
+            "type": "hello", "v": 1, "pf": "android", "name": "Phone", "id": "bad"
+        }))
+        .unwrap();
+        assert!(decode_wire(&invalid).is_none());
+    }
+
+    #[test]
     fn file_offer_rejects_path_traversal_and_oversized_payloads() {
         let value = serde_json::to_vec(
             &json!({ "type": "file_offer", "v": 1, "name": "..\\secret.txt", "size": 1 }),
@@ -1913,12 +2024,26 @@ mod tests {
             auto_accept: true,
         };
         assert_eq!(
-            automatic_destination(&settings, "a.txt")
+            default_destination(&settings, "a.txt", true)
                 .unwrap()
                 .file_name()
                 .unwrap(),
             "a (1).txt"
         );
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn manual_accept_can_use_default_directory_without_auto_accept() {
+        let temp = env::temp_dir().join(format!("qing-transfer-default-test-{}", unique_id()));
+        fs::create_dir_all(&temp).unwrap();
+        let settings = ReceiveSettings {
+            default_directory: Some(temp.to_string_lossy().to_string()),
+            use_default_directory: true,
+            auto_accept: false,
+        };
+        assert!(default_destination(&settings, "a.txt", false).is_some());
+        assert!(default_destination(&settings, "a.txt", true).is_none());
         let _ = fs::remove_dir_all(temp);
     }
 

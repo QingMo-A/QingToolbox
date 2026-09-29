@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use crate::{
     modules::ModuleRecord,
-    paths::module_data_directory,
+    paths::{module_data_directory, user_data_root},
     protocol::{decode_line, ProtocolEnvelope, MAX_FRAME_BYTES},
 };
 
@@ -154,6 +154,15 @@ impl ModuleRuntimeManager {
             // own executable path.
             .env("QINGTOOLBOX_MODULE_DIRECTORY", &record.directory)
             .env("QINGTOOLBOX_MODULE_DATA_DIR", &data_directory);
+        if module_id == "qing.qingtransfer" {
+            if let Some(device_id) = user_data_root()
+                .and_then(|root| fs::read_to_string(root.join("Devices").join("discovery-id")).ok())
+                .map(|value| value.trim().to_ascii_lowercase())
+                .filter(|value| value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            {
+                command.env("QINGTOOLBOX_DEVICE_ID", device_id);
+            }
+        }
         apply_hidden_process_flags(&mut command);
 
         let mut child = command.spawn().map_err(|error| RuntimeError {
