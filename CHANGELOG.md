@@ -8,14 +8,25 @@
 
 ## Unreleased
 
-### 0.3.1-alpha（开发中）
+暂无未发布变更。
 
-- 宿主版本前进到 `0.3.1-alpha`，开始 0.3.0-alpha 之后的迭代。
+## 0.3.2-alpha - 2026-09-29
+
+继已发布 `v0.3.0-alpha` 之后的第二个 Rust/Tauri 2/Vue 3 宿主预览。`0.3.1-alpha` 是未单独发布的内部迭代，本版本覆盖自 `v0.3.0-alpha` 以来的全部改动。**未签名**，Windows 可能提示未知发布者或触发 SmartScreen。
+
+- 新增 PC 端设备发现与配对：mDNS 发现加 Noise 握手，无需中间服务或手输地址；转发的设备通知进入独立弹窗。
+- 「设备」页接管文件传输与接收设置，不再提供独立的 QingTransfer 窗口。
+- 宿主外观下发给模块窗口：明暗选择从外观预设中拆分为 `theme_mode`，宿主在页面脚本运行前写入 `data-` 属性，并在设置变更后向已打开的模块窗口求值，因此模块无需监听即跟随宿主，且不会先以错误外观绘制一次。
+- 设置页可主动触发一次本地消息弹窗，便于在没有配对设备发送消息时判断弹窗位置、动画与时长。
+- 每个模块清单声明 `apiVersion`，导入时校验，使宿主可以拒绝针对未实现 API 构建的模块。
+- 开发宿主使用独立的配置命名空间与窗口尺寸，不再与已安装宿主共享状态。
+- Qing Launcher 顶栏显示 Everything 索引状态。
+- 恢复独立 `.qmod` 模块交付：宿主安装器为 host-only，官方模块通过各自的 `.qmod` 包安装与更新。升级 `v0.3.0-alpha` 时先把该版本随包的模块迁入用户模块目录，并备份同 ID 的旧 WPF 模块，随后才移除旧宿主的 `resources` 树。
+- 退役已被取代的 WPF 时代开发入口：`run-legacy-wpf.bat`、`scripts/publish-preview.ps1`、`scripts/run-latest.ps1`、`scripts/stop-dev-host.ps1`、`scripts/measure-startup.ps1`。
 - 修复 Windows 签出时的固定 qpdf 校验字节比较，避免换行符转换导致校验失败。
-- 在发布验证中恢复 Tauri 宿主依赖，确保 Release 校验链完整。
 - CI 发布烟测改为非交互执行，避免流水线等待输入。
-- 恢复独立的 Tauri 模块交付路径。
-- Real-user installation, upgrade, Repair, uninstall, signature/SmartScreen, and representative-environment acceptance remain unrecorded or CI-only until the acceptance checklist is completed.
+- 安装包：`QingToolbox-0.3.2-alpha-win-x64-tauri-setup.exe` 及同名 SHA256。
+- 已知限制：未代码签名；模块窗口主题目前只有 Text Tools 接入宿主令牌；设备间文件传输的引擎目前只存在于开发宿主，已安装版本含设备发现、配对与通知弹窗而不含该引擎。真实用户升级、修复安装、卸载与签名/SmartScreen 验收仍为未记录状态。
 
 ## 0.3.0-alpha - 2026-09-25
 

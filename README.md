@@ -239,7 +239,7 @@ QingToolbox/
 
 | 发行线 | 当前版本 | 状态 |
 | --- | --- | --- |
-| Tauri 宿主（主线） | `0.3.1-alpha`（开发中） | 最新已发布 `v0.3.0-alpha`（2026-09-25） |
+| Tauri 宿主（主线） | `0.3.2-alpha` | 最新已发布 `v0.3.2-alpha`（2026-09-29） |
 | WPF 宿主（历史） | `0.2.9-alpha` | 已冻结，仅维护历史安装链 |
 
 `0.3.0-alpha` 是首个 Rust/Tauri 2/Vue 3 宿主预览，沿用原有 QingToolbox 产品 AppId，因此可以就地覆盖既有的 WPF 或 Tauri 安装，不会产生第二条卸载记录。
@@ -329,7 +329,8 @@ QingToolbox/
 
 | 文档 | 状态 | 说明 |
 | --- | --- | --- |
-| [`docs/PREVIEW_RELEASE_PROCESS.md`](docs/PREVIEW_RELEASE_PROCESS.md) | 当前 | 候选构建门禁、产物溯源与人工发布交接清单。 |
+| [`docs/TAURI_RELEASE_PROCESS.md`](docs/TAURI_RELEASE_PROCESS.md) | 当前 | Tauri 宿主的版本号来源、CI 候选门禁、本地安装包构建与手动发布交接。 |
+| [`docs/PREVIEW_RELEASE_PROCESS.md`](docs/PREVIEW_RELEASE_PROCESS.md) | 历史 | 已冻结的 **WPF** 发行线候选门禁与人工发布交接。**不适用于 Tauri 宿主。** |
 | [`docs/PREVIEW_2_ACCEPTANCE_CHECKLIST.md`](docs/PREVIEW_2_ACCEPTANCE_CHECKLIST.md) | 历史 | Preview 2 人工验收清单。**多数项目为 `Not Run`，不代表已通过。** |
 | [`docs/TAURI_PORTABLE_PREVIEW.md`](docs/TAURI_PORTABLE_PREVIEW.md) | 当前 | Tauri portable / production 候选目录的生成与内容说明。 |
 | [`docs/TAURI_PRODUCT_CUTOVER.md`](docs/TAURI_PRODUCT_CUTOVER.md) | 当前 | 产品 AppId 切换、WPF 迁移与回滚边界。 |
@@ -348,6 +349,7 @@ QingToolbox/
 
 | 版本 | 发行线 | 日期 |
 | --- | --- | --- |
+| [`0.3.2-alpha`](docs/releases/0.3.2-alpha.md) | Tauri 宿主 | 2026-09-29 |
 | [`0.3.0-alpha`](docs/releases/0.3.0-alpha.md) | Tauri 宿主 | 2026-09-25 |
 | [`tauri-modules-0.3.0-alpha`](docs/releases/tauri-modules-0.3.0-alpha.md) | 原生模块包清单 | 2026-09-25 |
 | [`launcher-0.3.0`](docs/releases/launcher-0.3.0.md) | Qing Launcher 模块 | 2026-09-25 |

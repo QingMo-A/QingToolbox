@@ -1,3 +1,8 @@
+> **状态：历史（WPF 发行线，已冻结）。**
+> 本文只描述已冻结的 WPF 宿主（`QingToolbox.Shell`）候选与人工发布交接，其中的版本号、脚本与升级基线均停留在 `0.2.9-alpha`/`v0.2.8-alpha`。
+> Rust/Tauri 2/Vue 3 宿主**不适用**这条流程，见 [`TAURI_RELEASE_PROCESS.md`](TAURI_RELEASE_PROCESS.md)。
+> 不要用本文的脚本或 `publish-preview-release.bat` 发布 Tauri 宿主。
+
 # Preview Release Candidate Process
 
 本文说明 QingToolbox `0.2.9-alpha` 的安装器唯一 Release Candidate 构建与人工发布交接流程。
