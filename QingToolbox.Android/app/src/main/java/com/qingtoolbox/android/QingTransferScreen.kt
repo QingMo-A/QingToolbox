@@ -10,10 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.DevicesOther
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -33,15 +30,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import android.provider.OpenableColumns
 import android.content.res.AssetFileDescriptor
+import android.widget.Toast
 internal fun shouldKeepTransferSession(state: QingTransferConnectionState): Boolean =
     state == QingTransferConnectionState.CONNECTED
 
@@ -50,11 +48,20 @@ internal fun shouldShowIncomingDialog(
     peer: QingTransferPeer?,
 ): Boolean = state == QingTransferConnectionState.WAITING_APPROVAL && peer != null
 
+internal data class QingTransferSelectedFile(
+    val uri: android.net.Uri,
+    val name: String,
+    val size: Long,
+)
+
 @Composable
-fun QingTransferDevicesScreen(
+internal fun QingTransferDevicesScreen(
     modifier: Modifier = Modifier,
-    showReceiveSettings: Boolean,
-    onDismissReceiveSettings: () -> Unit,
+    targetDeviceId: String,
+    targetAddress: String?,
+    initialFile: QingTransferSelectedFile? = null,
+    showContent: Boolean = true,
+    onClose: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -62,33 +69,24 @@ fun QingTransferDevicesScreen(
     val discovery = session.discovery
     val connection = session.connection
     val peers by session.peers.collectAsStateWithLifecycle()
+    val targetPeers = peers.filter { QingTransferTarget.matches(it, targetDeviceId, targetAddress) }
     val state by session.discoveryState.collectAsStateWithLifecycle()
-    // The process-scoped session may still hold the peer list from an earlier visit.
-    // Rendering it for the frame it takes `retain` to settle would show peers that the
-    // just-restarted discovery has not confirmed, so the list stays behind a veil until
-    // this screen has actually landed. The veil is what makes the previous page's
-    // content go away immediately instead of lingering on the way in.
-    var revealPeers by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { revealPeers = true }
     val connectionState by connection.state.collectAsStateWithLifecycle()
     val incomingPeer by connection.incomingPeer.collectAsStateWithLifecycle()
     val incomingOffer by connection.incomingOffer.collectAsStateWithLifecycle()
     val transferProgress by connection.progress.collectAsStateWithLifecycle()
+    val lastCompleted by connection.lastCompleted.collectAsStateWithLifecycle()
     val connectionError by connection.error.collectAsStateWithLifecycle()
+    var pendingFile by remember(targetDeviceId, initialFile) { mutableStateOf(initialFile) }
     var saveOffer by remember { mutableStateOf<QingTransferFileOffer?>(null) }
-    var receivePreferences by remember { mutableStateOf(connection.receivePreferences()) }
-    val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            runCatching { context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
-            receivePreferences = receivePreferences.copy(defaultTreeUri = uri.toString())
-            connection.updateReceivePreferences(receivePreferences)
-        }
-    }
     val sendLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val details = queryTransferFile(context, uri)
             if (details == null || details.second < 0L) connection.reportTransferFailure()
-            else connection.sendFile(uri, details.first, details.second)
+            else {
+                connection.clearCompletion()
+                pendingFile = QingTransferSelectedFile(uri, details.first, details.second)
+            }
         }
     }
     val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
@@ -100,22 +98,47 @@ fun QingTransferDevicesScreen(
     DisposableEffect(lifecycleOwner, discovery, connection) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> discovery.start()
+                Lifecycle.Event.ON_START -> discovery.acquire("transfer-screen")
                 Lifecycle.Event.ON_STOP -> {
                     if (!shouldKeepTransferSession(connection.state.value)) {
                         connection.disconnect()
                     }
-                    discovery.stop()
+                    discovery.release("transfer-screen")
                 }
                 else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) discovery.start()
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) discovery.acquire("transfer-screen")
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             if (!shouldKeepTransferSession(connection.state.value)) connection.disconnect()
-            discovery.stop()
+            discovery.release("transfer-screen")
+        }
+    }
+
+    LaunchedEffect(targetPeers, pendingFile, connectionState) {
+        val file = pendingFile ?: return@LaunchedEffect
+        when (connectionState) {
+            QingTransferConnectionState.IDLE -> targetPeers.firstOrNull()?.let { peer ->
+                pendingFile = null
+                connection.connectAndSend(peer, file.uri, file.name, file.size)
+            }
+            QingTransferConnectionState.CONNECTED -> {
+                pendingFile = null
+                connection.sendFile(file.uri, file.name, file.size)
+            }
+            else -> Unit
+        }
+    }
+    LaunchedEffect(lastCompleted, connectionState, transferProgress, incomingOffer) {
+        if (lastCompleted != null && connectionState == QingTransferConnectionState.CONNECTED &&
+            transferProgress == null && incomingOffer == null) {
+            connection.disconnect()
+            if (!showContent) {
+                Toast.makeText(context, context.getString(R.string.qing_transfer_success), Toast.LENGTH_SHORT).show()
+                onClose()
+            }
         }
     }
 
@@ -138,10 +161,12 @@ fun QingTransferDevicesScreen(
             title = { Text(stringResource(R.string.qing_transfer_incoming_file_title)) },
             text = { Text(stringResource(R.string.qing_transfer_incoming_file_body, incomingPeer?.displayName ?: "QingToolbox", offer.name, offer.size)) },
             confirmButton = { TextButton(onClick = {
-                saveOffer = offer
-                runCatching { saveLauncher.launch(offer.name) }.onFailure {
-                    saveOffer = null
-                    connection.rejectIncomingFile()
+                if (!connection.acceptIncomingToDefault()) {
+                    saveOffer = offer
+                    runCatching { saveLauncher.launch(offer.name) }.onFailure {
+                        saveOffer = null
+                        connection.rejectIncomingFile()
+                    }
                 }
             }) { Text(stringResource(R.string.qing_transfer_accept)) } },
             dismissButton = { TextButton(onClick = { connection.rejectIncomingFile() }) { Text(stringResource(R.string.qing_transfer_reject)) } },
@@ -156,19 +181,28 @@ fun QingTransferDevicesScreen(
         )
     }
 
-    LazyColumn(
+    if (showContent) LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // The screen is a list of peers. The header card, the folder row and the
-        // refresh button all moved to the top bar, so nothing sits above the list.
-        // `retain` is driven per state: the search row must not flicker off and on
-        // when discovery flips SEARCHING -> READY, and the error row must not linger
-        // once peers have actually been confirmed.
-        val keepSearchRow = !revealPeers || state == QingTransferDiscoveryState.SEARCHING
-        val keepErrorRow = state == QingTransferDiscoveryState.ERROR && (peers.isEmpty() || !revealPeers)
-        if (connectionState != QingTransferConnectionState.IDLE) {
+        if (lastCompleted != null) {
+            item {
+                QingCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            stringResource(R.string.qing_transfer_success),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        QingPrimaryButton(onClick = onClose, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.qing_transfer_close))
+                        }
+                    }
+                }
+            }
+        } else if (connectionState != QingTransferConnectionState.IDLE) {
             item {
                 QingCard(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -206,37 +240,31 @@ fun QingTransferDevicesScreen(
                 }
             }
         }
-        if (peers.isNotEmpty()) {
-            items(peers, key = { it.serviceName }) { peer -> QingTransferPeerCard(peer, connectionState, connection::connect) }
-        }
-        if (revealPeers && peers.isEmpty()) {
+        if (lastCompleted == null && connectionState == QingTransferConnectionState.IDLE) {
             item {
-                QingEmptyState(
-                    modifier = Modifier.fillMaxWidth(),
-                    icon = { Icon(Icons.Outlined.DevicesOther, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                    title = stringResource(R.string.qing_transfer_empty),
-                    body = stringResource(R.string.qing_transfer_hint),
-                )
-            }
-        }
-        if (keepSearchRow || keepErrorRow) {
-            item {
-                // No discovery state left to report means the hint that already sits in
-                // the empty card is shown twice, so only the two live states get a row.
-                val text = when {
-                    keepErrorRow -> stringResource(R.string.qing_transfer_error)
-                    else -> stringResource(R.string.qing_transfer_searching)
-                }
                 QingStatusText(
-                    text = text,
+                    text = stringResource(if (state == QingTransferDiscoveryState.ERROR)
+                        R.string.qing_transfer_error else R.string.qing_transfer_searching),
                     modifier = Modifier.padding(top = 2.dp, bottom = 20.dp),
                 )
             }
         }
     }
-    if (showReceiveSettings) {
+}
+@Composable
+internal fun QingTransferReceiveSettingsDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val connection = remember(context) { QingTransferProcessSessionStore.get(context).connection }
+    var receivePreferences by remember { mutableStateOf(connection.receivePreferences()) }
+    val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+            receivePreferences = receivePreferences.copy(defaultTreeUri = uri.toString())
+            connection.updateReceivePreferences(receivePreferences)
+        }
+    }
         AlertDialog(
-            onDismissRequest = onDismissReceiveSettings,
+            onDismissRequest = onDismiss,
             title = { Text(stringResource(R.string.qing_transfer_receive_settings)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -273,12 +301,11 @@ fun QingTransferDevicesScreen(
                     Text(stringResource(R.string.qing_transfer_auto_accept_hint), style = MaterialTheme.typography.bodySmall)
                 }
             },
-            confirmButton = { TextButton(onClick = onDismissReceiveSettings) { Text(stringResource(R.string.ok)) } },
+            confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.ok)) } },
         )
-    }
 }
 
-private fun queryTransferFile(context: android.content.Context, uri: android.net.Uri): Pair<String, Long>? {
+internal fun queryTransferFile(context: android.content.Context, uri: android.net.Uri): Pair<String, Long>? {
     val values = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
         if (cursor.moveToFirst()) {
             val name = cursor.getString(0)?.takeIf { it.isNotBlank() } ?: return@use null
@@ -291,40 +318,4 @@ private fun queryTransferFile(context: android.content.Context, uri: android.net
         context.contentResolver.openAssetFileDescriptor(uri, "r")?.use(AssetFileDescriptor::getLength) ?: -1L
     }.getOrDefault(-1L)
     return values.first to descriptorLength
-}
-
-@Composable
-private fun QingTransferPeerCard(
-    peer: QingTransferPeer,
-    connectionState: QingTransferConnectionState,
-    onConnect: (QingTransferPeer) -> Unit,
-) {
-    QingCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                QingIconSurface(modifier = Modifier.size(44.dp)) {
-                    Icon(Icons.Outlined.DevicesOther, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(peer.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        if (peer.platform.equals("android", ignoreCase = true)) stringResource(R.string.qing_transfer_android) else stringResource(R.string.qing_transfer_windows),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (peer.addresses.isNotEmpty() && peer.port > 0) QingStatusText(text = peer.addresses.joinToString(", ") + ":${peer.port}")
-                }
-                Text(
-                    if (peer.online) stringResource(R.string.qing_transfer_online) else stringResource(R.string.qing_transfer_offline),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (peer.online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            QingPrimaryButton(
-                onClick = { onConnect(peer) },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = connectionState == QingTransferConnectionState.IDLE && peer.online && peer.port > 0,
-            ) { Text(stringResource(R.string.qing_transfer_connect)) }
-        }
-    }
 }

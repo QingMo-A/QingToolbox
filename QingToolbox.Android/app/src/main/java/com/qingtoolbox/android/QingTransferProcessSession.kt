@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /** Process-scoped holder so an established socket survives navigation and document pickers. */
 internal class QingTransferProcessSession internal constructor(context: Context) {
+    var selectedDeviceId: String? = null
     private val _peers = MutableStateFlow<List<QingTransferPeer>>(emptyList())
     val peers: StateFlow<List<QingTransferPeer>> = _peers.asStateFlow()
     private val _discoveryState = MutableStateFlow(QingTransferDiscoveryState.IDLE)

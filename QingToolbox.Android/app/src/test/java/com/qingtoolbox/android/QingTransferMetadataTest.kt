@@ -70,4 +70,23 @@ class QingTransferMetadataTest {
         assertTrue(table.remove("DESK._QINGTRANSFER._TCP.LOCAL."))
         assertTrue(table.snapshot().isEmpty())
     }
+
+    @Test
+    fun deviceTransferOnlyTargetsTheSelectedIdAndAddress() {
+        val id = "0123456789abcdef0123456789abcdef"
+        val parsed = QingTransferMetadata.parse(
+            "Desk._qingtransfer._tcp.local", fields + ("id" to id),
+            addresses = listOf("fe80::1234%wlan0"), port = 43125,
+        ) as QingTransferMetadata.ParseResult.Valid
+        assertEquals(id, parsed.peer.deviceId)
+        assertTrue(QingTransferTarget.matches(parsed.peer, id, "fe80::1234%5"))
+        assertTrue(!QingTransferTarget.matches(parsed.peer, "fedcba9876543210fedcba9876543210", "fe80::1234"))
+        assertTrue(QingTransferTarget.matches(parsed.peer, id, "192.168.1.5"))
+        assertTrue(QingTransferTarget.matches(parsed.peer, id, null))
+        val legacy = QingTransferMetadata.parse(
+            "Desk._qingtransfer._tcp.local", fields,
+            addresses = listOf("fe80::1234"), port = 43125,
+        ) as QingTransferMetadata.ParseResult.Valid
+        assertTrue(!QingTransferTarget.matches(legacy.peer, id, "fe80::1234"))
+    }
 }

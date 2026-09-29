@@ -41,6 +41,8 @@ object QingTransferMetadata {
             ?.filter { it.isNotEmpty() && it.length <= maxFieldLength }
             ?.distinctBy(String::lowercase)
             ?: return ParseResult.Invalid
+        val deviceId = field(fields, "id")?.lowercase(Locale.ROOT)
+            ?.takeIf { it.matches(Regex("[0-9a-f]{32}")) }
         if (version != protocolVersion || platform !in setOf("windows", "android") ||
             name.length !in 1..maxDisplayNameLength || name.any(Char::isISOControl) ||
             capabilities.none { it.equals("file", ignoreCase = true) } ||
@@ -55,6 +57,7 @@ object QingTransferMetadata {
                 capabilities = capabilities,
                 addresses = addresses.asSequence().filter(::isSafeAddress).distinct().take(8).toList(),
                 port = port,
+                deviceId = deviceId,
                 online = true,
                 lastSeen = lastSeen,
             ),
@@ -87,4 +90,9 @@ object QingTransferMetadata {
 
     private fun isSafeAddress(value: String): Boolean =
         value.length <= 64 && value.isNotBlank() && value.none(Char::isISOControl)
+}
+
+internal object QingTransferTarget {
+    fun matches(peer: QingTransferPeer, deviceId: String?, @Suppress("UNUSED_PARAMETER") address: String?): Boolean =
+        deviceId != null && peer.deviceId == deviceId
 }

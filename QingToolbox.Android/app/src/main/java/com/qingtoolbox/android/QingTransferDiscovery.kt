@@ -6,6 +6,7 @@ import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.ext.SdkExtensions
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -13,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 
 data class QingTransferPeer(
@@ -23,6 +25,7 @@ data class QingTransferPeer(
     val capabilities: List<String>,
     val addresses: List<String>,
     val port: Int,
+    val deviceId: String? = null,
     val online: Boolean = true,
     val lastSeen: Long? = null,
 )
@@ -73,6 +76,8 @@ class QingTransferDiscovery(
     private val probeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val probeJobs = ConcurrentHashMap<String, Job>()
     private val probeLastAttempt = ConcurrentHashMap<String, Long>()
+    private val trustedAddressHints = ConcurrentHashMap<String, String>()
+    private val resolvedPeers = ConcurrentHashMap<String, QingTransferPeer>()
     private val probeGate = Any()
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
@@ -82,9 +87,20 @@ class QingTransferDiscovery(
     private var acceptThread: Thread? = null
     private var multicastLock: WifiManager.MulticastLock? = null
     private var active = false
+    private val owners = HashSet<String>()
     private var localPort = 0
     @Volatile
     private var connectedPeerServiceName: String? = null
+
+    @Synchronized
+    fun acquire(owner: String) {
+        if (owners.add(owner) && owners.size == 1) start()
+    }
+
+    @Synchronized
+    fun release(owner: String) {
+        if (owners.remove(owner) && owners.isEmpty()) stop()
+    }
 
     @Synchronized
     fun start() {
@@ -101,6 +117,7 @@ class QingTransferDiscovery(
     fun stop() {
         if (!active) {
             peers.clear()
+            resolvedPeers.clear()
             onPeersChanged(emptyList())
             onStateChanged(QingTransferDiscoveryState.IDLE)
             return
@@ -125,6 +142,7 @@ class QingTransferDiscovery(
         multicastLock?.let { lock -> runCatching { if (lock.isHeld) lock.release() } }
         multicastLock = null
         peers.clear()
+        resolvedPeers.clear()
         onPeersChanged(emptyList())
         onStateChanged(QingTransferDiscoveryState.IDLE)
     }
@@ -142,6 +160,27 @@ class QingTransferDiscovery(
 
     fun setConnectedPeer(serviceName: String?) {
         connectedPeerServiceName = serviceName?.let(QingTransferMetadata::canonicalServiceName)
+    }
+
+    /**
+     * Reuse the address already authenticated by the device-link handshake.
+     * Android NSD can occasionally resolve the companion transfer service with
+     * only an unusable IPv6 address even though the same peer is online over IPv4.
+     */
+    fun hintTrustedAddress(deviceId: String, address: String?) {
+        val normalizedId = deviceId.trim().lowercase()
+        val normalizedAddress = address?.trim()?.substringBefore('%')?.takeIf { candidate ->
+            candidate.isNotEmpty() && runCatching { InetAddress.getByName(candidate) }.isSuccess
+        }
+        if (normalizedAddress == null) trustedAddressHints.remove(normalizedId)
+        else {
+            trustedAddressHints[normalizedId] = normalizedAddress
+            resolvedPeers.values
+                .filter { it.deviceId?.lowercase() == normalizedId }
+                .forEach { peer -> upsertPeer(peer.copy(
+                    addresses = (listOf(normalizedAddress) + peer.addresses).distinct(),
+                )) }
+        }
     }
 
     private fun openEphemeralListener() {
@@ -191,6 +230,7 @@ class QingTransferDiscovery(
             setAttribute("pf", "android")
             setAttribute("name", friendlyName)
             setAttribute("cap", "file")
+            setAttribute("id", DeviceDiscoverySessionStore.get(appContext).ownId)
         }
         expectedServiceName = QingTransferMetadata.fullServiceName(friendlyName)
         val listener = object : NsdManager.RegistrationListener {
@@ -229,7 +269,9 @@ class QingTransferDiscovery(
                 resolve(manager, serviceInfo, name)
             }
             override fun onServiceLost(serviceInfo: NsdServiceInfo) {
-                removePeer(QingTransferMetadata.fullServiceName(serviceInfo.serviceName))
+                val serviceName = QingTransferMetadata.fullServiceName(serviceInfo.serviceName)
+                resolvedPeers.remove(QingTransferMetadata.canonicalServiceName(serviceName))
+                removePeer(serviceName)
             }
             override fun onDiscoveryStopped(serviceType: String) = Unit
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
@@ -267,14 +309,26 @@ class QingTransferDiscovery(
                     val peer = QingTransferMetadata.parse(
                         serviceName = resolvedName,
                         fields = attributes,
-                        addresses = listOfNotNull(serviceInfo.host?.hostAddress),
+                        addresses = resolvedAddresses(serviceInfo),
                         port = serviceInfo.port,
                         lastSeen = System.currentTimeMillis(),
                     )
-                    if (peer is QingTransferMetadata.ParseResult.Valid) upsertPeer(peer.peer)
-                    else removePeer(serviceName)
+                    if (peer is QingTransferMetadata.ParseResult.Valid) {
+                        resolvedPeers[QingTransferMetadata.canonicalServiceName(peer.peer.serviceName)] = peer.peer
+                        val hint = peer.peer.deviceId?.lowercase()?.let(trustedAddressHints::get)
+                        val resolvedPeer = if (hint == null) peer.peer else peer.peer.copy(
+                            addresses = (listOf(hint) + peer.peer.addresses).distinct(),
+                        )
+                        Log.d("QingTransferDiscovery", "resolved ${resolvedPeer.serviceName} ${resolvedPeer.addresses}:${resolvedPeer.port}")
+                        upsertPeer(resolvedPeer)
+                    } else {
+                        Log.d("QingTransferDiscovery", "invalid service $resolvedName")
+                        resolvedPeers.remove(QingTransferMetadata.canonicalServiceName(resolvedName))
+                        removePeer(serviceName)
+                    }
                 }
                 override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                    Log.d("QingTransferDiscovery", "resolve failed ${serviceInfo.serviceName}:$errorCode")
                     resolving.remove(serviceName)
                     resolveListeners.remove(serviceName)
                     if (active) removePeer(serviceName)
@@ -310,6 +364,7 @@ class QingTransferDiscovery(
             val job = probeScope.launch {
                 try {
                     val reachable = QingTransferEndpointProbe.confirm(normalized)
+                    Log.d("QingTransferDiscovery", "probe ${normalized.serviceName} reachable=$reachable")
                     if (!active || isSelf(canonical) || connectedPeerServiceName == canonical) return@launch
                     if (reachable && isCurrentEndpoint(normalized)) {
                         peers.upsert(normalized)
@@ -349,6 +404,17 @@ class QingTransferDiscovery(
     private fun isSelf(serviceName: String): Boolean =
         actualServiceName?.let { QingTransferMetadata.canonicalServiceName(it) == QingTransferMetadata.canonicalServiceName(serviceName) } == true ||
             expectedServiceName?.let { QingTransferMetadata.canonicalServiceName(it) == QingTransferMetadata.canonicalServiceName(serviceName) } == true
+
+    @Suppress("DEPRECATION", "NewApi")
+    private fun resolvedAddresses(serviceInfo: NsdServiceInfo): List<String> =
+        buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                addAll(serviceInfo.hostAddresses)
+            }
+            // Some Android 14 vendor NSD implementations still expose the only
+            // usable IPv4 endpoint through the legacy property.
+            runCatching { serviceInfo.host }.getOrNull()?.let(::add)
+        }.mapNotNull { it.hostAddress }.distinct()
 
     companion object {
         private const val PROBE_INTERVAL_MILLIS = 10_000L

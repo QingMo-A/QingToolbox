@@ -10,9 +10,10 @@ import java.nio.ByteOrder
 class QingTransferProtocolTest {
     @Test
     fun roundTripsHelloAndDecodesHandshake() {
-        val frame = QingTransferProtocol.encode(QingTransferMessage.Hello("android", "Phone"))
+        val expected = QingTransferMessage.Hello("android", "Phone", "a".repeat(32))
+        val frame = QingTransferProtocol.encode(expected)
         val decoded = QingTransferProtocol.decode(frame)
-        assertTrue(decoded is QingTransferMessage.Hello)
+        assertTrue(decoded == expected)
     }
 
     @Test
@@ -22,6 +23,9 @@ class QingTransferProtocolTest {
         val malformedPayload = "{\"type\":\"hello\",\"v\":2,\"pf\":\"android\",\"name\":\"x\"}".toByteArray()
         val malformed = ByteBuffer.allocate(4 + malformedPayload.size).order(ByteOrder.BIG_ENDIAN).putInt(malformedPayload.size).put(malformedPayload).array()
         assertNull(QingTransferProtocol.decode(malformed))
+        val invalidIdPayload = "{\"type\":\"hello\",\"v\":1,\"pf\":\"android\",\"name\":\"x\",\"id\":\"bad\"}".toByteArray()
+        val invalidId = ByteBuffer.allocate(4 + invalidIdPayload.size).order(ByteOrder.BIG_ENDIAN).putInt(invalidIdPayload.size).put(invalidIdPayload).array()
+        assertNull(QingTransferProtocol.decode(invalidId))
     }
 
     @Test

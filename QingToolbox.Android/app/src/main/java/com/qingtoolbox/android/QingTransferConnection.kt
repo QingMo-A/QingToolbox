@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.EOFException
 import java.io.InputStream
 import java.io.OutputStream
@@ -45,6 +46,12 @@ internal data class QingTransferProgress(
     val receiving: Boolean,
 )
 
+private data class QingTransferPendingSend(
+    val uri: Uri,
+    val name: String,
+    val size: Long,
+)
+
 internal class QingTransferConnection(
     private val context: Context,
     private val discovery: QingTransferDiscovery,
@@ -62,6 +69,8 @@ internal class QingTransferConnection(
     val incomingOffer: StateFlow<QingTransferFileOffer?> = _incomingOffer.asStateFlow()
     private val _progress = MutableStateFlow<QingTransferProgress?>(null)
     val progress: StateFlow<QingTransferProgress?> = _progress.asStateFlow()
+    private val _lastCompleted = MutableStateFlow<String?>(null)
+    val lastCompleted: StateFlow<String?> = _lastCompleted.asStateFlow()
     private val _error = MutableStateFlow<QingTransferErrorCode?>(null)
     val error: StateFlow<QingTransferErrorCode?> = _error.asStateFlow()
 
@@ -73,12 +82,19 @@ internal class QingTransferConnection(
     private var outgoingRawComplete: CompletableDeferred<Unit>? = null
     private var resultDecision: CompletableDeferred<Boolean>? = null
     private var incomingName: String? = null
+    var targetDeviceId: String? = null
+    var targetAddress: String? = null
 
     init { discovery.onIncomingSocket = { client -> ioJob = scope.launch { handleIncoming(client) } } }
 
-    fun connect(peer: QingTransferPeer) {
+    fun connect(peer: QingTransferPeer) = connect(peer, null)
+
+    private fun connect(peer: QingTransferPeer, initialSend: QingTransferPendingSend?) {
+        if (!QingTransferTarget.matches(peer, targetDeviceId, targetAddress)) return
         if (_state.value != QingTransferConnectionState.IDLE) return
+        stage("connect-start endpoints=${peer.addresses.size} port=${peer.port}")
         _error.value = null
+        _lastCompleted.value = null
         _state.value = QingTransferConnectionState.CONNECTING
         ioJob = scope.launch {
             try {
@@ -87,6 +103,7 @@ internal class QingTransferConnection(
                     try {
                         val candidate = Socket()
                         withTimeout(5_000) { candidate.connect(InetSocketAddress(address, peer.port), 5_000) }
+                        stage("connect-socket-ok")
                         connected = candidate
                         break
                     } catch (_: Exception) { }
@@ -94,11 +111,17 @@ internal class QingTransferConnection(
                 val client = connected ?: throw IllegalStateException("unable")
                 socket = client
                 withTimeout(5_000) {
-                    QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.Hello("android", friendlyName))
+                    QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.Hello(
+                        "android", friendlyName, DeviceDiscoverySessionStore.get(context).ownId))
                         when (QingTransferProtocol.read(client.getInputStream())) {
                         QingTransferMessage.Accept -> {
+                            stage("connect-accepted")
                             _state.value = QingTransferConnectionState.CONNECTED
                             discovery.setConnectedPeer(peer.serviceName)
+                            initialSend?.let {
+                                stage("initial-send-dispatch")
+                                sendFile(it.uri, it.name, it.size)
+                            }
                         }
                         QingTransferMessage.Reject -> throw PeerRejectedException()
                         else -> throw ProtocolException()
@@ -106,18 +129,28 @@ internal class QingTransferConnection(
                 }
                 receiveUntilClosed(client)
             } catch (_: CancellationException) { throw CancellationException() }
-            catch (error: PeerRejectedException) { fail(QingTransferErrorCode.PEER_REJECTED, peer.serviceName) }
-            catch (error: ProtocolException) { fail(QingTransferErrorCode.INVALID_PROTOCOL, peer.serviceName) }
-            catch (_: Exception) { fail(QingTransferErrorCode.UNABLE_TO_CONNECT, peer.serviceName) }
+            catch (error: PeerRejectedException) { stage("connect-rejected"); fail(QingTransferErrorCode.PEER_REJECTED, peer.serviceName) }
+            catch (error: ProtocolException) { stage("connect-invalid-protocol"); fail(QingTransferErrorCode.INVALID_PROTOCOL, peer.serviceName) }
+            catch (error: Exception) { stage("connect-failed type=${error.javaClass.simpleName}"); fail(QingTransferErrorCode.UNABLE_TO_CONNECT, peer.serviceName) }
         }
     }
 
+    fun connectAndSend(peer: QingTransferPeer, uri: Uri, name: String, size: Long) {
+        if (_state.value != QingTransferConnectionState.IDLE ||
+            size !in 0..QingTransferProtocol.MAX_FILE_BYTES || !safeFileName(name)) {
+            _error.value = QingTransferErrorCode.TRANSFER_FAILED
+            return
+        }
+        connect(peer, QingTransferPendingSend(uri, name, size))
+    }
+
     fun sendFile(uri: Uri, name: String, size: Long) {
-        if (_state.value != QingTransferConnectionState.CONNECTED || size < 0 || !safeFileName(name)) {
+        if (_state.value != QingTransferConnectionState.CONNECTED || size !in 0..QingTransferProtocol.MAX_FILE_BYTES || !safeFileName(name)) {
             _error.value = QingTransferErrorCode.TRANSFER_FAILED
             return
         }
         if (transferJob?.isActive == true) return
+        _lastCompleted.value = null
         transferJob = scope.launch {
             try {
                 stage("offer-send nameLength=${name.length} size=$size")
@@ -128,7 +161,7 @@ internal class QingTransferConnection(
                 outgoingRawComplete = rawComplete
                 QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.FileOffer(name, size))
                 stage("offer-sent")
-                val accepted = runCatching { withTimeout(30_000) { decision.await() } }.getOrNull()
+                val accepted = runCatching { withTimeout(120_000) { decision.await() } }.getOrNull()
                 if (accepted == null) throw TransferException()
                 if (!accepted) {
                     stage("offer-response accepted=false")
@@ -151,6 +184,7 @@ internal class QingTransferConnection(
                 if (!result.await()) throw TransferException()
                 stage("result-received ok=true")
                 _progress.value = null
+                _lastCompleted.value = name
             } catch (_: CancellationException) {
                 _error.value = QingTransferErrorCode.CANCELED
             } catch (error: Exception) {
@@ -173,7 +207,14 @@ internal class QingTransferConnection(
 
     fun acceptIncomingAutomatically(): Boolean {
         val offer = _incomingOffer.value ?: return false
-        val destination = automaticDestination(offer) ?: return false
+        val destination = defaultDestination(offer, requireAutoAccept = true) ?: return false
+        incomingDecision?.complete(destination)
+        return true
+    }
+
+    fun acceptIncomingToDefault(): Boolean {
+        val offer = _incomingOffer.value ?: return false
+        val destination = defaultDestination(offer, requireAutoAccept = false) ?: return false
         incomingDecision?.complete(destination)
         return true
     }
@@ -200,6 +241,7 @@ internal class QingTransferConnection(
 
     fun disconnect() { closeToIdle() }
     fun clearError() { _error.value = null }
+    fun clearCompletion() { _lastCompleted.value = null; _error.value = null }
     fun reportTransferFailure() { _error.value = QingTransferErrorCode.TRANSFER_FAILED }
 
     fun receivePreferences(): QingTransferReceivePreferences = receivePreferences?.read() ?: QingTransferReceivePreferences()
@@ -211,9 +253,10 @@ internal class QingTransferConnection(
         return runCatching { resolver.persistedUriPermissions.any { it.uri == Uri.parse(uri) && it.isReadPermission && it.isWritePermission } }.getOrDefault(false)
     }
 
-    fun automaticDestination(offer: QingTransferFileOffer): Uri? {
+    private fun defaultDestination(offer: QingTransferFileOffer, requireAutoAccept: Boolean): Uri? {
         val settings = receivePreferences?.read() ?: return null
-        if (!QingTransferReceivePolicy.automaticAcceptAllowed(settings, defaultDirectoryStatus())) return null
+        if (!settings.useDefaultDirectory || settings.defaultTreeUri.isNullOrBlank() || !defaultDirectoryStatus() ||
+            requireAutoAccept && !settings.autoAccept) return null
         val tree = DocumentFile.fromTreeUri(context, Uri.parse(settings.defaultTreeUri!!)) ?: return null
         if (!tree.canWrite()) return null
         val existing = tree.listFiles().mapNotNull { it.name }.toSet()
@@ -249,13 +292,31 @@ internal class QingTransferConnection(
                 runCatching { QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.Reject) }
                 client.close(); return
             }
+            val hello = first as? QingTransferMessage.Hello
+            val address = client.inetAddress.hostAddress?.substringBefore('%')
+            val devices = DeviceDiscoverySessionStore.get(context)
+            val pairing = devices.pairing.snapshot.value
+            val trusted = pairing.paired.filter { paired ->
+                paired.id in pairing.online && paired.platform == hello?.platform &&
+                    (hello?.deviceId?.equals(paired.discoveryId, ignoreCase = true) == true ||
+                        hello?.deviceId == null && devices.snapshot.value.nearby.any { nearby ->
+                            nearby.discoveryId == paired.discoveryId &&
+                                nearby.address.substringBefore('%') == address
+                        })
+            }.singleOrNull()
+            if (trusted == null || hello == null) {
+                runCatching { QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.Reject) }
+                client.close(); return
+            }
+            targetDeviceId = trusted.discoveryId
+            targetAddress = address
+            _lastCompleted.value = null
             socket = client
             client.soTimeout = 0
-            val hello = first
-            if (hello !is QingTransferMessage.Hello) throw ProtocolException()
-            incomingName = hello.name
-            _incomingPeer.value = QingTransferPeer("incoming", hello.name, hello.platform, "1", listOf("file"), emptyList(), 0)
-            _state.value = QingTransferConnectionState.WAITING_APPROVAL
+            incomingName = trusted.name
+            _incomingPeer.value = QingTransferPeer("incoming", trusted.name, trusted.platform, "1", listOf("file"), listOfNotNull(address), 0, trusted.discoveryId)
+            QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.Accept)
+            _state.value = QingTransferConnectionState.CONNECTED
             receiveUntilClosed(client)
         } catch (_: Exception) { closeToIdle(client) }
     }
@@ -276,7 +337,8 @@ internal class QingTransferConnection(
                 }
             }
         } catch (_: Exception) {
-            if (_state.value == QingTransferConnectionState.CONNECTED && _error.value == null) {
+            if (_state.value == QingTransferConnectionState.CONNECTED && _error.value == null &&
+                _lastCompleted.value == null) {
                 _error.value = QingTransferErrorCode.DISCONNECTED
             }
             closeToIdle(client)
@@ -289,10 +351,12 @@ internal class QingTransferConnection(
             return
         }
         val decision = CompletableDeferred<Uri?>()
+        _lastCompleted.value = null
         incomingDecision = decision
         _incomingOffer.value = QingTransferFileOffer(offer.name, offer.size)
-        automaticDestination(QingTransferFileOffer(offer.name, offer.size))?.let { decision.complete(it) }
-        val destination = try { decision.await() } finally { incomingDecision = null; _incomingOffer.value = null }
+        defaultDestination(QingTransferFileOffer(offer.name, offer.size), requireAutoAccept = true)?.let { decision.complete(it) }
+        val destination = try { withTimeoutOrNull(120_000) { decision.await() } }
+            finally { incomingDecision = null; _incomingOffer.value = null }
         if (destination == null) {
             stage("incoming-decision accepted=false")
             runCatching { QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.FileReject) }
@@ -313,10 +377,12 @@ internal class QingTransferConnection(
             if (!ok) runCatching { DocumentsContract.deleteDocument(resolver, destination) }
             if (!ok) throw TransferException()
             _progress.value = null
+            _lastCompleted.value = offer.name
         } catch (error: Exception) {
             stage("receive-exception type=${error.javaClass.simpleName}")
             runCatching { DocumentsContract.deleteDocument(resolver, destination) }
             _error.value = QingTransferErrorCode.TRANSFER_FAILED
+            _progress.value = null
             runCatching { QingTransferProtocol.write(client.getOutputStream(), QingTransferMessage.FileResult(false)) }
         }
     }

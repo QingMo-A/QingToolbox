@@ -8,7 +8,7 @@ import java.nio.ByteOrder
 import java.security.SecureRandom
 
 internal sealed interface QingTransferMessage {
-    data class Hello(val platform: String, val name: String) : QingTransferMessage
+    data class Hello(val platform: String, val name: String, val deviceId: String? = null) : QingTransferMessage
     data class Probe(val nonce: String) : QingTransferMessage
     data class ProbeAck(val nonce: String) : QingTransferMessage
     data object Accept : QingTransferMessage
@@ -22,6 +22,7 @@ internal sealed interface QingTransferMessage {
 
 internal object QingTransferProtocol {
     const val MAX_FRAME_BYTES = 4096
+    const val MAX_FILE_BYTES = 8L * 1024 * 1024 * 1024
     const val PROBE_NONCE_LENGTH = 32
     private const val MAX_FIELD_LENGTH = 128
 
@@ -29,7 +30,9 @@ internal object QingTransferProtocol {
         val json = when (message) {
             is QingTransferMessage.Hello -> {
                 require(message.platform in setOf("windows", "android") && safe(message.platform) && safe(message.name))
-                "{\"type\":\"hello\",\"v\":1,\"pf\":\"${message.platform}\",\"name\":\"${message.name}\"}"
+                require(message.deviceId == null || safeDeviceId(message.deviceId))
+                val identity = message.deviceId?.let { ",\"id\":\"$it\"" }.orEmpty()
+                "{\"type\":\"hello\",\"v\":1,\"pf\":\"${message.platform}\",\"name\":\"${message.name}\"$identity}"
             }
             is QingTransferMessage.Probe -> {
                 require(safeProbeNonce(message.nonce))
@@ -42,7 +45,7 @@ internal object QingTransferProtocol {
             QingTransferMessage.Accept -> "{\"type\":\"accept\",\"v\":1}"
             QingTransferMessage.Reject -> "{\"type\":\"reject\",\"v\":1}"
             is QingTransferMessage.FileOffer -> {
-                require(safeFileName(message.name) && message.size >= 0)
+                require(safeFileName(message.name) && message.size in 0..MAX_FILE_BYTES)
                 "{\"type\":\"file_offer\",\"v\":1,\"name\":\"${escape(message.name)}\",\"size\":${message.size}}"
             }
             QingTransferMessage.FileAccept -> "{\"type\":\"file_accept\",\"v\":1}"
@@ -94,16 +97,18 @@ internal object QingTransferProtocol {
             "file_accept" -> if (fields.size == 2) QingTransferMessage.FileAccept else null
             "file_reject" -> if (fields.size == 2) QingTransferMessage.FileReject else null
             "hello" -> {
-                if (fields.size != 4) return null
+                if (fields.size !in 4..5) return null
                 val platform = fields["pf"]?.takeIf { it.isString }?.value ?: return null
                 val name = fields["name"]?.takeIf { it.isString }?.value ?: return null
-                if (platform in setOf("windows", "android") && safe(platform) && safe(name)) QingTransferMessage.Hello(platform, name) else null
+                val deviceId = fields["id"]?.takeIf { it.isString }?.value
+                if (fields.containsKey("id") && !safeDeviceId(deviceId)) return null
+                if (platform in setOf("windows", "android") && safe(platform) && safe(name)) QingTransferMessage.Hello(platform, name, deviceId) else null
             }
             "file_offer" -> {
                 if (fields.size != 4) return null
                 val name = fields["name"]?.takeIf { it.isString }?.value ?: return null
                 val size = fields["size"]?.takeIf { !it.isString }?.value?.toLongOrNull() ?: return null
-                if (safeFileName(name) && size >= 0) QingTransferMessage.FileOffer(name, size) else null
+                if (safeFileName(name) && size in 0..MAX_FILE_BYTES) QingTransferMessage.FileOffer(name, size) else null
             }
             "file_end" -> {
                 if (fields.size != 3) return null
@@ -123,6 +128,9 @@ internal object QingTransferProtocol {
 
     private fun safeProbeNonce(value: String): Boolean =
         value.length == PROBE_NONCE_LENGTH && value.all { it in '0'..'9' || it in 'a'..'f' }
+
+    private fun safeDeviceId(value: String?): Boolean =
+        value != null && value.length == 32 && value.all { it in '0'..'9' || it in 'a'..'f' }
 
     fun createProbeNonce(): String {
         val bytes = ByteArray(PROBE_NONCE_LENGTH / 2)

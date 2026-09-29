@@ -109,6 +109,11 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.zxing.core)
+    implementation(libs.noise.java) {
+        // The published POM includes a JAXB API used by its JVM tests, not by
+        // Android's Noise handshake implementation.
+        exclude(group = "javax.xml.bind", module = "jaxb-api")
+    }
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 

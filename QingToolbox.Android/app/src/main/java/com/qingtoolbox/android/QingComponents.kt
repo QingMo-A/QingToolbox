@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -656,3 +657,33 @@ fun QingStatusText(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
+
+private val QingStatusDotSize = 8.dp
+
+/**
+ * Reachability dot that sits to the left of an online/offline label.
+ *
+ * The two colours are stated outright instead of being taken from the scheme. A status
+ * colour has to keep its meaning: `primary` is green in one appearance and violet in
+ * another, so tinting "online" with it would read as reachable in one theme and as nothing
+ * in particular in the next. This pair also lands at roughly 4:1 against both the light and
+ * the dark surfaces the appearances use, so a single pair serves all of them.
+ *
+ * Deliberately decorative — the label beside it already carries the state, so the dot adds
+ * no semantics and is not announced twice by a screen reader.
+ */
+@Composable
+fun QingStatusDot(
+    online: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(QingStatusDotSize)
+            .clip(CircleShape)
+            .background(if (online) QingStatusOnline else QingStatusOffline),
+    )
+}
+
+private val QingStatusOnline = Color(0xFF1E8E3E)
+private val QingStatusOffline = Color(0xFFD93025)

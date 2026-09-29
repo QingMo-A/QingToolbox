@@ -16,4 +16,12 @@ class MainActivity : AppCompatActivity() {
             QingToolboxApp(viewModel = viewModel)
         }
     }
+
+    override fun onStart() {
+        super.onStart()
+        val pairing = DeviceDiscoverySessionStore.get(this).pairing.snapshot.value
+        if (pairing.paired.isNotEmpty() || pairing.revocations.isNotEmpty()) {
+            DeviceLinkService.update(this, true)
+        }
+    }
 }
