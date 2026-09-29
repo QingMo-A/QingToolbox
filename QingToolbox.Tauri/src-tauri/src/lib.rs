@@ -19,9 +19,9 @@ use tauri::{
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
-mod fonts;
-mod devices;
 mod device_pairing;
+mod devices;
+mod fonts;
 mod host_update;
 mod importer;
 mod launcher_keyboard;
@@ -69,7 +69,9 @@ struct InfoPopupQueue {
 
 impl InfoPopupQueue {
     fn enqueue(&mut self, item: device_pairing::ForwardedNotification) -> bool {
-        if self.pending.len() >= 16 { self.pending.pop_front(); }
+        if self.pending.len() >= 16 {
+            self.pending.pop_front();
+        }
         self.pending.push_back(item);
         if self.current.is_none() && !self.exiting {
             self.current = self.pending.pop_front();
@@ -239,12 +241,10 @@ fn get_host_info() -> HostInfo {
     HostInfo {
         product_name: "QingToolbox",
         version: env!("CARGO_PKG_VERSION"),
-        device_name: std::env::var("COMPUTERNAME")
-            .ok()
-            .and_then(|value| {
-                let name = value.trim();
-                (!name.is_empty() && name.chars().count() <= 255).then(|| name.to_owned())
-            }),
+        device_name: std::env::var("COMPUTERNAME").ok().and_then(|value| {
+            let name = value.trim();
+            (!name.is_empty() && name.chars().count() <= 255).then(|| name.to_owned())
+        }),
         backend: "rust",
         protocol_version: "1",
         api_version: module_api::API_VERSION,
@@ -2940,8 +2940,13 @@ fn get_devices_snapshot(
 }
 
 fn ensure_info_popup_window(window: &WebviewWindow) -> Result<(), CommandError> {
-    if window.label() == INFO_POPUP_WINDOW_LABEL { Ok(()) } else {
-        Err(CommandError { code: "infoPopupUnauthorized", message: "仅信息弹窗可读取消息。".to_string() })
+    if window.label() == INFO_POPUP_WINDOW_LABEL {
+        Ok(())
+    } else {
+        Err(CommandError {
+            code: "infoPopupUnauthorized",
+            message: "仅信息弹窗可读取消息。".to_string(),
+        })
     }
 }
 
@@ -2951,9 +2956,15 @@ fn get_info_popup_item(
     state: State<'_, HostState>,
 ) -> Result<Option<device_pairing::ForwardedNotification>, CommandError> {
     ensure_info_popup_window(&window)?;
-    Ok(state.info_popup.lock().map_err(|_| CommandError {
-        code: "stateUnavailable", message: "信息弹窗状态不可用。".to_string(),
-    })?.current.clone())
+    Ok(state
+        .info_popup
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "信息弹窗状态不可用。".to_string(),
+        })?
+        .current
+        .clone())
 }
 
 #[tauri::command]
@@ -2962,9 +2973,15 @@ fn get_info_popup_dismiss_seconds(
     state: State<'_, HostState>,
 ) -> Result<u32, CommandError> {
     ensure_info_popup_window(&window)?;
-    Ok(state.settings.lock().map_err(|_| CommandError {
-        code: "stateUnavailable", message: "信息弹窗设置不可用。".to_string(),
-    })?.snapshot().info_popup_dismiss_seconds)
+    Ok(state
+        .settings
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "信息弹窗设置不可用。".to_string(),
+        })?
+        .snapshot()
+        .info_popup_dismiss_seconds)
 }
 
 #[tauri::command]
@@ -2973,23 +2990,59 @@ fn show_info_popup_preview(
     state: State<'_, HostState>,
 ) -> Result<(), CommandError> {
     ensure_main_window(&window)?;
-    if window.app_handle().get_webview_window(INFO_POPUP_WINDOW_LABEL).is_none() {
-        return Err(CommandError { code: "infoPopupUnavailable", message: "信息弹窗窗口不可用。".to_string() });
+    if window
+        .app_handle()
+        .get_webview_window(INFO_POPUP_WINDOW_LABEL)
+        .is_none()
+    {
+        return Err(CommandError {
+            code: "infoPopupUnavailable",
+            message: "信息弹窗窗口不可用。".to_string(),
+        });
     }
-    let english = state.settings.lock().map_err(|_| CommandError {
-        code: "stateUnavailable", message: "信息弹窗设置不可用。".to_string(),
-    })?.snapshot().language == "en-US";
+    let english = state
+        .settings
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "信息弹窗设置不可用。".to_string(),
+        })?
+        .snapshot()
+        .language
+        == "en-US";
     let item = device_pairing::ForwardedNotification {
-        id: format!("preview-{}", state.info_popup_preview_sequence.fetch_add(1, Ordering::Relaxed)),
+        id: format!(
+            "preview-{}",
+            state
+                .info_popup_preview_sequence
+                .fetch_add(1, Ordering::Relaxed)
+        ),
         device_name: "QingToolbox".to_string(),
         app_name: if english { "Preview" } else { "预览" }.to_string(),
-        title: if english { "Message popup test" } else { "信息弹窗测试" }.to_string(),
-        body: if english { "This is a local test message." } else { "这是一条本机生成的测试消息。" }.to_string(),
+        title: if english {
+            "Message popup test"
+        } else {
+            "信息弹窗测试"
+        }
+        .to_string(),
+        body: if english {
+            "This is a local test message."
+        } else {
+            "这是一条本机生成的测试消息。"
+        }
+        .to_string(),
     };
-    let show = state.info_popup.lock().map_err(|_| CommandError {
-        code: "stateUnavailable", message: "信息弹窗状态不可用。".to_string(),
-    })?.enqueue(item);
-    if show { present_info_popup(window.app_handle().clone()); }
+    let show = state
+        .info_popup
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "信息弹窗状态不可用。".to_string(),
+        })?
+        .enqueue(item);
+    if show {
+        present_info_popup(window.app_handle().clone());
+    }
     Ok(())
 }
 
@@ -3002,31 +3055,51 @@ fn dismiss_info_popup_item(
     ensure_info_popup_window(&window)?;
     let exit_x = {
         let mut queue = state.info_popup.lock().map_err(|_| CommandError {
-            code: "stateUnavailable", message: "信息弹窗状态不可用。".to_string(),
+            code: "stateUnavailable",
+            message: "信息弹窗状态不可用。".to_string(),
         })?;
-        if queue.exiting || queue.current.as_ref().is_none_or(|current| current.id != id) {
+        if queue.exiting
+            || !queue
+                .current
+                .as_ref()
+                .is_some_and(|current| current.id == id)
+        {
             return Ok(());
         }
         queue.exiting = true;
         queue.exit_x
     };
-    state.info_popup_move_generation.fetch_add(1, Ordering::AcqRel);
+    state
+        .info_popup_move_generation
+        .fetch_add(1, Ordering::AcqRel);
     let app = window.app_handle().clone();
     thread::spawn(move || {
-        let config = app.state::<HostState>().settings.lock().ok().map(|store| store.snapshot());
+        let config = app
+            .state::<HostState>()
+            .settings
+            .lock()
+            .ok()
+            .map(|store| store.snapshot());
         if let Some(window) = app.get_webview_window(INFO_POPUP_WINDOW_LABEL) {
             if let Some(config) = config {
                 if config.info_popup_animation {
                     if let (Some(exit_x), Ok(position)) = (exit_x, window.outer_position()) {
-                        let duration = Duration::from_millis(u64::from(config.info_popup_duration_ms));
+                        let duration =
+                            Duration::from_millis(u64::from(config.info_popup_duration_ms));
                         let started = std::time::Instant::now();
                         loop {
-                            let progress = (started.elapsed().as_secs_f64() / duration.as_secs_f64()).min(1.0);
+                            let progress =
+                                (started.elapsed().as_secs_f64() / duration.as_secs_f64()).min(1.0);
                             // The reverse path accelerates out through the same screen edge.
                             let eased = progress.powi(3);
                             let x = position.x as f64 + (exit_x - position.x) as f64 * eased;
-                            let _ = window.set_position(tauri::PhysicalPosition::new(x.round() as i32, position.y));
-                            if progress >= 1.0 { break; }
+                            let _ = window.set_position(tauri::PhysicalPosition::new(
+                                x.round() as i32,
+                                position.y,
+                            ));
+                            if progress >= 1.0 {
+                                break;
+                            }
                             thread::sleep(Duration::from_millis(16));
                         }
                     }
@@ -3036,14 +3109,24 @@ fn dismiss_info_popup_item(
         }
         let has_next = {
             let state = app.state::<HostState>();
-            let Ok(mut queue) = state.info_popup.lock() else { return };
-            if queue.current.as_ref().is_none_or(|current| current.id != id) { return; }
+            let Ok(mut queue) = state.info_popup.lock() else {
+                return;
+            };
+            if !queue
+                .current
+                .as_ref()
+                .is_some_and(|current| current.id == id)
+            {
+                return;
+            }
             queue.current = queue.pending.pop_front();
             queue.exiting = false;
             queue.exit_x = None;
             queue.current.is_some()
         };
-        if has_next { present_info_popup(app); }
+        if has_next {
+            present_info_popup(app);
+        }
     });
     Ok(())
 }
@@ -3059,7 +3142,9 @@ fn start_info_popup_pump(app: tauri::AppHandle) {
                     show |= queue.enqueue(item);
                 }
             }
-            if show { present_info_popup(app.clone()); }
+            if show {
+                present_info_popup(app.clone());
+            }
         }
         thread::sleep(Duration::from_millis(250));
     });
@@ -3073,43 +3158,101 @@ fn start_device_transfer_pump(app: tauri::AppHandle) {
         loop {
             thread::sleep(Duration::from_millis(500));
             let state = app.state::<HostState>();
-            if !state.devices.is_enabled() { pending_offer = None; announced = false; last_announcement = None; continue; }
-            let record = state.module_index.lock().ok()
+            if !state.devices.is_enabled() {
+                pending_offer = None;
+                announced = false;
+                last_announcement = None;
+                continue;
+            }
+            let record = state
+                .module_index
+                .lock()
+                .ok()
                 .and_then(|index| index.get(DEVICE_TRANSFER_MODULE_ID).cloned());
             let Some(record) = record else { continue };
-            let snapshot = state.runtime.lock().ok().and_then(|mut runtime|
-                runtime.invoke(DEVICE_TRANSFER_MODULE_ID, &record, "getState", serde_json::json!({})).ok());
+            let snapshot = state.runtime.lock().ok().and_then(|mut runtime| {
+                runtime
+                    .invoke(
+                        DEVICE_TRANSFER_MODULE_ID,
+                        &record,
+                        "getState",
+                        serde_json::json!({}),
+                    )
+                    .ok()
+            });
             let Some(snapshot) = snapshot else { continue };
             let session = &snapshot["session"];
             let platform = session["peer"]["platform"].as_str().unwrap_or_default();
             let device_id = session["peer"]["deviceId"].as_str();
-            let addresses = session["peer"]["addresses"].as_array().map(|items| items.iter()
-                .filter_map(|item| item.as_str().map(str::to_string)).collect::<Vec<_>>())
+            let addresses = session["peer"]["addresses"]
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(str::to_string))
+                        .collect::<Vec<_>>()
+                })
                 .unwrap_or_default();
-            let trusted = state.devices.paired_transfer_peer(platform, device_id, &addresses);
+            let trusted = state
+                .devices
+                .paired_transfer_peer(platform, device_id, &addresses);
             if session["state"] == "WaitingApproval" {
-                let method = if trusted.is_some() { "acceptIncomingConnection" } else { "rejectIncomingConnection" };
+                let method = if trusted.is_some() {
+                    "acceptIncomingConnection"
+                } else {
+                    "rejectIncomingConnection"
+                };
                 if let Ok(mut runtime) = state.runtime.lock() {
-                    let _ = runtime.invoke(DEVICE_TRANSFER_MODULE_ID, &record, method, serde_json::json!({}));
+                    let _ = runtime.invoke(
+                        DEVICE_TRANSFER_MODULE_ID,
+                        &record,
+                        method,
+                        serde_json::json!({}),
+                    );
                 }
                 continue;
             }
             let offer = &snapshot["incomingFile"];
-            let Some((peer_id, peer_name)) = trusted else { pending_offer = None; announced = false; last_announcement = None; continue };
-            let Some(file_name) = offer["name"].as_str() else { pending_offer = None; announced = false; last_announcement = None; continue };
+            let Some((peer_id, peer_name)) = trusted else {
+                pending_offer = None;
+                announced = false;
+                last_announcement = None;
+                continue;
+            };
+            let Some(file_name) = offer["name"].as_str() else {
+                pending_offer = None;
+                announced = false;
+                last_announcement = None;
+                continue;
+            };
             let size = offer["size"].as_u64().unwrap_or_default();
-            let same_offer = pending_offer.as_ref().is_some_and(|(id, name, length, _)|
-                id == &peer_id && name == file_name && *length == size);
+            let same_offer = pending_offer.as_ref().is_some_and(|(id, name, length, _)| {
+                id == &peer_id && name == file_name && *length == size
+            });
             if !same_offer {
-                pending_offer = Some((peer_id.clone(), file_name.to_string(), size, std::time::Instant::now()));
+                pending_offer = Some((
+                    peer_id.clone(),
+                    file_name.to_string(),
+                    size,
+                    std::time::Instant::now(),
+                ));
                 announced = false;
                 last_announcement = None;
             }
-            if pending_offer.as_ref().is_some_and(|(_, _, _, since)| since.elapsed() >= Duration::from_millis(800)) &&
-                (!announced || last_announcement.is_some_and(|at| at.elapsed() >= Duration::from_secs(3))) {
-                if !announced { show_main_window(&app); }
-                let _ = app.emit_to(EventTarget::webview_window("main"), "qing:incoming-device-file",
-                    serde_json::json!({ "id": peer_id, "name": peer_name }));
+            if pending_offer
+                .as_ref()
+                .is_some_and(|(_, _, _, since)| since.elapsed() >= Duration::from_millis(800))
+                && (!announced
+                    || last_announcement.is_some_and(|at| at.elapsed() >= Duration::from_secs(3)))
+            {
+                if !announced {
+                    show_main_window(&app);
+                }
+                let _ = app.emit_to(
+                    EventTarget::webview_window("main"),
+                    "qing:incoming-device-file",
+                    serde_json::json!({ "id": peer_id, "name": peer_name }),
+                );
                 announced = true;
                 last_announcement = Some(std::time::Instant::now());
             }
@@ -3118,12 +3261,26 @@ fn start_device_transfer_pump(app: tauri::AppHandle) {
 }
 
 fn present_info_popup(app: tauri::AppHandle) {
-    let generation = app.state::<HostState>().info_popup_move_generation.fetch_add(1, Ordering::AcqRel) + 1;
+    let generation = app
+        .state::<HostState>()
+        .info_popup_move_generation
+        .fetch_add(1, Ordering::AcqRel)
+        + 1;
     thread::spawn(move || {
-        let Some(window) = app.get_webview_window(INFO_POPUP_WINDOW_LABEL) else { return };
-        let Some(monitor) = window.current_monitor().ok().flatten()
-            .or_else(|| window.primary_monitor().ok().flatten()) else { return };
-        let Ok(size) = window.outer_size() else { return };
+        let Some(window) = app.get_webview_window(INFO_POPUP_WINDOW_LABEL) else {
+            return;
+        };
+        let Some(monitor) = window
+            .current_monitor()
+            .ok()
+            .flatten()
+            .or_else(|| window.primary_monitor().ok().flatten())
+        else {
+            return;
+        };
+        let Ok(size) = window.outer_size() else {
+            return;
+        };
         let config = match app.state::<HostState>().settings.lock() {
             Ok(settings) => settings.snapshot(),
             Err(_) => return,
@@ -3132,13 +3289,19 @@ fn present_info_popup(app: tauri::AppHandle) {
         let bottom = config.info_popup_corner.ends_with("Bottom");
         let origin = monitor.position();
         let screen = monitor.size();
-        let end_x = if left { origin.x + 24 } else {
+        let end_x = if left {
+            origin.x + 24
+        } else {
             origin.x + screen.width as i32 - size.width as i32 - 24
         };
         let end_y = if bottom {
             origin.y + screen.height as i32 - size.height as i32 - 80
-        } else { origin.y + 24 };
-        let start_x = if left { origin.x - size.width as i32 } else {
+        } else {
+            origin.y + 24
+        };
+        let start_x = if left {
+            origin.x - size.width as i32
+        } else {
             origin.x + screen.width as i32
         };
         if let Ok(mut queue) = app.state::<HostState>().info_popup.lock() {
@@ -3152,17 +3315,30 @@ fn present_info_popup(app: tauri::AppHandle) {
             let _ = window.set_position(tauri::PhysicalPosition::new(start_x, end_y));
             let _ = window.show();
         }
-        let _ = app.emit_to(EventTarget::webview_window(INFO_POPUP_WINDOW_LABEL), "qing:info-popup-changed", ());
+        let _ = app.emit_to(
+            EventTarget::webview_window(INFO_POPUP_WINDOW_LABEL),
+            "qing:info-popup-changed",
+            (),
+        );
         if config.info_popup_animation {
             let duration = Duration::from_millis(u64::from(config.info_popup_duration_ms));
             let started = std::time::Instant::now();
             loop {
-                if app.state::<HostState>().info_popup_move_generation.load(Ordering::Acquire) != generation { return; }
+                if app
+                    .state::<HostState>()
+                    .info_popup_move_generation
+                    .load(Ordering::Acquire)
+                    != generation
+                {
+                    return;
+                }
                 let progress = (started.elapsed().as_secs_f64() / duration.as_secs_f64()).min(1.0);
                 let eased = 1.0 - (1.0 - progress).powi(3);
                 let x = start_x as f64 + (end_x - start_x) as f64 * eased;
                 let _ = window.set_position(tauri::PhysicalPosition::new(x.round() as i32, end_y));
-                if progress >= 1.0 { break; }
+                if progress >= 1.0 {
+                    break;
+                }
                 thread::sleep(Duration::from_millis(16));
             }
         }
@@ -3182,44 +3358,106 @@ fn set_devices_discovery_enabled(
 }
 
 #[tauri::command]
-fn request_device_pairing(window: WebviewWindow, state: State<'_, HostState>, device_id: String) -> Result<devices::DeviceSnapshot, CommandError> {
+fn request_device_pairing(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    device_id: String,
+) -> Result<devices::DeviceSnapshot, CommandError> {
     ensure_main_window(&window)?;
-    state.devices.request_pairing(&device_id).map_err(|message| CommandError { code: "devicePairingFailed", message })?;
+    state
+        .devices
+        .request_pairing(&device_id)
+        .map_err(|message| CommandError {
+            code: "devicePairingFailed",
+            message,
+        })?;
     Ok(state.devices.snapshot())
 }
 
 #[tauri::command]
-fn get_device_transfer_target(window: WebviewWindow, state: State<'_, HostState>, peer_id: String) -> Result<devices::TransferTarget, CommandError> {
+fn get_device_transfer_target(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    peer_id: String,
+) -> Result<devices::TransferTarget, CommandError> {
     ensure_main_window(&window)?;
-    state.devices.transfer_target(&peer_id)
-        .map_err(|message| CommandError { code: "deviceTransferUnavailable", message })
+    state
+        .devices
+        .transfer_target(&peer_id)
+        .map_err(|message| CommandError {
+            code: "deviceTransferUnavailable",
+            message,
+        })
 }
 
 #[tauri::command]
-fn decide_device_pairing(window: WebviewWindow, state: State<'_, HostState>, session_id: String, approve: bool) -> Result<devices::DeviceSnapshot, CommandError> {
+fn decide_device_pairing(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    session_id: String,
+    approve: bool,
+) -> Result<devices::DeviceSnapshot, CommandError> {
     ensure_main_window(&window)?;
-    state.devices.decide_pairing(&session_id, approve).map_err(|message| CommandError { code: "devicePairingFailed", message })?;
+    state
+        .devices
+        .decide_pairing(&session_id, approve)
+        .map_err(|message| CommandError {
+            code: "devicePairingFailed",
+            message,
+        })?;
     Ok(state.devices.snapshot())
 }
 
 #[tauri::command]
-fn decide_device_action(window: WebviewWindow, state: State<'_, HostState>, session_id: String, approve: bool) -> Result<devices::DeviceSnapshot, CommandError> {
+fn decide_device_action(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    session_id: String,
+    approve: bool,
+) -> Result<devices::DeviceSnapshot, CommandError> {
     ensure_main_window(&window)?;
-    state.devices.decide_action(&session_id, approve).map_err(|message| CommandError { code: "deviceActionFailed", message })?;
+    state
+        .devices
+        .decide_action(&session_id, approve)
+        .map_err(|message| CommandError {
+            code: "deviceActionFailed",
+            message,
+        })?;
     Ok(state.devices.snapshot())
 }
 
 #[tauri::command]
-fn set_device_relationship(window: WebviewWindow, state: State<'_, HostState>, peer_id: String, intimate: bool) -> Result<devices::DeviceSnapshot, CommandError> {
+fn set_device_relationship(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    peer_id: String,
+    intimate: bool,
+) -> Result<devices::DeviceSnapshot, CommandError> {
     ensure_main_window(&window)?;
-    state.devices.set_relationship(&peer_id, intimate).map_err(|message| CommandError { code: "deviceRelationshipFailed", message })?;
+    state
+        .devices
+        .set_relationship(&peer_id, intimate)
+        .map_err(|message| CommandError {
+            code: "deviceRelationshipFailed",
+            message,
+        })?;
     Ok(state.devices.snapshot())
 }
 
 #[tauri::command]
-fn revoke_device_pairing(window: WebviewWindow, state: State<'_, HostState>, peer_id: String) -> Result<devices::DeviceSnapshot, CommandError> {
+fn revoke_device_pairing(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    peer_id: String,
+) -> Result<devices::DeviceSnapshot, CommandError> {
     ensure_main_window(&window)?;
-    state.devices.revoke_pairing(&peer_id).map_err(|message| CommandError { code: "deviceRelationshipFailed", message })?;
+    state
+        .devices
+        .revoke_pairing(&peer_id)
+        .map_err(|message| CommandError {
+            code: "deviceRelationshipFailed",
+            message,
+        })?;
     Ok(state.devices.snapshot())
 }
 
@@ -3784,7 +4022,10 @@ fn start_authorized_modules<R: tauri::Runtime>(app: &tauri::AppHandle<R>, state:
 }
 
 fn sync_device_transfer_runtime(state: &HostState) {
-    let record = state.module_index.lock().ok()
+    let record = state
+        .module_index
+        .lock()
+        .ok()
         .and_then(|index| index.get(DEVICE_TRANSFER_MODULE_ID).cloned());
     let Some(record) = record else { return };
     let enabled = state.devices.is_enabled();
@@ -4023,8 +4264,11 @@ mod tests {
     fn preview_popup_uses_the_same_bounded_queue_as_device_messages() {
         let mut queue = InfoPopupQueue::default();
         let make = |id: &str| crate::device_pairing::ForwardedNotification {
-            id: id.to_string(), device_name: "QingToolbox".to_string(),
-            app_name: "预览".to_string(), title: "测试".to_string(), body: "示例".to_string(),
+            id: id.to_string(),
+            device_name: "QingToolbox".to_string(),
+            app_name: "预览".to_string(),
+            title: "测试".to_string(),
+            body: "示例".to_string(),
         };
         assert!(queue.enqueue(make("preview-1")));
         assert!(!queue.enqueue(make("device-1")));

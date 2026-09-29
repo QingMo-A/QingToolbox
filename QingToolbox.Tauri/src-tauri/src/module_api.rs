@@ -20,37 +20,28 @@ pub fn requested_version(value: Option<&Value>) -> Result<u32, &'static str> {
     Ok(version)
 }
 
-pub fn resolve_version(value: Option<&Value>) -> Result<u32, &'static str> {
-    let version = requested_version(value)?;
-    if version != API_VERSION {
-        return Err("apiVersionUnsupported");
-    }
-    Ok(version)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn accepts_v1_and_legacy_absence_only() {
-        assert_eq!(resolve_version(None), Ok(1));
-        assert_eq!(resolve_version(Some(&serde_json::json!(1))), Ok(1));
+    fn accepts_legacy_absence_and_positive_integers() {
+        assert_eq!(requested_version(None), Ok(API_VERSION));
+        assert_eq!(requested_version(Some(&serde_json::json!(1))), Ok(1));
         assert_eq!(
-            resolve_version(Some(&serde_json::json!(0))),
+            requested_version(Some(&serde_json::json!(0))),
             Err("apiVersionInvalid")
         );
         assert_eq!(
-            resolve_version(Some(&serde_json::json!(1.0))),
+            requested_version(Some(&serde_json::json!(1.0))),
             Err("apiVersionInvalid")
         );
         assert_eq!(
-            resolve_version(Some(&serde_json::json!("1"))),
+            requested_version(Some(&serde_json::json!("1"))),
             Err("apiVersionInvalid")
         );
-        assert_eq!(
-            resolve_version(Some(&serde_json::json!(2))),
-            Err("apiVersionUnsupported")
-        );
+        // Refusing a version the host does not implement belongs to the caller,
+        // which reports it with its own code and message per call site.
+        assert_eq!(requested_version(Some(&serde_json::json!(2))), Ok(2));
     }
 }

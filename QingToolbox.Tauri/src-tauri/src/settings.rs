@@ -329,8 +329,14 @@ impl SettingsStore {
             candidate.startup_fullscreen = value;
         }
         if let Some(value) = update.info_popup_corner {
-            if !matches!(value.as_str(), "rightTop" | "rightBottom" | "leftTop" | "leftBottom") {
-                return Err(SettingsError { code: "popupCornerInvalid", message: "信息弹窗位置无效。".to_string() });
+            if !matches!(
+                value.as_str(),
+                "rightTop" | "rightBottom" | "leftTop" | "leftBottom"
+            ) {
+                return Err(SettingsError {
+                    code: "popupCornerInvalid",
+                    message: "信息弹窗位置无效。".to_string(),
+                });
             }
             candidate.info_popup_corner = value;
         }
@@ -339,13 +345,19 @@ impl SettingsStore {
         }
         if let Some(value) = update.info_popup_duration_ms {
             if !(100..=2000).contains(&value) {
-                return Err(SettingsError { code: "popupDurationInvalid", message: "动画时长须为 100–2000 毫秒。".to_string() });
+                return Err(SettingsError {
+                    code: "popupDurationInvalid",
+                    message: "动画时长须为 100–2000 毫秒。".to_string(),
+                });
             }
             candidate.info_popup_duration_ms = value;
         }
         if let Some(value) = update.info_popup_dismiss_seconds {
             if !(3..=60).contains(&value) {
-                return Err(SettingsError { code: "popupDismissInvalid", message: "弹窗显示时间须为 3–60 秒。".to_string() });
+                return Err(SettingsError {
+                    code: "popupDismissInvalid",
+                    message: "弹窗显示时间须为 3–60 秒。".to_string(),
+                });
             }
             candidate.info_popup_dismiss_seconds = value;
         }
@@ -510,14 +522,26 @@ fn settings_from_document(document: &SettingsDocument) -> Settings {
             .filter(|value| (MIN_WINDOW_HEIGHT..=MAX_WINDOW_HEIGHT).contains(value))
             .unwrap_or(DEFAULT_WINDOW_HEIGHT),
         startup_fullscreen: document.startup_fullscreen.unwrap_or(false),
-        info_popup_corner: document.info_popup_corner.as_deref()
-            .filter(|value| matches!(*value, "rightTop" | "rightBottom" | "leftTop" | "leftBottom"))
-            .unwrap_or("rightTop").to_string(),
+        info_popup_corner: document
+            .info_popup_corner
+            .as_deref()
+            .filter(|value| {
+                matches!(
+                    *value,
+                    "rightTop" | "rightBottom" | "leftTop" | "leftBottom"
+                )
+            })
+            .unwrap_or("rightTop")
+            .to_string(),
         info_popup_animation: document.info_popup_animation.unwrap_or(true),
-        info_popup_duration_ms: document.info_popup_duration_ms
-            .filter(|value| (100..=2000).contains(value)).unwrap_or(380),
-        info_popup_dismiss_seconds: document.info_popup_dismiss_seconds
-            .filter(|value| (3..=60).contains(value)).unwrap_or(15),
+        info_popup_duration_ms: document
+            .info_popup_duration_ms
+            .filter(|value| (100..=2000).contains(value))
+            .unwrap_or(380),
+        info_popup_dismiss_seconds: document
+            .info_popup_dismiss_seconds
+            .filter(|value| (3..=60).contains(value))
+            .unwrap_or(15),
         toggle_hotkey: normalize_hotkey(document.toggle_hotkey.as_deref().unwrap_or_default()),
         launch_at_login: document.launch_at_login.unwrap_or(false),
         show_logs_in_sidebar: document.show_logs_in_sidebar.unwrap_or(false),
@@ -832,7 +856,10 @@ mod tests {
         let settings = settings_from_document(&legacy);
         assert_eq!(settings.appearance_preset_id, "dark");
         assert_eq!(settings.theme_mode, "dark");
-        assert_eq!(module_appearance("dark", "system"), ("qing-default", "system"));
+        assert_eq!(
+            module_appearance("dark", "system"),
+            ("qing-default", "system")
+        );
 
         // And the pair a module window is drawn in never carries a value the
         // module cannot use.
@@ -840,7 +867,10 @@ mod tests {
             module_appearance("neon-circuit", "light"),
             ("neon-circuit", "light")
         );
-        assert_eq!(module_appearance("nonsense", ""), ("qing-default", "system"));
+        assert_eq!(
+            module_appearance("nonsense", ""),
+            ("qing-default", "system")
+        );
     }
 
     #[test]
@@ -898,19 +928,35 @@ mod tests {
         let mut store = SettingsStore::from_path(Some(path.clone()));
         assert_eq!(store.snapshot().info_popup_corner, "rightTop");
         assert!(store.snapshot().info_popup_animation);
-        store.update(SettingsUpdate {
-            info_popup_corner: Some("leftBottom".to_string()),
-            info_popup_animation: Some(false),
-            info_popup_duration_ms: Some(900),
-            info_popup_dismiss_seconds: Some(28),
-            ..SettingsUpdate::default()
-        }).unwrap();
-        assert_eq!(store.update(SettingsUpdate {
-            info_popup_duration_ms: Some(20), ..SettingsUpdate::default()
-        }).unwrap_err().code, "popupDurationInvalid");
-        assert_eq!(store.update(SettingsUpdate {
-            info_popup_dismiss_seconds: Some(2), ..SettingsUpdate::default()
-        }).unwrap_err().code, "popupDismissInvalid");
+        store
+            .update(SettingsUpdate {
+                info_popup_corner: Some("leftBottom".to_string()),
+                info_popup_animation: Some(false),
+                info_popup_duration_ms: Some(900),
+                info_popup_dismiss_seconds: Some(28),
+                ..SettingsUpdate::default()
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .update(SettingsUpdate {
+                    info_popup_duration_ms: Some(20),
+                    ..SettingsUpdate::default()
+                })
+                .unwrap_err()
+                .code,
+            "popupDurationInvalid"
+        );
+        assert_eq!(
+            store
+                .update(SettingsUpdate {
+                    info_popup_dismiss_seconds: Some(2),
+                    ..SettingsUpdate::default()
+                })
+                .unwrap_err()
+                .code,
+            "popupDismissInvalid"
+        );
         let reloaded = SettingsStore::from_path(Some(path));
         assert_eq!(reloaded.snapshot().info_popup_corner, "leftBottom");
         assert!(!reloaded.snapshot().info_popup_animation);

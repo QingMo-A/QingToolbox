@@ -163,7 +163,9 @@ pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
             // The transfer engine is now host-owned. An older user-installed
             // QingTransfer package must not shadow the bundled process, whose
             // discovery identity is required by the Devices page.
-            if root.source == ModuleSource::User && directory_name.eq_ignore_ascii_case("qing.qingtransfer") {
+            if root.source == ModuleSource::User
+                && directory_name.eq_ignore_ascii_case("qing.qingtransfer")
+            {
                 continue;
             }
             // The WPF updater owns this journal/staging directory in the

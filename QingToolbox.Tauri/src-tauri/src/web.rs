@@ -465,8 +465,7 @@ fn error_response(status: StatusCode, message: &'static str) -> Response<Vec<u8>
 #[cfg(test)]
 mod tests {
     use super::{
-        appearance_script, format_pin_document, parse_route, valid_pin_token,
-        ScreenPinWindowRecord,
+        appearance_script, format_pin_document, parse_route, valid_pin_token, ScreenPinWindowRecord,
     };
 
     #[test]

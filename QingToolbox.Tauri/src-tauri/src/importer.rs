@@ -274,6 +274,10 @@ pub fn update_qmod_confirmed(
     )
 }
 
+/// Update an installed module in an explicit root without a package digest or
+/// an incompatible-API override. Only the test suite needs this shorthand; the
+/// host always goes through `update_qmod_into_with_options`.
+#[cfg(test)]
 fn update_qmod_into(
     source_path: &str,
     expected_module_id: &str,
@@ -438,6 +442,7 @@ fn update_qmod_into_with_options(
 /// Import a package into an explicit module root.  Keeping the root as an
 /// argument makes the filesystem boundary deterministic in tests and avoids
 /// ever making the test suite mutate the user's real module directory.
+#[cfg(test)]
 fn import_qmod_into(
     source_path: &str,
     modules_root: &Path,

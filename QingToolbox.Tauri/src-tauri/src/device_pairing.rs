@@ -191,7 +191,9 @@ impl PairingCore {
         fs::create_dir_all(&directory).map_err(|error| format!("无法创建设备数据目录：{error}"))?;
         let records_file = directory.join("paired.json");
         let tombstones_file = directory.join("revocations.json");
-        if (records_file.exists() || tombstones_file.exists()) && !directory.join("pairing-key.dpapi").exists() {
+        if (records_file.exists() || tombstones_file.exists())
+            && !directory.join("pairing-key.dpapi").exists()
+        {
             return Err("配对密钥已丢失；旧配对不能沿用。".to_string());
         }
         let identity = load_or_create_identity(&directory)?;
@@ -234,16 +236,27 @@ impl PairingCore {
             notices: state.notices.clone(),
             batteries: state.batteries.values().cloned().collect(),
             revocations: state.tombstones.values().cloned().collect(),
-            online: state.records.keys()
-                .filter(|id| state.last_authenticated.get(*id)
-                    .is_some_and(|time| time.elapsed() < PRESENCE_TTL))
-                .cloned().collect(),
+            online: state
+                .records
+                .keys()
+                .filter(|id| {
+                    state
+                        .last_authenticated
+                        .get(*id)
+                        .is_some_and(|time| time.elapsed() < PRESENCE_TTL)
+                })
+                .cloned()
+                .collect(),
         }
     }
 
     pub fn take_notifications(&self) -> Vec<ForwardedNotification> {
-        self.state.lock().unwrap_or_else(|error| error.into_inner())
-            .notification_queue.drain(..).collect()
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .notification_queue
+            .drain(..)
+            .collect()
     }
 
     pub fn decide(&self, session_id: &str, approve: bool) -> Result<(), String> {
@@ -262,7 +275,10 @@ impl PairingCore {
 
     pub fn decide_action(&self, session_id: &str, approve: bool) -> Result<(), String> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        let pending = state.actions.get_mut(session_id).ok_or("设备操作请求已过期。")?;
+        let pending = state
+            .actions
+            .get_mut(session_id)
+            .ok_or("设备操作请求已过期。")?;
         if pending.decision.is_some() {
             return Err("设备操作已经确认。".to_string());
         }
@@ -356,19 +372,30 @@ impl PairingCore {
         state.last_authenticated.remove(peer_id);
         state.last_ping.remove(peer_id);
         state.notices.push(DeviceNotice {
-            id: random_id()?, peer_name: removed.name, action: DeviceAction::Disconnect,
+            id: random_id()?,
+            peer_name: removed.name,
+            action: DeviceAction::Disconnect,
         });
-        if state.notices.len() > 16 { state.notices.remove(0); }
+        if state.notices.len() > 16 {
+            state.notices.remove(0);
+        }
         Ok(())
     }
 
     pub fn retry_tombstone(self: &Arc<Self>, peer: OutboundPeer, stop: Arc<AtomicBool>) {
         let key = {
             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            let key = state.tombstones.values().find(|record| record.discovery_id == peer.discovery_id)
+            let key = state
+                .tombstones
+                .values()
+                .find(|record| record.discovery_id == peer.discovery_id)
                 .map(|record| record.id.clone());
             if let Some(key) = &key {
-                if state.last_retry.get(key).is_some_and(|time| time.elapsed() < Duration::from_secs(30)) {
+                if state
+                    .last_retry
+                    .get(key)
+                    .is_some_and(|time| time.elapsed() < Duration::from_secs(30))
+                {
                     return;
                 }
                 state.last_retry.insert(key.clone(), Instant::now());
@@ -376,7 +403,9 @@ impl PairingCore {
             key
         };
         let Some(key) = key else { return };
-        if self.acquire_slot(Some(&peer.discovery_id)).is_err() { return }
+        if self.acquire_slot(Some(&peer.discovery_id)).is_err() {
+            return;
+        }
         let core = Arc::clone(self);
         thread::spawn(move || {
             let discovery_id = peer.discovery_id.clone();
@@ -388,23 +417,40 @@ impl PairingCore {
     pub fn probe_online(self: &Arc<Self>, peer: OutboundPeer, stop: Arc<AtomicBool>) {
         let key = {
             let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            let Some(record) = state.records.values().find(|record| record.discovery_id == peer.discovery_id) else {
+            let Some(record) = state
+                .records
+                .values()
+                .find(|record| record.discovery_id == peer.discovery_id)
+            else {
                 return;
             };
-            if state.last_ping.get(&record.id)
-                .is_some_and(|time| time.elapsed() < PRESENCE_INTERVAL) { return; }
+            if state
+                .last_ping
+                .get(&record.id)
+                .is_some_and(|time| time.elapsed() < PRESENCE_INTERVAL)
+            {
+                return;
+            }
             record.id.clone()
         };
-        if self.acquire_slot(None).is_err() { return; }
-        self.state.lock().unwrap_or_else(|error| error.into_inner())
-            .last_ping.insert(key.clone(), Instant::now());
+        if self.acquire_slot(None).is_err() {
+            return;
+        }
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .last_ping
+            .insert(key.clone(), Instant::now());
         let core = Arc::clone(self);
         thread::spawn(move || {
             let result = core.connect_and_manage(peer, &key, DeviceAction::Ping, Arc::clone(&stop));
             if result.is_err() && !stop.load(Ordering::Acquire) {
                 let mut state = core.state.lock().unwrap_or_else(|error| error.into_inner());
                 if state.records.contains_key(&key) {
-                    state.last_ping.insert(key, Instant::now() - (PRESENCE_INTERVAL - PRESENCE_RETRY_INTERVAL));
+                    state.last_ping.insert(
+                        key,
+                        Instant::now() - (PRESENCE_INTERVAL - PRESENCE_RETRY_INTERVAL),
+                    );
                 }
             }
             // A missed heartbeat is normal offline state, not a user action error.
@@ -508,9 +554,19 @@ impl PairingCore {
                 return Err("设备发现已关闭。".to_string());
             }
             if let Ok(mut stream) = TcpStream::connect_timeout(&address, HANDSHAKE_TIMEOUT) {
-                stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT)).map_err(|e| e.to_string())?;
-                stream.write_all(b"QDM1").map_err(|_| "无法启动设备操作。".to_string())?;
-                return self.run_management(stream, true, Some((&peer.discovery_id, expected_key)), Some(action), stop);
+                stream
+                    .set_write_timeout(Some(HANDSHAKE_TIMEOUT))
+                    .map_err(|e| e.to_string())?;
+                stream
+                    .write_all(b"QDM1")
+                    .map_err(|_| "无法启动设备操作。".to_string())?;
+                return self.run_management(
+                    stream,
+                    true,
+                    Some((&peer.discovery_id, expected_key)),
+                    Some(action),
+                    stop,
+                );
             }
         }
         if action == DeviceAction::Disconnect {
@@ -527,20 +583,34 @@ impl PairingCore {
         action: Option<DeviceAction>,
         stop: Arc<AtomicBool>,
     ) -> Result<(), String> {
-        stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).map_err(|e| e.to_string())?;
-        stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT)).map_err(|e| e.to_string())?;
+        stream
+            .set_read_timeout(Some(HANDSHAKE_TIMEOUT))
+            .map_err(|e| e.to_string())?;
+        stream
+            .set_write_timeout(Some(HANDSHAKE_TIMEOUT))
+            .map_err(|e| e.to_string())?;
         let (handshake, remote) = handshake(
-            &mut stream, &self.identity.private, &self.discovery_id, &self.name,
-            initiator, MANAGEMENT_PROLOGUE,
+            &mut stream,
+            &self.identity.private,
+            &self.discovery_id,
+            &self.name,
+            initiator,
+            MANAGEMENT_PROLOGUE,
         )?;
         let key = hex(handshake.get_remote_static().ok_or("对端身份验证失败。")?);
         let record = {
             let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            state.records.get(&key).or_else(|| state.tombstones.get(&key))
-                .cloned().ok_or("设备尚未配对。")?
+            state
+                .records
+                .get(&key)
+                .or_else(|| state.tombstones.get(&key))
+                .cloned()
+                .ok_or("设备尚未配对。")?
         };
-        if remote.discovery_id != record.discovery_id ||
-            expected.is_some_and(|(id, expected_key)| id != remote.discovery_id || expected_key != key) {
+        if remote.discovery_id != record.discovery_id
+            || expected
+                .is_some_and(|(id, expected_key)| id != remote.discovery_id || expected_key != key)
+        {
             return Err("对端配对身份不匹配。".to_string());
         }
         {
@@ -549,25 +619,49 @@ impl PairingCore {
                 state.last_authenticated.insert(key.clone(), Instant::now());
             }
         }
-        let mut transport = handshake.into_transport_mode().map_err(|_| "加密设备会话无法启动。".to_string())?;
+        let mut transport = handshake
+            .into_transport_mode()
+            .map_err(|_| "加密设备会话无法启动。".to_string())?;
         if initiator {
             let action = action.ok_or("设备操作无效。")?;
             let request = serde_json::to_vec(&ManagementRequest {
-                version: 1, action: action.wire_name().to_string(), percent: None, charging: None,
-                app_name: None, title: None, body: None,
+                version: 1,
+                action: action.wire_name().to_string(),
+                percent: None,
+                charging: None,
+                app_name: None,
+                title: None,
+                body: None,
             })
-                .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
             write_encrypted(&mut stream, &mut transport, &request)?;
-            let answer = read_encrypted_timeout(&mut stream, &mut transport,
-                if matches!(action, DeviceAction::DisconnectNotice | DeviceAction::Ping) { HANDSHAKE_TIMEOUT } else { PAIR_TIMEOUT })?;
+            let answer = read_encrypted_timeout(
+                &mut stream,
+                &mut transport,
+                if matches!(action, DeviceAction::DisconnectNotice | DeviceAction::Ping) {
+                    HANDSHAKE_TIMEOUT
+                } else {
+                    PAIR_TIMEOUT
+                },
+            )?;
             if matches!(action, DeviceAction::DisconnectNotice | DeviceAction::Ping) {
-                if answer != b"D" { return Err("设备在线验证失败。".to_string()); }
-                if action == DeviceAction::DisconnectNotice { self.clear_tombstone(&key)?; }
+                if answer != b"D" {
+                    return Err("设备在线验证失败。".to_string());
+                }
+                if action == DeviceAction::DisconnectNotice {
+                    self.clear_tombstone(&key)?;
+                }
                 return Ok(());
             }
-            if answer == b"R" { return Err("对方拒绝了设备操作。".to_string()); }
-            if answer != b"A" { return Err("设备操作确认无效。".to_string()); }
-            if stop.load(Ordering::Acquire) { return Err("设备发现已关闭。".to_string()); }
+            if answer == b"R" {
+                return Err("对方拒绝了设备操作。".to_string());
+            }
+            if answer != b"A" {
+                return Err("设备操作确认无效。".to_string());
+            }
+            if stop.load(Ordering::Acquire) {
+                return Err("设备发现已关闭。".to_string());
+            }
             write_encrypted(&mut stream, &mut transport, b"C")?;
             if read_encrypted_timeout(&mut stream, &mut transport, HANDSHAKE_TIMEOUT)? != b"D" {
                 return Err("设备操作完成确认无效。".to_string());
@@ -575,16 +669,22 @@ impl PairingCore {
             self.apply_action(&key, action, &record.name)?;
         } else {
             let request = read_encrypted_timeout(&mut stream, &mut transport, HANDSHAKE_TIMEOUT)?;
-            let request: ManagementRequest = serde_json::from_slice(&request)
-                .map_err(|_| "设备操作消息无效。".to_string())?;
-            if request.version != 1 { return Err("设备操作版本不兼容。".to_string()); }
+            let request: ManagementRequest =
+                serde_json::from_slice(&request).map_err(|_| "设备操作消息无效。".to_string())?;
+            if request.version != 1 {
+                return Err("设备操作版本不兼容。".to_string());
+            }
             if request.action == "disconnectNotice" {
                 self.apply_disconnect_notice(&key, &record.name)?;
                 write_encrypted(&mut stream, &mut transport, b"D")?;
                 return Ok(());
             }
-            let already_revoked = !self.state.lock().unwrap_or_else(|e| e.into_inner())
-                .records.contains_key(&key);
+            let already_revoked = !self
+                .state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .records
+                .contains_key(&key);
             if already_revoked && request.action == "disconnect" {
                 // We already committed this user's approval, but the completion
                 // frame may have been lost. Let the initiator finish idempotently.
@@ -595,32 +695,60 @@ impl PairingCore {
                 write_encrypted(&mut stream, &mut transport, b"D")?;
                 return Ok(());
             }
-            if already_revoked { return Err("设备已断开。".to_string()); }
+            if already_revoked {
+                return Err("设备已断开。".to_string());
+            }
             if request.action == "ping" {
                 write_encrypted(&mut stream, &mut transport, b"D")?;
                 return Ok(());
             }
             if request.action == "battery" {
-                let trusted = self.state.lock().unwrap_or_else(|e| e.into_inner())
-                    .records.get(&key).is_some_and(|peer| peer.relationship == Relationship::Intimate);
+                let trusted = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .records
+                    .get(&key)
+                    .is_some_and(|peer| peer.relationship == Relationship::Intimate);
                 if !trusted {
                     return Err("非亲密设备不得发送电量。".to_string());
                 }
-                let percent = request.percent.filter(|value| *value <= 100)
+                let percent = request
+                    .percent
+                    .filter(|value| *value <= 100)
                     .ok_or("电量数据无效。")?;
                 let charging = request.charging.ok_or("充电状态无效。")?;
-                let received_at_ms = SystemTime::now().duration_since(UNIX_EPOCH)
-                    .map_err(|e| e.to_string())?.as_millis() as u64;
-                self.state.lock().unwrap_or_else(|e| e.into_inner()).batteries.insert(
-                    key.clone(), DeviceBattery { peer_id: key, percent, charging, received_at_ms }
-                );
+                let received_at_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|e| e.to_string())?
+                    .as_millis() as u64;
+                self.state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .batteries
+                    .insert(
+                        key.clone(),
+                        DeviceBattery {
+                            peer_id: key,
+                            percent,
+                            charging,
+                            received_at_ms,
+                        },
+                    );
                 write_encrypted(&mut stream, &mut transport, b"D")?;
                 return Ok(());
             }
             if request.action == "notification" {
-                let trusted = self.state.lock().unwrap_or_else(|e| e.into_inner())
-                    .records.get(&key).is_some_and(can_accept_notification);
-                if !trusted { return Err("非亲密安卓设备不得发送通知。".to_string()); }
+                let trusted = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .records
+                    .get(&key)
+                    .is_some_and(can_accept_notification);
+                if !trusted {
+                    return Err("非亲密安卓设备不得发送通知。".to_string());
+                }
                 let app_name = bounded_notification_field(request.app_name, 80, false)?;
                 let title = bounded_notification_field(request.title, 160, false)?;
                 let body = bounded_notification_field(request.body, 700, true)?;
@@ -628,9 +756,15 @@ impl PairingCore {
                     return Err("通知内容为空。".to_string());
                 }
                 let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                if state.notification_queue.len() >= 16 { state.notification_queue.pop_front(); }
+                if state.notification_queue.len() >= 16 {
+                    state.notification_queue.pop_front();
+                }
                 state.notification_queue.push_back(ForwardedNotification {
-                    id: random_id()?, device_name: record.name, app_name, title, body,
+                    id: random_id()?,
+                    device_name: record.name,
+                    app_name,
+                    title,
+                    body,
                 });
                 drop(state);
                 write_encrypted(&mut stream, &mut transport, b"D")?;
@@ -645,15 +779,29 @@ impl PairingCore {
                 if state.actions.values().any(|pending| pending.peer_id == key) {
                     return Err("该设备已有待处理操作。".to_string());
                 }
-                state.actions.insert(session_id.clone(), PendingDeviceAction {
-                    session_id: session_id.clone(), peer_id: key.clone(), name: record.name.clone(),
-                    action, local_approved: false, decision: None,
-                });
+                state.actions.insert(
+                    session_id.clone(),
+                    PendingDeviceAction {
+                        session_id: session_id.clone(),
+                        peer_id: key.clone(),
+                        name: record.name.clone(),
+                        action,
+                        local_approved: false,
+                        decision: None,
+                    },
+                );
             }
             let answer = self.await_action_decision(&session_id, &stop);
-            self.state.lock().unwrap_or_else(|e| e.into_inner()).actions.remove(&session_id);
+            self.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .actions
+                .remove(&session_id);
             match answer? {
-                false => { write_encrypted(&mut stream, &mut transport, b"R")?; return Ok(()); }
+                false => {
+                    write_encrypted(&mut stream, &mut transport, b"R")?;
+                    return Ok(());
+                }
                 true => write_encrypted(&mut stream, &mut transport, b"A")?,
             }
             if read_encrypted_timeout(&mut stream, &mut transport, HANDSHAKE_TIMEOUT)? != b"C" {
@@ -668,8 +816,14 @@ impl PairingCore {
     fn await_action_decision(&self, session_id: &str, stop: &AtomicBool) -> Result<bool, String> {
         let started = Instant::now();
         while started.elapsed() < PAIR_TIMEOUT && !stop.load(Ordering::Acquire) {
-            if let Some(decision) = self.state.lock().unwrap_or_else(|e| e.into_inner())
-                .actions.get(session_id).and_then(|action| action.decision) {
+            if let Some(decision) = self
+                .state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .actions
+                .get(session_id)
+                .and_then(|action| action.decision)
+            {
                 return Ok(decision);
             }
             thread::sleep(Duration::from_millis(70));
@@ -700,8 +854,14 @@ impl PairingCore {
             state.records.insert(peer_id.to_owned(), previous);
             return Err(error);
         }
-        state.notices.push(DeviceNotice { id: random_id()?, peer_name: name.to_owned(), action });
-        if state.notices.len() > 16 { state.notices.remove(0); }
+        state.notices.push(DeviceNotice {
+            id: random_id()?,
+            peer_name: name.to_owned(),
+            action,
+        });
+        if state.notices.len() > 16 {
+            state.notices.remove(0);
+        }
         Ok(())
     }
 
@@ -710,7 +870,9 @@ impl PairingCore {
         // A previous paired-file write may have failed after the revocation
         // was safely persisted. Do not clear that safety record first.
         self.persist(&state.records)?;
-        let Some(removed) = state.tombstones.remove(peer_id) else { return Ok(()) };
+        let Some(removed) = state.tombstones.remove(peer_id) else {
+            return Ok(());
+        };
         if let Err(error) = self.persist_tombstones(&state.tombstones) {
             state.tombstones.insert(peer_id.to_owned(), removed);
             return Err(error);
@@ -723,23 +885,35 @@ impl PairingCore {
         let old_record = state.records.remove(peer_id);
         let old_tombstone = state.tombstones.remove(peer_id);
         if let Err(error) = self.persist(&state.records) {
-            if let Some(record) = old_record { state.records.insert(peer_id.to_owned(), record); }
-            if let Some(record) = old_tombstone { state.tombstones.insert(peer_id.to_owned(), record); }
+            if let Some(record) = old_record {
+                state.records.insert(peer_id.to_owned(), record);
+            }
+            if let Some(record) = old_tombstone {
+                state.tombstones.insert(peer_id.to_owned(), record);
+            }
             return Err(error);
         }
         if old_tombstone.is_some() {
             if let Err(error) = self.persist_tombstones(&state.tombstones) {
                 // The paired file has already been durably cleared. Keep the
                 // old revocation so a restart still fails closed.
-                if let Some(record) = old_tombstone { state.tombstones.insert(peer_id.to_owned(), record); }
+                if let Some(record) = old_tombstone {
+                    state.tombstones.insert(peer_id.to_owned(), record);
+                }
                 return Err(error);
             }
         }
         state.batteries.remove(peer_id);
         state.last_authenticated.remove(peer_id);
         state.last_ping.remove(peer_id);
-        state.notices.push(DeviceNotice { id: random_id()?, peer_name: name.to_owned(), action: DeviceAction::Disconnect });
-        if state.notices.len() > 16 { state.notices.remove(0); }
+        state.notices.push(DeviceNotice {
+            id: random_id()?,
+            peer_name: name.to_owned(),
+            action: DeviceAction::Disconnect,
+        });
+        if state.notices.len() > 16 {
+            state.notices.remove(0);
+        }
         Ok(())
     }
 
@@ -919,8 +1093,14 @@ impl PairingCore {
         self.persist_file(self.tombstones_file.as_deref(), records)
     }
 
-    fn persist_file(&self, file: Option<&Path>, records: &BTreeMap<String, PairedDevice>) -> Result<(), String> {
-        let Some(file) = file else { return Ok(()); };
+    fn persist_file(
+        &self,
+        file: Option<&Path>,
+        records: &BTreeMap<String, PairedDevice>,
+    ) -> Result<(), String> {
+        let Some(file) = file else {
+            return Ok(());
+        };
         let value = PairRecords {
             version: 1,
             peers: records.values().cloned().collect(),
@@ -965,11 +1145,19 @@ struct ManagementRequest {
     body: Option<String>,
 }
 
-fn bounded_notification_field(value: Option<String>, max_chars: usize, multiline: bool) -> Result<String, String> {
+fn bounded_notification_field(
+    value: Option<String>,
+    max_chars: usize,
+    multiline: bool,
+) -> Result<String, String> {
     let value = value.ok_or("通知字段缺失。")?;
-    if value.chars().count() > max_chars || value.chars().any(|c|
-        c.is_control() && !(multiline && (c == '\n' || c == '\t'))
-    ) { return Err("通知字段无效。".to_string()); }
+    if value.chars().count() > max_chars
+        || value
+            .chars()
+            .any(|c| c.is_control() && !(multiline && (c == '\n' || c == '\t')))
+    {
+        return Err("通知字段无效。".to_string());
+    }
     Ok(value.trim().to_string())
 }
 
@@ -1364,15 +1552,21 @@ mod tests {
     #[test]
     fn forwarded_notifications_require_an_intimate_android_identity() {
         let peer = PairedDevice {
-            id: "a".repeat(64), discovery_id: "b".repeat(32), name: "Phone".to_string(),
-            platform: "android".to_string(), relationship: Relationship::Connected,
+            id: "a".repeat(64),
+            discovery_id: "b".repeat(32),
+            name: "Phone".to_string(),
+            platform: "android".to_string(),
+            relationship: Relationship::Connected,
         };
         assert!(!can_accept_notification(&peer));
         assert!(!can_accept_notification(&PairedDevice {
-            platform: "windows".to_string(), relationship: Relationship::Intimate, ..peer.clone()
+            platform: "windows".to_string(),
+            relationship: Relationship::Intimate,
+            ..peer.clone()
         }));
         assert!(can_accept_notification(&PairedDevice {
-            relationship: Relationship::Intimate, ..peer
+            relationship: Relationship::Intimate,
+            ..peer
         }));
         assert!(bounded_notification_field(Some("a".repeat(701)), 700, true).is_err());
         assert!(bounded_notification_field(Some("hello\u{0000}".to_string()), 160, false).is_err());
@@ -1456,17 +1650,33 @@ mod tests {
             assert_eq!(&marker, b"QDM1");
             action_responder.accept_action(stream, action_stop);
         });
-        first.request_action(&peer_id, OutboundPeer {
-            discovery_id: second.discovery_id.clone(), addresses: vec![action_address],
-        }, DeviceAction::Upgrade, Arc::clone(&stopped)).unwrap();
+        first
+            .request_action(
+                &peer_id,
+                OutboundPeer {
+                    discovery_id: second.discovery_id.clone(),
+                    addresses: vec![action_address],
+                },
+                DeviceAction::Upgrade,
+                Arc::clone(&stopped),
+            )
+            .unwrap();
         action_receiver.join().unwrap();
         wait_until(|| second.snapshot().actions.len() == 1);
-        assert_eq!(first.snapshot().paired[0].relationship, Relationship::Connected);
-        assert_eq!(second.snapshot().paired[0].relationship, Relationship::Connected);
+        assert_eq!(
+            first.snapshot().paired[0].relationship,
+            Relationship::Connected
+        );
+        assert_eq!(
+            second.snapshot().paired[0].relationship,
+            Relationship::Connected
+        );
         let action_id = second.snapshot().actions[0].session_id.clone();
         second.decide_action(&action_id, true).unwrap();
-        wait_until(|| first.snapshot().paired[0].relationship == Relationship::Intimate &&
-            second.snapshot().paired[0].relationship == Relationship::Intimate);
+        wait_until(|| {
+            first.snapshot().paired[0].relationship == Relationship::Intimate
+                && second.snapshot().paired[0].relationship == Relationship::Intimate
+        });
 
         first.state.lock().unwrap().last_authenticated.clear();
         second.state.lock().unwrap().last_authenticated.clear();
@@ -1482,9 +1692,13 @@ mod tests {
             assert_eq!(&marker, b"QDM1");
             ping_responder.accept_action(stream, ping_stop);
         });
-        first.probe_online(OutboundPeer {
-            discovery_id: second.discovery_id.clone(), addresses: vec![ping_address],
-        }, Arc::clone(&stopped));
+        first.probe_online(
+            OutboundPeer {
+                discovery_id: second.discovery_id.clone(),
+                addresses: vec![ping_address],
+            },
+            Arc::clone(&stopped),
+        );
         ping_receiver.join().unwrap();
         wait_until(|| first.snapshot().online.len() == 1 && second.snapshot().online.len() == 1);
 
@@ -1499,9 +1713,17 @@ mod tests {
             assert_eq!(&marker, b"QDM1");
             disconnect_responder.accept_action(stream, disconnect_stop);
         });
-        first.request_action(&peer_id, OutboundPeer {
-            discovery_id: second.discovery_id.clone(), addresses: vec![disconnect_address],
-        }, DeviceAction::Disconnect, Arc::clone(&stopped)).unwrap();
+        first
+            .request_action(
+                &peer_id,
+                OutboundPeer {
+                    discovery_id: second.discovery_id.clone(),
+                    addresses: vec![disconnect_address],
+                },
+                DeviceAction::Disconnect,
+                Arc::clone(&stopped),
+            )
+            .unwrap();
         disconnect_receiver.join().unwrap();
         wait_until(|| second.snapshot().actions.len() == 1);
         assert_eq!(first.snapshot().paired.len(), 1);
@@ -1523,11 +1745,17 @@ mod tests {
             assert_eq!(&marker, b"QDM1");
             sync_responder.accept_action(stream, sync_stop);
         });
-        first.retry_tombstone(OutboundPeer {
-            discovery_id: second.discovery_id.clone(), addresses: vec![sync_address],
-        }, Arc::clone(&stopped));
+        first.retry_tombstone(
+            OutboundPeer {
+                discovery_id: second.discovery_id.clone(),
+                addresses: vec![sync_address],
+            },
+            Arc::clone(&stopped),
+        );
         sync_receiver.join().unwrap();
-        wait_until(|| first.snapshot().revocations.is_empty() && second.snapshot().revocations.is_empty());
+        wait_until(|| {
+            first.snapshot().revocations.is_empty() && second.snapshot().revocations.is_empty()
+        });
         stopped.store(true, Ordering::Release);
     }
 
@@ -1568,17 +1796,25 @@ mod tests {
     fn authenticated_presence_expires_and_discovery_stop_clears_it() {
         let core = PairingCore::ephemeral("0123456789abcdef0123456789abcdef", "One");
         let peer = PairedDevice {
-            id: "a".repeat(64), discovery_id: "f".repeat(32),
-            name: "Two".to_string(), platform: "android".to_string(),
+            id: "a".repeat(64),
+            discovery_id: "f".repeat(32),
+            name: "Two".to_string(),
+            platform: "android".to_string(),
             relationship: Relationship::Connected,
         };
         core.save_new_pair(peer.clone()).unwrap();
         assert_eq!(core.snapshot().online, vec![peer.id.clone()]);
-        core.state.lock().unwrap().last_authenticated.insert(
-            peer.id.clone(), Instant::now() - PRESENCE_TTL,
-        );
+        core.state
+            .lock()
+            .unwrap()
+            .last_authenticated
+            .insert(peer.id.clone(), Instant::now() - PRESENCE_TTL);
         assert!(core.snapshot().online.is_empty());
-        core.state.lock().unwrap().last_authenticated.insert(peer.id, Instant::now());
+        core.state
+            .lock()
+            .unwrap()
+            .last_authenticated
+            .insert(peer.id, Instant::now());
         core.cancel_pending();
         assert!(core.snapshot().online.is_empty());
     }
@@ -1633,13 +1869,16 @@ mod tests {
     #[test]
     fn offline_disconnect_persists_a_revocation_until_authenticated_sync() {
         let profile = std::env::temp_dir().join(format!(
-            "qingtoolbox-device-revoke-test-{}", random_id().unwrap()
+            "qingtoolbox-device-revoke-test-{}",
+            random_id().unwrap()
         ));
         let id = "0123456789abcdef0123456789abcdef";
         let first = PairingCore::new(&profile, id, "First PC").unwrap();
         let peer = PairedDevice {
-            id: "a".repeat(64), discovery_id: "f".repeat(32),
-            name: "Second PC".to_string(), platform: "windows".to_string(),
+            id: "a".repeat(64),
+            discovery_id: "f".repeat(32),
+            name: "Second PC".to_string(),
+            platform: "windows".to_string(),
             relationship: Relationship::Connected,
         };
         first.save_new_pair(peer.clone()).unwrap();

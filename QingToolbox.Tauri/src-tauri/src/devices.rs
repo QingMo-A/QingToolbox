@@ -14,9 +14,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::device_pairing::{DeviceAction, ForwardedNotification, OutboundPeer, PairingCore, PairingSnapshot};
 #[cfg(test)]
 use crate::device_pairing::Relationship;
+use crate::device_pairing::{
+    DeviceAction, ForwardedNotification, OutboundPeer, PairingCore, PairingSnapshot,
+};
 use mdns_sd::{ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::Serialize;
 
@@ -87,11 +89,17 @@ pub struct DeviceManager {
 
 impl DeviceManager {
     pub fn is_enabled(&self) -> bool {
-        self.shared.lock().unwrap_or_else(|error| error.into_inner()).enabled
+        self.shared
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .enabled
     }
 
     pub fn take_notifications(&self) -> Vec<ForwardedNotification> {
-        self.pairing.as_ref().map(|core| core.take_notifications()).unwrap_or_default()
+        self.pairing
+            .as_ref()
+            .map(|core| core.take_notifications())
+            .unwrap_or_default()
     }
     pub fn new(profile: Option<&Path>) -> Self {
         let identity = profile
@@ -169,34 +177,63 @@ impl DeviceManager {
 
     pub fn transfer_target(&self, peer_id: &str) -> Result<TransferTarget, String> {
         let pairing = self.pairing.as_ref().map_err(Clone::clone)?.snapshot();
-        let peer = pairing.paired.iter().find(|peer| peer.id == peer_id)
+        let peer = pairing
+            .paired
+            .iter()
+            .find(|peer| peer.id == peer_id)
             .ok_or("设备未配对。")?;
         if !pairing.online.iter().any(|id| id == peer_id) {
             return Err("设备当前不在线。".to_string());
         }
-        let shared = self.shared.lock().unwrap_or_else(|error| error.into_inner());
-        let candidate = shared.candidates.values()
-            .find(|candidate| candidate.id == peer.discovery_id && candidate.platform == peer.platform)
+        let shared = self
+            .shared
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let candidate = shared
+            .candidates
+            .values()
+            .find(|candidate| {
+                candidate.id == peer.discovery_id && candidate.platform == peer.platform
+            })
             .ok_or("设备传输端点暂不可用。")?;
         Ok(TransferTarget {
             device_id: peer.discovery_id.clone(),
             platform: peer.platform.clone(),
-            addresses: candidate.addresses.iter().map(|address| address.ip().to_string()).collect(),
+            addresses: candidate
+                .addresses
+                .iter()
+                .map(|address| address.ip().to_string())
+                .collect(),
         })
     }
 
     /// Resolve an incoming legacy transfer socket against an authenticated,
     /// currently discoverable paired device. A name alone is never sufficient.
-    pub fn paired_transfer_peer(&self, platform: &str, device_id: Option<&str>, addresses: &[String]) -> Option<(String, String)> {
+    pub fn paired_transfer_peer(
+        &self,
+        platform: &str,
+        device_id: Option<&str>,
+        addresses: &[String],
+    ) -> Option<(String, String)> {
         let pairing = self.pairing.as_ref().ok()?.snapshot();
-        let matches = pairing.paired.iter().filter(|peer| {
-            peer.platform == platform && pairing.online.iter().any(|id| id == &peer.id) &&
-                (device_id.is_some_and(|id| id.eq_ignore_ascii_case(&peer.discovery_id)) ||
-                    device_id.is_none() && self.transfer_target(&peer.id).is_ok_and(|target| {
-                        target.addresses.iter().any(|address| addresses.iter().any(|incoming| same_ip(address, incoming)))
-                    }))
-        }).collect::<Vec<_>>();
-        if matches.len() != 1 { return None; }
+        let matches = pairing
+            .paired
+            .iter()
+            .filter(|peer| {
+                peer.platform == platform
+                    && pairing.online.iter().any(|id| id == &peer.id)
+                    && (device_id.is_some_and(|id| id.eq_ignore_ascii_case(&peer.discovery_id))
+                        || device_id.is_none()
+                            && self.transfer_target(&peer.id).is_ok_and(|target| {
+                                target.addresses.iter().any(|address| {
+                                    addresses.iter().any(|incoming| same_ip(address, incoming))
+                                })
+                            }))
+            })
+            .collect::<Vec<_>>();
+        if matches.len() != 1 {
+            return None;
+        }
         Some((matches[0].id.clone(), matches[0].name.clone()))
     }
 
@@ -208,7 +245,14 @@ impl DeviceManager {
     }
 
     pub fn set_relationship(&self, peer_id: &str, intimate: bool) -> Result<(), String> {
-        self.request_action(peer_id, if intimate { DeviceAction::Upgrade } else { DeviceAction::Demote })
+        self.request_action(
+            peer_id,
+            if intimate {
+                DeviceAction::Upgrade
+            } else {
+                DeviceAction::Demote
+            },
+        )
     }
 
     pub fn revoke_pairing(&self, peer_id: &str) -> Result<(), String> {
@@ -216,29 +260,55 @@ impl DeviceManager {
     }
 
     pub fn decide_action(&self, session_id: &str, approve: bool) -> Result<(), String> {
-        self.pairing.as_ref().map_err(Clone::clone)?.decide_action(session_id, approve)
+        self.pairing
+            .as_ref()
+            .map_err(Clone::clone)?
+            .decide_action(session_id, approve)
     }
 
     fn request_action(&self, peer_id: &str, action: DeviceAction) -> Result<(), String> {
         let core = self.pairing.as_ref().map_err(Clone::clone)?;
-        let peer = core.snapshot().paired.into_iter().find(|record| record.id == peer_id)
+        let peer = core
+            .snapshot()
+            .paired
+            .into_iter()
+            .find(|record| record.id == peer_id)
             .ok_or("设备未配对。")?;
-        let runtime = self.runtime.lock().unwrap_or_else(|error| error.into_inner());
-        let candidate = self.shared.lock().unwrap_or_else(|error| error.into_inner())
-            .candidates.values().find(|candidate| candidate.id == peer.discovery_id)
+        let runtime = self
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let candidate = self
+            .shared
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .candidates
+            .values()
+            .find(|candidate| candidate.id == peer.discovery_id)
             .cloned();
         let Some(active) = runtime.as_ref() else {
-            return if action == DeviceAction::Disconnect { core.revoke_offline(peer_id) }
-                else { Err("设备发现未开启。".to_string()) };
+            return if action == DeviceAction::Disconnect {
+                core.revoke_offline(peer_id)
+            } else {
+                Err("设备发现未开启。".to_string())
+            };
         };
         let Some(candidate) = candidate else {
-            return if action == DeviceAction::Disconnect { core.revoke_offline(peer_id) }
-                else { Err("对方目前不在线。".to_string()) };
+            return if action == DeviceAction::Disconnect {
+                core.revoke_offline(peer_id)
+            } else {
+                Err("对方目前不在线。".to_string())
+            };
         };
-        core.request_action(peer_id, OutboundPeer {
-            discovery_id: candidate.id,
-            addresses: candidate.addresses,
-        }, action, Arc::clone(&active.stop))
+        core.request_action(
+            peer_id,
+            OutboundPeer {
+                discovery_id: candidate.id,
+                addresses: candidate.addresses,
+            },
+            action,
+            Arc::clone(&active.stop),
+        )
     }
 
     pub fn set_enabled(&self, enabled: bool) -> DeviceSnapshot {
@@ -344,7 +414,9 @@ impl DeviceManager {
         let shared = Arc::clone(&self.shared);
         let own_id = id.clone();
         let browse_pairing = self.pairing.as_ref().ok().cloned();
-        let browse = thread::spawn(move || browse_loop(receiver, browse_stop, shared, own_id, browse_pairing));
+        let browse = thread::spawn(move || {
+            browse_loop(receiver, browse_stop, shared, own_id, browse_pairing)
+        });
         Ok(Runtime {
             daemon,
             fullname,
@@ -416,12 +488,19 @@ fn valid_id(value: &str) -> bool {
 }
 
 fn same_ip(first: &str, second: &str) -> bool {
-    let parse = |value: &str| value.split('%').next().and_then(|raw| raw.parse::<IpAddr>().ok());
+    let parse = |value: &str| {
+        value
+            .split('%')
+            .next()
+            .and_then(|raw| raw.parse::<IpAddr>().ok())
+    };
     match (parse(first), parse(second)) {
-        (Some(IpAddr::V6(value)), Some(other)) if value.to_ipv4_mapped().is_some() =>
-            Some(IpAddr::V4(value.to_ipv4_mapped().unwrap())) == Some(other),
-        (Some(first), Some(IpAddr::V6(value))) if value.to_ipv4_mapped().is_some() =>
-            Some(first) == Some(IpAddr::V4(value.to_ipv4_mapped().unwrap())),
+        (Some(IpAddr::V6(value)), Some(other)) if value.to_ipv4_mapped().is_some() => {
+            Some(IpAddr::V4(value.to_ipv4_mapped().unwrap())) == Some(other)
+        }
+        (Some(first), Some(IpAddr::V6(value))) if value.to_ipv4_mapped().is_some() => {
+            Some(first) == Some(IpAddr::V4(value.to_ipv4_mapped().unwrap()))
+        }
         (Some(first), Some(second)) => first == second,
         _ => false,
     }
@@ -501,7 +580,9 @@ fn browse_loop(
                             if state.candidates.len() < MAX_CANDIDATES
                                 || state.candidates.contains_key(&candidate.service_name)
                             {
-                                state.candidates.insert(candidate.service_name.clone(), candidate.clone());
+                                state
+                                    .candidates
+                                    .insert(candidate.service_name.clone(), candidate.clone());
                                 true
                             } else {
                                 false
@@ -552,14 +633,20 @@ fn browse_loop(
                         .candidates
                         .remove(&candidate.service_name);
                 } else if let Some(core) = &pairing {
-                    core.retry_tombstone(OutboundPeer {
-                        discovery_id: candidate.id.clone(),
-                        addresses: candidate.addresses.clone(),
-                    }, Arc::clone(&stop));
-                    core.probe_online(OutboundPeer {
-                        discovery_id: candidate.id.clone(),
-                        addresses: candidate.addresses.clone(),
-                    }, Arc::clone(&stop));
+                    core.retry_tombstone(
+                        OutboundPeer {
+                            discovery_id: candidate.id.clone(),
+                            addresses: candidate.addresses.clone(),
+                        },
+                        Arc::clone(&stop),
+                    );
+                    core.probe_online(
+                        OutboundPeer {
+                            discovery_id: candidate.id.clone(),
+                            addresses: candidate.addresses.clone(),
+                        },
+                        Arc::clone(&stop),
+                    );
                 }
             }
             last_recheck = Instant::now();
@@ -618,9 +705,7 @@ fn accept_loop(
 }
 
 fn probe(candidate: &Candidate) -> Option<SocketAddr> {
-    let Some(expected_id) = decode_id(&candidate.id) else {
-        return None;
-    };
+    let expected_id = decode_id(&candidate.id)?;
     for socket in &candidate.addresses {
         let Ok(mut stream) = TcpStream::connect_timeout(socket, PROBE_TIMEOUT) else {
             continue;

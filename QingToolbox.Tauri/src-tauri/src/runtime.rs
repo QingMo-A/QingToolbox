@@ -158,7 +158,9 @@ impl ModuleRuntimeManager {
             if let Some(device_id) = user_data_root()
                 .and_then(|root| fs::read_to_string(root.join("Devices").join("discovery-id")).ok())
                 .map(|value| value.trim().to_ascii_lowercase())
-                .filter(|value| value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+                .filter(|value| {
+                    value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
             {
                 command.env("QINGTOOLBOX_DEVICE_ID", device_id);
             }
