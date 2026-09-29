@@ -72,15 +72,20 @@ function Stop-WorkspaceTauriHosts {
     ) | ForEach-Object { [IO.Path]::GetFullPath($_) }
     $candidateSet = @{}
     foreach ($path in $candidatePaths) { $candidateSet[$path] = $true }
-    foreach ($process in @(Get-CimInstance Win32_Process | Where-Object {
-        $path = $_.ExecutablePath
-        if ([string]::IsNullOrWhiteSpace($path)) { return $false }
-        try { $candidateSet.ContainsKey([IO.Path]::GetFullPath($path)) }
+    # Querying Win32_Process can block for minutes when the local WMI provider
+    # is unhealthy. Get-Process exposes the executable path without depending
+    # on WMI and is sufficient because the candidate set contains exact paths.
+    foreach ($process in @(Get-Process | Where-Object {
+        try {
+            $path = $_.Path
+            -not [string]::IsNullOrWhiteSpace($path) -and
+                $candidateSet.ContainsKey([IO.Path]::GetFullPath($path))
+        }
         catch { $false }
     })) {
-        Write-Host "Stopping workspace Tauri host PID $($process.ProcessId) before rebuilding..."
-        & taskkill.exe /PID $process.ProcessId /T /F | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw "Failed to stop workspace Tauri host PID $($process.ProcessId)." }
+        Write-Host "Stopping workspace Tauri host PID $($process.Id) before rebuilding..."
+        & taskkill.exe /PID $process.Id /T /F | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "Failed to stop workspace Tauri host PID $($process.Id)." }
     }
 }
 
