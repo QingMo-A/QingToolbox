@@ -8,7 +8,7 @@
 
 宿主保持最小，工具按需以导入模块交付。
 
-[![Version](https://img.shields.io/badge/version-0.1.0--alpha-blue?style=flat-square)](#版本状态)
+[![Version](https://img.shields.io/badge/version-0.1.1--alpha-blue?style=flat-square)](#版本状态)
 [![License](https://img.shields.io/github/license/QingMo-A/QingToolbox?style=flat-square&color=green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](#项目简介)
 
@@ -17,7 +17,7 @@
 [![Material 3](https://img.shields.io/badge/Material%203-M3-757575?style=flat-square&logo=materialdesign&logoColor=white)](https://m3.material.io/)
 [![AGP](https://img.shields.io/badge/AGP-8.6.1-3DDC84?style=flat-square&logo=gradle&logoColor=white)](https://developer.android.com/build)
 
-[![Unit tests](https://img.shields.io/badge/unit%20tests-72%20passing-brightgreen?style=flat-square)](#测试)
+[![Unit tests](https://img.shields.io/badge/unit%20tests-79%20passing-brightgreen?style=flat-square)](#测试)
 [![Modules](https://img.shields.io/badge/modules-4%20official-8957E5?style=flat-square)](android_modules)
 [![Branch](https://img.shields.io/badge/branch-toolbox--android-lightgrey?style=flat-square)](https://github.com/QingMo-A/QingToolbox/tree/toolbox-android)
 
@@ -103,6 +103,20 @@ QingToolbox Android 是 QingToolbox 的移动端外壳，与 Windows 桌面宿�
 - 128 KB 缓冲区流式传输，完成后校验 SHA-256。
 - 传输过程支持进度与取消，接收文件可自动归入指定目录。
 
+**设备发现与配对**
+
+- 通过 mDNS 找到局域网内的对端；广告里解析出的端点还必须完成一次 nonce 绑定的非静默 TCP 探测才会进入列表，因此陈旧或伪造的广告不会显示出来。
+- 配对要求两端显示同一个 8 位码，并完成一次 Noise 握手才建立关系；码不匹配即中止。
+- 配对关系决定后续授权，不只是一个标记。目前只有**亲密**关系且平台为 Windows 的对端才会收到转发的通知。
+- 信任记录由 Android Keystore 包裹后落盘，不以明文保存。
+- 发现、配对与通知转发共用一个进程级会话，并以 owner 引用计数维持，因此在「设备」页与传输页之间来去不会中断在线状态。
+
+**通知转发**
+
+- 把本机通知转发的目标限定为已配对的亲密 Windows 设备；未配对或非亲密对端无论在附近与否都不会收到。
+- 通知读取权限由 Android 系统设置单独授予，**配对本身不隐含该权限**；未授权时「设备」页明确提示并给出跳转入口，而不是静默失败。
+- 分组摘要与常驻通知被跳过；标题与正文按上限截断。
+
 ## 架构总览
 
 ```text
@@ -124,6 +138,16 @@ QingTransfer（设备页）
 ├─ QingTransferProtocol            帧格式与元数据
 ├─ QingTransferConnection          连接、传输、SHA-256 校验
 └─ QingTransferEndpointProbe       nonce 绑定的端点探测
+
+设备会话（设备页）
+├─ DeviceDiscoverySession          进程级会话、owner 引用计数、通知转发入口
+├─ DeviceDiscoveryProtocol         mDNS 属性与候选端点格式
+├─ DevicePairingSession            8 位码配对、Noise 握手与授权
+├─ DevicePairingProtocol           配对帧格式
+├─ DevicePairingStore              Keystore 包裹的信任记录与撤销
+├─ DeviceLinkService               存在配对时的前台服务
+├─ DeviceHubScreen                 设备页界面
+└─ DeviceNotificationListener      系统通知读取与转发
 
 模块（每个 `.qmod` 一个 Web 页面）
 └─ 只能经由能力桥访问系统，且仅限清单已声明项
@@ -208,9 +232,9 @@ adb install -r app/build/outputs/apk/debug/build-<时间戳>.apk
 
 ## QingTransfer
 
-「设备」目的地运行 QingTransfer：两台 Android 设备之间的局域网文件传输会话。
+「设备」目的地承载两件事：**设备发现与配对**（见上方[功能特性](#功能特性)）以及 QingTransfer 的局域网文件传输会话。本节只说明传输。
 
-当前行为：
+传输的当前行为：
 
 - 设备通过 DNS-SD 在局域网内互相广告与发现，无服务器、无中继、无账号。
 - 连接由接收方确认后才开始传输。
@@ -218,7 +242,7 @@ adb install -r app/build/outputs/apk/debug/build-<时间戳>.apk
 - 传输过程提供进度与取消，接收文件可自动归入选定目录。
 - 接收偏好（默认目录、是否自动接收）保存在本机，并做可写性检查。
 
-协议中带有平台字段，取值接受 `windows` 与 `android`，但**目前只实现了 Android 一端**。尚不存在 Windows 端点，因此 Android↔Windows 或 Windows↔Windows 传输**当前不可用**。
+协议中带有平台字段，取值接受 `windows` 与 `android`。Android↔Android 传输可用；**Android 与 Windows 之间的文件传输当前不可用**，因为传输的 Windows 端仍未接通。设备发现、配对与通知转发不受此限制：Android 可以与已配对的 Windows 电脑互认身份并把本机通知转发过去。
 
 ## 项目结构
 
@@ -275,8 +299,8 @@ gradle :app:testDebugUnitTest
 
 | 项目 | 值 |
 | --- | --- |
-| 版本名 | `0.1.0-alpha` |
-| 版本号 | `1` |
+| 版本名 | `0.1.1-alpha` |
+| 版本号 | `2` |
 | minSdk / targetSdk | 26 / 35 |
 | compileSdk | 35 |
 | 分发方式 | 侧载 APK（**不上架应用商店**） |
@@ -290,12 +314,16 @@ gradle :app:testDebugUnitTest
 - 离线 Web 模块运行时、资源供给与能力桥
 - 七套外观主题与中英双语
 - 两台 Android 设备间的 QingTransfer：发现、确认、流式传输、SHA-256 校验、进度与取消
+- 局域网设备发现与配对：mDNS 发现，配对要求两端显示同一个 8 位码并完成 Noise 握手，信任记录由 Android Keystore 包裹后落盘
+- 把本机通知转发到已配对的亲密 Windows 设备；通知读取权限由系统设置单独授予，配对本身不隐含该权限
+- 存在配对关系时以前台服务维持设备会话，进出「设备」页与传输页不会中断在线状态
 
 **尚未实现**
 
-- QingTransfer 的 Windows 端点——因此跨平台传输当前不可用
+- QingTransfer 的 Windows 端点——通知可以转发到电脑，但 Android↔Windows 的**文件传输**当前不可用
 - 原生（进程外 DEX）模块通道
-- 模块更新、云端或账号同步、后台服务、远程控制
+- 模块更新、云端或账号同步、远程控制
+- 通知转发的开机自启：当前只在 App 启动时检查配对并起前台服务
 - Root 或 hook 框架类能力
 
 ## 文档地图
@@ -305,6 +333,7 @@ gradle :app:testDebugUnitTest
 | [`QingToolbox.Android/README.md`](QingToolbox.Android/README.md) | 当前 | Android 宿主详细说明：文件职责、构建步骤、测试明细。 |
 | [`QingToolbox.Android/docs/MOBILE_MODULE_RUNTIME.md`](QingToolbox.Android/docs/MOBILE_MODULE_RUNTIME.md) | 当前 | 移动端模块运行时：离线资源供给、能力桥边界、主题注入。 |
 | [`android_modules/README.md`](android_modules/README.md) | 当前 | 官方 Android 模块包清单、导入步骤与校验方式。 |
+| [`docs/releases/`](docs/releases/) | 当前 | 逐版本发布说明；Android 构建见 [`android-0.1.1-alpha.md`](docs/releases/android-0.1.1-alpha.md)。 |
 | [`docs/WINDOWS_HOST_NOTES.md`](docs/WINDOWS_HOST_NOTES.md) | 归档 | Windows 宿主技术说明。**不要**作为 Android 开发依据。 |
 | [`plans/README.md`](plans/README.md) | 当前 | 编号实现计划索引，含移动端壳层路线。 |
 

@@ -2,7 +2,29 @@
 
 ## Unreleased
 
-### Android shell
+Nothing is pending; the Android shell work below shipped in `0.1.1-alpha`.
+
+## 0.1.1-alpha - 2026-09-29
+
+The Android shell moves from `0.1.0-alpha` to `0.1.1-alpha` (versionCode 2), and this is the first Android build published as a Release. The APK is debug-signed and sideloaded; it is not code-signed and is not submitted to any app store.
+
+### Devices
+
+- Added local-network device discovery. Peers are found over mDNS, and an endpoint resolved from an advertisement must still answer a nonce-bound, non-silent TCP probe before it is listed, so a stale or forged advertisement never reaches the devices page.
+- Added pairing. Both sides must show the same eight-digit code and complete a Noise handshake before a relationship exists, and the relationship decides later authorisation rather than acting as a label.
+- Added notification forwarding from this device to a paired **Intimate** Windows peer. Notification access is granted by Android's settings and is deliberately **not** implied by pairing; the devices page says so instead of failing silently.
+- Wrapped trust records with the Android Keystore before writing them; they are never stored in clear text.
+- Made discovery, pairing and forwarding share one process-wide session kept alive by owner reference counting, so the foreground service stays online while the devices page and the transfer page come and go.
+
+### Shell and appearance
+
+- Added the Brushed Metal and Aurora appearances, for seven presets in total.
+- Gave the settings page a section structure instead of three bare rows.
+- Moved the transfer actions into the top bar and squared off the bars.
+- Fixed a light inner rectangle appearing inside gradient buttons: replacing a control's fill with a gradient must also replace the ink, because Material's `onPrimary` only names the ink for a `primary` fill.
+- Fixed the crash on launch and the delay when switching destinations.
+
+### Modules
 
 - Added the Android module runtime: `.qmod` packages are imported through the system file picker, verified, and stored in app-private storage. Importing copies a module; it never runs it. Loading, unloading and deleting are separate actions on the module page.
 - Added a capability bridge as the only path from a module to Android. A module declares what it needs in its manifest; undeclared calls are refused, and every request to a host other than the module's own package is refused so a module is offline by construction.
