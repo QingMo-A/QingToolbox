@@ -9,6 +9,7 @@ import QModal from '../design-system/components/QModal.vue'
 import QModalLabel from '../design-system/components/QModalLabel.vue'
 import { useLocalization } from '../localization/localization'
 import { TauriTransport } from '../bridge/transport/TauriTransport'
+import DeviceReceiveSettings from './DeviceReceiveSettings.vue'
 
 type DeviceGroup = 'intimate' | 'connected'
 type NearbyDevice = { id: string; name: string; platform: 'windows' | 'android'; status: 'Unverified' }
@@ -25,6 +26,7 @@ const acknowledgedDeviceNotices = new Set<string>()
 const app = useAppStore()
 const { t } = useLocalization()
 const selectedGroup = ref<DeviceGroup>('intimate')
+const receiveSettingsOpen = ref(false)
 const pairedScroll = ref<HTMLElement | null>(null)
 const groups: DeviceGroup[] = ['intimate', 'connected']
 const deviceName = computed(() => app.snapshot?.deviceName?.trim() || null)
@@ -148,6 +150,9 @@ function onTabKeydown(event: KeyboardEvent, group: DeviceGroup) {
   selectGroup(groups[index])
   void nextTick(() => document.getElementById(`device-tab-${selectedGroup.value}`)?.focus())
 }
+function openTransfer(device: PairedDevice) {
+  window.dispatchEvent(new CustomEvent('qing:open-device-transfer', { detail: { id: device.id, name: device.name } }))
+}
 </script>
 
 <template>
@@ -158,6 +163,7 @@ function onTabKeydown(event: KeyboardEvent, group: DeviceGroup) {
           <span class="devices-eyebrow">QINGTRANSFER</span>
           <h1>{{ t('devices.page.title') }}</h1>
         </div>
+        <QButton @click="receiveSettingsOpen = true">{{ t('devices.transfer.receiveSettings') }}</QButton>
       </header>
 
       <div class="devices-upper">
@@ -211,6 +217,7 @@ function onTabKeydown(event: KeyboardEvent, group: DeviceGroup) {
                       {{ t(selectedGroup === 'intimate' ? 'devices.pairing.demote' : 'devices.pairing.promote') }}
                     </button>
                     <button class="devices-small-action devices-revoke" type="button" :disabled="Boolean(actionBusy)" @click="deviceAction('revoke_device_pairing', { peerId: device.id }, device.id)">{{ t('devices.pairing.revoke') }}</button>
+                    <button class="devices-small-action devices-transfer-action" type="button" :disabled="!onlineIds.has(device.id)" :title="t('devices.transfer.action')" :aria-label="t('devices.transfer.action')" @click="openTransfer(device)"><QIcon name="folder" :size="17" /></button>
                   </div>
                 </template>
                 <template v-else>
@@ -246,6 +253,7 @@ function onTabKeydown(event: KeyboardEvent, group: DeviceGroup) {
       </section>
     </div>
   </QPage>
+  <DeviceReceiveSettings v-if="receiveSettingsOpen" @close="receiveSettingsOpen = false" />
   <QModal :open="dialogKind === 'pair'" :title="currentPair ? t(currentPair.incoming ? 'devices.pairing.incoming' : 'devices.pairing.outgoing') : ''" :busy="Boolean(currentPair?.localApproved || actionBusy)" :close-label="t('devices.pairing.reject')" @close="closeDialog">
     <QModalLabel>{{ currentPair?.name }}</QModalLabel>
     <QModalLabel>{{ t('devices.pairing.compare') }}</QModalLabel>
@@ -282,7 +290,7 @@ function onTabKeydown(event: KeyboardEvent, group: DeviceGroup) {
 <style scoped>
 .devices-page { padding: 32px 34px; }
 .devices-workspace { width: min(100%, 1080px); margin: 0 auto; }
-.devices-heading { margin-bottom: 25px; animation: devices-enter 420ms both; }
+.devices-heading { display:flex;align-items:end;justify-content:space-between;gap:14px;margin-bottom: 25px; animation: devices-enter 420ms both; }
 .devices-eyebrow { color: var(--q-brand); font-size: 11px; font-weight: 750; letter-spacing: .13em; }
 .devices-heading h1 { margin: 6px 0 0; font-size: clamp(27px, 3vw, 34px); letter-spacing: -.035em; }
 .devices-upper { display: grid; grid-template-columns: minmax(260px, .82fr) minmax(0, 1.55fr); gap: 18px; align-items: stretch; }
@@ -326,6 +334,7 @@ function onTabKeydown(event: KeyboardEvent, group: DeviceGroup) {
 .devices-pair-error { margin: 10px 16px; color: #d13b49; font-size: 12px; }
 .devices-small-action { flex: 0 0 auto; border: 1px solid var(--q-border); border-radius: 8px; padding: 6px 9px; background: var(--q-surface); color: var(--q-brand); font-size: 11px; font-weight: 650; cursor: pointer; }
 .devices-small-action:hover { border-color: var(--q-brand); }
+.devices-transfer-action { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; }
 .devices-small-action:disabled { opacity: .5; cursor: wait; }
 .devices-revoke { color: var(--q-text-2); }
 .devices-nearby-item { display: flex; align-items: center; gap: 12px; min-height: 66px; padding: 9px 12px; border-bottom: 1px solid var(--q-border); animation: devices-enter 240ms both; }

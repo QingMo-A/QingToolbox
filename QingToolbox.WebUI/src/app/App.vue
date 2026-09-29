@@ -15,6 +15,8 @@ import { routeTitleKeyByPath } from './router'
 import { applyFontPresentation } from '../presentation/fontPresentation'
 import QTitleBar from '../design-system/components/QTitleBar.vue'
 import { TauriTransport } from '../bridge/transport/TauriTransport'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import DeviceTransferPanel from '../pages/DeviceTransferPanel.vue'
 
 const nativeTitleBar = TauriTransport.isAvailable()
 
@@ -24,6 +26,12 @@ const app = useAppStore()
 const settings = useSettingsStore()
 const client = inject<SettingsClient>('settingsClient')!
 const commandPaletteOpen = ref(false)
+const transferRequest = ref<{ device: { id: string; name: string }; incoming: boolean } | null>(null)
+let unlistenTransfer: UnlistenFn | null = null
+function openDeviceTransfer(event: Event) {
+  const device = (event as CustomEvent<{ id: string; name: string }>).detail
+  if (device?.id && device.name) transferRequest.value = { device, incoming: false }
+}
 const route = useRoute()
 const router = useRouter()
 const { currentLocale, t } = useLocalization()
@@ -44,8 +52,16 @@ onMounted(() => {
   theme.set(theme.mode)
   appearance.set(appearance.id)
   window.addEventListener('keydown', onGlobalKeydown)
+  window.addEventListener('qing:open-device-transfer', openDeviceTransfer)
+  if (nativeTitleBar) void listen<{ id: string; name: string }>('qing:incoming-device-file', event => {
+    if (event.payload?.id && event.payload.name) transferRequest.value = { device: event.payload, incoming: true }
+  }).then(unlisten => { unlistenTransfer = unlisten })
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('qing:open-device-transfer', openDeviceTransfer)
+  unlistenTransfer?.()
+})
 watch(() => app.bridge, bridge => {
   if (bridge === 'Connected' && settings.status === 'idle') void loadSettings()
 }, { immediate: true })
@@ -80,6 +96,7 @@ watchEffect(() => {
   </QSidebarLayout>
   </div>
   <QCommandPalette :open="commandPaletteOpen" @close="commandPaletteOpen = false" />
+  <DeviceTransferPanel v-if="transferRequest" :key="`${transferRequest.device.id}:${transferRequest.incoming}`" :device="transferRequest.device" :incoming="transferRequest.incoming" @close="transferRequest = null" />
   <QToast />
 </template>
 <style>

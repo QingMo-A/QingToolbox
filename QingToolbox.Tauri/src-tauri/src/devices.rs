@@ -68,6 +68,14 @@ struct NearbyDevice {
     status: &'static str,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferTarget {
+    pub device_id: String,
+    pub platform: String,
+    pub addresses: Vec<String>,
+}
+
 pub struct DeviceManager {
     identity: Result<String, String>,
     name: String,
@@ -78,6 +86,10 @@ pub struct DeviceManager {
 }
 
 impl DeviceManager {
+    pub fn is_enabled(&self) -> bool {
+        self.shared.lock().unwrap_or_else(|error| error.into_inner()).enabled
+    }
+
     pub fn take_notifications(&self) -> Vec<ForwardedNotification> {
         self.pairing.as_ref().map(|core| core.take_notifications()).unwrap_or_default()
     }
@@ -153,6 +165,39 @@ impl DeviceManager {
             },
             Arc::clone(&active.stop),
         )
+    }
+
+    pub fn transfer_target(&self, peer_id: &str) -> Result<TransferTarget, String> {
+        let pairing = self.pairing.as_ref().map_err(Clone::clone)?.snapshot();
+        let peer = pairing.paired.iter().find(|peer| peer.id == peer_id)
+            .ok_or("设备未配对。")?;
+        if !pairing.online.iter().any(|id| id == peer_id) {
+            return Err("设备当前不在线。".to_string());
+        }
+        let shared = self.shared.lock().unwrap_or_else(|error| error.into_inner());
+        let candidate = shared.candidates.values()
+            .find(|candidate| candidate.id == peer.discovery_id && candidate.platform == peer.platform)
+            .ok_or("设备传输端点暂不可用。")?;
+        Ok(TransferTarget {
+            device_id: peer.discovery_id.clone(),
+            platform: peer.platform.clone(),
+            addresses: candidate.addresses.iter().map(|address| address.ip().to_string()).collect(),
+        })
+    }
+
+    /// Resolve an incoming legacy transfer socket against an authenticated,
+    /// currently discoverable paired device. A name alone is never sufficient.
+    pub fn paired_transfer_peer(&self, platform: &str, device_id: Option<&str>, addresses: &[String]) -> Option<(String, String)> {
+        let pairing = self.pairing.as_ref().ok()?.snapshot();
+        let matches = pairing.paired.iter().filter(|peer| {
+            peer.platform == platform && pairing.online.iter().any(|id| id == &peer.id) &&
+                (device_id.is_some_and(|id| id.eq_ignore_ascii_case(&peer.discovery_id)) ||
+                    device_id.is_none() && self.transfer_target(&peer.id).is_ok_and(|target| {
+                        target.addresses.iter().any(|address| addresses.iter().any(|incoming| same_ip(address, incoming)))
+                    }))
+        }).collect::<Vec<_>>();
+        if matches.len() != 1 { return None; }
+        Some((matches[0].id.clone(), matches[0].name.clone()))
     }
 
     pub fn decide_pairing(&self, session_id: &str, approve: bool) -> Result<(), String> {
@@ -368,6 +413,18 @@ fn load_or_create_identity(profile: &Path) -> Result<String, String> {
 
 fn valid_id(value: &str) -> bool {
     value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn same_ip(first: &str, second: &str) -> bool {
+    let parse = |value: &str| value.split('%').next().and_then(|raw| raw.parse::<IpAddr>().ok());
+    match (parse(first), parse(second)) {
+        (Some(IpAddr::V6(value)), Some(other)) if value.to_ipv4_mapped().is_some() =>
+            Some(IpAddr::V4(value.to_ipv4_mapped().unwrap())) == Some(other),
+        (Some(first), Some(IpAddr::V6(value))) if value.to_ipv4_mapped().is_some() =>
+            Some(first) == Some(IpAddr::V4(value.to_ipv4_mapped().unwrap())),
+        (Some(first), Some(second)) => first == second,
+        _ => false,
+    }
 }
 
 fn safe_name(value: &str) -> String {

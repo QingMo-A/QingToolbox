@@ -57,6 +57,7 @@ const MODULE_STATE_CHANGED_EVENT: &str = "qmod:module-state-changed";
 const DEFAULT_LAUNCHER_HOTKEY: &str = "Ctrl+Alt+L";
 const FLOATING_BADGE_WINDOW_LABEL: &str = "floating-badge";
 const INFO_POPUP_WINDOW_LABEL: &str = "info-popup";
+const DEVICE_TRANSFER_MODULE_ID: &str = "qing.qingtransfer";
 
 #[derive(Default)]
 struct InfoPopupQueue {
@@ -3064,6 +3065,58 @@ fn start_info_popup_pump(app: tauri::AppHandle) {
     });
 }
 
+fn start_device_transfer_pump(app: tauri::AppHandle) {
+    thread::spawn(move || {
+        let mut pending_offer: Option<(String, String, u64, std::time::Instant)> = None;
+        let mut announced = false;
+        let mut last_announcement: Option<std::time::Instant> = None;
+        loop {
+            thread::sleep(Duration::from_millis(500));
+            let state = app.state::<HostState>();
+            if !state.devices.is_enabled() { pending_offer = None; announced = false; last_announcement = None; continue; }
+            let record = state.module_index.lock().ok()
+                .and_then(|index| index.get(DEVICE_TRANSFER_MODULE_ID).cloned());
+            let Some(record) = record else { continue };
+            let snapshot = state.runtime.lock().ok().and_then(|mut runtime|
+                runtime.invoke(DEVICE_TRANSFER_MODULE_ID, &record, "getState", serde_json::json!({})).ok());
+            let Some(snapshot) = snapshot else { continue };
+            let session = &snapshot["session"];
+            let platform = session["peer"]["platform"].as_str().unwrap_or_default();
+            let device_id = session["peer"]["deviceId"].as_str();
+            let addresses = session["peer"]["addresses"].as_array().map(|items| items.iter()
+                .filter_map(|item| item.as_str().map(str::to_string)).collect::<Vec<_>>())
+                .unwrap_or_default();
+            let trusted = state.devices.paired_transfer_peer(platform, device_id, &addresses);
+            if session["state"] == "WaitingApproval" {
+                let method = if trusted.is_some() { "acceptIncomingConnection" } else { "rejectIncomingConnection" };
+                if let Ok(mut runtime) = state.runtime.lock() {
+                    let _ = runtime.invoke(DEVICE_TRANSFER_MODULE_ID, &record, method, serde_json::json!({}));
+                }
+                continue;
+            }
+            let offer = &snapshot["incomingFile"];
+            let Some((peer_id, peer_name)) = trusted else { pending_offer = None; announced = false; last_announcement = None; continue };
+            let Some(file_name) = offer["name"].as_str() else { pending_offer = None; announced = false; last_announcement = None; continue };
+            let size = offer["size"].as_u64().unwrap_or_default();
+            let same_offer = pending_offer.as_ref().is_some_and(|(id, name, length, _)|
+                id == &peer_id && name == file_name && *length == size);
+            if !same_offer {
+                pending_offer = Some((peer_id.clone(), file_name.to_string(), size, std::time::Instant::now()));
+                announced = false;
+                last_announcement = None;
+            }
+            if pending_offer.as_ref().is_some_and(|(_, _, _, since)| since.elapsed() >= Duration::from_millis(800)) &&
+                (!announced || last_announcement.is_some_and(|at| at.elapsed() >= Duration::from_secs(3))) {
+                if !announced { show_main_window(&app); }
+                let _ = app.emit_to(EventTarget::webview_window("main"), "qing:incoming-device-file",
+                    serde_json::json!({ "id": peer_id, "name": peer_name }));
+                announced = true;
+                last_announcement = Some(std::time::Instant::now());
+            }
+        }
+    });
+}
+
 fn present_info_popup(app: tauri::AppHandle) {
     let generation = app.state::<HostState>().info_popup_move_generation.fetch_add(1, Ordering::AcqRel) + 1;
     thread::spawn(move || {
@@ -3123,7 +3176,9 @@ fn set_devices_discovery_enabled(
     enabled: bool,
 ) -> Result<devices::DeviceSnapshot, CommandError> {
     ensure_main_window(&window)?;
-    Ok(state.devices.set_enabled(enabled))
+    let snapshot = state.devices.set_enabled(enabled);
+    sync_device_transfer_runtime(&state);
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -3131,6 +3186,13 @@ fn request_device_pairing(window: WebviewWindow, state: State<'_, HostState>, de
     ensure_main_window(&window)?;
     state.devices.request_pairing(&device_id).map_err(|message| CommandError { code: "devicePairingFailed", message })?;
     Ok(state.devices.snapshot())
+}
+
+#[tauri::command]
+fn get_device_transfer_target(window: WebviewWindow, state: State<'_, HostState>, peer_id: String) -> Result<devices::TransferTarget, CommandError> {
+    ensure_main_window(&window)?;
+    state.devices.transfer_target(&peer_id)
+        .map_err(|message| CommandError { code: "deviceTransferUnavailable", message })
 }
 
 #[tauri::command]
@@ -3270,13 +3332,15 @@ pub fn run() {
             select_screenpin_region,
             control_screenpin_window,
             get_module_runtime,
-            get_all_module_runtime
+            get_all_module_runtime,
+            get_device_transfer_target
         ])
         .setup(|app| {
             app.state::<HostState>().devices.restore_enabled();
             start_info_popup_pump(app.handle().clone());
             start_runtime_supervisor(app.handle().clone());
             start_authorized_modules(app.handle(), &app.state::<HostState>());
+            start_device_transfer_pump(app.handle().clone());
             record_log(
                 &app.state::<HostState>(),
                 "Information",
@@ -3697,6 +3761,7 @@ fn start_authorized_modules<R: tauri::Runtime>(app: &tauri::AppHandle<R>, state:
     }
     drop(runtime);
     drop(index);
+    sync_device_transfer_runtime(state);
     if let Some(record) = launcher_record {
         let requested = launcher_hotkey_from_state(state, launcher_overlay::MODULE_ID, &record)
             .unwrap_or_else(|| DEFAULT_LAUNCHER_HOTKEY.to_string());
@@ -3716,6 +3781,18 @@ fn start_authorized_modules<R: tauri::Runtime>(app: &tauri::AppHandle<R>, state:
         "Runtime",
         format!("Startup authorization processed: {started} started, {failed} failed."),
     );
+}
+
+fn sync_device_transfer_runtime(state: &HostState) {
+    let record = state.module_index.lock().ok()
+        .and_then(|index| index.get(DEVICE_TRANSFER_MODULE_ID).cloned());
+    let Some(record) = record else { return };
+    let enabled = state.devices.is_enabled();
+    if let Ok(mut runtime) = state.runtime.lock() {
+        if runtime.start(DEVICE_TRANSFER_MODULE_ID, &record).is_ok() {
+            let _ = runtime.set_active(DEVICE_TRANSFER_MODULE_ID, enabled);
+        }
+    }
 }
 
 fn stop_all_modules<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
