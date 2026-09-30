@@ -37,6 +37,8 @@ const TAURI_MARKER_INSTALL_KIND: &str = "tauri-production";
 const TAURI_MARKER_CONTRACT_VERSION: &str = "1";
 const TAURI_EXECUTABLE_NAME: &str = "QingToolbox.exe";
 const TAURI_MANIFEST_NAME: &str = "portable-manifest.json";
+const UPDATE_HANDOFF_TOKEN_VALUE: &str = "UpdateHandoffToken";
+pub const UPDATE_HANDOFF_ARGUMENT_PREFIX: &str = "--qing-update-shutdown=";
 
 /// The host-update contract is intentionally backend-owned. The Vue shell
 /// receives this projection and never receives a release download URL or
@@ -65,6 +67,29 @@ pub struct HostUpdateSnapshot {
 }
 
 impl HostUpdateSnapshot {
+    pub fn ready(current_version: impl Into<String>, generated_at: impl Into<String>) -> Self {
+        Self {
+            generated_at: generated_at.into(),
+            state: "NotChecked".to_string(),
+            current_version: current_version.into(),
+            latest_version: String::new(),
+            published_at: String::new(),
+            last_checked: String::new(),
+            summary: "可以检查 QingToolbox 官方更新。".to_string(),
+            show_banner: false,
+            download_state: "NotDownloaded".to_string(),
+            bytes_received: 0,
+            expected_bytes: 0,
+            download_error: String::new(),
+            can_check: true,
+            can_download: false,
+            can_cancel_download: false,
+            can_install: false,
+            installation_supported: false,
+            install_message: String::new(),
+        }
+    }
+
     pub fn unavailable(
         current_version: impl Into<String>,
         generated_at: impl Into<String>,
@@ -76,7 +101,7 @@ impl HostUpdateSnapshot {
             latest_version: String::new(),
             published_at: String::new(),
             last_checked: String::new(),
-            summary: "Tauri updater integration is not enabled yet.".to_string(),
+            summary: "当前环境已禁用工具箱更新。".to_string(),
             show_banner: false,
             download_state: "DisabledByEnvironment".to_string(),
             bytes_received: 0,
@@ -101,6 +126,14 @@ pub struct HostUpdateState {
 
 impl HostUpdateState {
     pub fn new(current_version: impl Into<String>, generated_at: impl Into<String>) -> Self {
+        Self {
+            snapshot: HostUpdateSnapshot::ready(current_version, generated_at),
+            generation: 0,
+            release: None,
+        }
+    }
+
+    pub fn disabled(current_version: impl Into<String>, generated_at: impl Into<String>) -> Self {
         Self {
             snapshot: HostUpdateSnapshot::unavailable(current_version, generated_at),
             generation: 0,
@@ -158,7 +191,7 @@ impl HostUpdateState {
         self.snapshot.bytes_received = 0;
         self.snapshot.expected_bytes = 0;
         self.snapshot.download_error.clear();
-        self.snapshot.install_message = "更新下载由 Rust 宿主负责，安装交接尚未启用。".to_string();
+        self.snapshot.install_message.clear();
 
         match result {
             Ok(Some(release)) => {
@@ -170,6 +203,9 @@ impl HostUpdateState {
                 } else {
                     release.summary.clone()
                 };
+                self.snapshot.install_message =
+                    "可由工具箱下载、校验并覆盖安装此版本。".to_string();
+                self.snapshot.show_banner = true;
                 self.snapshot.can_download = true;
                 self.release = Some(release);
             }
@@ -951,6 +987,118 @@ pub fn prepare_installer_for_handoff(
     }
 }
 
+/// Generate a one-session token used only by the installed Inno Setup package
+/// to ask the already-running host to shut down cleanly. The token is not an
+/// authorization boundary for installation; the installer is independently
+/// verified before handoff. It prevents accidental or stale secondary-instance
+/// arguments from closing the host.
+pub fn new_update_handoff_token() -> Option<String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).ok()?;
+    Some(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+pub fn update_handoff_token_from_args(args: &[String]) -> Option<&str> {
+    let mut tokens = args
+        .iter()
+        .filter_map(|arg| arg.strip_prefix(UPDATE_HANDOFF_ARGUMENT_PREFIX));
+    let token = tokens.next()?;
+    if tokens.next().is_some() || !valid_update_handoff_token(token) {
+        return None;
+    }
+    Some(token)
+}
+
+pub fn update_handoff_token_matches(expected: &str, actual: &str) -> bool {
+    if !valid_update_handoff_token(expected) || !valid_update_handoff_token(actual) {
+        return false;
+    }
+    expected
+        .as_bytes()
+        .iter()
+        .zip(actual.as_bytes())
+        .fold(0u8, |difference, (left, right)| difference | (left ^ right))
+        == 0
+}
+
+#[cfg(windows)]
+pub fn registered_update_handoff_token_matches(actual: &str) -> bool {
+    if !valid_update_handoff_token(actual) {
+        return false;
+    }
+    registry_string(TAURI_MARKER_KEY, UPDATE_HANDOFF_TOKEN_VALUE)
+        .ok()
+        .is_some_and(|expected| update_handoff_token_matches(expected.trim(), actual))
+}
+
+#[cfg(not(windows))]
+pub fn registered_update_handoff_token_matches(_actual: &str) -> bool {
+    false
+}
+
+fn valid_update_handoff_token(token: &str) -> bool {
+    token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+#[cfg(windows)]
+pub fn publish_update_handoff_token(token: &str) -> bool {
+    use std::ffi::c_void;
+    use windows_sys::Win32::{
+        Foundation::ERROR_SUCCESS,
+        System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ},
+    };
+
+    if !valid_update_handoff_token(token) {
+        return false;
+    }
+    let key = wide_registry_text(TAURI_MARKER_KEY);
+    let value = wide_registry_text(UPDATE_HANDOFF_TOKEN_VALUE);
+    let data = wide_registry_text(token);
+    unsafe {
+        RegSetKeyValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            REG_SZ,
+            data.as_ptr() as *const c_void,
+            (data.len() * std::mem::size_of::<u16>()) as u32,
+        ) == ERROR_SUCCESS
+    }
+}
+
+#[cfg(not(windows))]
+pub fn publish_update_handoff_token(_token: &str) -> bool {
+    false
+}
+
+#[cfg(windows)]
+pub fn clear_update_handoff_token(expected: &str) {
+    use windows_sys::Win32::System::Registry::{RegDeleteKeyValueW, HKEY_CURRENT_USER};
+
+    if !valid_update_handoff_token(expected) {
+        return;
+    }
+    let Ok(current) = registry_string(TAURI_MARKER_KEY, UPDATE_HANDOFF_TOKEN_VALUE) else {
+        return;
+    };
+    if !update_handoff_token_matches(expected, current.trim()) {
+        return;
+    }
+    let key = wide_registry_text(TAURI_MARKER_KEY);
+    let value = wide_registry_text(UPDATE_HANDOFF_TOKEN_VALUE);
+    unsafe {
+        RegDeleteKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), value.as_ptr());
+    }
+}
+
+#[cfg(not(windows))]
+pub fn clear_update_handoff_token(_expected: &str) {}
+
+#[cfg(windows)]
+fn wide_registry_text(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
 #[cfg(windows)]
 pub fn is_supported_tauri_production_installation() -> bool {
     verify_installed_tauri_production().is_ok()
@@ -1113,8 +1261,16 @@ pub fn launch_installer(installer: &Path) -> Result<(), InstallFailure> {
     if installer.extension().and_then(|value| value.to_str()) != Some("exe") {
         return Err(InstallFailure::InstallerLaunchFailed);
     }
+    let host_pid = format!("/QINGHOSTPID={}", std::process::id());
     std::process::Command::new(installer)
-        .args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOICONS"])
+        .args([
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            "/NOICONS",
+            "/QINGRELAUNCH=1",
+            host_pid.as_str(),
+        ])
         .current_dir(
             installer
                 .parent()
@@ -1720,8 +1876,9 @@ mod tests {
     use super::{
         cache_paths, download_official_release, is_running_version, is_true_unc_path,
         parse_releases, parse_sidecar, parse_version, select_best_release,
-        validate_release_for_handoff, verify_cached, DownloadFailure, HostUpdateSnapshot,
-        HostUpdateState, InstallFailure,
+        update_handoff_token_from_args, update_handoff_token_matches, validate_release_for_handoff,
+        verify_cached, DownloadFailure, HostUpdateSnapshot, HostUpdateState, InstallFailure,
+        UPDATE_HANDOFF_ARGUMENT_PREFIX,
     };
     use std::{
         fs,
@@ -1808,6 +1965,40 @@ mod tests {
     }
 
     #[test]
+    fn enabled_snapshot_allows_the_first_release_check() {
+        let snapshot = HostUpdateState::new("0.3.2-alpha", "initial").snapshot();
+        assert_eq!(snapshot.state, "NotChecked");
+        assert_eq!(snapshot.download_state, "NotDownloaded");
+        assert!(snapshot.can_check);
+        assert!(!snapshot.can_download);
+        assert!(!snapshot.can_install);
+    }
+
+    #[test]
+    fn update_handoff_requires_one_exact_random_token_argument() {
+        let token = "0123456789abcdef".repeat(4);
+        let args = vec![
+            "QingToolbox.exe".to_string(),
+            format!("{UPDATE_HANDOFF_ARGUMENT_PREFIX}{token}"),
+        ];
+        assert_eq!(update_handoff_token_from_args(&args), Some(token.as_str()));
+        assert!(update_handoff_token_matches(&token, &token));
+
+        let wrong = format!("{}0", &token[..63]);
+        assert!(!update_handoff_token_matches(&token, &wrong));
+        assert!(update_handoff_token_from_args(&[
+            format!("{UPDATE_HANDOFF_ARGUMENT_PREFIX}{token}"),
+            format!("{UPDATE_HANDOFF_ARGUMENT_PREFIX}{token}"),
+        ])
+        .is_none());
+        assert!(update_handoff_token_from_args(&[
+            "QingToolbox.exe".to_string(),
+            format!("{UPDATE_HANDOFF_ARGUMENT_PREFIX}../invalid"),
+        ])
+        .is_none());
+    }
+
+    #[test]
     fn checksum_sidecar_requires_exact_installer_name_and_sha256() {
         let name = "QingToolbox-0.2.10-alpha-win-x64-tauri-setup.exe";
         let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -1827,7 +2018,9 @@ mod tests {
         let records = parse_releases(RELEASES).expect("release payload");
         let release =
             select_best_release(&records, &parse_version("0.2.9-alpha").unwrap()).unwrap();
-        let _ = state.finish_check(generation, "0.2.9-alpha", "checked", Ok(Some(release)));
+        let checked = state.finish_check(generation, "0.2.9-alpha", "checked", Ok(Some(release)));
+        assert!(checked.show_banner);
+        assert!(checked.can_download);
         let (download_generation, _) = state.begin_download().expect("download candidate");
         let snapshot = state.snapshot();
         assert_eq!(snapshot.download_state, "Downloading");

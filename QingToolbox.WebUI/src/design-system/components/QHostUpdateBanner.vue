@@ -9,7 +9,7 @@ import QIcon from './QIcon.vue'
 
 const client=inject<HostUpdateClient>('hostUpdateClient')!
 const app=useAppStore();const store=useHostUpdateStore();const {t}=useLocalization();const dismissedVersion=ref('')
-let timer:number|undefined;let mounted=false;let operationRequiresPolling=false
+let timer:number|undefined;let mounted=false;let operationRequiresPolling=false;let initialCheckAttempted=false
 const visible=computed(()=>app.snapshot?.environmentKind==='Production'&&store.snapshot?.showBanner===true&&dismissedVersion.value!==store.snapshot.latestVersion)
 const progress=computed(()=>{const s=store.snapshot;if(!s||s.expectedBytes<=0)return 0;return Math.min(100,Math.round(s.bytesReceived/s.expectedBytes*100))})
 const pageVisible=()=>document.visibilityState!=='hidden'
@@ -26,9 +26,16 @@ async function run(action:()=>Promise<import('../../contracts/hostUpdate').HostU
   try{store.complete(await action())}catch(e){store.fail(e)}finally{store.busy=false;operationRequiresPolling=false;syncPolling()}
 }
 const refresh=()=>run(()=>client.getSnapshot())
+async function refreshAndCheck(){
+  await refresh()
+  if(!initialCheckAttempted&&!store.error&&store.snapshot?.state==='NotChecked'&&store.snapshot.canCheck){
+    initialCheckAttempted=true
+    await run(()=>client.check())
+  }
+}
 async function refreshProgress(){try{store.complete(await client.getSnapshot())}catch(e){store.fail(e)}}
-function onVisibilityChange(){if(!pageVisible()){stopPolling();return}void refresh().finally(syncPolling)}
-onMounted(()=>{mounted=true;document.addEventListener('visibilitychange',onVisibilityChange);if(pageVisible())void refresh().finally(syncPolling)})
+function onVisibilityChange(){if(!pageVisible()){stopPolling();return}void refreshAndCheck().finally(syncPolling)}
+onMounted(()=>{mounted=true;document.addEventListener('visibilitychange',onVisibilityChange);if(pageVisible())void refreshAndCheck().finally(syncPolling)})
 onBeforeUnmount(()=>{mounted=false;stopPolling();document.removeEventListener('visibilitychange',onVisibilityChange)})
 </script>
 <template>

@@ -58,8 +58,7 @@ Compression=lzma2
 SolidCompression=yes
 UninstallDisplayName=QingToolbox
 UninstallDisplayIcon={app}\QingToolbox.exe
-CloseApplications=force
-CloseApplicationsFilter=QingToolbox.exe,qing-*-module.exe,QingToolbox.Shell.exe,QingToolbox.ModuleHost.exe,QingToolbox.StartupMaintenance.exe
+CloseApplications=no
 RestartApplications=no
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
@@ -83,6 +82,10 @@ chinesesimplified.RunQingToolbox=运行 QingToolbox（旧版覆盖测试）
 english.RunQingToolbox=Run QingToolbox
 chinesesimplified.RunQingToolbox=运行 QingToolbox
 #endif
+english.UpdateCloseFailed=QingToolbox is still running. Exit it completely from the tray, then retry the installation.
+chinesesimplified.UpdateCloseFailed=QingToolbox 仍在运行。请从托盘中完全退出后重试安装。
+english.UpdateCloseCheckFailed=Setup could not verify that the installed QingToolbox has exited. No files were changed.
+chinesesimplified.UpdateCloseCheckFailed=安装程序无法确认已安装的 QingToolbox 是否退出，因此尚未修改任何文件。
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:DesktopShortcut}"; GroupDescription: "{cm:AdditionalShortcuts}"; Flags: unchecked
@@ -124,10 +127,36 @@ Name: "{autodesktop}\QingToolbox"; Filename: "{app}\QingToolbox.exe"; WorkingDir
 ; registrations before the new host can register its preferred startup mode.
 Filename: "{app}\QingToolbox.StartupMaintenance.exe"; Parameters: "--remove-owned-startup"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Check: ShouldRunLegacyStartupCleanup
 Filename: "{app}\QingToolbox.exe"; WorkingDir: "{app}"; Description: "{cm:RunQingToolbox}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\QingToolbox.exe"; WorkingDir: "{app}"; Flags: nowait; Check: ShouldRelaunchAfterUpdate
 
 [Code]
 const
   ProductUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}_is1';
+  TauriMarkerKey = 'Software\QingMo-A\QingToolbox\Tauri';
+  UpdateHandoffTokenValue = 'UpdateHandoffToken';
+  UpdateHandoffArgumentPrefix = '--qing-update-shutdown=';
+  ProcessSynchronize = $00100000;
+  ProcessQueryLimitedInformation = $00001000;
+  ToolhelpSnapshotProcess = $00000002;
+  InvalidHandleValue = -1;
+  MaxProcessPath = 32768;
+  WaitObject0 = $00000000;
+  InAppExitTimeoutMs = 30000;
+  ManualExitTimeoutMs = 15000;
+  LegacyExitGraceMs = 5000;
+type
+  TProcessEntry32 = record
+    dwSize: DWORD;
+    cntUsage: DWORD;
+    th32ProcessID: DWORD;
+    th32DefaultHeapID: DWORD;
+    th32ModuleID: DWORD;
+    cntThreads: DWORD;
+    th32ParentProcessID: DWORD;
+    pcPriClassBase: LongInt;
+    dwFlags: DWORD;
+    szExeFile: array[0..259] of Char;
+  end;
 var
   LegacyInstallDir: String;
   BackupDir: String;
@@ -135,6 +164,22 @@ var
 
 function GetFileAttributesW(const FileName: String): Cardinal;
   external 'GetFileAttributesW@kernel32.dll stdcall';
+function OpenProcess(dwDesiredAccess: DWORD; bInheritHandle: BOOL;
+  dwProcessId: DWORD): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function WaitForSingleObject(hHandle: THandle; dwMilliseconds: DWORD): DWORD;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(hObject: THandle): BOOL;
+  external 'CloseHandle@kernel32.dll stdcall';
+function CreateToolhelp32Snapshot(dwFlags, th32ProcessID: DWORD): THandle;
+  external 'CreateToolhelp32Snapshot@kernel32.dll stdcall';
+function Process32FirstW(hSnapshot: THandle; var lppe: TProcessEntry32): BOOL;
+  external 'Process32FirstW@kernel32.dll stdcall';
+function Process32NextW(hSnapshot: THandle; var lppe: TProcessEntry32): BOOL;
+  external 'Process32NextW@kernel32.dll stdcall';
+function QueryFullProcessImageNameW(hProcess: THandle; dwFlags: DWORD;
+  lpExeName: String; var lpdwSize: DWORD): BOOL;
+  external 'QueryFullProcessImageNameW@kernel32.dll stdcall';
 
 function SameDirectory(const A, B: String): Boolean;
 begin
@@ -183,6 +228,157 @@ function ShouldRunLegacyStartupCleanup(): Boolean;
 begin
   Result := LegacyMigrationPending and
     FileExists(ExpandConstant('{app}\QingToolbox.StartupMaintenance.exe'));
+end;
+
+function ShouldRelaunchAfterUpdate(): Boolean;
+begin
+  Result := WizardSilent and
+    (CompareText(ExpandConstant('{param:QINGRELAUNCH|0}'), '1') = 0);
+end;
+
+function IsHexDigit(const Character: Char): Boolean;
+begin
+  Result := ((Character >= '0') and (Character <= '9')) or
+    ((Character >= 'a') and (Character <= 'f')) or
+    ((Character >= 'A') and (Character <= 'F'));
+end;
+
+function IsValidUpdateHandoffToken(const Token: String): Boolean;
+var
+  Index: Integer;
+begin
+  Result := Length(Token) = 64;
+  if not Result then exit;
+  for Index := 1 to Length(Token) do
+    if not IsHexDigit(Token[Index]) then begin
+      Result := False;
+      exit;
+    end;
+end;
+
+function ProcessEntryName(const Entry: TProcessEntry32): String;
+var
+  Index: Integer;
+begin
+  Result := '';
+  for Index := 0 to 259 do begin
+    if Entry.szExeFile[Index] = #0 then exit;
+    Result := Result + Entry.szExeFile[Index];
+  end;
+end;
+
+function TryFindInstalledProcess(const ProcessName: String; var ProcessId: DWORD): Boolean;
+var
+  Snapshot, ProcessHandle: THandle;
+  Entry: TProcessEntry32;
+  ExecutablePath: String;
+  PathLength: DWORD;
+begin
+  Result := False;
+  ProcessId := 0;
+  Snapshot := CreateToolhelp32Snapshot(ToolhelpSnapshotProcess, 0);
+  if Snapshot = InvalidHandleValue then RaiseException('Cannot inspect running processes.');
+  try
+    Entry.dwSize := SizeOf(Entry);
+    if not Process32FirstW(Snapshot, Entry) then exit;
+    repeat
+      if CompareText(ProcessEntryName(Entry), ProcessName) = 0 then begin
+        ProcessHandle := OpenProcess(ProcessQueryLimitedInformation, False,
+          Entry.th32ProcessID);
+        if ProcessHandle <> 0 then begin
+          try
+            SetLength(ExecutablePath, MaxProcessPath);
+            PathLength := MaxProcessPath;
+            if QueryFullProcessImageNameW(ProcessHandle, 0, ExecutablePath,
+              PathLength) then begin
+              SetLength(ExecutablePath, PathLength);
+              if SameDirectory(ExtractFileDir(ExecutablePath),
+                ExpandConstant('{app}')) then begin
+                ProcessId := Entry.th32ProcessID;
+                Result := True;
+                exit;
+              end;
+            end;
+          finally
+            CloseHandle(ProcessHandle);
+          end;
+        end;
+      end;
+    until not Process32NextW(Snapshot, Entry);
+  finally
+    CloseHandle(Snapshot);
+  end;
+end;
+
+function WaitForProcessExit(const ProcessId, TimeoutMs: DWORD): Boolean;
+var
+  ProcessHandle: THandle;
+begin
+  ProcessHandle := OpenProcess(ProcessSynchronize, False, ProcessId);
+  if ProcessHandle = 0 then begin
+    Result := True;
+    exit;
+  end;
+  try
+    Result := WaitForSingleObject(ProcessHandle, TimeoutMs) = WaitObject0;
+  finally
+    CloseHandle(ProcessHandle);
+  end;
+end;
+
+function RequestInstalledHostShutdown(const ProcessId: DWORD): Boolean;
+var
+  Token: String;
+  ExitCode: Integer;
+  ProcessHandle: THandle;
+begin
+  Result := False;
+  if not RegQueryStringValue(HKCU64, TauriMarkerKey,
+    UpdateHandoffTokenValue, Token) or not IsValidUpdateHandoffToken(Token) then exit;
+  ProcessHandle := OpenProcess(ProcessSynchronize, False, ProcessId);
+  if ProcessHandle = 0 then begin
+    Result := True;
+    exit;
+  end;
+  try
+    if not Exec(ExpandConstant('{app}\QingToolbox.exe'),
+      UpdateHandoffArgumentPrefix + Token, ExpandConstant('{app}'),
+      SW_HIDE, ewWaitUntilTerminated, ExitCode) then exit;
+    Result := WaitForSingleObject(ProcessHandle, ManualExitTimeoutMs) = WaitObject0;
+  finally
+    CloseHandle(ProcessHandle);
+  end;
+  if Result then RegDeleteValue(HKCU64, TauriMarkerKey, UpdateHandoffTokenValue);
+end;
+
+function PrepareInstalledHostForOverwrite(): String;
+var
+  ProcessId, RequestedProcessId, LegacyProcessId: DWORD;
+  RequestedProcessText: String;
+  FallbackTimeout: DWORD;
+begin
+  Result := '';
+  RequestedProcessText := ExpandConstant('{param:QINGHOSTPID|0}');
+  RequestedProcessId := StrToIntDef(RequestedProcessText, 0);
+  if RequestedProcessId <> 0 then begin
+    if not WaitForProcessExit(RequestedProcessId, InAppExitTimeoutMs) then begin
+      Result := ExpandConstant('{cm:UpdateCloseFailed}');
+      exit;
+    end;
+  end;
+
+  if TryFindInstalledProcess('QingToolbox.exe', ProcessId) then begin
+    if WizardSilent then FallbackTimeout := InAppExitTimeoutMs
+    else FallbackTimeout := LegacyExitGraceMs;
+    if not RequestInstalledHostShutdown(ProcessId) and
+       not WaitForProcessExit(ProcessId, FallbackTimeout) then begin
+      Result := ExpandConstant('{cm:UpdateCloseFailed}');
+      exit;
+    end;
+  end;
+  if TryFindInstalledProcess('QingToolbox.Shell.exe', LegacyProcessId) and
+     not WaitForProcessExit(LegacyProcessId, LegacyExitGraceMs) then
+    Result := ExpandConstant('{cm:UpdateCloseFailed}');
 end;
 
 procedure BackupTree(const Source, Destination: String);
@@ -303,19 +499,13 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   SettingsFile, BackupBase, RegisteredLocation: String;
   ExitCode: Integer;
-  Locator, Services, Processes: Variant;
 begin
   Result := '';
   try
-    Locator := CreateOleObject('WbemScripting.SWbemLocator');
-    Services := Locator.ConnectServer('', 'root\CIMV2');
-    Processes := Services.ExecQuery('SELECT ProcessId FROM Win32_Process WHERE Name="QingToolbox.Shell.exe" OR Name="QingToolbox.exe"');
-    if Processes.Count > 0 then begin
-      Result := 'Please exit QingToolbox completely (including its tray icon and development copy), then retry the upgrade.';
-      exit;
-    end;
+    Result := PrepareInstalledHostForOverwrite();
+    if Result <> '' then exit;
   except
-    Result := 'Cannot verify that QingToolbox is closed. Upgrade stopped before touching the installation.';
+    Result := ExpandConstant('{cm:UpdateCloseCheckFailed}');
     exit;
   end;
   try

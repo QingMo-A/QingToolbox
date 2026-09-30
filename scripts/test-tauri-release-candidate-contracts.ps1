@@ -75,6 +75,38 @@ if ($installer.IndexOf('MigrateLegacyBundledModules();', [StringComparison]::Ord
     $installer.IndexOf("Type: filesandordirs; Name: `"{app}\resources`"", [StringComparison]::Ordinal) -lt 0) {
     throw 'The installer must migrate old bundled modules before removing host-owned resources.'
 }
+foreach ($contract in @(
+    'CloseApplications=no',
+    'UpdateHandoffToken',
+    '--qing-update-shutdown=',
+    '{param:QINGHOSTPID|0}',
+    '{param:QINGRELAUNCH|0}',
+    'PrepareInstalledHostForOverwrite()'
+)) {
+    if ($installer.IndexOf($contract, [StringComparison]::Ordinal) -lt 0) {
+        throw "The Tauri installer lost its graceful overwrite contract: $contract"
+    }
+}
+if ($installer.IndexOf('CloseApplications=force', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+    throw 'The Tauri installer must never force-close the Rust host during an overwrite.'
+}
+if ($installer.IndexOf('WbemScripting', [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+    $installer.IndexOf('Win32_Process', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+    throw 'The Tauri installer must use bounded Win32 process APIs instead of WMI.'
+}
+$hostUpdateSource = [IO.File]::ReadAllText((Join-Path (Split-Path -Parent $PSScriptRoot) 'QingToolbox.Tauri/src-tauri/src/host_update.rs'))
+$hostSource = [IO.File]::ReadAllText((Join-Path (Split-Path -Parent $PSScriptRoot) 'QingToolbox.Tauri/src-tauri/src/lib.rs'))
+foreach ($contract in @(
+    '--qing-update-shutdown=',
+    '/QINGHOSTPID=',
+    '/QINGRELAUNCH=1',
+    'publish_update_handoff_token',
+    'try_handle_update_shutdown'
+)) {
+    if (($hostUpdateSource + $hostSource).IndexOf($contract, [StringComparison]::Ordinal) -lt 0) {
+        throw "The Rust host lost its graceful update handoff contract: $contract"
+    }
+}
 $tauriConfig = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'QingToolbox.Tauri/src-tauri/tauri.conf.json') -Raw | ConvertFrom-Json
 if ($tauriConfig.bundle.PSObject.Properties.Name -contains 'resources') {
     throw 'The host Tauri bundle must not include official modules.'

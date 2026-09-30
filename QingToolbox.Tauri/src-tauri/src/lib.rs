@@ -92,6 +92,8 @@ pub struct HostState {
     module_activity: Arc<Mutex<std::collections::BTreeSet<String>>>,
     host_update: Mutex<host_update::HostUpdateState>,
     host_update_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    update_handoff_token: Option<String>,
+    update_shutdown_requested: AtomicBool,
     settings: Mutex<SettingsStore>,
     module_hotkeys: Mutex<std::collections::BTreeMap<String, String>>,
     screenpin_windows: Mutex<std::collections::BTreeMap<String, ScreenPinWindowRecord>>,
@@ -111,17 +113,22 @@ impl HostState {
     pub fn new() -> Self {
         let runtime = ModuleRuntimeManager::new();
         let module_activity = Arc::clone(&runtime.active_modules);
+        let generated_at = now_rfc3339();
+        let host_update = if host_update_network_enabled() {
+            host_update::HostUpdateState::new(env!("CARGO_PKG_VERSION"), generated_at)
+        } else {
+            host_update::HostUpdateState::disabled(env!("CARGO_PKG_VERSION"), generated_at)
+        };
         Self {
             roots: resolve_module_roots(),
             module_index: Mutex::new(std::collections::BTreeMap::new()),
             scan_gate: Mutex::new(()),
             runtime: Mutex::new(runtime),
             module_activity,
-            host_update: Mutex::new(host_update::HostUpdateState::new(
-                env!("CARGO_PKG_VERSION"),
-                now_rfc3339(),
-            )),
+            host_update: Mutex::new(host_update),
             host_update_cancel: Mutex::new(None),
+            update_handoff_token: host_update::new_update_handoff_token(),
+            update_shutdown_requested: AtomicBool::new(false),
             settings: Mutex::new(SettingsStore::new()),
             module_hotkeys: Mutex::new(std::collections::BTreeMap::new()),
             screenpin_windows: Mutex::new(std::collections::BTreeMap::new()),
@@ -552,11 +559,9 @@ async fn install_host_update(
             message: "宿主更新状态不可用。".to_string(),
         })?
         .finish_install(generation, Ok(()));
-    // Inno Setup will close/restart the host using the explicit silent
-    // handoff flags. Stop only module processes owned by this host first so
-    // their windows and IPC pipes cannot keep the install directory locked.
-    stop_all_modules(&app);
-    app.exit(0);
+    // Inno Setup waits for this exact host PID before it replaces files and
+    // relaunches the new version. Close every host-owned runtime first.
+    shutdown_for_update(&app);
     Ok(snapshot)
 }
 
@@ -3479,8 +3484,10 @@ pub fn run() {
     // part of the normal user-facing launch path.
     let disable_single_instance = std::env::var_os("QING_TAURI_DISABLE_SINGLE_INSTANCE").is_some();
     if !disable_single_instance {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            show_main_window(app);
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !try_handle_update_shutdown(app, &args) {
+                show_main_window(app);
+            }
         }));
     }
     builder
@@ -3574,6 +3581,10 @@ pub fn run() {
             get_device_transfer_target
         ])
         .setup(|app| {
+            if handle_startup_update_shutdown(app.handle()) {
+                return Ok(());
+            }
+            configure_update_handoff(app.handle());
             app.state::<HostState>().devices.restore_enabled();
             start_info_popup_pump(app.handle().clone());
             start_runtime_supervisor(app.handle().clone());
@@ -3640,6 +3651,7 @@ pub fn run() {
                 event,
                 tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
             ) {
+                clear_update_handoff(app);
                 stop_all_modules(app);
                 app.state::<HostState>().devices.stop();
             }
@@ -3881,6 +3893,105 @@ fn start_runtime_supervisor<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
             }
         }
     });
+}
+
+fn handle_startup_update_shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    let args = std::env::args().collect::<Vec<_>>();
+    let Some(token) = host_update::update_handoff_token_from_args(&args) else {
+        return false;
+    };
+    if !host_update::registered_update_handoff_token_matches(token)
+        || !host_update::is_supported_tauri_production_installation()
+    {
+        return false;
+    }
+    host_update::clear_update_handoff_token(token);
+    app.exit(0);
+    true
+}
+
+fn configure_update_handoff<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if paths::is_development() || !host_update::is_supported_tauri_production_installation() {
+        return;
+    }
+    let state = app.state::<HostState>();
+    let Some(token) = state.update_handoff_token.as_deref() else {
+        record_log(
+            &state,
+            "Warning",
+            "Updates",
+            "Update shutdown handoff token could not be generated.",
+        );
+        return;
+    };
+    let published = host_update::publish_update_handoff_token(token);
+    record_log(
+        &state,
+        if published { "Information" } else { "Warning" },
+        "Updates",
+        if published {
+            "Update shutdown handoff is ready."
+        } else {
+            "Update shutdown handoff could not be published."
+        },
+    );
+}
+
+fn clear_update_handoff<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(state) = app.try_state::<HostState>() {
+        if let Some(token) = state.update_handoff_token.as_deref() {
+            host_update::clear_update_handoff_token(token);
+        }
+    }
+}
+
+fn try_handle_update_shutdown<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    args: &[String],
+) -> bool {
+    let Some(actual) = host_update::update_handoff_token_from_args(args) else {
+        return false;
+    };
+    let Some(state) = app.try_state::<HostState>() else {
+        return false;
+    };
+    let Some(expected) = state.update_handoff_token.as_deref() else {
+        return false;
+    };
+    if !host_update::update_handoff_token_matches(expected, actual)
+        || !host_update::registered_update_handoff_token_matches(actual)
+        || !host_update::is_supported_tauri_production_installation()
+    {
+        record_log(
+            &state,
+            "Warning",
+            "Updates",
+            "Rejected an invalid update shutdown handoff.",
+        );
+        return false;
+    }
+    shutdown_for_update(app);
+    true
+}
+
+fn shutdown_for_update<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(state) = app.try_state::<HostState>() else {
+        app.exit(0);
+        return;
+    };
+    if state.update_shutdown_requested.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    record_log(
+        &state,
+        "Information",
+        "Updates",
+        "Update handoff accepted; shutting down the host cleanly.",
+    );
+    clear_update_handoff(app);
+    stop_all_modules(app);
+    state.devices.stop();
+    app.exit(0);
 }
 
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {

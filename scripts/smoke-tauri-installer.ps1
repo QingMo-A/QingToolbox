@@ -90,6 +90,54 @@ try {
         }
     }
     & (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts/smoke-tauri-host.ps1') -ExecutablePath $installedExe
+    # A manually launched newer installer must ask the already-running
+    # installed host to stop itself, wait for that exact process to exit, and
+    # only then replace files. This is the path users exercise when they
+    # download an .exe instead of pressing the in-app update button.
+    Remove-ItemProperty -LiteralPath $markerKey -Name UpdateHandoffToken -ErrorAction SilentlyContinue
+    $handoffHost = [Diagnostics.Process]::new()
+    $handoffHost.StartInfo = [Diagnostics.ProcessStartInfo]::new()
+    $handoffHost.StartInfo.FileName = $installedExe
+    $handoffHost.StartInfo.WorkingDirectory = $installRoot
+    $handoffHost.StartInfo.UseShellExecute = $false
+    $handoffHost.StartInfo.CreateNoWindow = $true
+    $handoffHost.StartInfo.EnvironmentVariables['QING_TAURI_STARTUP_PRESENTATION'] = 'main'
+    $handoffHost.StartInfo.EnvironmentVariables['QING_TAURI_DISABLE_AUTOSTART_SYNC'] = '1'
+    $handoffHost.StartInfo.EnvironmentVariables['QING_TAURI_DISABLE_UPDATE_CHECK'] = '1'
+    try {
+        if (-not $handoffHost.Start()) { throw 'Unable to start the installed host for update handoff smoke.' }
+        $deadline = [DateTime]::UtcNow.AddSeconds(15)
+        $handoffToken = ''
+        while ([DateTime]::UtcNow -lt $deadline -and -not $handoffHost.HasExited) {
+            $handoffToken = [string](Get-ItemPropertyValue -LiteralPath $markerKey -Name UpdateHandoffToken -ErrorAction SilentlyContinue)
+            if ($handoffToken -match '^[0-9a-fA-F]{64}$') { break }
+            Start-Sleep -Milliseconds 200
+        }
+        if ($handoffToken -notmatch '^[0-9a-fA-F]{64}$') {
+            throw 'The installed host did not publish its update shutdown handoff token.'
+        }
+        $originalHostPid = $handoffHost.Id
+        Invoke-Installer -Path $installer -Arguments @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOICONS',
+            "/DIR=$installRoot"
+        )
+        if (-not $handoffHost.WaitForExit(5000)) {
+            throw "The running installed host ($originalHostPid) did not exit for overwrite."
+        }
+        if (-not (Test-Path -LiteralPath $installedExe -PathType Leaf)) {
+            throw 'The graceful overwrite removed the installed host executable.'
+        }
+        if ($null -ne (Get-ItemPropertyValue -LiteralPath $markerKey -Name UpdateHandoffToken -ErrorAction SilentlyContinue)) {
+            throw 'The graceful overwrite left a stale update handoff token.'
+        }
+    }
+    finally {
+        if ($handoffHost -and -not $handoffHost.HasExited) {
+            try { [void]$handoffHost.Kill() } catch { }
+            try { [void]$handoffHost.WaitForExit(2000) } catch { }
+        }
+        if ($handoffHost) { $handoffHost.Dispose() }
+    }
     # Simulate an upgrade from the published 0.3.0-alpha bundled-module
     # layout. A legacy WPF user module must be backed up, while a newer
     # already-installed Tauri module must be left untouched.

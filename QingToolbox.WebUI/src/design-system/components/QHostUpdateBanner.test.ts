@@ -43,6 +43,22 @@ afterEach(() => {
 })
 
 describe('QHostUpdateBanner background polling', () => {
+  it('checks for an official update once when a production host has not checked yet', async () => {
+    const getSnapshot = vi.fn().mockResolvedValue(snapshot({
+      state: 'NotChecked', latestVersion: '', summary: '', showBanner: false,
+      downloadState: 'NotDownloaded', canDownload: false, installationSupported: false,
+    }))
+    const check = vi.fn().mockResolvedValue(snapshot({
+      state: 'UpToDate', latestVersion: '', summary: 'Current', showBanner: false,
+      downloadState: 'NotDownloaded', canDownload: false, installationSupported: false,
+    }))
+    render(getSnapshot, { check })
+    await flushPromises()
+
+    expect(getSnapshot).toHaveBeenCalledTimes(1)
+    expect(check).toHaveBeenCalledTimes(1)
+  })
+
   it('does not poll an idle update snapshot every second', async () => {
     vi.useFakeTimers()
     vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
