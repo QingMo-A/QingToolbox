@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import mark from '../../assets/QingToolbox.Mark.svg'
 import { useLocalization } from '../../localization/localization'
 import { useAppStore } from '../../app/store'
+import QHostUpdateButton from './QHostUpdateButton.vue'
 
 const { currentLocale } = useLocalization()
 const app = useAppStore()
@@ -27,6 +28,7 @@ function drag(event: MouseEvent) {
     <div class="q-titlebar-drag" @mousedown="drag" @dblclick="act('toggleMaximize')">
       <img :src="mark" alt="" draggable="false" />
       <span>QingToolbox<template v-if="isDevelopment"> [Dev]</template></span>
+      <QHostUpdateButton />
       <small v-if="error" role="status">{{ error }}</small>
     </div>
     <div class="q-titlebar-actions">

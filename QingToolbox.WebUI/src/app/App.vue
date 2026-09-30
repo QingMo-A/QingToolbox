@@ -9,7 +9,6 @@ import type { SettingsClient } from '../bridge/clients/SettingsClient'
 import QSidebarLayout from '../design-system/layouts/QSidebarLayout.vue'
 import QCommandPalette from '../design-system/components/QCommandPalette.vue'
 import QToast from '../design-system/components/QToast.vue'
-import QHostUpdateBanner from '../design-system/components/QHostUpdateBanner.vue'
 import { useLocalization } from '../localization/localization'
 import { routeTitleKeyByPath } from './router'
 import { applyFontPresentation } from '../presentation/fontPresentation'
@@ -91,7 +90,6 @@ watchEffect(() => {
   <div class="q-desktop-frame" :class="{ 'with-titlebar': nativeTitleBar }">
   <QTitleBar v-if="nativeTitleBar" />
   <QSidebarLayout @open-command-palette="commandPaletteOpen = true">
-    <QHostUpdateBanner />
     <router-view />
   </QSidebarLayout>
   </div>

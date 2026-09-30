@@ -40,7 +40,6 @@ function app() {
       stubs: {
         RouterView: { template: '<div />' },
         QToast: { template: '<div />' },
-        QHostUpdateBanner: { template: '<div />' },
         QSidebarLayout: { emits: ['openCommandPalette'], template: '<button class="open" @click="$emit(\'openCommandPalette\')">Open</button><slot />' },
         QCommandPalette: { props: ['open'], emits: ['close'], template: '<div class="palette" :data-open="open"><button @click="$emit(\'close\')">Close</button></div>' },
       },

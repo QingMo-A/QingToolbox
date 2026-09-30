@@ -1,4 +1,9 @@
 export const enUSMessages = {
+  'hostUpdate.button.update': 'Download and install QingToolbox {version}',
+  'hostUpdate.button.verifying': 'Verifying update…',
+  'hostUpdate.button.installing': 'Installing update…',
+  'hostUpdate.button.retry': 'Update failed. Click to retry.',
+  'hostUpdate.button.unsupported': 'This installation does not support automatic updates.',
   'hostUpdate.banner.title': 'QingToolbox {version} is available',
   'hostUpdate.banner.description': 'A verified installer update is ready to review.',
   'hostUpdate.banner.progress': 'Downloading… {progress}%',

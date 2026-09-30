@@ -1,6 +1,11 @@
 import type { TranslationKey } from './en-US'
 
 export const zhCNMessages = {
+  'hostUpdate.button.update': '下载并安装 QingToolbox {version}',
+  'hostUpdate.button.verifying': '正在校验更新…',
+  'hostUpdate.button.installing': '正在安装更新…',
+  'hostUpdate.button.retry': '更新失败，点击重试。',
+  'hostUpdate.button.unsupported': '当前安装方式不支持自动更新。',
   'hostUpdate.banner.title': 'QingToolbox {version} 可用',
   'hostUpdate.banner.description': '已有经过验证的安装器更新可供查看。',
   'hostUpdate.banner.progress': '正在下载……{progress}%',
