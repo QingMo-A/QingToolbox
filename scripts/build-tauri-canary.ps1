@@ -3,7 +3,8 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$canaryRoot = Join-Path $repoRoot 'QingToolbox.Tauri/native-module-canary'
+. (Join-Path $PSScriptRoot 'module-sources.ps1')
+$canaryRoot = Resolve-QingModuleSource 'canary'
 $appRoot = Join-Path $repoRoot 'QingToolbox.Tauri'
 $resourceRoot = Join-Path $appRoot 'src-tauri/resources/modules/qing.canary'
 $cargoBin = Join-Path $HOME '.cargo\bin'

@@ -162,7 +162,7 @@ async function smoke() {
   await delay(200)
   await sendLauncherHotkey('Escape')
   await waitFor(()=>evaluate(moduleTarget, `!document.querySelector('.hotkey-input').value.includes('请按下')`),3000)
-  await evaluate(moduleTarget, `document.querySelector('.settings-close').click(); true`)
+  await evaluate(moduleTarget, `document.querySelector('.launcher-settings-card .q-modal-close').click(); true`)
   console.log('Native hotkey recording: Alt+Space, Ctrl+Shift+K, manual cancel and Escape passed.')
   if(await evaluate(moduleTarget,`document.querySelectorAll('.launcher-tile').length > 0`)) {
     await waitFor(()=>evaluate(moduleTarget,`[...document.querySelectorAll('.launcher-tile .launcher-app-image img')].some(image=>image.naturalWidth>=128)`),15000)

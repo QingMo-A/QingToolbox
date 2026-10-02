@@ -16,7 +16,7 @@ function Add-Candidate([string]$Relative) {
 }
 
 Add-Candidate 'QingToolbox.Tauri/src-tauri/target/debug'
-foreach ($module in @('native-module-canary','native-launcher','native-pdf','native-transfer','native-texttools','native-windowtopmost','native-powerguard','native-screenpin')) {
+foreach ($module in @('native-transfer')) {
     Add-Candidate "QingToolbox.Tauri/$module/target/debug"
 }
 foreach ($project in @(Get-ChildItem -LiteralPath $repo -Directory | Where-Object Name -Like 'QingToolbox.*')) {

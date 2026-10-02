@@ -21,12 +21,16 @@ test('content cache reuses unchanged work and rejects changed/missing outputs', 
   }
   write('scripts/tauri-build-cache.mjs', '')
   copyFileSync(fileURLToPath(new URL('./tauri-build-cache.mjs', import.meta.url)), join(root, 'scripts/tauri-build-cache.mjs'))
-  const src = 'QingToolbox.Tauri/native-launcher/src/main.rs'
+  copyFileSync(fileURLToPath(new URL('./module-sources.mjs', import.meta.url)), join(root, 'scripts/module-sources.mjs'))
+  write('modules/index.json', JSON.stringify({ schemaVersion: 2, sourceId: 'qingtoolbox-official-tauri', moduleProfile: 'tauri-process-v1' }))
+  const src = 'modules/Launcher/src/main.rs'
   const out = 'QingToolbox.Tauri/src-tauri/resources/modules/qing.launcher/bin/module.exe'
   write(src, 'one')
-  write('QingToolbox.Tauri/native-launcher/ui-src/package.json', '{}')
+  write('modules/Launcher/ui-src/package.json', '{}')
+  const shared = 'QingToolbox.WebUI/src/design-system/components/QButton.vue'
+  write(shared, 'button-one')
   write(out, 'binary')
-  const run = (...args) => spawnSync(process.execPath, [join(root, 'scripts/tauri-build-cache.mjs'), ...args], { encoding: 'utf8' })
+  const run = (...args) => spawnSync(process.execPath, [join(root, 'scripts/tauri-build-cache.mjs'), ...args], { encoding: 'utf8', env: { ...process.env, QINGTOOLBOX_MODULES_ROOT: root } })
   const hash = () => {
     const value = run('fingerprint', 'launcher')
     assert.equal(value.status, 0, value.stderr)
@@ -36,8 +40,14 @@ test('content cache reuses unchanged work and rejects changed/missing outputs', 
   assert.equal(run('check', 'launcher').status, 1)
   assert.equal(run('save', 'launcher', before).status, 0)
   assert.equal(run('check', 'launcher').status, 0)
-  write('QingToolbox.Tauri/native-launcher/target/ignored', 'generated')
-  write('QingToolbox.Tauri/native-launcher/ui-src/node_modules/ignored', 'dependency cache')
+  write(shared, 'button-two')
+  assert.equal(run('check', 'launcher').status, 1)
+  write(shared, 'button-one')
+  assert.equal(run('check', 'launcher').status, 0)
+  write('QingToolbox.WebUI/src/design-system/components/QHostUpdateButton.vue', 'unrelated shell update')
+  assert.equal(run('check', 'launcher').status, 0)
+  write('modules/Launcher/target/ignored', 'generated')
+  write('modules/Launcher/ui-src/node_modules/ignored', 'dependency cache')
   assert.equal(run('check', 'launcher').status, 0)
   write(src, 'two')
   assert.equal(run('check', 'launcher').status, 1)
@@ -67,8 +77,9 @@ test('host fingerprint ignores independently packaged module inputs', t => {
   }
   write('scripts/tauri-build-cache.mjs', '')
   copyFileSync(fileURLToPath(new URL('./tauri-build-cache.mjs', import.meta.url)), resolve(root, 'scripts/tauri-build-cache.mjs'))
+  copyFileSync(fileURLToPath(new URL('./module-sources.mjs', import.meta.url)), resolve(root, 'scripts/module-sources.mjs'))
   write('QingToolbox.Tauri/src-tauri/src/main.rs', 'host')
-  write('QingToolbox.Tauri/native-launcher/src/main.rs', 'module')
+  write('modules/Launcher/src/main.rs', 'module')
   write('QingToolbox.Tauri/src-tauri/resources/modules/qing.launcher/module.json', '{}')
   const fingerprint = () => {
     const result = spawnSync(process.execPath, [resolve(root, 'scripts/tauri-build-cache.mjs'), 'fingerprint', 'host'], { encoding: 'utf8' })
@@ -76,7 +87,7 @@ test('host fingerprint ignores independently packaged module inputs', t => {
     return result.stdout.trim()
   }
   const before = fingerprint()
-  write('QingToolbox.Tauri/native-launcher/src/main.rs', 'new module')
+  write('modules/Launcher/src/main.rs', 'new module')
   write('QingToolbox.Tauri/src-tauri/resources/modules/qing.launcher/module.json', '{"new":true}')
   assert.equal(fingerprint(), before)
   write('QingToolbox.Tauri/src-tauri/src/main.rs', 'new host')

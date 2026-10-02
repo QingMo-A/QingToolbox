@@ -30,4 +30,19 @@ describe('QModal building blocks', () => {
     expect(input.get('label').text()).toContain('Module name')
     label.unmount(); input.unmount()
   })
+
+  it('supports a module layout extension while preserving shared dialog semantics', async () => {
+    const wrapper = mount(QModal, { attachTo: document.body, props: { open: true, title: 'Folder', panelClass: 'folder-panel-card', layerClass: 'folder-panel', busy: true } })
+    const layer = document.querySelector<HTMLElement>('.folder-panel')!
+    const dialog = layer.querySelector<HTMLElement>('.folder-panel-card')!
+    expect(dialog.getAttribute('role')).toBe('dialog')
+    expect(dialog.classList.contains('q-modal-card')).toBe(true)
+    expect(dialog.getAttribute('aria-busy')).toBe('true')
+    layer.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(wrapper.emitted('close')).toBeUndefined()
+    await wrapper.setProps({ busy: false })
+    layer.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    wrapper.unmount()
+  })
 })

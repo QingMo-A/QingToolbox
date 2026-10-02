@@ -11,7 +11,8 @@ if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
     throw "Qing PDF executable was not found: $resolved"
 }
 
-$moduleRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\QingToolbox.Tauri\native-pdf'))
+. (Join-Path $PSScriptRoot 'module-sources.ps1')
+$moduleRoot = Resolve-QingModuleSource 'pdf'
 $nonce = 'pdf-smoke-' + [Guid]::NewGuid().ToString('N')
 $dataRoot = Join-Path ([IO.Path]::GetTempPath()) ('qing-pdf-smoke-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null

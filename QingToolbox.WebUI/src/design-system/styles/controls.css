@@ -1,0 +1,8 @@
+/* The same primitive sizing for shell and independently bundled modules.
+   Colours, radius, focus and state variants are owned by appearance tokens. */
+.q-button, .q-icon-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; padding: 0 16px; border: 1px solid var(--q-border); border-radius: var(--control-radius, 9px); font: inherit; font-size: 13px; font-weight: 600; line-height: 1.35; cursor: pointer; transition: background var(--q-fast), color var(--q-fast), border-color var(--q-fast), box-shadow var(--q-fast), transform var(--q-fast); }
+.q-icon-button { flex: 0 0 auto; width: 38px; padding: 0; }
+.q-button-content, .q-icon-button-content { display: inline-flex; align-items: center; justify-content: center; gap: inherit; min-width: 0; }
+.q-button:disabled, .q-icon-button:disabled { cursor: default; opacity: .55; }
+.q-button:focus-visible, .q-icon-button:focus-visible { outline: 2px solid var(--q-focus); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .q-button, .q-icon-button { transition: none; } }

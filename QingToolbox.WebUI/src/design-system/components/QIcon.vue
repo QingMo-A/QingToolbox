@@ -25,6 +25,7 @@ type QIconName =
   | 'search'
   | 'close'
   | 'folder'
+  | 'edit'
   | 'remove'
 
 const props = defineProps<{ name: QIconName; size?: number }>()
@@ -121,6 +122,9 @@ const fluentGlyph = computed(() => fluentGlyphs[props.name])
     <template v-else-if="name === 'folder'">
       <path d="M2.8 5.5h5l1.5 1.8h7.9v8.2H2.8z" />
       <path d="M2.8 7.3V4.5h4.3l1.4 1.6" />
+    </template>
+    <template v-else-if="name === 'edit'">
+      <path d="m12.7 3.3 4 4L7 17l-4 .8.8-4zM11 5l4 4" />
     </template>
     <template v-else-if="name === 'remove'">
       <path d="M4.5 6.2h11" />

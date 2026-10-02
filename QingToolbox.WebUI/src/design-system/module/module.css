@@ -1,0 +1,12 @@
+@import '../tokens/tokens.css';
+@import '../styles/controls.css';
+@import '../tokens/appearancePresets.css';
+
+/* Share the design system, not the shell's page/sidebar box models. */
+:root.q-module-document { font-family: var(--q-font-family); color: var(--q-text); font-synthesis: none; }
+.q-module-document *, .q-module-document *::before, .q-module-document *::after { box-sizing: border-box; }
+.q-module-document button, .q-module-document input, .q-module-document select, .q-module-document textarea { font-family: inherit; }
+.q-module-document button, .q-module-document a { transition: background var(--q-fast), border-color var(--q-fast), color var(--q-fast), box-shadow var(--q-fast), transform var(--q-fast); }
+.q-module-document :focus-visible:not([tabindex='-1']) { outline: 2px solid var(--q-focus); outline-offset: 3px; }
+.q-module-document ::selection { color: var(--q-text); background: var(--q-brand-soft); }
+@media (prefers-reduced-motion: reduce) { .q-module-document button, .q-module-document a { transition: none; } }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, useId, watch } from 'vue'
 
-const props = withDefaults(defineProps<{ open: boolean; title: string; busy?: boolean; closeLabel?: string }>(), { busy: false, closeLabel: 'Close dialog' })
+const props = withDefaults(defineProps<{ open: boolean; title: string; busy?: boolean; closeLabel?: string; panelClass?: string; layerClass?: string }>(), { busy: false, closeLabel: 'Close dialog' })
 const emit = defineEmits<{ close: [] }>()
 const titleId = useId()
 const panel = ref<HTMLElement | null>(null)
@@ -38,8 +38,8 @@ function onKeydown(event: KeyboardEvent) {
 <template>
   <Teleport to="body">
     <Transition name="q-modal">
-      <div v-if="open" class="q-modal-layer" @click.self="requestClose" @keydown="onKeydown">
-        <section ref="panel" class="q-modal-card" tabindex="-1" role="dialog" aria-modal="true" :aria-labelledby="titleId" :aria-busy="busy || undefined">
+      <div v-if="open" class="q-modal-layer" :class="layerClass" @click.self="requestClose" @keydown="onKeydown">
+        <section ref="panel" class="q-modal-card" :class="panelClass" tabindex="-1" role="dialog" aria-modal="true" :aria-labelledby="titleId" :aria-busy="busy || undefined">
           <header class="q-modal-header"><h2 :id="titleId">{{ title }}</h2><button type="button" class="q-modal-close" :disabled="busy" :aria-label="closeLabel" @click="requestClose">×</button></header>
           <div class="q-modal-content"><slot /></div>
           <footer v-if="$slots.actions" class="q-modal-actions"><slot name="actions" /></footer>

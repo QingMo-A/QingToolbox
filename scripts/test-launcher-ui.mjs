@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { moduleSource } from './module-sources.mjs'
 import { createServer as portServer } from 'node:net'
 import { readFileSync, mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -6,13 +7,13 @@ import { resolve, join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { verifyLauncherDrag } from './launcher-drag-check.mjs'
 
-const root = resolve('QingToolbox.Tauri/native-launcher/ui-src/dist')
+const root = resolve(moduleSource('launcher'), 'ui-src/dist')
 const fixture = `window.__callbacks={}; window.__listeners={}; window.__callbackId=0; window.__hides=0; window.__runtimeReady=false;
 window.__emit=(event,payload)=>{for(const handler of window.__listeners[event]??[])window.__callbacks[handler]?.({event,id:handler,payload})};
 window.__TAURI_INTERNALS__={transformCallback:fn=>{window.__callbacks[++window.__callbackId]=fn;return window.__callbackId},unregisterCallback:()=>{},invoke:async(cmd,args)=>{
  if(cmd==='plugin:event|listen'){(window.__listeners[args.event]??=[]).push(args.handler);return args.handler}
  if(cmd==='hide_module_window'){window.__hides++;return}
- if(cmd==='get_module_window_context')return {name:'Qing Launcher',version:'test',operations:[],iconDataUrl:null};
+ if(cmd==='get_module_window_context')return {name:'Qing Launcher',version:'test',operations:[],iconDataUrl:null,appearancePreset:'qing-default',theme:'light'};
  if(cmd==='invoke_module_window' && args.method==='getEverythingStatus')return window.__runtimeReady?{status:'ready'}:{status:'indexing',error:'Everything 索引尚未建立。'};
  if(cmd==='invoke_module_window')return {sortMode:'custom',items:[],folders:[],customOrder:[],recent:[],hotkey:{ctrl:true,alt:true,shift:false,win:false,virtualKey:76,keyLabel:'L'},hotkeyStatus:'HostManaged',active:true};
  return null;
@@ -46,6 +47,23 @@ async function cdp(target,method,params={}){
 }
 async function evaluate(target,expression){const r=await cdp(target,'Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw new Error(r.exceptionDetails.exception?.description??r.exceptionDetails.text);return r.result?.value}
 async function mouse(target,type,x,y){return cdp(target,'Input.dispatchMouseEvent',{type,x,y,button:type==='mouseMoved'?'none':'left',buttons:type==='mouseReleased'?0:1,clickCount:type==='mouseMoved'?0:1})}
+// Emulation belongs to the CDP session and is cleared on detach. Keep its
+// socket alive through the assertion, rather than checking on a new socket.
+async function emulatedCheck(target, method, params, expression) {
+ const socket=new WebSocket(target.webSocketDebuggerUrl)
+ await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',reject,{once:true})})
+ const request=(method,params)=>new Promise((resolve,reject)=>{
+   const id=sequence++,timer=setTimeout(()=>reject(new Error('Emulation check timed out')),5000)
+   const receive=event=>{const m=JSON.parse(event.data);if(m.id!==id)return;clearTimeout(timer);socket.removeEventListener('message',receive);m.error?reject(new Error(m.error.message)):resolve(m.result)}
+   socket.addEventListener('message',receive);socket.send(JSON.stringify({id,method,params}))
+ })
+ try {
+   await request(method,params)
+   const result=await request('Runtime.evaluate',{expression:`(async()=>{await new Promise(r=>requestAnimationFrame(r));return ${expression}})()`,awaitPromise:true,returnByValue:true})
+   if(result.exceptionDetails)throw new Error(result.exceptionDetails.text)
+   return result.result?.value
+ } finally {socket.close()}
+}
 try {
  let target
  await waitFor(async()=>{try{target=(await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(t=>t.url.startsWith(`http://127.0.0.1:${server.address().port}`));return !!target}catch{return false}})
@@ -161,8 +179,8 @@ try {
  await evaluate(target,`document.querySelector('[data-id="folder-one"]').click();true`)
  await waitFor(()=>evaluate(target,`!!document.querySelector('.folder-panel-card')`))
  if(!await evaluate(target,`document.querySelector('.folder-panel-card').innerText.includes('待归类应用')`))throw new Error('Moved app is missing from the folder')
- if(!await evaluate(target,`(() => {const panel=document.querySelector('.folder-panel');return panel.classList.contains('folder-open-enter-active') || panel.classList.contains('folder-open-enter-from')})()`))throw new Error('Folder open transition did not run')
- await evaluate(target,`document.querySelector('.folder-close').click();true`)
+ if(!await evaluate(target,`(() => {const panel=document.querySelector('.folder-panel');return panel.classList.contains('q-modal-enter-active') || panel.classList.contains('q-modal-enter-from')})()`))throw new Error('Shared folder open transition did not run')
+ await evaluate(target,`document.querySelector('.folder-panel .q-modal-close').click();true`)
  await waitFor(()=>evaluate(target,`!document.querySelector('.folder-panel')`))
  console.log('Folder icon controls, grid-to-folder move and open animation passed.')
  const geometry = await evaluate(target, `(() => { const r=document.querySelector('.launcher-shell').getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,vw:innerWidth,vh:innerHeight,bg:getComputedStyle(document.body).backgroundColor}})()`)
@@ -183,6 +201,52 @@ try {
  console.log('Launcher transparent centering, blank click and external-drop protection passed.')
  await waitFor(()=>evaluate(target,`document.querySelector('.everything-runtime-status')?.classList.contains('is-ready') && document.querySelector('.everything-runtime-status')?.innerText.includes('已初始化')`),10000)
  console.log('Everything header status changed from indexing to initialized.')
+ await evaluate(target, `(() => {
+   window.__folderDialogCalls=[];
+   window.prompt=window.confirm=()=>{throw new Error('Native browser dialog must not be used')};
+   const original=window.__TAURI_INTERNALS__.invoke;
+   window.__TAURI_INTERNALS__.invoke=async(cmd,args)=>{
+     if(cmd==='invoke_module_window' && ['createFolder','renameFolder'].includes(args.method)){
+       window.__folderDialogCalls.push({method:args.method,payload:args.payload});
+       if(args.method==='createFolder'){window.__desktopState.folders.push({id:'created-folder',name:args.payload.name,items:[]});window.__desktopState.customOrder.push('created-folder')}
+       else window.__desktopState.folders.find(folder=>folder.id===args.payload.id).name=args.payload.name;
+       return structuredClone(window.__desktopState);
+     }
+     return original(cmd,args);
+   };document.querySelector('.folder-add').click();return true;
+ })()`)
+ await waitFor(()=>evaluate(target,`document.querySelector('[role="dialog"]')?.innerText.includes('新建文件夹')`))
+ await evaluate(target,`(() => {const input=document.querySelector('.q-modal-field input');input.value='开发工具';input.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
+ await evaluate(target,`document.querySelector('.q-modal-actions .is-primary').click();true`)
+ await waitFor(()=>evaluate(target,`!!document.querySelector('[data-id="created-folder"]') && !document.querySelector('[role="dialog"]')`))
+ await evaluate(target,`document.querySelector('[data-id="created-folder"] [aria-label="重命名文件夹"]').click();true`)
+ await waitFor(()=>evaluate(target,`document.querySelector('[role="dialog"]')?.innerText.includes('重命名文件夹')`))
+ await evaluate(target,`(() => {const input=document.querySelector('.q-modal-field input');input.value='常用工具';input.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
+ await evaluate(target,`document.querySelector('.q-modal-actions .is-primary').click();true`)
+ await waitFor(()=>evaluate(target,`document.querySelector('[data-id="created-folder"]')?.innerText.includes('常用工具') && !document.querySelector('[role="dialog"]')`))
+ if(!await evaluate(target,`JSON.stringify(window.__folderDialogCalls)==='[{"method":"createFolder","payload":{"name":"开发工具"}},{"method":"renameFolder","payload":{"id":"created-folder","name":"常用工具"}}]'`))throw new Error('Shared folder dialogs changed backend payloads')
+ const hidesBeforeSettings=await evaluate(target,'window.__hides')
+ await evaluate(target,`document.querySelector('.hotkey-toggle').click();true`)
+ await waitFor(()=>evaluate(target,`!!document.querySelector('.launcher-settings-card .hotkey-input')`))
+ await evaluate(target,`document.querySelector('.launcher-settings-card').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));true`)
+ await waitFor(()=>evaluate(target,`!document.querySelector('.launcher-settings-card')`))
+ if(await evaluate(target,'window.__hides')!==hidesBeforeSettings)throw new Error('Closing shared settings dialog hid the Launcher')
+ console.log('Shared folder create/rename dialogs, settings Escape isolation and unchanged IPC payloads passed.')
+ const paletteSignatures=new Set();
+ for(const preset of ['qing-default','neon-circuit','greenline','aurora-flow','qing-nova']){
+   await evaluate(target,`document.documentElement.dataset.appearancePreset=${JSON.stringify(preset)};document.documentElement.dataset.theme='light';true`)
+   const palette=await evaluate(target,`(() => {const r=getComputedStyle(document.documentElement),s=getComputedStyle(document.querySelector('.launcher-shell'));return {brand:r.getPropertyValue('--q-primary').trim(),card:r.getPropertyValue('--q-card').trim(),surface:s.backgroundColor,text:s.color}})()`)
+   if(!palette.brand || !palette.card || palette.surface==='rgba(0, 0, 0, 0)')throw new Error('Unresolved shared module tokens: '+preset)
+   paletteSignatures.add(palette.brand+palette.card);
+ }
+ if(paletteSignatures.size!==5)throw new Error('Module did not project all five host skins')
+ await evaluate(target,`document.documentElement.dataset.appearancePreset='qing-default';document.documentElement.dataset.theme='dark';true`)
+ if(!await evaluate(target,`getComputedStyle(document.documentElement).getPropertyValue('--q-card').trim()==='#162236'`))throw new Error('Launcher ignores host dark theme')
+ if(!await emulatedCheck(target,'Emulation.setDeviceMetricsOverride',{width:430,height:720,deviceScaleFactor:1,mobile:false},`(() => {const shell=document.querySelector('.launcher-shell').getBoundingClientRect(),tabs=document.querySelector('.mode-tabs').getBoundingClientRect();return innerWidth===430 && shell.left>=0 && shell.right<=innerWidth && tabs.left>=shell.left && tabs.right<=shell.right && document.documentElement.scrollWidth===innerWidth})()`))throw new Error('Narrow Launcher layout overflows')
+ if(!await emulatedCheck(target,'Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]},`matchMedia('(prefers-reduced-motion:reduce)').matches && parseFloat(getComputedStyle(document.querySelector('.launcher-tile')).transitionDuration) < .01`))throw new Error('Launcher ignores reduced motion')
+ await evaluate(target,`document.documentElement.dataset.theme='light';true`)
+ console.log('All five host skins, dark mode, responsive layout and reduced-motion checks passed.')
+ await delay(400) // settle token-based colour transitions after emulation
  const screenshot=await cdp(target,'Page.captureScreenshot',{format:'png'})
  mkdirSync('artifacts/ui-check',{recursive:true});writeFileSync('artifacts/ui-check/launcher.png',Buffer.from(screenshot.data,'base64'))
  console.log('Launcher browser interaction checks passed.')

@@ -5,7 +5,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
-$moduleRoot = Join-Path $repoRoot 'QingToolbox.Tauri/native-pdf'
+. (Join-Path $PSScriptRoot 'module-sources.ps1')
+$moduleRoot = Resolve-QingModuleSource 'pdf'
 $uiRoot = Join-Path $moduleRoot 'ui-src'
 $appRoot = Join-Path $repoRoot 'QingToolbox.Tauri'
 $resourceRoot = Join-Path $appRoot 'src-tauri/resources/modules/qing.pdf'

@@ -6,7 +6,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $resolved = [IO.Path]::GetFullPath($ExecutablePath)
 if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) { throw "Text Tools executable was not found: $resolved" }
-$moduleRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\QingToolbox.Tauri\native-texttools'))
+. (Join-Path $PSScriptRoot 'module-sources.ps1')
+$moduleRoot = Resolve-QingModuleSource 'texttools'
 $nonce = 'texttools-smoke-' + [Guid]::NewGuid().ToString('N')
 $dataRoot = Join-Path ([IO.Path]::GetTempPath()) ('qing-texttools-smoke-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null

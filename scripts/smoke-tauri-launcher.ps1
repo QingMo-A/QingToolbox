@@ -32,7 +32,8 @@ $psi.Environment['QINGTOOLBOX_MODULE_DATA_DIR'] = $dataRoot
 if ($Everything -or $EverythingService) {
     # The controlled root keeps this optional integration smoke bounded and
     # avoids changing a developer's global Everything index configuration.
-    $moduleDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\QingToolbox.Tauri\native-launcher'))
+    . (Join-Path $PSScriptRoot 'module-sources.ps1')
+    $moduleDirectory = Resolve-QingModuleSource 'launcher'
     $psi.Environment['QINGTOOLBOX_MODULE_DIRECTORY'] = $moduleDirectory
     if ($EverythingService) {
         # Exercise the production service path against a file on a fixed

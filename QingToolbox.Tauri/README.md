@@ -34,10 +34,12 @@ QingToolbox.Tauri/
 transport，不会被这次接入破坏。
 ```
 
-`native-module-canary/` 是一个可复现的 Rust 进程模块样例，用于验证
-nonce-bound hello、invoke 和有界 shutdown。`native-launcher/`、`native-pdf/`、
-`native-transfer/`、`native-texttools/`、`native-windowtopmost/`、`native-powerguard/` 和 `native-screenpin/` 是当前产品迁移切片：各自的状态、系统能力、文件边界和重型运行时
-都在独立 Rust 进程中，Vue 只通过模块窗口 IPC 调用，不接收可直接执行的路径。
+独立模块源码已迁至 `modules` 分支的 `modules/`，包含 Launcher、QingPdf、
+TextTools、WindowTopmost、PowerGuard、ScreenPin 和开发诊断 Canary。
+宿主通过 Git worktree 列表定位该分支；单独检出时设置
+`QINGTOOLBOX_MODULES_ROOT` 为模块仓库根目录。构建入口不再维护另一份模块源码。
+模块 Vue 在构建时复用本体共享 UI，通过模块窗口 IPC 调用独立 Rust 进程。
+`native-transfer/` 保留为设备页的内部传输引擎，不是官方模块下载项目。
 
 ## 本地运行
 

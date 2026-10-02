@@ -26,7 +26,7 @@ Everything, qpdf or another heavyweight runtime. Qing Launcher, Qing PDF and
 QingTransfer are explicitly scoped module exceptions:
 its package carries the fixed official Everything 1.4.1.1032 x64 portable
 components, ES 1.1.0.37 and the SDK DLL under
-`native-launcher/third-party/Everything/`, together with `LICENSE.txt` and
+`modules` branch: `modules/Launcher/third-party/Everything/`, together with `LICENSE.txt` and
 `NOTICE.md`. The pinned component hashes and official source URLs are recorded
 in that notice; the build does not download a moving `latest` dependency. The
 native Launcher also uses `sha2` 0.10.9 (MIT OR Apache-2.0) for asset and
@@ -35,7 +35,7 @@ Windows clipboard/elevation APIs. The ZIP importer uses the fixed `zip` crate
 only for package extraction; it is not a general filesystem bridge.
 
 Qing PDF carries the official qpdf 12.4.1 Windows runtime under
-`native-pdf/third-party/qpdf/`, including its `LICENSE.txt`, `NOTICE.md` and
+`modules` branch: `modules/QingPdf/third-party/qpdf/`, including its `LICENSE.txt`, `NOTICE.md` and
 `SHA256SUMS`; the build script verifies every copied file against the pinned
 hashes. QingTransfer uses the fixed `mdns-sd` 0.21.0 crate for DNS-SD discovery;
 its transitive versions are recorded in `native-transfer/Cargo.lock`. No build

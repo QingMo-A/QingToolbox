@@ -1,1 +1,9 @@
-<script setup lang="ts">withDefaults(defineProps<{label:string;disabled?:boolean;loading?:boolean}>(),{loading:false})</script><template><button class="q-icon-button" :class="{ 'is-loading': loading }" :aria-label="label" :title="label" :disabled="disabled || loading" :aria-busy="loading || undefined"><span v-if="loading" class="q-icon-button-spinner" aria-hidden="true" /><span class="q-icon-button-content"><slot /></span></button></template>
+<script setup lang="ts">
+withDefaults(defineProps<{
+  label: string
+  disabled?: boolean
+  loading?: boolean
+}>(), { loading: false });
+</script>
+<template><button class="q-icon-button" :class="{ 'is-loading': loading }" :aria-label="label" :title="label" :disabled="disabled || loading" :aria-busy="loading || undefined"><span v-if="loading" class="q-icon-button-spinner" aria-hidden="true" /><span class="q-icon-button-content"><slot /></span></button></template>
+<style src="../styles/controls.css"></style>

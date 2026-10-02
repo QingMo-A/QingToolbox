@@ -14,6 +14,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'module-sources.ps1')
 $appRoot = Join-Path $repoRoot 'QingToolbox.Tauri'
 $rustRoot = Join-Path $appRoot 'src-tauri'
 $cargoBin = Join-Path $HOME '.cargo\bin'
@@ -43,13 +44,13 @@ $textToolsExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.text
 $windowTopmostExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.windowtopmost/bin/qing-windowtopmost-module.exe'
 $powerGuardExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.powerguard/bin/qing-powerguard-module.exe'
 $screenPinExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.screenpin/bin/qing-screenpin-module.exe'
-$launcherRoot = Join-Path $appRoot 'native-launcher'
-$pdfRoot = Join-Path $appRoot 'native-pdf'
+$launcherRoot = Resolve-QingModuleSource 'launcher'
+$pdfRoot = Resolve-QingModuleSource 'pdf'
 $transferRoot = Join-Path $appRoot 'native-transfer'
-$textToolsRoot = Join-Path $appRoot 'native-texttools'
-$windowTopmostRoot = Join-Path $appRoot 'native-windowtopmost'
-$powerGuardRoot = Join-Path $appRoot 'native-powerguard'
-$screenPinRoot = Join-Path $appRoot 'native-screenpin'
+$textToolsRoot = Resolve-QingModuleSource 'texttools'
+$windowTopmostRoot = Resolve-QingModuleSource 'windowtopmost'
+$powerGuardRoot = Resolve-QingModuleSource 'powerguard'
+$screenPinRoot = Resolve-QingModuleSource 'screenpin'
 if (-not $SkipCanary) {
     & (Join-Path $repoRoot 'scripts/build-tauri-canary.ps1')
     & (Join-Path $repoRoot 'scripts/smoke-tauri-canary.ps1') -ExecutablePath $canaryExecutable

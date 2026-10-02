@@ -1,11 +1,12 @@
 import { createServer } from 'node:http'
+import { moduleSource } from './module-sources.mjs'
 import { createServer as portServer } from 'node:net'
 import { readFileSync, mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { spawn } from 'node:child_process'
 
-const root = resolve('QingToolbox.Tauri/native-windowtopmost/ui-src/dist')
+const root = resolve(moduleSource('windowtopmost'), 'ui-src/dist')
 const fixture = `window.__callbacks={};window.__callbackId=0;window.__calls=[];
 window.__state={windows:[{id:'w-AA',title:'Alpha window',processName:'alpha.exe',processId:101,handleText:'0xAA',isTopmost:false},{id:'w-BB',title:'Beta window',processName:'beta.exe',processId:202,handleText:'0xBB',isTopmost:false}],selectedWindowId:null,status:'ready',error:null};
 window.__TAURI_INTERNALS__={transformCallback:fn=>{window.__callbacks[++window.__callbackId]=fn;return window.__callbackId},unregisterCallback:()=>{},invoke:async(cmd,args)=>{
@@ -74,10 +75,10 @@ try {
   const layout = await evaluate(target, `(() => { const actions=document.querySelector('.actions').getBoundingClientRect();const table=document.querySelector('.table-card').getBoundingClientRect();return actions.bottom<table.top })()`)
   if (!layout) throw new Error('Topmost action buttons are not above the window list')
   await evaluate(target, `document.querySelectorAll('.window-row')[0].click();true`)
-  await waitFor(() => evaluate(target, `document.querySelectorAll('.window-row')[0].getAttribute('aria-pressed')==='true' && !document.querySelector('.actions .primary').disabled`))
+  await waitFor(() => evaluate(target, `document.querySelectorAll('.window-row')[0].getAttribute('aria-pressed')==='true' && !document.querySelector('.actions .is-primary').disabled`))
   await delay(1250)
   if (!await evaluate(target, `document.querySelectorAll('.window-row')[0].classList.contains('selected')`)) throw new Error('Polling cleared the selected list row')
-  await evaluate(target, `document.querySelector('.actions .primary').click();true`)
+  await evaluate(target, `document.querySelector('.actions .is-primary').click();true`)
   await waitFor(() => evaluate(target, `document.querySelectorAll('.window-row')[0].querySelector('.pill').textContent==='是'`))
   if (!await evaluate(target, `window.__calls.some(call=>call.method==='setTopmost' && call.payload.windowId==='w-AA')`)) throw new Error('Topmost action did not use the selected row id')
   await evaluate(target, `window.__holdNextPoll=true;true`)
@@ -88,7 +89,7 @@ try {
   await delay(120)
   if (!await evaluate(target, `document.querySelectorAll('.window-row')[1].classList.contains('selected')`)) throw new Error('An older poll response overwrote the newer selection')
   await evaluate(target, `document.querySelector('.actions button:last-child').click();true`)
-  await waitFor(() => evaluate(target, `!document.querySelector('.window-row.selected') && document.querySelector('.actions .primary').disabled`))
+  await waitFor(() => evaluate(target, `!document.querySelector('.window-row.selected') && document.querySelector('.actions .is-primary').disabled`))
   await evaluate(target, `document.querySelector('.pick-button').click();true`)
   await waitFor(() => evaluate(target, `document.querySelectorAll('.window-row')[0].classList.contains('selected')`))
   console.log('Window Topmost list selection, action placement, polling race, clear and picker passed.')
