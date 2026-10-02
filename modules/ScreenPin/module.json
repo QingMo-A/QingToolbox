@@ -1,20 +1,38 @@
 {
   "id": "qing.screenpin",
   "name": "Screen Pin",
-  "description": "Capture a screen region and pin it as a resizable floating image.",
-  "version": "0.1.1",
-  "author": "QingMo",
-  "entry": "QingToolbox.Modules.ScreenPin.dll",
-  "icon": "icon.svg",
-  "runtimeType": "InProcess",
+  "description": "Capture bounded screen regions and keep them in a local pin board.",
+  "version": "0.2.0",
+  "apiVersion": 1,
+  "author": "QingMo-A",
+  "minimumHostVersion": "0.3.0-alpha",
+  "entry": "bin/qing-screenpin-module.exe",
+  "runtimeType": "Process",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
   "loadMode": "Manual",
-  "permissions": [],
-  "defaultLanguage": "en-US",
+  "permissions": [
+    "WindowControl"
+  ],
+  "icon": "icon.svg",
+  "defaultLanguage": "zh-CN",
   "localization": {
     "basePath": "i18n",
     "resources": {
       "en-US": "i18n/en-US.json",
       "zh-CN": "i18n/zh-CN.json"
     }
-  }
+  },
+  "operations": [
+    "getState",
+    "getDisplayBounds",
+    "getPin",
+    "captureRegion",
+    "selectRegion",
+    "getSelectionResult",
+    "copyPin",
+    "removePin",
+    "clearPins"
+  ]
 }

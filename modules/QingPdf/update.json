@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "moduleId": "qing.pdf",
+  "publisher": "QingMo-A",
+  "releases": [
+    {
+      "version": "0.1.0",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.0-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-09-25T14:24:07Z",
+      "package": {
+        "fileName": "qing.pdf-0.1.0-tauri.qmod",
+        "url": "https://github.com/QingMo-A/QingToolbox/releases/download/modules-pdf-v0.1.0/qing.pdf-0.1.0-tauri.qmod",
+        "size": 3576653,
+        "sha256": "48699ce887f07b175c75b0da888437f23f4eae1c9c7a0db96ada67cdab9715d6"
+      },
+      "releaseNotes": {
+        "zh-CN": "已发布的 Rust/Tauri 独立模块版本。本地后续改动尚未发布。",
+        "en-US": "Published Rust/Tauri module generation. Subsequent local changes are not published yet."
+      }
+    }
+  ]
+}

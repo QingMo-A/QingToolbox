@@ -1,24 +1,63 @@
 {
-  "schemaVersion": 1,
-  "sourceId": "qingtoolbox-official",
+  "schemaVersion": 2,
+  "sourceId": "qingtoolbox-official-tauri",
+  "moduleProfile": "tauri-process-v1",
   "modules": {
+    "qing.canary": {
+      "name": { "zh-CN": "模块诊断", "en-US": "Web Module Canary" },
+      "description": { "zh-CN": "用于开发和模块协议验证。", "en-US": "Development and module protocol diagnostics." },
+      "icon": "Canary/icon.svg",
+      "moduleManifest": "Canary/module.json",
+      "updateManifest": "Canary/update.json",
+      "visibility": "development"
+    },
     "qing.launcher": {
-      "updateManifest": "Launcher/update.json"
+      "name": { "zh-CN": "启动台", "en-US": "Qing Launcher" },
+      "description": { "zh-CN": "应用启动、桌面图标、文件夹和 Everything 搜索。", "en-US": "Application launching, desktop items, folders and Everything search." },
+      "icon": "Launcher/icon.svg",
+      "moduleManifest": "Launcher/module.json",
+      "updateManifest": "Launcher/update.json",
+      "visibility": "public"
+    },
+    "qing.pdf": {
+      "name": { "zh-CN": "PDF 工具", "en-US": "Qing PDF" },
+      "description": { "zh-CN": "在本地合并、拆分、提取和旋转 PDF。", "en-US": "Merge, split, extract and rotate PDFs locally." },
+      "icon": "QingPdf/icon.svg",
+      "moduleManifest": "QingPdf/module.json",
+      "updateManifest": "QingPdf/update.json",
+      "visibility": "public"
     },
     "qing.powerguard": {
-      "updateManifest": "PowerGuard/update.json"
-    },
-    "qing.qingtransfer": {
-      "updateManifest": "QingTransfer/update.json"
+      "name": { "zh-CN": "断电保护", "en-US": "PowerGuard" },
+      "description": { "zh-CN": "监测断网状态，并在用户授权后执行关机倒计时。", "en-US": "Connectivity monitoring and user-authorized shutdown countdowns." },
+      "icon": "PowerGuard/icon.svg",
+      "moduleManifest": "PowerGuard/module.json",
+      "updateManifest": "PowerGuard/update.json",
+      "visibility": "public"
     },
     "qing.screenpin": {
-      "updateManifest": "ScreenPin/update.json"
+      "name": { "zh-CN": "截图贴图", "en-US": "Screen Pin" },
+      "description": { "zh-CN": "截图并将图片固定在桌面上。", "en-US": "Capture screen regions and pin images to the desktop." },
+      "icon": "ScreenPin/icon.svg",
+      "moduleManifest": "ScreenPin/module.json",
+      "updateManifest": "ScreenPin/update.json",
+      "visibility": "public"
     },
     "qing.texttools": {
-      "updateManifest": "TextTools/update.json"
+      "name": { "zh-CN": "文本工具", "en-US": "Text Tools" },
+      "description": { "zh-CN": "JSON、编码、大小写和文本行处理。", "en-US": "JSON, encoding, case and line transformations." },
+      "icon": "TextTools/icon.svg",
+      "moduleManifest": "TextTools/module.json",
+      "updateManifest": "TextTools/update.json",
+      "visibility": "public"
     },
     "qing.windowtopmost": {
-      "updateManifest": "WindowTopmost/update.json"
+      "name": { "zh-CN": "窗口置顶", "en-US": "Window Topmost" },
+      "description": { "zh-CN": "选择或拾取窗口，切换窗口置顶状态。", "en-US": "Select or pick windows and change their always-on-top state." },
+      "icon": "WindowTopmost/icon.svg",
+      "moduleManifest": "WindowTopmost/module.json",
+      "updateManifest": "WindowTopmost/update.json",
+      "visibility": "public"
     }
   }
 }

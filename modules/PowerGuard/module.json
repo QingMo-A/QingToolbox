@@ -1,15 +1,41 @@
 {
   "id": "qing.powerguard",
   "name": "PowerGuard",
-  "description": "Monitor internet connectivity and safely shut down the computer after a confirmed outage.",
-  "version": "0.1.1",
-  "author": "QingMo",
-  "minimumHostVersion": "0.1.0",
-  "entry": "QingToolbox.Modules.PowerGuard.dll",
-  "runtimeType": "InProcess",
+  "description": "Monitor connectivity and safely shut down after a confirmed outage.",
+  "version": "0.2.0",
+  "apiVersion": 1,
+  "author": "QingMo-A",
+  "minimumHostVersion": "0.3.0-alpha",
+  "entry": "bin/qing-powerguard-module.exe",
+  "runtimeType": "Process",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
   "loadMode": "Manual",
-  "permissions": ["Network", "ProcessStart"],
+  "permissions": [
+    "Network",
+    "ProcessStart",
+    "WindowControl"
+  ],
   "icon": "icon.svg",
-  "defaultLanguage": "en-US",
-  "localization": { "basePath": "i18n", "resources": { "en-US": "i18n/en-US.json", "zh-CN": "i18n/zh-CN.json" } }
+  "defaultLanguage": "zh-CN",
+  "localization": {
+    "basePath": "i18n",
+    "resources": {
+      "en-US": "i18n/en-US.json",
+      "zh-CN": "i18n/zh-CN.json"
+    }
+  },
+  "operations": [
+    "getState",
+    "setSettings",
+    "probeNow",
+    "testWarning",
+    "cancelCurrent",
+    "rearmCurrent",
+    "extendCountdown",
+    "shutdownNow",
+    "readEvents",
+    "clearEvents"
+  ]
 }

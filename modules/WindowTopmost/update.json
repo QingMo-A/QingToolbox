@@ -1,24 +1,27 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "moduleId": "qing.windowtopmost",
   "publisher": "QingMo-A",
   "releases": [
     {
-      "version": "0.1.1",
-      "channel": "stable",
-      "moduleApiVersion": "experimental-0.1",
-      "minimumHostVersion": "0.1.0",
+      "version": "0.2.0",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.0-alpha",
       "maximumHostVersionExclusive": null,
-      "publishedAt": "2026-08-01T18:03:25Z",
+      "publishedAt": "2026-09-25T14:21:10Z",
       "package": {
-        "fileName": "qing.windowtopmost-0.1.1.qmod",
-        "url": "https://github.com/QingMo-A/QingToolbox/releases/download/modules-windowtopmost-v0.1.1/qing.windowtopmost-0.1.1.qmod",
-        "size": 14210,
-        "sha256": "3E9D8D796C3F6470A5AED2B4C0E072D2DB7938A584545ACFE7E8F0B6FED18822"
+        "fileName": "qing.windowtopmost-0.2.0-tauri.qmod",
+        "url": "https://github.com/QingMo-A/QingToolbox/releases/download/modules-windowtopmost-v0.2.0/qing.windowtopmost-0.2.0-tauri.qmod",
+        "size": 162740,
+        "sha256": "f70145e9313141435fdaf0c440e77658355d84ad04cf310615c315258e472960"
       },
       "releaseNotes": {
-        "zh-CN": "改进窗口选择、置顶操作安全性与界面反馈。",
-        "en-US": "Improves window selection, topmost action safety, and UI feedback."
+        "zh-CN": "已发布的 Rust/Tauri 独立模块版本。本地后续改动尚未发布。",
+        "en-US": "Published Rust/Tauri module generation. Subsequent local changes are not published yet."
       }
     }
   ]

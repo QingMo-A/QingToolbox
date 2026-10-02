@@ -2,20 +2,44 @@
   "id": "qing.texttools",
   "name": "Text Tools",
   "description": "Lightweight text conversion and formatting tools.",
-  "version": "0.1.1",
-  "author": "QingMo",
-  "minimumHostVersion": "0.1.0",
-  "entry": "QingToolbox.Modules.TextTools.dll",
-  "runtimeType": "InProcess",
+  "version": "0.2.0",
+  "apiVersion": 1,
+  "author": "QingMo-A",
+  "minimumHostVersion": "0.3.0-alpha",
+  "entry": "bin/qing-texttools-module.exe",
+  "runtimeType": "Process",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
   "loadMode": "Manual",
-  "permissions": [],
+  "permissions": [
+    "Clipboard",
+    "WindowControl"
+  ],
   "icon": "icon.svg",
-  "defaultLanguage": "en-US",
+  "defaultLanguage": "zh-CN",
   "localization": {
     "basePath": "i18n",
     "resources": {
       "en-US": "i18n/en-US.json",
       "zh-CN": "i18n/zh-CN.json"
     }
-  }
+  },
+  "operations": [
+    "getState",
+    "setInput",
+    "formatJson",
+    "minifyJson",
+    "base64Encode",
+    "base64Decode",
+    "urlEncode",
+    "urlDecode",
+    "uppercase",
+    "lowercase",
+    "removeEmptyLines",
+    "copyOutput",
+    "copyOutputToInput",
+    "swap",
+    "clear"
+  ]
 }

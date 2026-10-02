@@ -1,6 +1,28 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "moduleId": "qing.texttools",
   "publisher": "QingMo-A",
-  "releases": []
+  "releases": [
+    {
+      "version": "0.2.0",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.0-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-09-25T14:24:06Z",
+      "package": {
+        "fileName": "qing.texttools-0.2.0-tauri.qmod",
+        "url": "https://github.com/QingMo-A/QingToolbox/releases/download/modules-texttools-v0.2.0/qing.texttools-0.2.0-tauri.qmod",
+        "size": 171194,
+        "sha256": "0451ce3f2d8ef9caba996d961eb035b4d93792702863886308cb2a08ba7cddbb"
+      },
+      "releaseNotes": {
+        "zh-CN": "已发布的 Rust/Tauri 独立模块版本。本地后续改动尚未发布。",
+        "en-US": "Published Rust/Tauri module generation. Subsequent local changes are not published yet."
+      }
+    }
+  ]
 }

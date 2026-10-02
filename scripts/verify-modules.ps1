@@ -1,57 +1,20 @@
 [CmdletBinding()]
-param(
-    [string]$ModulesRoot,
-    [string]$QingToolboxHostRoot = "..\..\QingToolbox-toolbox",
-    [ValidateSet("Debug", "Release")]
-    [string]$Configuration = "Debug"
-)
-
-$ErrorActionPreference = "Stop"
-$ModulesRoot = if ([string]::IsNullOrWhiteSpace($ModulesRoot)) {
-    Join-Path $PSScriptRoot "..\modules"
+param([string]$QingToolboxHostRoot = $env:QINGTOOLBOX_HOST_ROOT, [switch]$MetadataOnly, [switch]$Build)
+$ErrorActionPreference = 'Stop'
+$root = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+& node (Join-Path $PSScriptRoot 'module-catalog.mjs') (Join-Path $root 'modules')
+if ($LASTEXITCODE -ne 0) { throw 'Module catalog validation failed.' }
+& node --test (Join-Path $PSScriptRoot 'module-catalog.test.mjs')
+if ($LASTEXITCODE -ne 0) { throw 'Module catalog tests failed.' }
+if ($MetadataOnly) { return }
+$env:Path = (Join-Path $HOME '.cargo/bin') + [IO.Path]::PathSeparator + $env:Path
+$mapping = [ordered]@{canary='Canary'; launcher='Launcher'; pdf='QingPdf'; powerguard='PowerGuard'; screenpin='ScreenPin'; texttools='TextTools'; windowtopmost='WindowTopmost'}
+foreach ($scope in $mapping.Keys) {
+    if ($Build) { & (Join-Path $PSScriptRoot 'build-module.ps1') -Module $scope -QingToolboxHostRoot $QingToolboxHostRoot }
+    $manifest = Join-Path $root "modules/$($mapping[$scope])/Cargo.toml"
+    & cargo fmt --manifest-path $manifest -- --check
+    if ($LASTEXITCODE -ne 0) { throw "Rust format check failed: $scope" }
+    & cargo test --manifest-path $manifest --locked
+    if ($LASTEXITCODE -ne 0) { throw "Rust tests failed: $scope" }
 }
-else {
-    $ModulesRoot
-}
-$resolvedModulesRoot = [System.IO.Path]::GetFullPath($ModulesRoot)
-$hostRoot = if ([System.IO.Path]::IsPathRooted($QingToolboxHostRoot)) {
-    [System.IO.Path]::GetFullPath($QingToolboxHostRoot)
-}
-else {
-    [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $QingToolboxHostRoot))
-}
-
-$validatorProject = Join-Path $PSScriptRoot "..\tools\QingToolbox.ModuleUpdateMetadataValidator\QingToolbox.ModuleUpdateMetadataValidator.csproj"
-Write-Host "Running module update metadata validator self-test..."
-dotnet run --project $validatorProject -c $Configuration -- --self-test
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-Write-Host "Validating module update metadata..."
-dotnet run --project $validatorProject -c $Configuration -- --modules-root $resolvedModulesRoot
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-& (Join-Path $PSScriptRoot "check-module-i18n.ps1") -ModulesRoot $resolvedModulesRoot
-if (-not $?) {
-    exit 1
-}
-
-$projects = Get-ChildItem -LiteralPath $resolvedModulesRoot -Recurse -Filter "*.csproj" -File
-if ($projects.Count -eq 0) {
-    throw "No module projects found under: $resolvedModulesRoot"
-}
-
-foreach ($project in $projects) {
-    Write-Host "Building $($project.Name) ($Configuration)..."
-    dotnet build $project.FullName -c $Configuration "-p:QingToolboxHostRoot=$hostRoot"
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
-    }
-}
-
-$powerGuardSmoke = Join-Path $PSScriptRoot "..\tests\PowerGuard.SmokeTest\QingToolbox.Modules.PowerGuard.SmokeTest.csproj"
-if (Test-Path -LiteralPath $powerGuardSmoke -PathType Leaf) {
-    Write-Host "Building and running PowerGuard safe smoke test ($Configuration)..."
-    dotnet run --project $powerGuardSmoke -c $Configuration "-p:QingToolboxHostRoot=$hostRoot"
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-}
-
-Write-Host "Module verification passed."
+Write-Host 'Native module verification passed. No real shutdown or device-trust changes were performed.'

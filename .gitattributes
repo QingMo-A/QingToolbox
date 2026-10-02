@@ -1,3 +1,10 @@
 modules/Launcher/third-party/Everything/*.dll binary
 modules/Launcher/third-party/Everything/*.exe binary
 modules/Launcher/third-party/Everything/LICENSE.txt -whitespace
+modules/Launcher/third-party/Everything/LICENSE.txt text eol=lf
+modules/Launcher/third-party/Everything/NOTICE.md text eol=lf
+modules/QingPdf/third-party/qpdf/*.dll binary
+modules/QingPdf/third-party/qpdf/*.exe binary
+modules/QingPdf/third-party/qpdf/*.txt text eol=lf
+modules/QingPdf/third-party/qpdf/*.md text eol=lf
+modules/QingPdf/third-party/qpdf/SHA256SUMS text eol=lf

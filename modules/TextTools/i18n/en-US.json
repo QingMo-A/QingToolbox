@@ -22,14 +22,12 @@
   "status.done": "Done.",
   "status.copied": "Copied.",
   "status.inputEmpty": "Input is empty.",
-  "status.processing": "Processing…",
   "status.moved": "Result moved to input.",
   "status.swapped": "Input and result swapped.",
-  "automation.input": "Input text",
-  "automation.output": "Output text",
   "errors.invalidJson": "The input is not valid JSON.",
   "errors.invalidBase64": "Invalid Base64 input.",
   "errors.invalidUrl": "Invalid URL-encoded input.",
   "errors.copyFailed": "The result could not be copied.",
+  "errors.inputTooLarge": "Input is too large (2 MiB maximum).",
   "errors.operationFailed": "The operation could not be completed."
 }

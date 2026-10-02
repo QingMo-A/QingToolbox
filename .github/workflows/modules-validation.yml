@@ -1,4 +1,4 @@
-name: Modules validation
+name: Native modules validation
 
 on:
   workflow_dispatch:
@@ -13,56 +13,33 @@ permissions:
 jobs:
   verify:
     runs-on: windows-latest
+    timeout-minutes: 40
     steps:
-      - name: Checkout modules
+      - name: Checkout independent modules
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           path: modules-source
-      - name: Checkout compatible toolbox host
+      - name: Checkout compatible Rust toolbox and shared UI
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
-          repository: QingMo-A/QingToolbox
-          ref: 1e5f219c41f5025171a91a894e4078b09f5330d8
+          ref: toolbox
           path: toolbox-host
-      - name: Setup .NET 10
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
-        with:
-          dotnet-version: 10.0.x
-      - name: Setup Node 24 for compatible toolbox WebUI
+      - name: Setup Node 24
         uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: toolbox-host/QingToolbox.WebUI/package-lock.json
-      - name: Build compatible toolbox WebUI assets
+      - name: Verify source and metadata
+        shell: pwsh
+        run: ./modules-source/scripts/verify-modules.ps1 -MetadataOnly
+      - name: Build and verify native modules
+        shell: pwsh
+        env:
+          QINGTOOLBOX_MODULES_ROOT: ${{ github.workspace }}/modules-source
+          QINGTOOLBOX_HOST_ROOT: ${{ github.workspace }}/toolbox-host
+        run: |
+          cargo --version
+          ./modules-source/scripts/verify-modules.ps1 -Build -QingToolboxHostRoot "$env:QINGTOOLBOX_HOST_ROOT"
+      - name: Verify host source resolution and caches
         shell: pwsh
         working-directory: toolbox-host
-        run: ./scripts/build-web-ui.ps1
-      - name: Test Launcher Web UI
-        shell: pwsh
-        working-directory: modules-source/modules/Launcher/web
-        run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          npm run typecheck
-          npm run test
-          npm run build
-      - name: Validate module update metadata
-        shell: pwsh
-        run: |
-          dotnet run --project ./modules-source/tools/QingToolbox.ModuleUpdateMetadataValidator -c Release -- --self-test
-          dotnet run --project ./modules-source/tools/QingToolbox.ModuleUpdateMetadataValidator -c Release -- --modules-root ./modules-source/modules
-      - name: Verify modules
-        shell: pwsh
-        run: |
-          Write-Host "SAFE TEST MODE"
-          Write-Host "NO REAL SHUTDOWN"
-          Write-Host "NO LIVE NETWORK PROBE"
-          Write-Host "DETERMINISTIC TIME PROVIDER"
-          ./modules-source/scripts/check-module-i18n.ps1 -ModulesRoot "$PWD/modules-source/modules"
-          ./modules-source/scripts/verify-modules.ps1 -QingToolboxHostRoot "$PWD/toolbox-host" -Configuration Release
-      - name: Package and integration test PowerGuard
-        shell: pwsh
-        run: ./modules-source/scripts/package-powerguard.ps1 -QingToolboxHostRoot "$PWD/toolbox-host" -Configuration Release
-      - name: Package and integration test Launcher
-        shell: pwsh
-        run: ./modules-source/scripts/package-launcher.ps1 -QingToolboxHostRoot "$PWD/toolbox-host" -Configuration Release
+        run: node --test scripts/test-module-sources.mjs scripts/test-tauri-build-cache.mjs

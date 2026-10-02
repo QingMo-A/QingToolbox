@@ -1,0 +1,18 @@
+import { invoke as tauriInvoke } from '@tauri-apps/api/core'
+import type { ModuleContext, WindowState } from './types'
+
+export function invokeModule<T>(method: string, payload: Record<string, unknown> = {}): Promise<T> {
+  return tauriInvoke<T>('invoke_module_window', { method, payload })
+}
+
+export function getContext(): Promise<ModuleContext> {
+  return tauriInvoke<ModuleContext>('get_module_window_context')
+}
+
+export function hideModuleWindow(): Promise<void> {
+  return tauriInvoke<void>('hide_module_window')
+}
+
+export function getState(): Promise<WindowState> {
+  return invokeModule<WindowState>('getState')
+}

@@ -13,3 +13,14 @@ settings.json
 settings.corrupt-*.json
 events.jsonl
 events.previous.jsonl
+
+# Local preservation of the retired WPF worktree, including uncommitted edits.
+/legacy-wpf/
+**/target/
+**/dist/
+**/.qing-host-tsconfig.json
+**/.vite/
+**/coverage/
+!modules/QingPdf/third-party/qpdf/*.dll
+!modules/QingPdf/third-party/qpdf/*.exe
+!modules/QingPdf/third-party/qpdf/SHA256SUMS

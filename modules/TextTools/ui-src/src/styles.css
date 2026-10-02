@@ -1,0 +1,273 @@
+/* Text Tools — the module's own chrome.
+ *
+ * Every colour, radius, shadow and duration below comes from the shell's tokens
+ * (imported in `theme.css`). Nothing here states a literal colour. The version
+ * this replaced did, in fifty-four places, which is why the module ignored both
+ * the shell's palette and its light/dark switch: it had a palette of its own
+ * that merely happened to resemble one of the shell's.
+ *
+ * Box models stay here rather than being shared. The shell keeps its component
+ * box models in `styles/main.css` beside its page selectors, so the button's
+ * padding cannot be taken without the shell's page layout coming with it. The
+ * division is therefore explicit: the shell decides how a control *looks*, this
+ * module decides how big it is.
+ *
+ * Layout numbers (padding, gaps, the editor's minimum height) are written out.
+ * They are geometry, not appearance, and no preset has an opinion about them.
+ */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 420px;
+  min-height: 100vh;
+  /* Font comes from `tokens.css` and background/text from
+     `appearancePresets.css`, both on `:root` and `body`. Repeating them here
+     would be a second opinion about the same thing. */
+}
+
+.shell {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 28px clamp(20px, 5vw, 32px) 24px;
+}
+
+/* Header ------------------------------------------------------------------ */
+
+.hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--q-space-4);
+  padding: var(--q-space-5);
+  border: 1px solid var(--q-border);
+  border-radius: var(--q-radius-lg);
+  /* A two-stop ramp rather than a flat fill, so the header still reads as the
+     lit surface the old gradient made it — but built from the preset's own
+     card and accent colours, so it lands correctly on all five. */
+  background: linear-gradient(135deg, var(--q-card), var(--q-brand-soft));
+  box-shadow: var(--q-shadow-sm);
+}
+
+.brand { display: flex; align-items: center; gap: var(--q-space-4); min-width: 0; }
+
+.brand-mark {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  flex: none;
+  place-items: center;
+  /* The preset's primary treatment, gradient and glow included, which is also
+     where the preset states the ink that treatment needs. */
+  background: var(--control-primary-bg);
+  color: var(--control-primary-fg);
+  border-radius: var(--q-radius);
+  box-shadow: var(--primary-glow), var(--q-shadow-sm);
+}
+
+.brand-mark img { width: 38px; height: 38px; object-fit: contain; }
+.brand-mark span { font-size: 18px; font-weight: 500; }
+
+.eyebrow {
+  margin: 0 0 var(--q-space-1);
+  color: var(--q-brand);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .16em;
+}
+
+.hero h1 { margin: 0; color: var(--q-text); font-size: 27px; line-height: 1.2; }
+.hero p { margin: var(--q-space-1) 0 0; color: var(--q-text-2); font-size: 13px; }
+
+.icon-button {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--secondary-border);
+  border-radius: var(--control-radius);
+  background: var(--secondary-bg);
+  color: var(--secondary-fg);
+  font-size: 20px;
+  cursor: pointer;
+  transition: background-color var(--q-fast), border-color var(--q-fast),
+    color var(--q-fast), box-shadow var(--q-fast), transform var(--q-fast);
+}
+
+.icon-button:hover:not(:disabled) {
+  border-color: var(--secondary-border-hover);
+  background: var(--secondary-bg-hover);
+  color: var(--q-primary);
+  box-shadow: var(--control-hover-shadow);
+}
+
+.icon-button:active:not(:disabled) { transform: translateY(1px); }
+
+/* Notices ----------------------------------------------------------------- */
+
+.alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--q-space-3);
+  margin-top: var(--q-space-4);
+  padding: var(--q-space-3) var(--q-space-4);
+  border: 1px solid var(--q-border);
+  border-radius: var(--q-radius-sm);
+  background: var(--q-surface);
+  color: var(--q-text);
+  box-shadow: var(--q-shadow-sm);
+  font-size: 13px;
+}
+
+.alert.danger {
+  color: var(--q-danger);
+  border-color: color-mix(in srgb, var(--q-danger) 38%, transparent);
+}
+
+.alert button {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+/* Editors ----------------------------------------------------------------- */
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--q-space-4);
+  margin-top: var(--q-space-4);
+}
+
+.editor-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--q-space-2);
+  min-height: 330px;
+  padding: var(--q-space-4);
+  border: 1px solid var(--q-border);
+  border-radius: var(--q-radius);
+  background: var(--q-card);
+  box-shadow: var(--q-shadow-sm);
+}
+
+.field-label { color: var(--q-text-2); font-size: 13px; font-weight: 500; }
+
+.editor-card textarea {
+  /* Only the geometry is set here. Border, radius, background, text colour and
+     the hover and focus states come from the shared control rules in
+     `appearancePresets.css`, which is what makes the field follow the preset
+     and dark mode without this file knowing either exists — including when the
+     host pushes a new appearance to an already open window. */
+  flex: 1;
+  min-height: 270px;
+  padding: var(--q-space-3);
+  resize: vertical;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.55;
+  outline: none;
+}
+
+/* The output field is the one piece of the page that should read as recessed
+   rather than editable, so it takes the soft surface. Still a token, so it is
+   a lighter panel in the light presets and a darker one in the dark presets. */
+.editor-card.output textarea { background: var(--q-surface-soft); }
+
+/* Actions ----------------------------------------------------------------- */
+
+.actions-card {
+  margin-top: var(--q-space-4);
+  padding: var(--q-space-4);
+  border: 1px solid var(--q-border);
+  border-radius: var(--q-radius);
+  background: var(--q-card);
+  box-shadow: var(--q-shadow-sm);
+}
+
+.action-group,
+.utility-group { display: flex; flex-wrap: wrap; gap: var(--q-space-2); }
+
+.utility-group {
+  margin-top: var(--q-space-3);
+  padding-top: var(--q-space-3);
+  border-top: 1px solid var(--q-border);
+}
+
+/* Status ------------------------------------------------------------------ */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: var(--q-space-2);
+  margin-top: var(--q-space-4);
+  padding: 0 var(--q-space-1);
+  color: var(--q-text-2);
+  font-size: 12px;
+}
+
+.status .dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--q-success);
+}
+
+.status.error { color: var(--q-danger); }
+.status.error .dot { background: var(--q-danger); }
+
+.status .count {
+  margin-left: auto;
+  color: var(--q-text-3);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Boot ------------------------------------------------------------------- */
+
+/* The splash markup sits in `index.html`, outside the Vue app, and this module
+   ships no inline styles in that document — so these rules are both the only
+   styling the splash ever gets and the last thing to arrive, since they come
+   with the bundle. It is therefore briefly unstyled rather than briefly
+   mis-coloured, which is the failure worth having. */
+.boot-splash {
+  display: grid;
+  place-items: center;
+  gap: var(--q-space-2);
+  min-height: 100vh;
+}
+
+.boot-splash > span {
+  padding: var(--q-space-4);
+  border-radius: var(--q-radius-sm);
+  background: var(--control-primary-bg);
+  color: var(--control-primary-fg);
+  font-weight: 500;
+}
+
+.boot-splash strong { color: var(--q-text); }
+.boot-splash small { color: var(--q-text-3); }
+
+@media (max-width: 720px) {
+  .editor-grid { grid-template-columns: 1fr; }
+  .editor-card { min-height: 0; }
+  .editor-card textarea { min-height: 200px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}

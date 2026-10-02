@@ -1,24 +1,27 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "moduleId": "qing.powerguard",
   "publisher": "QingMo-A",
   "releases": [
     {
-      "version": "0.1.1",
-      "channel": "stable",
-      "moduleApiVersion": "experimental-0.1",
-      "minimumHostVersion": "0.1.0",
+      "version": "0.2.0",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.0-alpha",
       "maximumHostVersionExclusive": null,
-      "publishedAt": "2026-08-01T18:03:25Z",
+      "publishedAt": "2026-09-25T14:21:10Z",
       "package": {
-        "fileName": "qing.powerguard-0.1.1.qmod",
-        "url": "https://github.com/QingMo-A/QingToolbox/releases/download/modules-powerguard-v0.1.1/qing.powerguard-0.1.1.qmod",
-        "size": 64422,
-        "sha256": "B284386FBB56EAF80F295D1950A6D4AF84C05844E05BF22E1797105B1CF30A03"
+        "fileName": "qing.powerguard-0.2.0-tauri.qmod",
+        "url": "https://github.com/QingMo-A/QingToolbox/releases/download/modules-powerguard-v0.2.0/qing.powerguard-0.2.0-tauri.qmod",
+        "size": 213397,
+        "sha256": "a729131e84907f4866debf8550dc349d852d037fd674cacc9d609ff0c53268d4"
       },
       "releaseNotes": {
-        "zh-CN": "改进多源连接检测、状态恢复和安全关机倒计时可靠性。",
-        "en-US": "Improves multi-source connectivity detection, recovery handling, and safe shutdown countdown reliability."
+        "zh-CN": "已发布的 Rust/Tauri 独立模块版本。本地后续改动尚未发布。",
+        "en-US": "Published Rust/Tauri module generation. Subsequent local changes are not published yet."
       }
     }
   ]
