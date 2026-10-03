@@ -22,7 +22,6 @@ type DeviceNotice = { id: string; peerName: string; action: DeviceAction }
 type DeviceBattery = { peerId: string; percent: number; charging: boolean; receivedAtMs: number }
 type PairingSnapshot = { error: string | null; pending: PendingPair[]; paired: PairedDevice[]; actions?: PendingDeviceAction[]; notices?: DeviceNotice[]; batteries?: DeviceBattery[]; revocations?: PairedDevice[]; online?: string[] }
 type DeviceSnapshot = { enabled: boolean; error: string | null; nearby: NearbyDevice[]; pairing?: PairingSnapshot }
-const acknowledgedDeviceNotices = new Set<string>()
 
 const app = useAppStore()
 const { t } = useLocalization()
@@ -40,7 +39,7 @@ const remarkDevice = ref<PairedDevice | null>(null)
 const remarkDraft = ref('')
 const remarkBusy = ref(false)
 const remarkError = ref<string | null>(null)
-const seenNotices = ref<string[]>([...acknowledgedDeviceNotices])
+const seenNotices = ref<string[]>([])
 const rejectedSessions = ref<string[]>([])
 const currentNotice = computed(() => deviceSnapshot.value?.pairing?.notices?.find(notice => !seenNotices.value.includes(notice.id)))
 const currentPair = computed(() => deviceSnapshot.value?.pairing?.pending.find(pending => !rejectedSessions.value.includes(pending.sessionId)) ?? null)
@@ -86,9 +85,11 @@ function closeDialog() {
     void deviceAction('decide_device_action', { sessionId, approve: false }, sessionId)
   } else if (dialogKind.value === 'notice' && currentNotice.value) {
     const id = currentNotice.value.id
-    acknowledgedDeviceNotices.add(id)
-    if (acknowledgedDeviceNotices.size > 128) acknowledgedDeviceNotices.delete(acknowledgedDeviceNotices.values().next().value!)
     seenNotices.value.push(id)
+    // Consume in the process-owned inbox, not a page-scoped cache.
+    void invoke('acknowledge_device_notice', { noticeId: id }).catch(() => {
+      seenNotices.value = seenNotices.value.filter(value => value !== id)
+    })
   } else if (dialogKind.value === 'error') {
     dismissedError.value = currentError.value
     actionError.value = null

@@ -35,6 +35,24 @@ struct Candidate {
     platform: String,
     service_name: String,
     addresses: Vec<SocketAddr>,
+    reachable: bool,
+    failed_probes: u8,
+}
+
+impl Candidate {
+    // A failed liveness probe must not destroy the endpoint needed to retry.
+    fn record_probe(&mut self, success: bool) -> bool {
+        let recovered = success && !self.reachable;
+        self.failed_probes = if success {
+            0
+        } else {
+            self.failed_probes.saturating_add(1)
+        };
+        if success || self.failed_probes >= 2 {
+            self.reachable = success;
+        }
+        recovered
+    }
 }
 
 #[derive(Default)]
@@ -132,6 +150,7 @@ impl DeviceManager {
         let mut nearby = shared
             .candidates
             .values()
+            .filter(|candidate| candidate.reachable)
             .map(|candidate| NearbyDevice {
                 id: candidate.id.clone(),
                 name: candidate.name.clone(),
@@ -246,6 +265,12 @@ impl DeviceManager {
             .as_ref()
             .map_err(Clone::clone)?
             .decide(session_id, approve)
+    }
+
+    pub fn acknowledge_notice(&self, notice_id: &str) {
+        if let Ok(core) = &self.pairing {
+            core.acknowledge_notice(notice_id);
+        }
     }
 
     pub fn set_remark(&self, peer_id: &str, remark: &str) -> Result<(), String> {
@@ -569,6 +594,8 @@ fn parse_candidate(info: &ResolvedService, own_id: &str) -> Option<Candidate> {
         platform: platform.to_string(),
         service_name: info.get_fullname().to_ascii_lowercase(),
         addresses,
+        reachable: false,
+        failed_probes: 0,
     })
 }
 
@@ -584,30 +611,29 @@ fn browse_loop(
         match receiver.recv_timeout(Duration::from_millis(300)) {
             Ok(ServiceEvent::ServiceResolved(info)) => {
                 if let Some(mut candidate) = parse_candidate(&info, &own_id) {
-                    if let Some(verified_address) = probe(&candidate) {
-                        candidate.addresses = vec![verified_address];
-                        let stored = {
-                            let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
-                            if state.candidates.len() < MAX_CANDIDATES
-                                || state.candidates.contains_key(&candidate.service_name)
-                            {
-                                state
-                                    .candidates
-                                    .insert(candidate.service_name.clone(), candidate.clone());
-                                true
-                            } else {
-                                false
-                            }
-                        };
-                        if stored {
-                            if let Some(core) = &pairing {
-                                let peer = OutboundPeer {
-                                    discovery_id: candidate.id,
-                                    addresses: candidate.addresses,
-                                };
-                                core.retry_tombstone(peer.clone(), Arc::clone(&stop));
-                                core.probe_online(peer, Arc::clone(&stop));
-                            }
+                    let success = probe(&candidate).is_some();
+                    candidate.record_probe(success);
+                    let stored = {
+                        let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+                        if state.candidates.len() < MAX_CANDIDATES
+                            || state.candidates.contains_key(&candidate.service_name)
+                        {
+                            state
+                                .candidates
+                                .insert(candidate.service_name.clone(), candidate.clone());
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    if stored {
+                        if let Some(core) = &pairing {
+                            let peer = OutboundPeer {
+                                discovery_id: candidate.id,
+                                addresses: candidate.addresses,
+                            };
+                            core.retry_tombstone(peer.clone(), Arc::clone(&stop));
+                            core.refresh_online(peer, Arc::clone(&stop), true);
                         }
                     }
                 }
@@ -637,13 +663,15 @@ fn browse_loop(
                 if stop.load(Ordering::Acquire) {
                     break;
                 }
-                if probe(&candidate).is_none() {
-                    shared
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
+                let success = probe(&candidate).is_some();
+                let recovered = {
+                    let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+                    state
                         .candidates
-                        .remove(&candidate.service_name);
-                } else if let Some(core) = &pairing {
+                        .get_mut(&candidate.service_name)
+                        .is_some_and(|cached| cached.record_probe(success))
+                };
+                if let Some(core) = &pairing {
                     core.retry_tombstone(
                         OutboundPeer {
                             discovery_id: candidate.id.clone(),
@@ -651,13 +679,15 @@ fn browse_loop(
                         },
                         Arc::clone(&stop),
                     );
-                    core.probe_online(
-                        OutboundPeer {
-                            discovery_id: candidate.id.clone(),
-                            addresses: candidate.addresses.clone(),
-                        },
-                        Arc::clone(&stop),
-                    );
+                    let peer = OutboundPeer {
+                        discovery_id: candidate.id.clone(),
+                        addresses: candidate.addresses.clone(),
+                    };
+                    if recovered {
+                        core.refresh_online(peer, Arc::clone(&stop), true);
+                    } else {
+                        core.probe_online(peer, Arc::clone(&stop));
+                    }
                 }
             }
             last_recheck = Instant::now();
@@ -774,6 +804,8 @@ mod tests {
             platform: "windows".to_string(),
             service_name: "test".to_string(),
             addresses: vec![SocketAddr::new("127.0.0.1".parse().unwrap(), port)],
+            reachable: false,
+            failed_probes: 0,
         };
         assert_ne!(first_id, candidate.id);
         assert!(probe(&candidate).is_some());
@@ -798,6 +830,31 @@ mod tests {
         let manager = DeviceManager::new(None);
         assert!(!manager.set_enabled(true).enabled);
         assert!(manager.snapshot().nearby.is_empty());
+    }
+
+    #[test]
+    fn transient_probe_failure_keeps_endpoint_and_can_recover() {
+        let mut candidate = Candidate {
+            id: "0123456789abcdef0123456789abcdef".into(),
+            name: "test".into(),
+            platform: "windows".into(),
+            service_name: "test".into(),
+            addresses: vec!["127.0.0.1:54321".parse().unwrap()],
+            reachable: false,
+            failed_probes: 0,
+        };
+        assert!(candidate.record_probe(true));
+        assert!(!candidate.record_probe(false));
+        assert!(
+            candidate.reachable,
+            "one missed probe should not cause flicker"
+        );
+        candidate.record_probe(false);
+        assert!(!candidate.reachable);
+        assert_eq!(candidate.addresses.len(), 1, "retry still has an endpoint");
+        assert!(candidate.record_probe(true));
+        assert!(candidate.reachable);
+        assert_eq!(candidate.failed_probes, 0);
     }
 
     #[test]

@@ -4160,6 +4160,17 @@ fn decide_device_pairing(
 }
 
 #[tauri::command]
+fn acknowledge_device_notice(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    notice_id: String,
+) -> Result<(), CommandError> {
+    ensure_main_window(&window)?;
+    state.devices.acknowledge_notice(&notice_id);
+    Ok(())
+}
+
+#[tauri::command]
 fn decide_device_action(
     window: WebviewWindow,
     state: State<'_, HostState>,
@@ -4304,6 +4315,7 @@ pub fn run() {
             request_device_pairing,
             decide_device_pairing,
             decide_device_action,
+            acknowledge_device_notice,
             set_device_remark,
             set_device_relationship,
             revoke_device_pairing,

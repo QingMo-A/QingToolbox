@@ -37,6 +37,30 @@ function page(deviceName: string | null = 'QING-PC') {
 }
 
 describe('DevicesPage', () => {
+  it('consumes a completion notice in the backend so remounting cannot replay it', async () => {
+    vi.spyOn(TauriTransport, 'isAvailable').mockReturnValue(true)
+    let notices = [{ id: 'done-1', peerName: 'PHONE', action: 'demote' }]
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === 'acknowledge_device_notice') {
+        notices = notices.filter(notice => notice.id !== (args as { noticeId: string }).noticeId)
+        return undefined
+      }
+      return { enabled: true, error: null, nearby: [], pairing: { error: null, pending: [], paired: [], notices } } as never
+    })
+    const first = page().wrapper
+    await flushPromises()
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    ;(document.querySelector('.q-modal-actions .is-primary') as HTMLButtonElement).click()
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('acknowledge_device_notice', { noticeId: 'done-1' })
+    first.unmount()
+    const second = page().wrapper
+    await flushPromises()
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(invoke).not.toHaveBeenCalledWith('decide_device_action', expect.anything())
+    second.unmount()
+  })
+
   it.each(['Connected', 'Intimate'] as const)('saves a local remark for an offline %s device using the project input modal', async relationship => {
     vi.spyOn(TauriTransport, 'isAvailable').mockReturnValue(true)
     vi.mocked(invoke).mockResolvedValue(remarkSnapshot(null, relationship))

@@ -23,9 +23,9 @@ const PROLOGUE: &[u8] = b"QingToolbox device pairing v1";
 const MANAGEMENT_PROLOGUE: &[u8] = b"QingToolbox device management v1";
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const PAIR_TIMEOUT: Duration = Duration::from_secs(90);
-const PRESENCE_INTERVAL: Duration = Duration::from_secs(120);
-const PRESENCE_RETRY_INTERVAL: Duration = Duration::from_secs(15);
-const PRESENCE_TTL: Duration = Duration::from_secs(180);
+const PRESENCE_INTERVAL: Duration = Duration::from_secs(30);
+const PRESENCE_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+const PRESENCE_TTL: Duration = Duration::from_secs(75);
 const MAX_SESSIONS: usize = 4;
 const MAX_RECORDS: usize = 128;
 const MAX_FRAME: usize = 1024;
@@ -174,8 +174,10 @@ struct PairState {
     notices: Vec<DeviceNotice>,
     batteries: BTreeMap<String, DeviceBattery>,
     notification_queue: VecDeque<ForwardedNotification>,
+    notification_receipts: BTreeMap<(String, String), Instant>,
     last_retry: BTreeMap<String, Instant>,
     last_ping: BTreeMap<String, Instant>,
+    ping_inflight: BTreeMap<String, Instant>,
     last_authenticated: BTreeMap<String, Instant>,
 }
 
@@ -260,6 +262,59 @@ impl PairingCore {
             .notification_queue
             .drain(..)
             .collect()
+    }
+
+    pub fn acknowledge_notice(&self, notice_id: &str) {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .notices
+            .retain(|notice| notice.id != notice_id);
+    }
+
+    fn enqueue_notification(
+        &self,
+        peer_id: &str,
+        message_id: Option<&str>,
+        notification: ForwardedNotification,
+    ) -> Result<(), String> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if !state
+            .records
+            .get(peer_id)
+            .is_some_and(can_accept_notification)
+        {
+            return Err("非亲密安卓设备不得发送通知。".to_string());
+        }
+        if let Some(id) = message_id {
+            if id.len() != 32 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err("通知标识无效。".to_string());
+            }
+            state
+                .notification_receipts
+                .retain(|_, time| time.elapsed() < Duration::from_secs(120));
+            let key = (peer_id.to_owned(), id.to_owned());
+            // An ACK may be lost; return success without a second popup.
+            if state.notification_receipts.contains_key(&key) {
+                return Ok(());
+            }
+            if state.notification_receipts.len() >= 256 {
+                if let Some(oldest) = state
+                    .notification_receipts
+                    .iter()
+                    .min_by_key(|(_, time)| *time)
+                    .map(|(key, _)| key.clone())
+                {
+                    state.notification_receipts.remove(&oldest);
+                }
+            }
+            state.notification_receipts.insert(key, Instant::now());
+        }
+        if state.notification_queue.len() >= 16 {
+            state.notification_queue.pop_front();
+        }
+        state.notification_queue.push_back(notification);
+        Ok(())
     }
 
     pub fn decide(&self, session_id: &str, approve: bool) -> Result<(), String> {
@@ -428,8 +483,18 @@ impl PairingCore {
     }
 
     pub fn probe_online(self: &Arc<Self>, peer: OutboundPeer, stop: Arc<AtomicBool>) {
+        self.refresh_online(peer, stop, false);
+    }
+
+    pub fn refresh_online(
+        self: &Arc<Self>,
+        peer: OutboundPeer,
+        stop: Arc<AtomicBool>,
+        recovered: bool,
+    ) {
+        let attempt = Instant::now();
         let key = {
-            let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
             let Some(record) = state
                 .records
                 .values()
@@ -437,29 +502,37 @@ impl PairingCore {
             else {
                 return;
             };
-            if state
-                .last_ping
-                .get(&record.id)
-                .is_some_and(|time| time.elapsed() < PRESENCE_INTERVAL)
+            let key = record.id.clone();
+            if state.active >= MAX_SESSIONS
+                || state.ping_inflight.contains_key(&key)
+                || state.last_ping.get(&key).is_some_and(|time| {
+                    time.elapsed()
+                        < if recovered {
+                            Duration::from_secs(2)
+                        } else {
+                            PRESENCE_INTERVAL
+                        }
+                })
             {
                 return;
             }
-            record.id.clone()
+            state.active += 1;
+            state.last_ping.insert(key.clone(), attempt);
+            state.ping_inflight.insert(key.clone(), attempt);
+            key
         };
-        if self.acquire_slot(None).is_err() {
-            return;
-        }
-        self.state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .last_ping
-            .insert(key.clone(), Instant::now());
         let core = Arc::clone(self);
         thread::spawn(move || {
             let result = core.connect_and_manage(peer, &key, DeviceAction::Ping, Arc::clone(&stop));
-            if result.is_err() && !stop.load(Ordering::Acquire) {
+            if !stop.load(Ordering::Acquire) {
                 let mut state = core.state.lock().unwrap_or_else(|error| error.into_inner());
-                if state.records.contains_key(&key) {
+                if state.ping_inflight.get(&key) == Some(&attempt) {
+                    state.ping_inflight.remove(&key);
+                }
+                if result.is_err()
+                    && state.records.contains_key(&key)
+                    && state.last_ping.get(&key) == Some(&attempt)
+                {
                     state.last_ping.insert(
                         key,
                         Instant::now() - (PRESENCE_INTERVAL - PRESENCE_RETRY_INTERVAL),
@@ -476,6 +549,7 @@ impl PairingCore {
         state.pending.clear();
         state.actions.clear();
         state.last_ping.clear();
+        state.ping_inflight.clear();
         state.last_authenticated.clear();
     }
 
@@ -645,6 +719,7 @@ impl PairingCore {
                 app_name: None,
                 title: None,
                 body: None,
+                message_id: None,
             })
             .map_err(|e| e.to_string())?;
             write_encrypted(&mut stream, &mut transport, &request)?;
@@ -768,18 +843,17 @@ impl PairingCore {
                 if title.is_empty() && body.is_empty() {
                     return Err("通知内容为空。".to_string());
                 }
-                let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                if state.notification_queue.len() >= 16 {
-                    state.notification_queue.pop_front();
-                }
-                state.notification_queue.push_back(ForwardedNotification {
-                    id: random_id()?,
-                    device_name: record.name,
-                    app_name,
-                    title,
-                    body,
-                });
-                drop(state);
+                self.enqueue_notification(
+                    &key,
+                    request.message_id.as_deref(),
+                    ForwardedNotification {
+                        id: random_id()?,
+                        device_name: record.name,
+                        app_name,
+                        title,
+                        body,
+                    },
+                )?;
                 write_encrypted(&mut stream, &mut transport, b"D")?;
                 return Ok(());
             }
@@ -866,6 +940,9 @@ impl PairingCore {
         if let Err(error) = self.persist(&state.records) {
             state.records.insert(peer_id.to_owned(), previous);
             return Err(error);
+        }
+        if action == DeviceAction::Demote {
+            state.batteries.remove(peer_id);
         }
         state.notices.push(DeviceNotice {
             id: random_id()?,
@@ -1157,6 +1234,8 @@ struct ManagementRequest {
     title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     body: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_id: Option<String>,
 }
 
 fn bounded_notification_field(
@@ -1615,6 +1694,68 @@ mod tests {
             thread::sleep(Duration::from_millis(25));
         }
         panic!("pairing did not reach the expected state");
+    }
+
+    #[test]
+    fn acknowledging_notice_consumes_only_that_notice_without_changing_trust() {
+        let core = PairingCore::ephemeral("0123456789abcdef0123456789abcdef", "PC");
+        {
+            let mut state = core.state.lock().unwrap();
+            for id in ["first", "second"] {
+                state.notices.push(DeviceNotice {
+                    id: id.into(),
+                    peer_name: "Phone".into(),
+                    action: DeviceAction::Upgrade,
+                });
+            }
+        }
+        core.acknowledge_notice("first");
+        core.acknowledge_notice("first");
+        let snapshot = core.snapshot();
+        assert_eq!(snapshot.notices.len(), 1);
+        assert_eq!(snapshot.notices[0].id, "second");
+        assert!(snapshot.paired.is_empty());
+        assert!(snapshot.actions.is_empty());
+    }
+
+    #[test]
+    fn notification_retry_is_deduplicated_and_rechecks_relationship() {
+        let core = PairingCore::ephemeral("0123456789abcdef0123456789abcdef", "PC");
+        let peer = PairedDevice {
+            id: "key".into(),
+            discovery_id: "phone".into(),
+            name: "Phone".into(),
+            remark: None,
+            platform: "android".into(),
+            relationship: Relationship::Intimate,
+        };
+        core.state
+            .lock()
+            .unwrap()
+            .records
+            .insert(peer.id.clone(), peer);
+        let message = ForwardedNotification {
+            id: "ui-id".into(),
+            device_name: "Phone".into(),
+            app_name: "Messages".into(),
+            title: "Hello".into(),
+            body: "World".into(),
+        };
+        let id = "0123456789abcdef0123456789abcdef";
+        core.enqueue_notification("key", Some(id), message.clone())
+            .unwrap();
+        assert_eq!(core.take_notifications().len(), 1);
+        core.enqueue_notification("key", Some(id), message.clone())
+            .unwrap();
+        assert!(core.take_notifications().is_empty());
+        core.state
+            .lock()
+            .unwrap()
+            .records
+            .get_mut("key")
+            .unwrap()
+            .relationship = Relationship::Connected;
+        assert!(core.enqueue_notification("key", Some(id), message).is_err());
     }
 
     #[test]
