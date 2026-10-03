@@ -103,8 +103,9 @@ Type: filesandordirs; Name: "{app}\resources"
 [Registry]
 ; This marker is deliberately separate from the fixed Inno uninstall record:
 ; the Rust host requires both records plus its production manifest to agree
-; before it offers an update handoff. Portable/debug copies and the legacy WPF
-; installer therefore cannot satisfy this contract.
+; before installing a downloaded update. The authenticated shutdown channel
+; separately verifies the registered location/identity so an interrupted update
+; can still be repaired. Portable/debug and legacy WPF copies are not eligible.
 Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "InstallKind"; ValueData: "tauri-production"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "AppId"; ValueData: "{{9F2E7B13-3A62-4F66-B88C-5B6DBD8AE7C4}"
 Root: HKCU; Subkey: "Software\QingMo-A\QingToolbox\Tauri"; ValueType: string; ValueName: "InstallerContractVersion"; ValueData: "1"
@@ -343,7 +344,7 @@ begin
   try
     if not Exec(ExpandConstant('{app}\QingToolbox.exe'),
       UpdateHandoffArgumentPrefix + Token, ExpandConstant('{app}'),
-      SW_HIDE, ewWaitUntilTerminated, ExitCode) then exit;
+      SW_HIDE, ewNoWait, ExitCode) then exit;
     Result := WaitForSingleObject(ProcessHandle, ManualExitTimeoutMs) = WaitObject0;
   finally
     CloseHandle(ProcessHandle);
@@ -360,21 +361,19 @@ begin
   Result := '';
   RequestedProcessText := ExpandConstant('{param:QINGHOSTPID|0}');
   RequestedProcessId := StrToIntDef(RequestedProcessText, 0);
-  if RequestedProcessId <> 0 then begin
-    if not WaitForProcessExit(RequestedProcessId, InAppExitTimeoutMs) then begin
-      Result := ExpandConstant('{cm:UpdateCloseFailed}');
-      exit;
-    end;
-  end;
-
+  { Always find the host by its installed path first. A supplied PID is only
+    a hint, never authority to close or wait on an unrelated/dev process. }
   if TryFindInstalledProcess('QingToolbox.exe', ProcessId) then begin
-    if WizardSilent then FallbackTimeout := InAppExitTimeoutMs
+    if WizardSilent or (ProcessId = RequestedProcessId) then
+      FallbackTimeout := InAppExitTimeoutMs
     else FallbackTimeout := LegacyExitGraceMs;
+    Log(Format('Requesting graceful shutdown of installed host PID %d.', [ProcessId]));
     if not RequestInstalledHostShutdown(ProcessId) and
        not WaitForProcessExit(ProcessId, FallbackTimeout) then begin
       Result := ExpandConstant('{cm:UpdateCloseFailed}');
       exit;
     end;
+    Log('The installed host exited before file replacement.');
   end;
   if TryFindInstalledProcess('QingToolbox.Shell.exe', LegacyProcessId) and
      not WaitForProcessExit(LegacyProcessId, LegacyExitGraceMs) then

@@ -101,11 +101,20 @@ foreach ($contract in @(
     '/QINGHOSTPID=',
     '/QINGRELAUNCH=1',
     'publish_update_handoff_token',
+    'is_supported_update_shutdown_target',
     'try_handle_update_shutdown'
 )) {
     if (($hostUpdateSource + $hostSource).IndexOf($contract, [StringComparison]::Ordinal) -lt 0) {
         throw "The Rust host lost its graceful update handoff contract: $contract"
     }
+}
+$shutdownSource = $hostSource.Substring($hostSource.IndexOf('fn handle_startup_update_shutdown'))
+if ($shutdownSource -match 'is_supported_tauri_production_installation\(') {
+    throw 'Authenticated shutdown must not depend on strict payload/version update eligibility.'
+}
+if ($installer -match 'WaitForProcessExit\(RequestedProcessId,' -or
+    $installer -notmatch 'SW_HIDE, ewNoWait, ExitCode') {
+    throw 'Installer must request shutdown of the exact installed host with bounded waiting, not blindly wait on a supplied PID.'
 }
 $tauriConfig = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'QingToolbox.Tauri/src-tauri/tauri.conf.json') -Raw | ConvertFrom-Json
 if ($tauriConfig.bundle.PSObject.Properties.Name -contains 'resources') {

@@ -4685,7 +4685,7 @@ fn handle_startup_update_shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) 
         return false;
     };
     if !host_update::registered_update_handoff_token_matches(token)
-        || !host_update::is_supported_tauri_production_installation()
+        || !host_update::is_supported_update_shutdown_target()
     {
         return false;
     }
@@ -4695,7 +4695,7 @@ fn handle_startup_update_shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) 
 }
 
 fn configure_update_handoff<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    if paths::is_development() || !host_update::is_supported_tauri_production_installation() {
+    if paths::is_development() || !host_update::is_supported_update_shutdown_target() {
         return;
     }
     let state = app.state::<HostState>();
@@ -4744,7 +4744,7 @@ fn try_handle_update_shutdown<R: tauri::Runtime>(
     };
     if !host_update::update_handoff_token_matches(expected, actual)
         || !host_update::registered_update_handoff_token_matches(actual)
-        || !host_update::is_supported_tauri_production_installation()
+        || !host_update::is_supported_update_shutdown_target()
     {
         record_log(
             &state,

@@ -95,6 +95,11 @@ try {
     # only then replace files. This is the path users exercise when they
     # download an .exe instead of pressing the in-app update button.
     Remove-ItemProperty -LiteralPath $markerKey -Name UpdateHandoffToken -ErrorAction SilentlyContinue
+    # Recovery regression: the exe/manifest have advanced but the old installer
+    # registration has not. This must still publish and accept shutdown, while
+    # ordinary in-app installation remains subject to the strict payload check.
+    Set-ItemProperty -LiteralPath $markerKey -Name InstalledVersion -Value '0.0.0-alpha'
+    Set-ItemProperty -LiteralPath $uninstallKey -Name DisplayVersion -Value '0.0.0-alpha'
     $handoffHost = [Diagnostics.Process]::new()
     $handoffHost.StartInfo = [Diagnostics.ProcessStartInfo]::new()
     $handoffHost.StartInfo.FileName = $installedExe
@@ -129,6 +134,11 @@ try {
         }
         if ($null -ne (Get-ItemPropertyValue -LiteralPath $markerKey -Name UpdateHandoffToken -ErrorAction SilentlyContinue)) {
             throw 'The graceful overwrite left a stale update handoff token.'
+        }
+        $installedManifest = Get-Content -LiteralPath (Join-Path $installRoot 'portable-manifest.json') -Raw | ConvertFrom-Json
+        if ((Get-ItemPropertyValue -LiteralPath $markerKey -Name InstalledVersion) -ne $installedManifest.version -or
+            (Get-ItemPropertyValue -LiteralPath $uninstallKey -Name DisplayVersion) -ne $installedManifest.version) {
+            throw 'Overwrite did not repair the stale installer version registration.'
         }
     }
     finally {

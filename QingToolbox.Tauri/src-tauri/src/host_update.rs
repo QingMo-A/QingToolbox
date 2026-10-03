@@ -1109,11 +1109,41 @@ pub fn is_supported_tauri_production_installation() -> bool {
     false
 }
 
+/// Closing a registered host is a recovery operation, not permission to install
+/// a downloaded payload. Stale version metadata or a dirty build manifest must
+/// not disable the authenticated shutdown channel needed to repair that install.
 #[cfg(windows)]
-fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
+pub fn is_supported_update_shutdown_target() -> bool {
+    current_registered_tauri_installation().is_ok()
+}
+
+#[cfg(not(windows))]
+pub fn is_supported_update_shutdown_target() -> bool {
+    false
+}
+
+#[cfg(windows)]
+struct RegisteredTauriInstallation {
+    executable: PathBuf,
+    install_root: PathBuf,
+    uninstall_key: &'static str,
+}
+
+#[cfg(windows)]
+fn current_registered_tauri_installation() -> Result<RegisteredTauriInstallation, InstallFailure> {
+    verify_registered_tauri_installation(
+        &env::current_exe().map_err(|_| InstallFailure::UnsupportedInstallation)?,
+        registry_string,
+    )
+}
+
+#[cfg(windows)]
+fn verify_registered_tauri_installation(
+    executable: &Path,
+    registry_value: impl Fn(&str, &str) -> Result<String, InstallFailure>,
+) -> Result<RegisteredTauriInstallation, InstallFailure> {
     let executable =
-        fs::canonicalize(env::current_exe().map_err(|_| InstallFailure::UnsupportedInstallation)?)
-            .map_err(|_| InstallFailure::UnsupportedInstallation)?;
+        fs::canonicalize(executable).map_err(|_| InstallFailure::UnsupportedInstallation)?;
     if executable.file_name().and_then(|value| value.to_str()) != Some(TAURI_EXECUTABLE_NAME) {
         return Err(InstallFailure::UnsupportedInstallation);
     }
@@ -1125,17 +1155,16 @@ fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
         return Err(InstallFailure::UnsupportedInstallation);
     }
 
-    // The product identity is eligible only after an actual Tauri installation:
-    // all marker, executable and manifest checks below still apply. Merely
-    // finding a legacy WPF uninstall record never enables update handoff.
-    let installer_id = registry_string(TAURI_MARKER_KEY, "AppId")?;
+    // Merely finding a legacy WPF uninstall record is insufficient: require the
+    // Tauri marker, exact installed executable and matching uninstall identity.
+    let installer_id = registry_value(TAURI_MARKER_KEY, "AppId")?;
     let (uninstall_key, expected_display_name) = match installer_id.as_str() {
         TAURI_INSTALLER_APP_ID => (TAURI_UNINSTALL_KEY, "QingToolbox Tauri"),
         PRODUCT_INSTALLER_APP_ID => (PRODUCT_UNINSTALL_KEY, "QingToolbox"),
         _ => return Err(InstallFailure::UnsupportedInstallation),
     };
-    let marker_location = registry_string(TAURI_MARKER_KEY, "InstallLocation")?;
-    let uninstall_location = registry_string(uninstall_key, "InstallLocation")?;
+    let marker_location = registry_value(TAURI_MARKER_KEY, "InstallLocation")?;
+    let uninstall_location = registry_value(uninstall_key, "InstallLocation")?;
     let marker_root = canonical_local_path(&marker_location)?;
     let uninstall_root = canonical_local_path(&uninstall_location)?;
     let executable_root =
@@ -1144,25 +1173,27 @@ fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
         return Err(InstallFailure::UnsupportedInstallation);
     }
 
-    require_registry_value(TAURI_MARKER_KEY, "InstallKind", TAURI_MARKER_INSTALL_KIND)?;
-    require_registry_value(
-        TAURI_MARKER_KEY,
-        "InstallerContractVersion",
-        TAURI_MARKER_CONTRACT_VERSION,
-    )?;
-    require_registry_value(TAURI_MARKER_KEY, "Distribution", "production")?;
-    require_registry_value(TAURI_MARKER_KEY, "Backend", "rust")?;
-    require_registry_value(TAURI_MARKER_KEY, "Framework", "tauri-2")?;
-    require_registry_value(TAURI_MARKER_KEY, "Frontend", "vue-3")?;
-    require_registry_value(TAURI_MARKER_KEY, "BuildProfile", "release")?;
-    require_registry_value(TAURI_MARKER_KEY, "ExecutableName", TAURI_EXECUTABLE_NAME)?;
-    require_registry_value(TAURI_MARKER_KEY, "ManifestFileName", TAURI_MANIFEST_NAME)?;
+    for (name, expected) in [
+        ("InstallKind", TAURI_MARKER_INSTALL_KIND),
+        ("InstallerContractVersion", TAURI_MARKER_CONTRACT_VERSION),
+        ("Distribution", "production"),
+        ("Backend", "rust"),
+        ("Framework", "tauri-2"),
+        ("Frontend", "vue-3"),
+        ("BuildProfile", "release"),
+        ("ExecutableName", TAURI_EXECUTABLE_NAME),
+        ("ManifestFileName", TAURI_MANIFEST_NAME),
+    ] {
+        if registry_value(TAURI_MARKER_KEY, name)?.trim() != expected {
+            return Err(InstallFailure::UnsupportedInstallation);
+        }
+    }
 
-    let display_name = registry_string(uninstall_key, "DisplayName")?;
+    let display_name = registry_value(uninstall_key, "DisplayName")?;
     if display_name != expected_display_name {
         return Err(InstallFailure::UnsupportedInstallation);
     }
-    let display_icon = registry_string(uninstall_key, "DisplayIcon")?;
+    let display_icon = registry_value(uninstall_key, "DisplayIcon")?;
     let display_icon =
         registered_command_path(&display_icon).ok_or(InstallFailure::UnsupportedInstallation)?;
     if fs::canonicalize(display_icon).map_err(|_| InstallFailure::UnsupportedInstallation)?
@@ -1170,7 +1201,7 @@ fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
     {
         return Err(InstallFailure::UnsupportedInstallation);
     }
-    let uninstall_string = registry_string(uninstall_key, "UninstallString")?;
+    let uninstall_string = registry_value(uninstall_key, "UninstallString")?;
     let uninstall_executable = registered_command_path(&uninstall_string)
         .ok_or(InstallFailure::UnsupportedInstallation)?;
     let expected_uninstaller = install_root.join("unins000.exe");
@@ -1182,6 +1213,29 @@ fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
         return Err(InstallFailure::UnsupportedInstallation);
     }
 
+    Ok(RegisteredTauriInstallation {
+        install_root: install_root.to_path_buf(),
+        executable,
+        uninstall_key,
+    })
+}
+
+#[cfg(windows)]
+fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
+    let installation = current_registered_tauri_installation()?;
+    verify_production_payload(&installation, registry_string)
+}
+
+#[cfg(windows)]
+fn verify_production_payload(
+    installation: &RegisteredTauriInstallation,
+    registry_value: impl Fn(&str, &str) -> Result<String, InstallFailure>,
+) -> Result<(), InstallFailure> {
+    let RegisteredTauriInstallation {
+        executable,
+        install_root,
+        uninstall_key,
+    } = installation;
     let manifest_path = install_root.join(TAURI_MANIFEST_NAME);
     let manifest_metadata = fs::symlink_metadata(&manifest_path)
         .map_err(|_| InstallFailure::UnsupportedInstallation)?;
@@ -1209,8 +1263,8 @@ fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
     {
         return Err(InstallFailure::UnsupportedInstallation);
     }
-    let installed_version = registry_string(TAURI_MARKER_KEY, "InstalledVersion")?;
-    let display_version = registry_string(uninstall_key, "DisplayVersion")?;
+    let installed_version = registry_value(TAURI_MARKER_KEY, "InstalledVersion")?;
+    let display_version = registry_value(uninstall_key, "DisplayVersion")?;
     if !is_running_version(&manifest.version)
         || installed_version != manifest.version
         || display_version != manifest.version
@@ -1233,14 +1287,14 @@ fn verify_installed_tauri_production() -> Result<(), InstallFailure> {
     }
     let executable_entry = executable_entry.ok_or(InstallFailure::UnsupportedInstallation)?;
     let executable_metadata =
-        fs::symlink_metadata(&executable).map_err(|_| InstallFailure::UnsupportedInstallation)?;
+        fs::symlink_metadata(executable).map_err(|_| InstallFailure::UnsupportedInstallation)?;
     if !executable_metadata.file_type().is_file()
         || executable_metadata.file_type().is_symlink()
         || executable_metadata.len() != executable_entry.size
     {
         return Err(InstallFailure::UnsupportedInstallation);
     }
-    let actual_hash = hash_file(&executable, &AtomicBool::new(false))
+    let actual_hash = hash_file(executable, &AtomicBool::new(false))
         .map_err(|_| InstallFailure::UnsupportedInstallation)?;
     if actual_hash != executable_entry.sha256.to_ascii_uppercase() {
         return Err(InstallFailure::UnsupportedInstallation);
@@ -1347,15 +1401,6 @@ fn registered_command_path(value: &str) -> Option<PathBuf> {
     };
     let candidate = candidate.strip_suffix(",0").unwrap_or(candidate);
     (!candidate.is_empty()).then(|| PathBuf::from(candidate))
-}
-
-#[cfg(windows)]
-fn require_registry_value(key: &str, value: &str, expected: &str) -> Result<(), InstallFailure> {
-    if registry_string(key, value)?.trim() == expected {
-        Ok(())
-    } else {
-        Err(InstallFailure::UnsupportedInstallation)
-    }
 }
 
 #[cfg(windows)]
@@ -1951,14 +1996,19 @@ fn fetch_asset(
     Err(DownloadFailure::SourceUnavailable)
 }
 
-#[cfg(windows)]
 fn parse_allowed_download_url(url: &str) -> Result<(String, String), DownloadFailure> {
     const ALLOWED_HOSTS: [&str; 3] = [
         "github.com",
         "objects.githubusercontent.com",
         "release-assets.githubusercontent.com",
     ];
-    if !url.starts_with("https://") || url.contains(['?', '#', '\\']) {
+    if !url.starts_with("https://")
+        || url.len() > MAX_ASSET_URL_CHARS
+        || url.contains(['#', '\\'])
+        || url
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte == b' ')
+    {
         return Err(DownloadFailure::UntrustedRedirect);
     }
     let rest = &url[8..];
@@ -1971,7 +2021,13 @@ fn parse_allowed_download_url(url: &str) -> Result<(String, String), DownloadFai
         return Err(DownloadFailure::UntrustedRedirect);
     }
     let path = &rest[slash..];
-    if path == "/" || path.contains('\0') {
+    // GitHub signs CDN redirects with query parameters. Preserve those bytes;
+    // never allow queries to broaden the original github.com Release URL.
+    if path.split('?').next() == Some("/")
+        || (host.eq_ignore_ascii_case("github.com")
+            && (!path.starts_with("/QingMo-A/QingToolbox/releases/download/")
+                || path.contains('?')))
+    {
         return Err(DownloadFailure::UntrustedRedirect);
     }
     Ok((host.to_ascii_lowercase(), path.to_string()))
@@ -2050,6 +2106,236 @@ mod tests {
     fn installed_identity_requires_the_running_compile_time_version() {
         assert!(is_running_version(env!("CARGO_PKG_VERSION")));
         assert!(!is_running_version("999.999.999"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn registered_shutdown_survives_version_drift_and_dirty_payload_without_allowing_install() {
+        use super::{verify_production_payload, verify_registered_tauri_installation};
+        let fixture = InstalledFixture::new();
+        let identity = verify_registered_tauri_installation(&fixture.executable(), |key, name| {
+            fixture.registry(key, name)
+        })
+        .expect("registered host");
+        assert!(
+            verify_production_payload(&identity, |key, name| fixture.registry(key, name)).is_ok()
+        );
+
+        for field in ["InstalledVersion", "DisplayVersion"] {
+            let read = |key: &str, name: &str| {
+                if name == field {
+                    Ok("0.3.2-alpha".into())
+                } else {
+                    fixture.registry(key, name)
+                }
+            };
+            let identity = verify_registered_tauri_installation(&fixture.executable(), read)
+                .expect("metadata drift must not prevent shutdown");
+            assert_eq!(
+                verify_production_payload(&identity, read),
+                Err(InstallFailure::UnsupportedInstallation)
+            );
+        }
+        fixture.write_manifest(true);
+        let identity = verify_registered_tauri_installation(&fixture.executable(), |key, name| {
+            fixture.registry(key, name)
+        })
+        .expect("dirty payload must not prevent shutdown");
+        assert_eq!(
+            verify_production_payload(&identity, |key, name| fixture.registry(key, name)),
+            Err(InstallFailure::UnsupportedInstallation)
+        );
+        fixture.write_manifest(false);
+        fs::write(fixture.executable(), b"tampered").unwrap();
+        assert_eq!(
+            verify_production_payload(&identity, |key, name| fixture.registry(key, name)),
+            Err(InstallFailure::UnsupportedInstallation)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn shutdown_rejects_unregistered_wrong_identity_or_other_installation_paths() {
+        use super::verify_registered_tauri_installation;
+        let fixture = InstalledFixture::new();
+        assert!(
+            verify_registered_tauri_installation(&fixture.executable(), |_, _| Err(
+                InstallFailure::UnsupportedInstallation
+            ))
+            .is_err()
+        );
+        for (field, wrong) in [
+            ("AppId", "unknown"),
+            ("Backend", "wpf"),
+            ("InstallKind", "portable"),
+            ("InstallerContractVersion", "2"),
+            ("DisplayName", "Other App"),
+            ("InstallLocation", r"\\server\share"),
+        ] {
+            assert!(
+                verify_registered_tauri_installation(&fixture.executable(), |key, name| {
+                    if name == field {
+                        Ok(wrong.into())
+                    } else {
+                        fixture.registry(key, name)
+                    }
+                })
+                .is_err(),
+                "{field}"
+            );
+        }
+        let other = InstalledFixture::new();
+        for field in ["InstallLocation", "DisplayIcon", "UninstallString"] {
+            assert!(
+                verify_registered_tauri_installation(&fixture.executable(), |key, name| {
+                    if name == field {
+                        other.registry(key, name)
+                    } else {
+                        fixture.registry(key, name)
+                    }
+                })
+                .is_err(),
+                "{field}"
+            );
+        }
+        assert!(
+            verify_registered_tauri_installation(&other.executable(), |key, name| fixture
+                .registry(key, name))
+            .is_err()
+        );
+    }
+
+    #[cfg(windows)]
+    struct InstalledFixture {
+        root: PathBuf,
+    }
+
+    #[cfg(windows)]
+    impl InstalledFixture {
+        fn new() -> Self {
+            let fixture = Self {
+                root: unique_test_directory(),
+            };
+            fs::create_dir_all(&fixture.root).unwrap();
+            fs::write(fixture.executable(), b"host fixture").unwrap();
+            fs::write(fixture.root.join("unins000.exe"), b"uninstaller fixture").unwrap();
+            fixture.write_manifest(false);
+            fixture
+        }
+        fn executable(&self) -> PathBuf {
+            self.root.join(super::TAURI_EXECUTABLE_NAME)
+        }
+        fn write_manifest(&self, dirty: bool) {
+            let hash = super::hash_file(&self.executable(), &AtomicBool::new(false)).unwrap();
+            let manifest = serde_json::json!({
+                "schemaVersion": 1, "productName": "QingToolbox", "distribution": "production",
+                "version": env!("CARGO_PKG_VERSION"), "backend": "rust", "framework": "tauri-2",
+                "frontend": "vue-3", "buildProfile": "release", "target": "x86_64-pc-windows-msvc",
+                "sourceDirty": dirty, "executable": super::TAURI_EXECUTABLE_NAME,
+                "files": [{ "path": super::TAURI_EXECUTABLE_NAME,
+                    "size": fs::metadata(self.executable()).unwrap().len(), "sha256": hash }]
+            });
+            fs::write(
+                self.root.join(super::TAURI_MANIFEST_NAME),
+                serde_json::to_vec(&manifest).unwrap(),
+            )
+            .unwrap();
+        }
+        fn registry(&self, key: &str, name: &str) -> Result<String, InstallFailure> {
+            use super::*;
+            let value = match (key, name) {
+                (TAURI_MARKER_KEY, "AppId") => PRODUCT_INSTALLER_APP_ID,
+                (TAURI_MARKER_KEY | PRODUCT_UNINSTALL_KEY, "InstallLocation") => {
+                    return Ok(self.root.to_string_lossy().into_owned())
+                }
+                (TAURI_MARKER_KEY, "InstallKind") => TAURI_MARKER_INSTALL_KIND,
+                (TAURI_MARKER_KEY, "InstallerContractVersion") => TAURI_MARKER_CONTRACT_VERSION,
+                (TAURI_MARKER_KEY, "Distribution") => "production",
+                (TAURI_MARKER_KEY, "Backend") => "rust",
+                (TAURI_MARKER_KEY, "Framework") => "tauri-2",
+                (TAURI_MARKER_KEY, "Frontend") => "vue-3",
+                (TAURI_MARKER_KEY, "BuildProfile") => "release",
+                (TAURI_MARKER_KEY, "ExecutableName") => TAURI_EXECUTABLE_NAME,
+                (TAURI_MARKER_KEY, "ManifestFileName") => TAURI_MANIFEST_NAME,
+                (PRODUCT_UNINSTALL_KEY, "DisplayName") => "QingToolbox",
+                (PRODUCT_UNINSTALL_KEY, "DisplayIcon") => {
+                    return Ok(format!("\"{}\"", self.executable().display()))
+                }
+                (PRODUCT_UNINSTALL_KEY, "UninstallString") => {
+                    return Ok(format!("\"{}\"", self.root.join("unins000.exe").display()))
+                }
+                (TAURI_MARKER_KEY, "InstalledVersion")
+                | (PRODUCT_UNINSTALL_KEY, "DisplayVersion") => env!("CARGO_PKG_VERSION"),
+                _ => return Err(InstallFailure::UnsupportedInstallation),
+            };
+            Ok(value.into())
+        }
+    }
+
+    #[cfg(windows)]
+    impl Drop for InstalledFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn host_download_accepts_official_signed_cdn_redirects_but_no_untrusted_urls() {
+        use super::parse_allowed_download_url;
+        for host in [
+            "objects.githubusercontent.com",
+            "release-assets.githubusercontent.com",
+        ] {
+            let path = "/github-production-release-asset/file?sig=abc%2Bdef&se=2026&jwt=token";
+            assert_eq!(
+                parse_allowed_download_url(&format!("https://{host}{path}")).unwrap(),
+                (host.to_string(), path.to_string())
+            );
+        }
+        assert!(parse_allowed_download_url(
+            "https://github.com/QingMo-A/QingToolbox/releases/download/v0.3.3-alpha/setup.exe"
+        )
+        .is_ok());
+        for url in [
+            "http://release-assets.githubusercontent.com/file?sig=abc",
+            "https://release-assets.githubusercontent.com.evil.test/file?sig=abc",
+            "https://user@release-assets.githubusercontent.com/file?sig=abc",
+            "https://release-assets.githubusercontent.com:443/file",
+            "https://release-assets.githubusercontent.com/?sig=abc",
+            "https://release-assets.githubusercontent.com/file#fragment",
+            "https://release-assets.githubusercontent.com/file\r\nHeader:evil",
+            "https://github.com/QingMo-A/QingToolbox/releases/download/v0.3.3-alpha/setup.exe?redirect=evil",
+            "https://github.com/other/repository/file",
+        ] {
+            assert_eq!(parse_allowed_download_url(url), Err(DownloadFailure::UntrustedRedirect), "{url}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "Downloads and verifies the official installer over the real network; never executes it"]
+    fn live_official_installer_download_smoke() {
+        let body = super::fetch_official_releases().expect("official Release metadata");
+        let records = parse_releases(&body).expect("Release records");
+        let release = select_best_release(&records, &parse_version("0.3.2-alpha").unwrap())
+            .expect("new official installer");
+        let root = unique_test_directory();
+        let cancel = AtomicBool::new(false);
+        let outcome = download_official_release(&release, &root, &cancel, |_| {}, || {});
+        let verified = outcome.as_ref().is_ok_and(|installer| {
+            let (_, _, checksum, _) = cache_paths(&release, &root).unwrap();
+            verify_cached(&release, installer, &checksum, &cancel) == Ok(true)
+        });
+        let _ = fs::remove_dir_all(&root);
+        outcome.expect("official installer download including signed redirect");
+        assert!(
+            verified,
+            "downloaded installer must match its SHA-256 sidecar"
+        );
+        println!(
+            "Verified official installer {} ({} bytes).",
+            release.version, release.installer.size
+        );
     }
 
     #[test]
