@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { resolve, relative, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
 
 export const officialSource = 'https://raw.githubusercontent.com/QingMo-A/QingToolbox/modules/modules/'
 export const profile = 'tauri-process-v1'
@@ -59,7 +60,7 @@ function controlledFile(root, path) {
   if (relative(root, canonical).startsWith('..')) fail('Catalog asset escapes module root.')
   return candidate
 }
-export function validateUpdate(update, id) {
+export function validateUpdate(update, id, directory) {
   keys(update, ['schemaVersion', 'moduleId', 'publisher', 'releases'])
   if (update.schemaVersion !== 2 || update.moduleId !== id || update.publisher !== 'QingMo-A' || !Array.isArray(update.releases) || update.releases.length > 64) fail('Invalid module update identity.')
   let previous
@@ -77,8 +78,12 @@ export function validateUpdate(update, id) {
     keys(pkg, ['fileName', 'url', 'size', 'sha256'])
     if (pkg.fileName !== `${id}-${entry.version}-tauri.qmod` || !/^[A-Za-z0-9._+-]+\.qmod$/.test(pkg.fileName) || !Number.isSafeInteger(pkg.size) || pkg.size < 1 || pkg.size > 256 * 1024 * 1024 || !/^[a-f0-9]{64}$/.test(pkg.sha256)) fail('Invalid package identity or digest.')
     const url = new URL(pkg.url)
-    const segments = url.pathname.split('/')
-    if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port || url.username || url.password || url.search || url.hash || /[%\\]/.test(pkg.url) || segments.length !== 7 || segments.slice(0, 5).join('/') !== '/QingMo-A/QingToolbox/releases/download' || segments[5] !== `modules-${id.slice(5)}-v${entry.version}` || segments[6] !== pkg.fileName) fail('Only fixed official GitHub Release assets are accepted.')
+    if (url.protocol !== 'https:' || url.port || url.username || url.password || url.search || url.hash || /[%\\]/.test(pkg.url)) fail('Unsafe package URL.')
+    const legacy = `https://github.com/QingMo-A/QingToolbox/releases/download/modules-${id.slice(5)}-v${entry.version}/${pkg.fileName}`
+    const commit = url.pathname.split('/')[3]
+    const branchPackage = directory && /^[a-f0-9]{40}$/.test(commit ?? '') &&
+      pkg.url === `https://raw.githubusercontent.com/QingMo-A/QingToolbox/${commit}/modules/${directory}/packages/${pkg.fileName}`
+    if (pkg.url !== legacy && !branchPackage) fail('Only fixed official Release assets or commit-pinned module packages are accepted.')
     languages(entry.releaseNotes)
   }
   return update
@@ -111,7 +116,16 @@ export function validateCatalog(root) {
     const packageSection = cargo.split(/\r?\n\[/)[0]
     if (/^version\s*=\s*"([^"]+)"$/m.exec(packageSection)?.[1] !== manifest.version) fail('Cargo and module versions differ.')
     if (existsSync(resolve(root, directory, 'ui-src/package.json')) && readJson(controlledFile(root, `${directory}/ui-src/package.json`)).version !== manifest.version) fail('UI and module versions differ.')
-    const update = validateUpdate(readJson(controlledFile(root, item.updateManifest)), id)
+    const update = validateUpdate(readJson(controlledFile(root, item.updateManifest)), id, directory)
+    for (const entry of update.releases) {
+      if (!entry.package.url.startsWith('https://raw.githubusercontent.com/')) continue
+      const packagePath = controlledFile(root, `${directory}/packages/${entry.package.fileName}`)
+      const bytes = readFileSync(packagePath)
+      const hash = createHash('sha256').update(bytes).digest('hex')
+      if (bytes.length !== entry.package.size || hash !== entry.package.sha256) fail('Branch package size/hash differs from the update record.')
+      const sidecar = readFileSync(controlledFile(root, `${directory}/packages/${entry.package.fileName}.sha256`), 'utf8').trim()
+      if (sidecar.toLowerCase() !== `${hash}  ${entry.package.fileName}`.toLowerCase()) fail('Branch package checksum file differs.')
+    }
     releases += update.releases.length
   }
   return { modules: ids.length, publicModules, releases }

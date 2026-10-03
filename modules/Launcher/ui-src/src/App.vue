@@ -50,9 +50,23 @@ function internalDragChanged(id: string | null): void {
 function reveal(focusSearch = true): void {
   overlay.value.cancel()
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    panel.value?.animate([{ opacity: 0, transform: 'translateY(10px) scale(.985)' }, { opacity: 1, transform: 'none' }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' })
+    panel.value?.animate([{ opacity: 0, transform: 'translateY(12px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)' })
+    cascadeIcons()
   }
   if (focusSearch && !recordingHotkey.value && !overlay.value.external) searchInput.value?.focus({ preventScroll: true })
+}
+// Icons rise in a quick diagonal wave as the panel opens. Only the first
+// screenful takes part and only transform/opacity move, so a large grid
+// costs no more than a small one.
+function cascadeIcons(): void {
+  const tiles = panel.value?.querySelectorAll<HTMLElement>('.launcher-tile:not(.lifted) .tile-image')
+  if (!tiles) return
+  const columns = Math.max(1, Math.round((panel.value?.querySelector('.launcher-grid')?.clientWidth ?? 700) / 120))
+  Array.from(tiles).slice(0, 32).forEach((tile, index) => {
+    const delay = (index % columns + Math.floor(index / columns)) * 26
+    tile.animate([{ opacity: 0, transform: 'translateY(14px) scale(.9)' }, { opacity: 1, transform: 'none' }],
+      { duration: 340, delay: 40 + delay, easing: 'cubic-bezier(.34,1.3,.64,1)', fill: 'backwards' })
+  })
 }
 function addOverlayListener<T>(event: string, callback: (payload: T) => void): void {
   void listen<T>(event, message => callback(message.payload)).then(unlisten => {
@@ -372,6 +386,29 @@ const filteredItems = computed(() => {
     ? state.value.items.filter((item) => item.name.toLocaleLowerCase().includes(needle))
     : state.value.items
 })
+
+const modeIndex = computed(() => Math.max(0, (['custom', 'alphabetical', 'desktop'] as const).indexOf(state.value.sortMode)))
+
+// Splits a result name into plain and matched runs for display. Only literal
+// terms are highlighted; Everything operators and wildcards are left alone.
+function highlightParts(text: string): { text: string; hit: boolean }[] {
+  const lower = text.toLowerCase()
+  const terms = search.value.query.trim().toLowerCase().split(/\s+/)
+    .filter(term => term && !/[*?"<>|:\\/]/.test(term))
+  if (!terms.length || lower.length !== text.length) return [{ text, hit: false }]
+  const marks = new Array<boolean>(text.length).fill(false)
+  for (const term of terms) {
+    for (let at = lower.indexOf(term); at >= 0; at = lower.indexOf(term, at + term.length)) marks.fill(true, at, at + term.length)
+  }
+  const parts: { text: string; hit: boolean }[] = []
+  for (let start = 0; start < text.length;) {
+    let end = start
+    while (end < text.length && marks[end] === marks[start]) end++
+    parts.push({ text: text.slice(start, end), hit: marks[start] })
+    start = end
+  }
+  return parts
+}
 
 const modeLabel = computed(() => ({
   custom: '自定义',
@@ -819,9 +856,7 @@ onBeforeUnmount(() => {
   <section ref="panel" class="launcher-shell" :class="{ 'external-drag': overlay.external }">
     <header class="topbar">
       <div class="brand">
-        <div class="brand-mark" aria-hidden="true">
-          <LauncherIcon name="grid" />
-        </div>
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
         <div class="brand-heading">
           <h1>启动台</h1>
           <span class="everything-runtime-status" :class="`is-${runtimeStatus}`" role="status" aria-live="polite" :title="runtimeStatusTitle">
@@ -831,7 +866,8 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="top-actions">
-        <nav class="mode-tabs" aria-label="排序方式">
+        <nav class="mode-tabs" aria-label="排序方式" :style="{ '--mode-index': modeIndex }">
+          <span class="mode-thumb" aria-hidden="true"></span>
           <button v-for="mode in (['custom', 'alphabetical', 'desktop'] as const)" :key="mode" type="button" :data-mode="mode" :class="{ active: state.sortMode === mode, 'desktop-drop-target': mode === 'custom' && state.sortMode === 'desktop' && !!draggedId, 'desktop-drop-hover': mode === 'custom' && customDropHover }" :disabled="busy || everythingActive || (!!draggedId && !(state.sortMode === 'desktop' && mode === 'custom'))" @click="!draggedId && setMode(mode)">
             {{ { custom: '自定义', alphabetical: '首字母', desktop: '桌面' }[mode] }}
           </button>
@@ -848,6 +884,11 @@ onBeforeUnmount(() => {
       <LauncherIcon class="search-icon" name="search" />
       <span v-if="everythingActive" class="everything-badge" :title="everythingBadge">{{ everythingBadge }}</span>
       <input ref="searchInput" v-model="query" type="search" aria-label="搜索应用" placeholder="搜索应用…" autocomplete="off" spellcheck="false" />
+      <span v-if="!query" class="search-hints" aria-hidden="true">
+        <span><kbd>/e</kbd>全盘搜索</span>
+        <span><kbd>Esc</kbd>关闭</span>
+      </span>
+      <span v-else-if="!everythingActive" class="search-count" aria-live="polite">{{ filteredItems.length }} 个应用</span>
       <QIconButton v-if="query" class="clear" label="清空搜索" @click="query = ''"><LauncherIcon name="close" /></QIconButton>
     </section>
 
@@ -858,6 +899,7 @@ onBeforeUnmount(() => {
         <input
           ref="hotkeyInput"
           class="hotkey-input"
+          :class="{ recording: recordingHotkey }"
           :value="recordingHotkey ? '请按下组合键…' : (displayedHotkeyDraft || formatHotkey(state.hotkey))"
           readonly
           aria-label="启动台快捷键"
@@ -886,8 +928,8 @@ onBeforeUnmount(() => {
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="everythingActive && everythingError && everythingStatus !== 'indexing'" class="error everything-error" role="alert">{{ everythingError }}</p>
     <section v-if="loading" class="loading-card" aria-live="polite">
-      <span class="spinner" aria-hidden="true" />
-      <div><strong>正在准备启动台</strong></div>
+      <div class="skeleton-grid" aria-hidden="true"><span v-for="n in 14" :key="n" class="skeleton-tile"><i></i><b></b></span></div>
+      <strong class="sr-only">正在准备启动台</strong>
     </section>
     <section v-else class="content">
       <section v-if="everythingActive" class="everything-panel" aria-live="polite" @contextmenu.prevent>
@@ -896,7 +938,7 @@ onBeforeUnmount(() => {
           <span>正在查询内置 Everything…</span>
         </div>
         <div v-else-if="!everythingResults.length" class="empty everything-empty">
-          <LauncherIcon class="empty-icon" name="search" />
+          <span class="empty-art"><LauncherIcon class="empty-icon" name="search" /></span>
           <strong>{{ everythingStatus === 'indexing' ? 'Everything 索引尚未就绪' : everythingError || (search.query ? '没有找到匹配结果' : '输入关键词开始搜索') }}</strong>
           <small v-if="everythingStatus === 'indexing'">{{ everythingStatusLabel() }}；普通启动台搜索不受影响。</small>
           <small v-else>{{ everythingError ? '普通启动台搜索仍可正常使用' : '支持 *.exe、file:、folder: 等 Everything 查询语法' }}</small>
@@ -911,23 +953,30 @@ onBeforeUnmount(() => {
             :class="{ selected: selectedEverythingIndex === index }"
             role="option"
             :aria-selected="selectedEverythingIndex === index"
+            :style="{ '--i': index }"
             @mouseenter="selectEverythingResult(index)"
             @click="openEverythingResult(result)"
             @contextmenu="showEverythingMenu($event, result)"
           >
-            <span class="everything-result-icon"><LauncherIcon :name="result.isDirectory ? 'folder' : 'file'" /></span>
+            <span class="everything-result-icon" :class="{ 'is-folder': result.isDirectory }"><LauncherIcon :name="result.isDirectory ? 'folder' : 'file'" /></span>
             <span class="everything-result-copy">
-              <strong :title="result.name">{{ result.name }}</strong>
+              <strong :title="result.name"><template v-for="(part, partIndex) in highlightParts(result.name)" :key="partIndex"><mark v-if="part.hit">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></strong>
               <small :title="result.parentPath">{{ result.parentPath || '—' }}</small>
             </span>
             <span class="everything-result-type">{{ resultTypeLabel(result) }}</span>
           </article>
         </div>
+        <footer v-if="everythingResults.length" class="everything-footer" aria-hidden="true">
+          <span><kbd>↑</kbd><kbd>↓</kbd>选择</span>
+          <span><kbd>Enter</kbd>打开</span>
+          <span>右键更多操作</span>
+        </footer>
       </section>
       <template v-else>
       <div v-if="!filteredItems.length && !(state.sortMode === 'custom' && !query.trim() && state.folders.length)" class="empty">
-          <LauncherIcon class="empty-icon" :name="query ? 'search' : 'grid'" />
+          <span class="empty-art"><LauncherIcon class="empty-icon" :name="query ? 'search' : state.sortMode === 'desktop' ? 'grid' : 'upload'" /></span>
           <strong>{{ query ? '没有匹配的应用' : state.sortMode === 'desktop' ? '桌面暂无应用' : '拖入应用或快捷方式' }}</strong>
+          <small v-if="!query && state.sortMode !== 'desktop'">从桌面或资源管理器拖入 .exe / .lnk 文件</small>
         </div>
       <LauncherGrid v-if="gridTiles.length" :tiles="gridTiles" :enabled="state.sortMode !== 'alphabetical' && !query.trim()" :desktop-mode="state.sortMode === 'desktop'"
         :busy="busy" :save-order="saveGridOrder" @open="openTile" @rename="renameFolder" @remove-folder="deleteFolder"
@@ -976,7 +1025,13 @@ onBeforeUnmount(() => {
     </div>
 
 
-    <Transition name="drop-hint"><div v-if="overlay.external" class="external-drop-hint"><LauncherIcon name="upload" /><strong>松开添加到自定义</strong></div></Transition>
+    <Transition name="drop-hint">
+      <div v-if="overlay.external" class="external-drop-hint">
+        <span class="drop-rings" aria-hidden="true"><i></i><i></i><i></i><LauncherIcon name="upload" /></span>
+        <strong>松开添加到自定义</strong>
+        <small>支持 .exe 与 .lnk 快捷方式</small>
+      </div>
+    </Transition>
   </section>
   </main>
 </template>

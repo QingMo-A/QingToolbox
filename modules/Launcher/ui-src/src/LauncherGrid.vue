@@ -166,7 +166,27 @@ async function up(event: PointerEvent): Promise<void> {
 }
 function cancel(): void { if (moving.value) guardClick(); cleanup(); ordered.value = [...props.tiles] }
 function keydown(event: KeyboardEvent): void { if (event.key === 'Escape' && pointer) { event.preventDefault(); event.stopImmediatePropagation(); cancel() } }
-function click(tile: Tile): void { if (!suppressClick && !props.busy) emit('open', tile) }
+// Where the dragged icon will land, drawn in the same slot geometry the
+// hit test uses, so the outline and the drop can never disagree.
+const slotStyle = computed(() => gap.value === null ? null : {
+  width: `${cellWidth.value - 10}px`,
+  transform: `translate3d(${gap.value % columns.value * cellWidth.value + 5}px, ${Math.floor(gap.value / columns.value) * rowHeight}px, 0)`,
+})
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+// A short squash on the icon acknowledges the launch while the backend opens
+// the app. It is added on top of the hover transform, never replacing it.
+function pulse(target: EventTarget | null): void {
+  if (reducedMotion.matches) return
+  ;(target as HTMLElement | null)?.querySelector('.tile-image')?.animate(
+    [{ transform: 'scale(1)' }, { transform: 'scale(.88)', offset: .35 }, { transform: 'scale(1.06)', offset: .7 }, { transform: 'scale(1)' }],
+    { duration: 320, easing: 'ease-out', composite: 'add' },
+  )
+}
+function click(tile: Tile, event?: Event): void {
+  if (suppressClick || props.busy) return
+  pulse(event?.currentTarget ?? null)
+  emit('open', tile)
+}
 onMounted(() => {
   observer = new ResizeObserver(() => { if (surface.value) width.value = surface.value.clientWidth })
   if (surface.value) observer.observe(surface.value)
@@ -187,10 +207,11 @@ onBeforeUnmount(() => {
 <template>
   <div ref="viewport" class="grid-scroll">
     <div ref="surface" class="launcher-grid" :class="{ 'is-dragging': moving }" :style="{ height: `${height}px` }">
+      <div v-if="moving && slotStyle" class="drop-slot" :style="slotStyle" aria-hidden="true"></div>
       <article v-for="tile in ordered" :key="tile.id" class="launcher-tile" :data-id="tile.id"
         :class="{ lifted: moving === tile.id, 'folder-target': folderTarget === tile.id }" :style="position(tile)"
         role="button" tabindex="0" :aria-label="tile.name" @pointerdown="down($event, tile)" @dragstart.prevent
-        @click="click(tile)" @keydown.enter="click(tile)">
+        @click="click(tile, $event)" @keydown.enter="click(tile, $event)">
         <div v-if="isFolder(tile)" class="tile-image folder-preview">
           <span v-for="item in tile.items.slice(0, 4)" :key="item.id" class="folder-preview-icon"><LauncherAppIcon :icon-key="item.iconKey" /></span>
           <span v-if="!tile.items.length" class="folder-empty-mark">＋</span>
@@ -211,34 +232,11 @@ onBeforeUnmount(() => {
     </div>
   </div>
   <Teleport to="body">
-    <div v-if="movingTile" class="drag-ghost" :style="{ left: `${ghost.x}px`, top: `${ghost.y}px` }">
-      <div v-if="isFolder(movingTile)" class="folder-preview"><span v-for="item in movingTile.items.slice(0, 4)" :key="item.id" class="folder-preview-icon"><LauncherAppIcon :icon-key="item.iconKey" /></span></div>
-      <LauncherAppIcon v-else :icon-key="movingTile.iconKey" />
+    <div v-if="movingTile" class="drag-ghost" :style="{ transform: `translate3d(${ghost.x}px, ${ghost.y}px, 0)` }">
+      <div class="drag-ghost-inner">
+        <div v-if="isFolder(movingTile)" class="folder-preview"><span v-for="item in movingTile.items.slice(0, 4)" :key="item.id" class="folder-preview-icon"><LauncherAppIcon :icon-key="item.iconKey" /></span></div>
+        <LauncherAppIcon v-else :icon-key="movingTile.iconKey" />
+      </div>
     </div>
   </Teleport>
 </template>
-
-<style scoped>
-.grid-scroll { flex: 1; overflow: auto; min-height: 0; padding: 4px 0 12px; scrollbar-width: thin; scrollbar-color: var(--q-border-strong) transparent; }
-.launcher-grid { position: relative; width: 100%; touch-action: none; }
-.launcher-tile { position: absolute; top: 0; left: 0; height: 126px; padding: 12px 8px 8px; display: flex; flex-direction: column; align-items: center; border: 1px solid transparent; border-radius: 16px; cursor: pointer; user-select: none; transition: transform 360ms cubic-bezier(.22,1.18,.35,1), background 140ms ease, border-color 140ms ease; will-change: transform; }
-.launcher-tile:hover,.launcher-tile:focus-visible { border-color: color-mix(in srgb, var(--q-primary) 14%, transparent); background: color-mix(in srgb, var(--q-hover) 65%, transparent); outline: none; }
-.launcher-tile.lifted { opacity: 0; pointer-events: none; }
-.is-dragging .launcher-tile { pointer-events: none; background: transparent; border-color: transparent; }
-.launcher-tile.folder-target { background: var(--q-brand-soft); border-color: var(--q-primary); }
-.launcher-tile.folder-target .folder-preview { border-color: var(--q-primary); transform: scale(1.06); }
-.tile-image { position: relative; width: 64px; height: 64px; flex-shrink: 0; }
-.tile-icon-actions { position: absolute; z-index: 1; top: -7px; right: -7px; display: flex; gap: 4px; opacity: 0; pointer-events: none; transform: scale(.82); transform-origin: top right; transition: opacity 140ms ease, transform 140ms ease; }
-.tile-image:hover .tile-icon-actions, .tile-image:focus-within .tile-icon-actions { opacity: 1; pointer-events: auto; transform: scale(1); }
-.tile-icon-action { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 1px solid var(--q-border); border-radius: 50%; color: var(--q-text-2); background: var(--q-card); box-shadow: var(--q-shadow-sm); font-size: 17px; line-height: 1; }
-.tile-icon-action svg { width: 12px; height: 12px; }
-.tile-icon-action:hover { color: var(--q-primary); background: var(--q-hover); }
-.tile-icon-action.delete:hover { color: var(--q-danger); background: color-mix(in srgb, var(--q-danger) 10%, var(--q-card)); }
-.is-dragging .tile-icon-actions { opacity: 0; pointer-events: none; }
-.tile-name { font-size: 12px; line-height: 17px; margin-top: 8px; text-align: center; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
-.drag-ghost { position: fixed; z-index: 100; width: 64px; height: 64px; opacity: .72; pointer-events: none; filter: drop-shadow(0 8px 10px #163d5725); }
-.drag-ghost>img { width: 100%; height: 100%; object-fit: contain; }
-.drag-ghost .folder-preview { width: 64px; height: 64px; }
-@media(prefers-reduced-motion:reduce) { .launcher-tile { transition: none; } }
-@media(hover:none) { .tile-icon-actions { opacity: 1; pointer-events: auto; transform: none; } }
-</style>

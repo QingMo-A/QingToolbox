@@ -156,8 +156,22 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn shell_extracts_high_resolution_real_icon_and_shortcut() {
-        let icon = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../src-tauri/icons/icon.ico")
+        // Modules now live in their own branch/worktree; the old sibling
+        // native-launcher/src-tauri path no longer exists. Reuse the same
+        // controlled host resolver used by the module UI build.
+        let resolver =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/host-ui.mjs");
+        let resolved = std::process::Command::new("node")
+            .arg(resolver)
+            .output()
+            .unwrap();
+        assert!(
+            resolved.status.success(),
+            "Compatible host checkout required for the Shell icon fixture"
+        );
+        let host = String::from_utf8(resolved.stdout).unwrap();
+        let icon = std::path::Path::new(host.trim())
+            .join("QingToolbox.Tauri/src-tauri/icons/icon.ico")
             .canonicalize()
             .unwrap();
         let shortcut =

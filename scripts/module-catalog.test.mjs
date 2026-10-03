@@ -39,6 +39,19 @@ test('untrusted, mutable and misbound package downloads are rejected', () => {
     const r = release(); mutation(r); assert.throws(() => validateUpdate(manifest(r), 'qing.launcher'))
   }
 })
+
+test('branch packages require an official immutable commit and the catalog-owned directory', () => {
+  const r = release()
+  const commit = 'a'.repeat(40)
+  const url = `https://raw.githubusercontent.com/QingMo-A/QingToolbox/${commit}/modules/Launcher/packages/${r.package.fileName}`
+  r.package.url = url
+  assert.equal(validateUpdate(manifest(r), 'qing.launcher', 'Launcher').releases.length, 1)
+  assert.throws(() => validateUpdate(manifest(r), 'qing.launcher', 'QingPdf'))
+  for (const changed of [url.replace(commit, 'modules'), url.replace(commit, 'latest'), url.replace(commit, 'abcd'), url.replace('/packages/', '/ui/'), url.replace('QingMo-A', 'Someone'), url + '?x=1', url.replace('/Launcher/', '/%4cauncher/'), url.replace('qing.launcher', 'qing.pdf')]) {
+    r.package.url = changed
+    assert.throws(() => validateUpdate(manifest(r), 'qing.launcher', 'Launcher'))
+  }
+})
 test('duplicate versions, invalid ranges, dates and incomplete translations are rejected', () => {
   assert.throws(() => validateUpdate({ ...manifest(release()), releases: [release(), release()] }, 'qing.launcher'))
   for (const mutation of [r => { r.maximumHostVersionExclusive = '0.2.0' }, r => { r.publishedAt = '2026-02-31T14:14:12Z' }, r => { delete r.releaseNotes['zh-CN'] }, r => { r.version = '0.3.0-alpha'; r.channel = 'stable' }]) {

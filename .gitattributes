@@ -8,3 +8,5 @@ modules/QingPdf/third-party/qpdf/*.exe binary
 modules/QingPdf/third-party/qpdf/*.txt text eol=lf
 modules/QingPdf/third-party/qpdf/*.md text eol=lf
 modules/QingPdf/third-party/qpdf/SHA256SUMS text eol=lf
+modules/*/packages/*.qmod binary
+modules/*/packages/*.qmod.sha256 text eol=lf
