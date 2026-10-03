@@ -13,7 +13,7 @@ $root = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 if ($ModuleId -notmatch '^qing\.[a-z0-9][a-z0-9.-]{0,100}$' -or $PackageCommit -cnotmatch '^[a-f0-9]{40}$') {
     throw 'Module identity and full immutable package commit are required.'
 }
-$index = Get-Content -LiteralPath (Join-Path $root 'modules/index.json') -Raw | ConvertFrom-Json
+$index = Get-Content -LiteralPath (Join-Path $root 'modules/index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $item = $index.modules.PSObject.Properties[$ModuleId]
 if ($index.schemaVersion -ne 2 -or $null -eq $item) { throw 'Module is not registered in the native catalog.' }
 $directory = ([string]$item.Value.moduleManifest) -replace '/module\.json$', ''
@@ -21,7 +21,7 @@ if ($directory -notmatch '^[A-Za-z0-9._/-]+$' -or @($directory.Split('/') | Wher
     throw 'Unsafe module directory.'
 }
 $moduleRoot = Join-Path (Join-Path $root 'modules') $directory
-$manifest = Get-Content -LiteralPath (Join-Path $moduleRoot 'module.json') -Raw | ConvertFrom-Json
+$manifest = Get-Content -LiteralPath (Join-Path $moduleRoot 'module.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($manifest.id -cne $ModuleId -or $manifest.runtimeType -cne 'Process' -or $manifest.runtimeIsolation -cne 'OutOfProcess' -or $manifest.apiVersion -ne 1) {
     throw 'Module identity/API/runtime mismatch.'
 }
@@ -73,7 +73,7 @@ $entry = [ordered]@{
     releaseNotes = [ordered]@{ 'zh-CN' = $NotesZh; 'en-US' = $NotesEn }
 }
 $updatePath = Join-Path $moduleRoot 'update.json'
-$current = Get-Content -LiteralPath $updatePath -Raw | ConvertFrom-Json
+$current = Get-Content -LiteralPath $updatePath -Raw -Encoding UTF8 | ConvertFrom-Json
 $existing = @($current.releases | Where-Object version -CEQ $entry.version)
 if ($existing.Count -gt 0) {
     if ($existing.Count -ne 1 -or $existing[0].package.sha256 -cne $hash -or [long]$existing[0].package.size -ne $size -or $existing[0].package.url -cne $entry.package.url) {
@@ -88,7 +88,7 @@ New-Item -ItemType Directory -Path $candidateRoot -Force | Out-Null
 $candidate = Join-Path $candidateRoot "$ModuleId-update.json"
 $utf8 = [Text.UTF8Encoding]::new($false)
 [IO.File]::WriteAllText($candidate, (($current | ConvertTo-Json -Depth 12) + "`n"), $utf8)
-& node --input-type=module -e 'import { readFileSync } from "node:fs"; import { pathToFileURL } from "node:url"; const [path,id,directory,validator] = process.argv.slice(1); const {validateUpdate} = await import(pathToFileURL(validator)); validateUpdate(JSON.parse(readFileSync(path,"utf8")),id,directory);' $candidate $ModuleId $directory (Join-Path $PSScriptRoot 'module-catalog.mjs')
+& node (Join-Path $PSScriptRoot 'module-catalog.mjs') --validate-update $candidate $ModuleId $directory
 if ($LASTEXITCODE -ne 0) { throw 'Candidate update record is invalid.' }
 [IO.File]::WriteAllText($updatePath, [IO.File]::ReadAllText($candidate), $utf8)
 Write-Host "Recorded branch package: $ModuleId $($entry.version); $size bytes; SHA256 $hash; commit $PackageCommit"

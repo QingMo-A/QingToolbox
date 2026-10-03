@@ -132,6 +132,12 @@ export function validateCatalog(root) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const root = process.argv[2] ?? resolve(dirname(fileURLToPath(import.meta.url)), '../modules')
-  console.log(JSON.stringify(validateCatalog(root)))
+  if (process.argv[2] === '--validate-update') {
+    const [, , , path, id, directory] = process.argv
+    const update = validateUpdate(readJson(path), id, directory)
+    console.log(JSON.stringify({ moduleId: update.moduleId, releases: update.releases.length }))
+  } else {
+    const root = process.argv[2] ?? resolve(dirname(fileURLToPath(import.meta.url)), '../modules')
+    console.log(JSON.stringify(validateCatalog(root)))
+  }
 }

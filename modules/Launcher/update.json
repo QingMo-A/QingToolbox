@@ -1,28 +1,49 @@
 {
-  "schemaVersion": 2,
-  "moduleId": "qing.launcher",
-  "publisher": "QingMo-A",
-  "releases": [
-    {
-      "version": "0.3.0",
-      "channel": "preview",
-      "moduleProfile": "tauri-process-v1",
-      "apiVersion": 1,
-      "platform": "windows",
-      "architecture": "x64",
-      "minimumHostVersion": "0.3.0-alpha",
-      "maximumHostVersionExclusive": null,
-      "publishedAt": "2026-09-25T14:14:12Z",
-      "package": {
-        "fileName": "qing.launcher-0.3.0-tauri.qmod",
-        "url": "https://github.com/QingMo-A/QingToolbox/releases/download/modules-launcher-v0.3.0/qing.launcher-0.3.0-tauri.qmod",
-        "size": 1415757,
-        "sha256": "c7845e585c89ecf1d1a10eb02d5d8535dbcd03e0e551f11c04eaa1338fbbc7f6"
-      },
-      "releaseNotes": {
-        "zh-CN": "已发布的 Rust/Tauri 独立模块版本。本地后续改动尚未发布。",
-        "en-US": "Published Rust/Tauri module generation. Subsequent local changes are not published yet."
-      }
-    }
-  ]
+    "schemaVersion":  2,
+    "moduleId":  "qing.launcher",
+    "publisher":  "QingMo-A",
+    "releases":  [
+                     {
+                         "version":  "0.3.1",
+                         "channel":  "preview",
+                         "moduleProfile":  "tauri-process-v1",
+                         "apiVersion":  1,
+                         "platform":  "windows",
+                         "architecture":  "x64",
+                         "minimumHostVersion":  "0.3.0-alpha",
+                         "maximumHostVersionExclusive":  null,
+                         "publishedAt":  "2026-10-03T12:43:07Z",
+                         "package":  {
+                                         "fileName":  "qing.launcher-0.3.1-tauri.qmod",
+                                         "url":  "https://raw.githubusercontent.com/QingMo-A/QingToolbox/ca02a284cf5021ee8bf17ea303e28ab15c67069c/modules/Launcher/packages/qing.launcher-0.3.1-tauri.qmod",
+                                         "size":  1441495,
+                                         "sha256":  "44ba4228b5712fdc5ffa85aa1c157e0493e089187919f5294e8c2cb8b571e0d9"
+                                     },
+                         "releaseNotes":  {
+                                              "zh-CN":  "重做启动台界面与皮肤适配，加入图标入场、悬停和点击动画、栏目滑块、拖拽落位提示及 Everything 关键词高亮。安装包改由 modules 分支固定提交交付。",
+                                              "en-US":  "Refresh Launcher layout and skins with icon entry, hover and launch animations, sliding mode tabs, drag drop-slot feedback and Everything match highlighting. Deliver the package from a pinned modules commit."
+                                          }
+                     },
+                     {
+                         "version":  "0.3.0",
+                         "channel":  "preview",
+                         "moduleProfile":  "tauri-process-v1",
+                         "apiVersion":  1,
+                         "platform":  "windows",
+                         "architecture":  "x64",
+                         "minimumHostVersion":  "0.3.0-alpha",
+                         "maximumHostVersionExclusive":  null,
+                         "publishedAt":  "2026-09-25T14:14:12Z",
+                         "package":  {
+                                         "fileName":  "qing.launcher-0.3.0-tauri.qmod",
+                                         "url":  "https://github.com/QingMo-A/QingToolbox/releases/download/modules-launcher-v0.3.0/qing.launcher-0.3.0-tauri.qmod",
+                                         "size":  1415757,
+                                         "sha256":  "c7845e585c89ecf1d1a10eb02d5d8535dbcd03e0e551f11c04eaa1338fbbc7f6"
+                                     },
+                         "releaseNotes":  {
+                                              "zh-CN":  "已发布的 Rust/Tauri 独立模块版本。本地后续改动尚未发布。",
+                                              "en-US":  "Published Rust/Tauri module generation. Subsequent local changes are not published yet."
+                                          }
+                     }
+                 ]
 }
