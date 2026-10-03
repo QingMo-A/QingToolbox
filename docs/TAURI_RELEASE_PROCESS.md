@@ -57,6 +57,7 @@ Tauri 宿主的版本号只有一处权威来源：
 
 - 安装包下载仅接受官方 Release 链接，以及 GitHub 官方 CDN 的 HTTPS 跳转。CDN 签名查询参数原样保留；每次跳转重新检查域名，最终仍需匹配文件大小与 SHA-256 sidecar。
 - 应用内安装要求安装登记、当前运行版本、production manifest 与 exe 哈希一致。安装登记未完成时，应重新运行安装器修复，不要手工修改登记或跳过校验。
+- manifest 统一生成无 BOM 的 UTF-8 JSON；后端兼容历史 Windows PowerShell 5 生成的 UTF-8+BOM 清单，其他校验不变。
 - 安装器自动退出握手独立于上述载荷校验：已登记的 Tauri 安装路径、程序与卸载身份必须吻合，并验证本次进程生成的随机 token；版本登记过旧、manifest 的 `sourceDirty=true` 不再阻止正常退出。未登记 portable、开发环境及旧 WPF 不满足条件。
 - 安装器先按目标安装路径定位正在运行的宿主，主动发送退出请求，再有限等待该进程退出；`QINGHOSTPID` 只是提示，不会盲目等待或关闭其他安装/开发实例。不强杀进程。完全没有握手通道的历史版本首次升级仍需手动退出一次。
 - 回归验证：`cargo test --lib host_update::tests`；实际网络下载可单独运行 `cargo test --lib live_official_installer_download_smoke -- --ignored --nocapture`，只下载和校验，不执行安装包。完整安装器冒烟仍仅限一次性 CI 用户配置。

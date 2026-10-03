@@ -200,7 +200,10 @@ $manifest = [ordered]@{
     generatedAtUtc = [DateTime]::UtcNow.ToString('o')
 }
 $manifestPath = Join-Path $stageRoot 'portable-manifest.json'
-$manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+$manifestJson = $manifest | ConvertTo-Json -Depth 8
+# Set-Content -Encoding utf8 emits a BOM in Windows PowerShell 5, unlike PS 7.
+# Keep generated JSON bytes identical across both runtimes.
+[IO.File]::WriteAllText($manifestPath, $manifestJson, [Text.UTF8Encoding]::new($false))
 if ($Distribution -eq 'production' -and $stageRoot -eq (Join-Path $repoRoot 'artifacts\tauri-production\QingToolbox')) {
     & node $cacheScript save host $buildFingerprint
     if ($LASTEXITCODE -ne 0) { throw 'Cannot save the development build cache.' }

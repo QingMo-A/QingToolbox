@@ -1247,8 +1247,13 @@ fn verify_production_payload(
     if manifest_bytes.len() as u64 > MAX_MANIFEST_BYTES {
         return Err(InstallFailure::UnsupportedInstallation);
     }
-    let manifest: ProductionManifest = serde_json::from_slice(&manifest_bytes)
-        .map_err(|_| InstallFailure::UnsupportedInstallation)?;
+    // Windows PowerShell 5 historically wrote these manifests as UTF-8+BOM.
+    // Accept that encoding without relaxing any identity or payload checks.
+    let json_bytes = manifest_bytes
+        .strip_prefix(b"\xef\xbb\xbf")
+        .unwrap_or(&manifest_bytes);
+    let manifest: ProductionManifest =
+        serde_json::from_slice(json_bytes).map_err(|_| InstallFailure::UnsupportedInstallation)?;
     if manifest.schema_version != 1
         || manifest.product_name != "QingToolbox"
         || manifest.distribution != "production"
@@ -2202,6 +2207,29 @@ mod tests {
             verify_registered_tauri_installation(&other.executable(), |key, name| fixture
                 .registry(key, name))
             .is_err()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn production_manifest_accepts_powershell_utf8_bom_but_rejects_invalid_json() {
+        use super::{verify_production_payload, verify_registered_tauri_installation};
+        let fixture = InstalledFixture::new();
+        let identity = verify_registered_tauri_installation(&fixture.executable(), |key, name| {
+            fixture.registry(key, name)
+        })
+        .unwrap();
+        let path = fixture.root.join(super::TAURI_MANIFEST_NAME);
+        let mut encoded = b"\xef\xbb\xbf".to_vec();
+        encoded.extend(fs::read(&path).unwrap());
+        fs::write(&path, encoded).unwrap();
+        assert!(
+            verify_production_payload(&identity, |key, name| fixture.registry(key, name)).is_ok()
+        );
+        fs::write(&path, b"\xef\xbb\xbfnot JSON").unwrap();
+        assert_eq!(
+            verify_production_payload(&identity, |key, name| fixture.registry(key, name)),
+            Err(InstallFailure::UnsupportedInstallation)
         );
     }
 
