@@ -181,347 +181,438 @@
   --control-hover-shadow: var(--q-shadow-md);
 }
 
+/* Gilded Art Deco. The preset keeps its persisted id, 'neon-circuit', so
+   saved settings, the host's validation and modules keyed by the id are
+   untouched; only the look changed. Obsidian and champagne, with gold foil
+   reserved for what matters: the primary action, the active place, titles. */
 :root[data-appearance-preset='neon-circuit'] {
-  --q-bg: #070b16;
-  --q-sidebar: #0b1120;
-  --q-nav: #10182b;
-  --q-surface: #111a2d;
-  --q-surface-soft: #0d1527;
-  --q-card: #111a2d;
-  --q-panel: #0d1527;
-  --q-border: #24365a;
-  --q-border-strong: #365181;
-  --q-brand: #5de4ff;
-  --q-accent: #f05bd7;
-  --q-primary: #20c9e7;
-  --q-primary-hover: #5de4ff;
-  --q-primary-pressed: #0794b9;
-  --q-brand-soft: #12324a;
-  --q-secondary: #15213a;
-  --q-secondary-hover: #1c3153;
-  --q-success: #55e6a4;
-  --q-warning: #ffc857;
-  --q-danger: #ff5478;
-  --q-danger-hover: #ff7593;
-  --q-danger-pressed: #d6325a;
-  --q-input: #0d1527;
-  --q-select: #0d1527;
-  --q-toggle: #365181;
-  --q-text: #e7faff;
-  --q-text-2: #9bbbd0;
-  --q-text-3: #6f8da6;
-  --q-text-muted: #9bbbd0;
-  --q-text-disabled: #597187;
-  --q-hover: #12324a;
-  --q-pressed: #194a64;
-  --q-disabled: #152033;
-  --q-focus: #5de4ff;
-  --q-radius-xs: 3px;
-  --q-radius-sm: 5px;
-  --q-radius: 7px;
-  --q-radius-md: 7px;
-  --q-radius-lg: 10px;
-  --q-radius-xl: 12px;
-  --q-shadow-sm: 0 4px 16px rgba(32, 201, 231, .08);
-  --q-shadow-md: 0 10px 28px rgba(32, 201, 231, .12);
-  --q-shadow-lg: 0 18px 48px rgba(0, 0, 0, .38);
+  --deco-gold: #d4af37;
+  --deco-gold-light: #f3d98b;
+  --deco-foil: linear-gradient(135deg, #8a6a1f 0%, #e9c96b 24%, #fff1b8 40%, #d4af37 58%, #a8852a 100%);
+  --deco-display: "Copperplate Gothic Light", "Copperplate Gothic Bold", "Bahnschrift", "Microsoft YaHei UI Light", "Segoe UI", sans-serif;
+  --deco-figures: Georgia, "Palatino Linotype", "Microsoft YaHei UI", serif;
+  --q-bg: #09090b;
+  --q-sidebar: #0c0c0f;
+  --q-nav: rgba(20, 18, 14, .9);
+  --q-surface: #121216;
+  --q-surface-soft: #17161b;
+  --q-card: rgba(18, 17, 21, .96);
+  --q-panel: rgba(23, 22, 27, .94);
+  --q-border: rgba(212, 175, 55, .24);
+  --q-border-strong: rgba(232, 199, 106, .5);
+  --q-brand: #e3c16f;
+  --q-accent: #d4af37;
+  --q-primary: #e3c16f;
+  --q-primary-hover: #f3d98b;
+  --q-primary-pressed: #b8952f;
+  --q-brand-soft: rgba(212, 175, 55, .12);
+  --q-secondary: rgba(24, 22, 18, .92);
+  --q-secondary-hover: rgba(212, 175, 55, .09);
+  --q-success: #7fd1ae;
+  --q-warning: #f0b955;
+  --q-danger: #e06a7c;
+  --q-danger-hover: #ec8696;
+  --q-danger-pressed: #b9475a;
+  --q-info: #9cc0e6;
+  --q-input: #0e0e11;
+  --q-select: #0e0e11;
+  --q-toggle: #2b271f;
+  --q-text: #f3ead6;
+  --q-text-2: #c2b69c;
+  --q-text-3: #998f78;
+  --q-text-muted: #c2b69c;
+  --q-text-disabled: #625b4c;
+  --q-hover: rgba(212, 175, 55, .08);
+  --q-pressed: rgba(212, 175, 55, .16);
+  --q-disabled: rgba(255, 255, 255, .03);
+  --q-focus: #f3d98b;
+  --q-radius-xs: 2px;
+  --q-radius-sm: 2px;
+  --q-radius: 4px;
+  --q-radius-md: 4px;
+  --q-radius-lg: 6px;
+  --q-radius-xl: 8px;
+  --q-shadow-sm: 0 6px 18px rgba(0, 0, 0, .5);
+  --q-shadow-md: 0 14px 36px rgba(0, 0, 0, .6), 0 0 0 1px rgba(212, 175, 55, .05);
+  --q-shadow-lg: 0 26px 64px rgba(0, 0, 0, .7), 0 0 50px rgba(212, 175, 55, .06);
   --q-shadow: var(--q-shadow-md);
-  --control-primary-bg: linear-gradient(135deg, #20c9e7, #5de4ff);
-  --control-primary-bg-hover: linear-gradient(135deg, #35dff0, #8bf0ff);
-  --control-primary-bg-active: linear-gradient(135deg, #0794b9, #20c9e7);
-  --control-primary-fg: #03141c;
-  --control-primary-glow: 0 0 18px rgba(93, 228, 255, .32);
-  --control-secondary-bg: #15213a;
-  --control-secondary-bg-hover: #1c3153;
-  --control-secondary-fg: #d9f8ff;
-  --control-secondary-border: #2d6f92;
-  --control-secondary-border-hover: #5de4ff;
-  --control-danger-bg: linear-gradient(135deg, #e13f6c, #ff5478);
-  --control-danger-bg-hover: linear-gradient(135deg, #f0527e, #ff7593);
-  --control-danger-bg-active: linear-gradient(135deg, #b82b53, #d6325a);
-  --control-danger-fg: #19050d;
+  --control-primary-bg: linear-gradient(135deg, #8a6a1f 0%, #e9c96b 24%, #fff1b8 40%, #d4af37 58%, #a8852a 100%);
+  --control-primary-bg-hover: linear-gradient(135deg, #a07b24 0%, #f3d98b 24%, #fff7d6 40%, #e3c16f 58%, #b8952f 100%);
+  --control-primary-bg-active: linear-gradient(135deg, #6e5418 0%, #c9a23b 30%, #e9c96b 50%, #a8852a 100%);
+  --control-primary-fg: #17120a;
+  --control-primary-glow: 0 0 0 1px rgba(243, 217, 139, .55), 0 6px 22px rgba(212, 175, 55, .22);
+  --control-secondary-bg: rgba(24, 22, 18, .92);
+  --control-secondary-bg-hover: rgba(212, 175, 55, .09);
+  --control-secondary-fg: #f3ead6;
+  --control-secondary-border: rgba(212, 175, 55, .42);
+  --control-secondary-border-hover: #f3d98b;
+  --control-danger-bg: linear-gradient(135deg, #4a0f1a, #8e2537);
+  --control-danger-bg-hover: linear-gradient(135deg, #5c1421, #a52d42);
+  --control-danger-bg-active: linear-gradient(135deg, #3a0b14, #741d2d);
+  --control-danger-fg: #fbe3e7;
   --control-ghost-bg: transparent;
-  --control-ghost-bg-hover: #12324a;
-  --control-ghost-fg: #5de4ff;
-  --control-input-bg: #0d1527;
-  --control-input-border: #24365a;
-  --control-input-border-hover: #5de4ff;
-  --control-input-focus-border: #5de4ff;
-  --control-input-focus-shadow: 0 0 0 2px rgba(93, 228, 255, .28), 0 0 16px rgba(93, 228, 255, .16);
-  --control-toggle-track: #365181;
-  --control-toggle-track-active: #20c9e7;
-  --control-toggle-knob: #071522;
+  --control-ghost-bg-hover: rgba(212, 175, 55, .08);
+  --control-ghost-fg: #e3c16f;
+  --control-input-bg: #0e0e11;
+  --control-input-border: rgba(212, 175, 55, .28);
+  --control-input-border-hover: rgba(232, 199, 106, .55);
+  --control-input-focus-border: #f3d98b;
+  --control-input-focus-shadow: 0 0 0 1px rgba(243, 217, 139, .6), 0 0 18px rgba(212, 175, 55, .18);
+  --control-toggle-track: #2b271f;
+  --control-toggle-track-active: linear-gradient(90deg, #a8852a, #f3d98b, #d4af37);
+  --control-toggle-knob: #0c0c0f;
   --control-toggle-width: 42px;
   --control-toggle-height: 20px;
-  --control-toggle-radius: 5px;
+  --control-toggle-radius: 2px;
   --control-toggle-offset: 3px;
-  --control-radio-border: #365181;
-  --control-radio-selected-bg: #20c9e7;
-  --control-radio-selected-ring: #071522;
-  --control-radius: 7px;
-  --control-focus-ring: rgba(93, 228, 255, .34);
-  --control-disabled-bg: #152033;
-  --control-disabled-fg: #597187;
-  --control-shadow: 0 4px 16px rgba(32, 201, 231, .08);
-  --control-hover-shadow: 0 0 18px rgba(93, 228, 255, .24);
+  --control-radio-border: rgba(232, 199, 106, .55);
+  --control-radio-selected-bg: #d4af37;
+  --control-radio-selected-ring: #0c0c0f;
+  --control-radius: 2px;
+  --control-focus-ring: rgba(243, 217, 139, .38);
+  --control-disabled-bg: rgba(255, 255, 255, .03);
+  --control-disabled-fg: #625b4c;
+  --control-shadow: 0 2px 10px rgba(0, 0, 0, .45);
+  --control-hover-shadow: 0 0 0 1px rgba(243, 217, 139, .3), 0 6px 20px rgba(212, 175, 55, .16);
+  /* A gilt glow from above, a vignette below, and a faint gold fan-scale
+     pattern over obsidian. */
+  --q-ambient-background:
+    radial-gradient(ellipse 70% 45% at 50% -8%, rgba(212, 175, 55, .15), transparent 70%),
+    radial-gradient(ellipse 80% 55% at 50% 115%, rgba(0, 0, 0, .85), transparent 70%),
+    var(--deco-art-fan) 0 0 / 64px 64px,
+    #09090b;
+  scrollbar-color: rgba(212, 175, 55, .45) transparent;
+  /* Theme art, shared with modules: reference these rather than copying the SVG. */
+  --deco-art-corner-bl: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E %3Cg transform='rotate(270 11 11)' fill='none' stroke='%23d4af37'%3E %3Cpath d='M1 21V7h3V4h3V1h14' stroke-width='1.2' stroke-opacity='.85'/%3E %3Cpath d='M5 21V10h3V7h3V4h10' stroke-width='.8' stroke-opacity='.4'/%3E %3Crect x='9.6' y='9.6' width='2.8' height='2.8' fill='%23d4af37' stroke='none' transform='rotate(45 11 11)'/%3E %3C/g%3E%3C/svg%3E");
+  --deco-art-corner-br: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E %3Cg transform='rotate(180 11 11)' fill='none' stroke='%23d4af37'%3E %3Cpath d='M1 21V7h3V4h3V1h14' stroke-width='1.2' stroke-opacity='.85'/%3E %3Cpath d='M5 21V10h3V7h3V4h10' stroke-width='.8' stroke-opacity='.4'/%3E %3Crect x='9.6' y='9.6' width='2.8' height='2.8' fill='%23d4af37' stroke='none' transform='rotate(45 11 11)'/%3E %3C/g%3E%3C/svg%3E");
+  --deco-art-corner-tl: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E %3Cg transform='rotate(0 11 11)' fill='none' stroke='%23d4af37'%3E %3Cpath d='M1 21V7h3V4h3V1h14' stroke-width='1.2' stroke-opacity='.85'/%3E %3Cpath d='M5 21V10h3V7h3V4h10' stroke-width='.8' stroke-opacity='.4'/%3E %3Crect x='9.6' y='9.6' width='2.8' height='2.8' fill='%23d4af37' stroke='none' transform='rotate(45 11 11)'/%3E %3C/g%3E%3C/svg%3E");
+  --deco-art-corner-tr: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E %3Cg transform='rotate(90 11 11)' fill='none' stroke='%23d4af37'%3E %3Cpath d='M1 21V7h3V4h3V1h14' stroke-width='1.2' stroke-opacity='.85'/%3E %3Cpath d='M5 21V10h3V7h3V4h10' stroke-width='.8' stroke-opacity='.4'/%3E %3Crect x='9.6' y='9.6' width='2.8' height='2.8' fill='%23d4af37' stroke='none' transform='rotate(45 11 11)'/%3E %3C/g%3E%3C/svg%3E");
+  --deco-art-fan: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64' fill='none' stroke='%23d4af37' stroke-width='1' stroke-opacity='.1'%3E %3Cpath d='M2 32a30 30 0 0 1 60 0M10 32a22 22 0 0 1 44 0M18 32a14 14 0 0 1 28 0M26 32a6 6 0 0 1 12 0M36.2 27.8L53.2 10.8M32.0 26.0L32.0 2.0M27.8 27.8L10.8 10.8M-30 64a30 30 0 0 1 60 0M-22 64a22 22 0 0 1 44 0M-14 64a14 14 0 0 1 28 0M-6 64a6 6 0 0 1 12 0M4.2 59.8L21.2 42.8M0.0 58.0L0.0 34.0M-4.2 59.8L-21.2 42.8M34 64a30 30 0 0 1 60 0M42 64a22 22 0 0 1 44 0M50 64a14 14 0 0 1 28 0M58 64a6 6 0 0 1 12 0M68.2 59.8L85.2 42.8M64.0 58.0L64.0 34.0M59.8 59.8L42.8 42.8'/%3E%3C/svg%3E");
+  --deco-art-sunburst: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='560' height='300' viewBox='0 0 560 300'%3E %3Cdefs%3E %3CradialGradient id='r' cx='280' cy='300' r='360' gradientUnits='userSpaceOnUse'%3E %3Cstop offset='0' stop-color='%23d4af37' stop-opacity='.34'/%3E%3Cstop offset='.55' stop-color='%23d4af37' stop-opacity='.09'/%3E %3Cstop offset='1' stop-color='%23d4af37' stop-opacity='0'/%3E%3C/radialGradient%3E %3ClinearGradient id='f' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%238a6a1f'/%3E %3Cstop offset='.45' stop-color='%23fff1b8'/%3E%3Cstop offset='.7' stop-color='%23d4af37'/%3E%3Cstop offset='1' stop-color='%239c7a22'/%3E%3C/linearGradient%3E %3C/defs%3E %3Cpath fill='url(%23r)' d='M280 300L-80.0 300.0L-78.6 268.6ZM280 300L-74.5 237.5L-67.7 206.8ZM280 300L-58.3 176.9L-46.3 147.9ZM280 300L-31.8 120.0L-14.9 93.5ZM280 300L4.2 68.6L25.4 45.4ZM280 300L48.6 24.2L73.5 5.1ZM280 300L100.0 -11.8L127.9 -26.3ZM280 300L156.9 -38.3L186.8 -47.7ZM280 300L217.5 -54.5L248.6 -58.6ZM280 300L280.0 -60.0L311.4 -58.6ZM280 300L342.5 -54.5L373.2 -47.7ZM280 300L403.1 -38.3L432.1 -26.3ZM280 300L460.0 -11.8L486.5 5.1ZM280 300L511.4 24.2L534.6 45.4ZM280 300L555.8 68.6L574.9 93.5ZM280 300L591.8 120.0L606.3 147.9ZM280 300L618.3 176.9L627.7 206.8ZM280 300L634.5 237.5L638.6 268.6Z'/%3E %3Cg fill='none' stroke='%23d4af37' stroke-width='1'%3E%3Cpath d='M210 300a70 70 0 0 1 140 0' stroke-opacity='0.55'/%3E%3Cpath d='M175 300a105 105 0 0 1 210 0' stroke-opacity='0.38'/%3E%3Cpath d='M140 300a140 140 0 0 1 280 0' stroke-opacity='0.24'/%3E%3Cpath d='M105 300a175 175 0 0 1 350 0' stroke-opacity='0.14'/%3E%3Cpath d='M70 300a210 210 0 0 1 420 0' stroke-opacity='0.08'/%3E%3C/g%3E %3Cpath d='M234 300a46 46 0 0 1 92 0Z' fill='url(%23f)' opacity='.6'/%3E %3C/svg%3E");
   color-scheme: dark;
 }
 
+/* Shan Shui (blue-green landscape). The preset keeps its persisted id,
+   'greenline'. Rice paper and ink, with the mineral pigments of 青绿山水:
+   azurite for action, malachite for success and focus, cinnabar for the seal
+   and for anything destructive. */
 :root[data-appearance-preset='greenline'] {
-  --q-bg: #061009;
-  --q-sidebar: #08150c;
-  --q-nav: #0b1a10;
-  --q-surface: #0c1c11;
-  --q-surface-soft: #0a1710;
-  --q-card: #0c1c11;
-  --q-panel: #0a1710;
-  --q-border: #183a22;
-  --q-border-strong: #2e6b3d;
-  --q-brand: #55f083;
-  --q-primary: #37d769;
-  --q-primary-hover: #64f68d;
-  --q-primary-pressed: #1faa4d;
-  --q-brand-soft: #113821;
-  --q-secondary: #102519;
-  --q-secondary-hover: #173622;
-  --q-success: #55f083;
-  --q-warning: #d8c75f;
-  --q-danger: #ef6172;
-  --q-danger-hover: #ff7b89;
-  --q-danger-pressed: #c94456;
-  --q-input: #08150c;
-  --q-select: #08150c;
-  --q-toggle: #2e6b3d;
-  --q-text: #e0fbe7;
-  --q-text-2: #9bc5a6;
-  --q-text-3: #6f9279;
-  --q-text-muted: #9bc5a6;
-  --q-text-disabled: #577261;
-  --q-hover: #113821;
-  --q-pressed: #19512b;
-  --q-disabled: #122218;
-  --q-focus: #55f083;
-  --q-radius-xs: 2px;
+  --ss-ink: #22211e;
+  --ss-paper: #f3ecdc;
+  --ss-azurite: #1d5b73;
+  --ss-malachite: #2e7d64;
+  --ss-cinnabar: #b8322a;
+  --ss-brush: "Palatino Linotype", "Book Antiqua", Georgia, "KaiTi", "楷体", "STKaiti", serif;
+  --q-bg: #f3ecdc;
+  --q-sidebar: #ebe2cc;
+  --q-nav: rgba(255, 252, 244, .5);
+  --q-surface: #fcf9f1;
+  --q-surface-soft: #f7f1e3;
+  --q-card: rgba(252, 249, 241, .9);
+  --q-panel: rgba(247, 241, 227, .92);
+  --q-border: rgba(60, 52, 40, .18);
+  --q-border-strong: rgba(60, 52, 40, .36);
+  --q-brand: #1d5b73;
+  --q-accent: #b8322a;
+  --q-primary: #1d5b73;
+  --q-primary-hover: #24708c;
+  --q-primary-pressed: #154a5e;
+  --q-brand-soft: rgba(46, 125, 100, .12);
+  --q-secondary: rgba(252, 249, 241, .85);
+  --q-secondary-hover: rgba(29, 91, 115, .07);
+  --q-success: #2a7259;
+  --q-warning: #9a5616;
+  --q-danger: #b8322a;
+  --q-danger-hover: #c9402f;
+  --q-danger-pressed: #962520;
+  --q-info: #1d5b73;
+  --q-input: #fdfbf5;
+  --q-select: #fdfbf5;
+  --q-toggle: #d8cdb4;
+  --q-text: #22211e;
+  --q-text-2: #514c42;
+  --q-text-3: #6e675a;
+  --q-text-muted: #514c42;
+  --q-text-disabled: #a39c8b;
+  --q-hover: rgba(29, 91, 115, .07);
+  --q-pressed: rgba(29, 91, 115, .14);
+  --q-disabled: rgba(60, 52, 40, .06);
+  --q-focus: #2e7d64;
+  --q-radius-xs: 3px;
   --q-radius-sm: 4px;
-  --q-radius: 6px;
-  --q-radius-md: 6px;
-  --q-radius-lg: 8px;
-  --q-radius-xl: 10px;
-  --q-shadow-sm: none;
-  --q-shadow-md: none;
-  --q-shadow-lg: 0 0 0 1px rgba(85, 240, 131, .08);
-  --q-shadow: none;
-  --control-primary-bg: #37d769;
-  --control-primary-bg-hover: #64f68d;
-  --control-primary-bg-active: #1faa4d;
-  --control-primary-fg: #04130a;
-  --control-primary-glow: 0 0 0 transparent;
-  --control-secondary-bg: #102519;
-  --control-secondary-bg-hover: #173622;
-  --control-secondary-fg: #d8f8df;
-  --control-secondary-border: rgba(85, 240, 131, .3);
-  --control-secondary-border-hover: #55f083;
-  --control-danger-bg: #ef6172;
-  --control-danger-bg-hover: #ff7b89;
-  --control-danger-bg-active: #c94456;
-  --control-danger-fg: #19070b;
-  --control-ghost-bg: transparent;
-  --control-ghost-bg-hover: #113821;
-  --control-ghost-fg: #55f083;
-  --control-input-bg: #08150c;
-  --control-input-border: #183a22;
-  --control-input-border-hover: #2e6b3d;
-  --control-input-focus-border: #55f083;
-  --control-input-focus-shadow: 0 0 0 2px rgba(85, 240, 131, .24);
-  --control-toggle-track: #2e6b3d;
-  --control-toggle-track-active: #37d769;
-  --control-toggle-knob: #061009;
-  --control-toggle-width: 34px;
-  --control-toggle-height: 18px;
-  --control-toggle-radius: 4px;
-  --control-toggle-offset: 2px;
-  --control-radio-border: #2e6b3d;
-  --control-radio-selected-bg: #37d769;
-  --control-radio-selected-ring: #061009;
-  --control-radius: 6px;
-  --control-focus-ring: rgba(85, 240, 131, .32);
-  --control-disabled-bg: #122218;
-  --control-disabled-fg: #577261;
-  --control-shadow: 0 0 0 transparent;
-  --control-hover-shadow: 0 0 0 transparent;
-  color-scheme: dark;
-}
-
-:root[data-appearance-preset='aurora-flow'] {
-  --q-bg: #080f25;
-  --q-sidebar: rgba(12, 23, 50, .94);
-  --q-nav: rgba(17, 32, 66, .9);
-  --q-surface: rgba(20, 34, 70, .86);
-  --q-surface-soft: rgba(25, 42, 82, .72);
-  --q-card: rgba(20, 34, 70, .82);
-  --q-panel: rgba(25, 42, 82, .7);
-  --q-border: rgba(125, 151, 222, .28);
-  --q-border-strong: rgba(129, 174, 255, .5);
-  --q-brand: #7de7e1;
-  --q-primary: #718dff;
-  --q-primary-hover: #8da4ff;
-  --q-primary-pressed: #5870dd;
-  --q-brand-soft: rgba(88, 111, 214, .28);
-  --q-secondary: rgba(31, 49, 92, .82);
-  --q-secondary-hover: rgba(49, 70, 123, .9);
-  --q-success: #68ddb6;
-  --q-warning: #e9bd69;
-  --q-danger: #ef7299;
-  --q-danger-hover: #ff8bab;
-  --q-danger-pressed: #cb5279;
-  --q-input: rgba(10, 21, 49, .8);
-  --q-select: rgba(10, 21, 49, .8);
-  --q-toggle: #4b5f95;
-  --q-text: #f1f5ff;
-  --q-text-2: #b8c5e7;
-  --q-text-3: #8797c1;
-  --q-text-muted: #b8c5e7;
-  --q-text-disabled: #69779d;
-  --q-hover: rgba(92, 118, 219, .24);
-  --q-pressed: rgba(115, 83, 202, .32);
-  --q-disabled: rgba(32, 43, 72, .88);
-  --q-focus: #7de7e1;
-  --q-radius-xs: 8px;
-  --q-radius-sm: 12px;
-  --q-radius: 20px;
-  --q-radius-md: 20px;
-  --q-radius-lg: 26px;
-  --q-radius-xl: 30px;
-  --q-shadow-sm: 0 8px 24px rgba(4, 9, 28, .2);
-  --q-shadow-md: 0 16px 38px rgba(4, 9, 28, .26);
-  --q-shadow-lg: 0 24px 58px rgba(4, 9, 28, .34);
+  --q-radius: 8px;
+  --q-radius-md: 8px;
+  --q-radius-lg: 10px;
+  --q-radius-xl: 12px;
+  --q-shadow-sm: 0 1px 0 rgba(34, 33, 30, .04), 0 8px 22px -14px rgba(34, 33, 30, .35);
+  --q-shadow-md: 0 2px 0 rgba(34, 33, 30, .04), 0 16px 34px -18px rgba(34, 33, 30, .4);
+  --q-shadow-lg: 0 24px 50px -22px rgba(34, 33, 30, .45);
   --q-shadow: var(--q-shadow-md);
-  --control-primary-bg: linear-gradient(135deg, #65d9d1, #718dff 52%, #9b7df6);
-  --control-primary-bg-hover: linear-gradient(135deg, #82ece3, #8da4ff 52%, #b090ff);
-  --control-primary-bg-active: linear-gradient(135deg, #4cb8b0, #5870dd 52%, #795ac5);
-  --control-primary-fg: #f9fbff;
-  --control-primary-glow: 0 0 22px rgba(125, 231, 225, .25);
-  --control-secondary-bg: rgba(31, 49, 92, .82);
-  --control-secondary-bg-hover: rgba(49, 70, 123, .9);
-  --control-secondary-fg: #f1f5ff;
-  --control-secondary-border: rgba(129, 174, 255, .34);
-  --control-secondary-border-hover: rgba(125, 231, 225, .62);
-  --control-danger-bg: linear-gradient(135deg, #db5d86, #ef7299);
-  --control-danger-bg-hover: linear-gradient(135deg, #ee7199, #ff8bab);
-  --control-danger-bg-active: linear-gradient(135deg, #b84370, #cb5279);
-  --control-danger-fg: #fff7fb;
+  --control-primary-bg: #1d5b73;
+  --control-primary-bg-hover: #24708c;
+  --control-primary-bg-active: #154a5e;
+  --control-primary-fg: #f8f3e8;
+  --control-primary-glow: 0 6px 16px -8px rgba(29, 91, 115, .7);
+  --control-secondary-bg: rgba(252, 249, 241, .85);
+  --control-secondary-bg-hover: rgba(29, 91, 115, .07);
+  --control-secondary-fg: #22211e;
+  --control-secondary-border: rgba(34, 33, 30, .32);
+  --control-secondary-border-hover: rgba(29, 91, 115, .7);
+  --control-danger-bg: #b8322a;
+  --control-danger-bg-hover: #c9402f;
+  --control-danger-bg-active: #962520;
+  --control-danger-fg: #fbf3ea;
   --control-ghost-bg: transparent;
-  --control-ghost-bg-hover: rgba(92, 118, 219, .24);
-  --control-ghost-fg: #7de7e1;
-  --control-input-bg: rgba(10, 21, 49, .8);
-  --control-input-border: rgba(125, 151, 222, .28);
-  --control-input-border-hover: rgba(129, 174, 255, .5);
-  --control-input-focus-border: #7de7e1;
-  --control-input-focus-shadow: 0 0 0 3px rgba(125, 231, 225, .24), 0 0 18px rgba(113, 141, 255, .15);
-  --control-toggle-track: #4b5f95;
-  --control-toggle-knob: #f1f5ff;
-  --control-toggle-width: 44px;
-  --control-toggle-height: 24px;
-  --control-toggle-radius: 12px;
-  --control-toggle-offset: 3px;
-  --control-toggle-track-active: linear-gradient(90deg, #65d9d1, #718dff 52%, #9b7df6);
-  --control-radio-border: rgba(129, 174, 255, .5);
-  --control-radio-selected-bg: #718dff;
-  --control-radio-selected-ring: #f1f5ff;
-  --control-radius: 12px;
-  --control-focus-ring: rgba(125, 231, 225, .34);
-  --control-disabled-bg: rgba(32, 43, 72, .88);
-  --control-disabled-fg: #69779d;
-  --control-shadow: 0 8px 24px rgba(4, 9, 28, .2);
-  --control-hover-shadow: 0 0 24px rgba(125, 231, 225, .2);
-  --q-ambient-background: radial-gradient(circle at 12% 12%, rgba(53, 214, 192, .15), transparent 34%), radial-gradient(circle at 78% 18%, rgba(82, 132, 255, .18), transparent 38%), radial-gradient(circle at 64% 88%, rgba(151, 86, 226, .15), transparent 40%), #080f25;
-  color-scheme: dark;
-}
-
-:root[data-appearance-preset='qing-nova'] {
-  --q-bg: #071522;
-  --q-sidebar: rgba(8, 25, 40, .96);
-  --q-nav: rgba(13, 35, 55, .94);
-  --q-surface: rgba(13, 34, 52, .9);
-  --q-surface-soft: rgba(16, 42, 62, .84);
-  --q-card: rgba(13, 34, 52, .9);
-  --q-panel: rgba(16, 42, 62, .84);
-  --q-border: rgba(59, 183, 220, .3);
-  --q-border-strong: rgba(81, 218, 238, .56);
-  --q-brand: #57d9e9;
-  --q-primary: #37b7e8;
-  --q-primary-hover: #60d2f2;
-  --q-primary-pressed: #218ab9;
-  --q-brand-soft: rgba(41, 144, 190, .24);
-  --q-secondary: rgba(17, 48, 68, .9);
-  --q-secondary-hover: rgba(24, 67, 92, .94);
-  --q-success: #62e8a4;
-  --q-warning: #e7c66b;
-  --q-danger: #f06882;
-  --q-danger-hover: #ff8399;
-  --q-danger-pressed: #c94b65;
-  --q-input: rgba(7, 24, 38, .9);
-  --q-select: rgba(7, 24, 38, .9);
-  --q-toggle: #356b7e;
-  --q-text: #e9fbff;
-  --q-text-2: #add1d9;
-  --q-text-3: #759da8;
-  --q-text-muted: #add1d9;
-  --q-text-disabled: #5f7e87;
-  --q-hover: rgba(47, 164, 202, .2);
-  --q-pressed: rgba(44, 117, 170, .3);
-  --q-disabled: rgba(22, 45, 57, .9);
-  --q-focus: #62e8d0;
-  --q-radius-xs: 5px;
-  --q-radius-sm: 8px;
-  --q-radius: 13px;
-  --q-radius-md: 13px;
-  --q-radius-lg: 18px;
-  --q-radius-xl: 22px;
-  --q-shadow-sm: 0 6px 18px rgba(2, 10, 18, .18), 0 0 0 1px rgba(77, 210, 231, .04);
-  --q-shadow-md: 0 14px 34px rgba(2, 10, 18, .25), 0 0 22px rgba(55, 183, 232, .06);
-  --q-shadow-lg: 0 22px 52px rgba(2, 10, 18, .34), 0 0 34px rgba(86, 86, 221, .08);
-  --q-shadow: var(--q-shadow-md);
-  --control-primary-bg: linear-gradient(135deg, #57d9e9, #37b7e8 52%, #8b7df6);
-  --control-primary-bg-hover: linear-gradient(135deg, #72e6ef, #42c9f0 52%, #b09aff);
-  --control-primary-bg-active: linear-gradient(135deg, #3aaebf, #218ab9 52%, #725ac5);
-  --control-primary-fg: #04141e;
-  --control-primary-glow: 0 0 20px rgba(87, 217, 233, .24);
-  --control-secondary-bg: rgba(17, 48, 68, .9);
-  --control-secondary-bg-hover: rgba(24, 67, 92, .94);
-  --control-secondary-fg: #e9fbff;
-  --control-secondary-border: rgba(59, 183, 220, .34);
-  --control-secondary-border-hover: rgba(98, 232, 208, .62);
-  --control-danger-bg: linear-gradient(135deg, #e05270, #f06882);
-  --control-danger-bg-hover: linear-gradient(135deg, #f06b86, #ff8399);
-  --control-danger-bg-active: linear-gradient(135deg, #b93e5b, #c94b65);
-  --control-danger-fg: #fff5f7;
-  --control-ghost-bg: transparent;
-  --control-ghost-bg-hover: rgba(47, 164, 202, .2);
-  --control-ghost-fg: #57d9e9;
-  --control-input-bg: rgba(7, 24, 38, .9);
-  --control-input-border: rgba(59, 183, 220, .3);
-  --control-input-border-hover: rgba(81, 218, 238, .56);
-  --control-input-focus-border: #62e8d0;
-  --control-input-focus-shadow: 0 0 0 3px rgba(98, 232, 208, .24), 0 0 16px rgba(55, 183, 232, .14);
-  --control-toggle-track: #356b7e;
-  --control-toggle-track-active: linear-gradient(90deg, #57d9e9, #37b7e8 52%, #8b7df6);
-  --control-toggle-knob: #071522;
+  --control-ghost-bg-hover: rgba(29, 91, 115, .07);
+  --control-ghost-fg: #1d5b73;
+  --control-input-bg: #fdfbf5;
+  --control-input-border: rgba(34, 33, 30, .26);
+  --control-input-border-hover: rgba(34, 33, 30, .45);
+  --control-input-focus-border: #2e7d64;
+  --control-input-focus-shadow: 0 0 0 3px rgba(46, 125, 100, .16);
+  --control-toggle-track: #d8cdb4;
+  --control-toggle-track-active: #2e7d64;
+  --control-toggle-knob: #fdfbf5;
   --control-toggle-width: 40px;
   --control-toggle-height: 22px;
-  --control-toggle-radius: 8px;
+  --control-toggle-radius: 11px;
   --control-toggle-offset: 3px;
-  --control-radio-border: rgba(81, 218, 238, .56);
-  --control-radio-selected-bg: #37b7e8;
-  --control-radio-selected-ring: #071522;
-  --control-radius: 10px;
-  --control-focus-ring: rgba(98, 232, 208, .34);
-  --control-disabled-bg: rgba(22, 45, 57, .9);
-  --control-disabled-fg: #5f7e87;
-  --control-shadow: 0 6px 18px rgba(2, 10, 18, .18), 0 0 0 1px rgba(77, 210, 231, .04);
-  --control-hover-shadow: 0 0 20px rgba(87, 217, 233, .2);
-  --q-ambient-background: radial-gradient(circle at 18% 10%, rgba(48, 217, 198, .11), transparent 34%), radial-gradient(circle at 80% 24%, rgba(74, 118, 226, .13), transparent 38%), radial-gradient(circle at 58% 88%, rgba(128, 79, 194, .09), transparent 42%), #071522;
+  --control-radio-border: rgba(34, 33, 30, .4);
+  --control-radio-selected-bg: #1d5b73;
+  --control-radio-selected-ring: #fdfbf5;
+  --control-radius: 4px;
+  --control-focus-ring: rgba(46, 125, 100, .3);
+  --control-disabled-bg: rgba(60, 52, 40, .06);
+  --control-disabled-fg: #a39c8b;
+  --control-shadow: 0 1px 0 rgba(34, 33, 30, .05);
+  --control-hover-shadow: 0 6px 14px -8px rgba(34, 33, 30, .35);
+  /* A landscape along the foot of the workspace, a faint warmth where the sun
+     sits, and paper grain under everything. */
+  --q-ambient-background:
+    var(--ss-art-mountains) center bottom / 100% auto no-repeat,
+    radial-gradient(ellipse 45% 40% at 82% 8%, rgba(184, 50, 42, .05), transparent 70%),
+    var(--ss-art-grain) 0 0 / 240px 240px,
+    #f3ecdc;
+  scrollbar-color: rgba(34, 33, 30, .35) transparent;
+  /* Theme art, shared with modules: reference these rather than copying the SVG. */
+  --ss-art-brush: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='26' viewBox='0 0 300 26' preserveAspectRatio='none'%3E %3Cpath d='M6 15C40 7 100 6 160 8C220 10 270 9 296 6C292 13 270 17 230 18C170 20 90 21 24 22C12 22 4 19 6 15Z' fill='%23b8322a' opacity='.85'/%3E %3Cpath d='M30 13C90 10 170 11 250 10M50 17C120 16 190 16 262 14' fill='none' stroke='%23f3ecdc' stroke-width='1' stroke-opacity='.55'/%3E %3C/svg%3E");
+  --ss-art-brush-v: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='400' viewBox='0 0 8 400' preserveAspectRatio='none'%3E %3Cpath d='M4 0C6.5 60 6 340 4 400C2 340 1.5 60 4 0Z' fill='%2322211e' opacity='.5'/%3E%3C/svg%3E");
+  --ss-art-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E %3Cfilter id='g' x='0' y='0'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E %3CfeColorMatrix values='0 0 0 0 .36 0 0 0 0 .3 0 0 0 0 .2 0 0 0 .1 0'/%3E%3C/filter%3E %3Cfilter id='f' x='0' y='0'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.012 .35' numOctaves='2' seed='7' stitchTiles='stitch'/%3E %3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .43 0 0 0 0 .3 0 0 0 .16 -.04'/%3E%3C/filter%3E %3Crect width='240' height='240' filter='url(%23g)'/%3E%3Crect width='240' height='240' filter='url(%23f)'/%3E%3C/svg%3E");
+  --ss-art-ink-rule: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='6' viewBox='0 0 400 6' preserveAspectRatio='none'%3E %3Cpath d='M0 3C80 .8 320 .8 400 3C320 5.2 80 5.2 0 3Z' fill='%2322211e' opacity='.42'/%3E%3C/svg%3E");
+  --ss-art-mountains: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1600' height='520' viewBox='0 0 1600 520' preserveAspectRatio='xMidYMax slice'%3E %3Cdefs%3E %3ClinearGradient id='far' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='.35' stop-color='%238aaea6' stop-opacity='.42'/%3E%3Cstop offset='.85' stop-color='%238aaea6' stop-opacity='0'/%3E%3C/linearGradient%3E %3ClinearGradient id='mid' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='.3' stop-color='%233f8a78' stop-opacity='.42'/%3E%3Cstop offset='.8' stop-color='%233f8a78' stop-opacity='0'/%3E%3C/linearGradient%3E %3ClinearGradient id='near' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='.4' stop-color='%231d5b73' stop-opacity='.44'/%3E%3Cstop offset='1' stop-color='%231d5b73' stop-opacity='.1'/%3E%3C/linearGradient%3E %3ClinearGradient id='mist' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23f3ecdc' stop-opacity='0'/%3E%3Cstop offset='.5' stop-color='%23f3ecdc' stop-opacity='.7'/%3E%3Cstop offset='1' stop-color='%23f3ecdc' stop-opacity='0'/%3E%3C/linearGradient%3E %3C/defs%3E %3Ccircle cx='1270' cy='140' r='80' fill='%23c0392b' opacity='.05'/%3E %3Ccircle cx='1270' cy='140' r='44' fill='%23c0392b' opacity='.5'/%3E %3Cpath fill='url(%23far)' d='M0 300Q90 260 170 285Q240 230 320 262Q390 200 470 248Q560 286 650 250Q740 196 830 240Q920 282 1010 236Q1110 182 1200 232Q1300 280 1390 238Q1490 196 1600 246L1600 520L0 520Z'/%3E %3Cpath fill='url(%23mid)' d='M0 400Q70 392 120 350Q160 260 200 222Q232 196 252 250Q272 304 322 330Q366 352 402 300Q440 176 490 162Q526 154 546 232Q568 304 622 340Q690 380 760 356Q830 330 880 300Q930 266 966 252Q1010 186 1058 196Q1098 206 1120 282Q1148 352 1222 362Q1302 368 1350 318Q1398 232 1450 236Q1500 242 1530 318Q1560 384 1600 380L1600 520L0 520Z'/%3E %3Cg fill='none' stroke='%232b5f55' stroke-opacity='.28' stroke-width='1.6' stroke-linecap='round'%3E %3Cpath d='M488 170q-10 40-30 72M498 172q6 50 26 82M478 196q-6 22-18 36'/%3E %3Cpath d='M1056 202q-12 36-34 66M1064 204q10 44 30 72'/%3E %3Cpath d='M200 228q-8 30-26 52M210 230q6 26 20 44'/%3E %3Cpath d='M1448 242q-10 36-30 58M1458 246q8 30 22 50'/%3E %3C/g%3E %3Crect y='330' width='1600' height='90' fill='url(%23mist)'/%3E %3Cpath fill='url(%23near)' d='M0 250Q30 236 60 290Q96 360 160 400Q240 446 340 444Q460 440 560 456Q660 470 760 462Q880 452 980 458Q1100 466 1200 446Q1320 420 1420 380Q1500 344 1540 280Q1566 236 1600 230L1600 520L0 520Z'/%3E %3Cpath fill='%232a3532' opacity='.3' d='M0 470Q40 440 90 460Q130 480 150 520L0 520Z'/%3E %3Cg stroke='%231d5b73' stroke-opacity='.28' stroke-width='1.5' stroke-linecap='round'%3E %3Cpath d='M600 488h60M690 494h36M900 489h70M1000 497h30M420 496h44'/%3E%3C/g%3E %3Cpath d='M760 480q28 8 56 0l-7 7h-42z' fill='%2322211e' opacity='.55'/%3E %3Cpath d='M792 480v-13' stroke='%2322211e' stroke-opacity='.55' stroke-width='1.5'/%3E %3Ccircle cx='784' cy='474' r='3' fill='%2322211e' opacity='.55'/%3E %3Cg fill='none' stroke='%2322211e' stroke-opacity='.5' stroke-width='1.6' stroke-linecap='round'%3E %3Cpath d='M1176 210q7-6 14 0q7-6 14 0M1214 232q5-4 10 0q5-4 10 0M1150 240q4-3 8 0q4-3 8 0'/%3E%3C/g%3E %3C/svg%3E");
+  color-scheme: light;
+}
+
+/* Cyberpunk. The preset keeps its persisted id, 'aurora-flow', so saved
+   settings, the host's validation and modules keyed by the id are untouched;
+   only the look changed. Void black with a violet cast, an electric-cyan
+   primary that glows, and hot magenta for anything destructive or locked. */
+:root[data-appearance-preset='aurora-flow'] {
+  --cp-cyan: #00f0ff;
+  --cp-cyan-hot: #7df9ff;
+  --cp-magenta: #ff2bd6;
+  --cp-magenta-hot: #ff6ae4;
+  --cp-yellow: #fcee0a;
+  --cp-void: #07060f;
+  --cp-display: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  --q-bg: #07060f;
+  --q-sidebar: #0a0815;
+  --q-nav: rgba(18, 14, 34, .9);
+  --q-surface: #110e20;
+  --q-surface-soft: #16122b;
+  --q-card: rgba(17, 14, 32, .94);
+  --q-panel: rgba(21, 18, 42, .92);
+  --q-border: rgba(167, 139, 250, .24);
+  --q-border-strong: rgba(196, 167, 255, .46);
+  --q-brand: #00f0ff;
+  --q-accent: #ff2bd6;
+  --q-primary: #00f0ff;
+  --q-primary-hover: #7df9ff;
+  --q-primary-pressed: #00b4c2;
+  --q-brand-soft: rgba(0, 240, 255, .1);
+  --q-secondary: rgba(19, 16, 38, .92);
+  --q-secondary-hover: rgba(0, 240, 255, .07);
+  --q-success: #39ff9e;
+  --q-warning: #fcee0a;
+  --q-danger: #ff3d8e;
+  --q-danger-hover: #ff6aab;
+  --q-danger-pressed: #d4186a;
+  --q-info: #00f0ff;
+  --q-input: #0b0918;
+  --q-select: #0b0918;
+  --q-toggle: #2a2448;
+  --q-text: #ece9ff;
+  --q-text-2: #aaa4d6;
+  --q-text-3: #8580b6;
+  --q-text-muted: #aaa4d6;
+  --q-text-disabled: #5a5384;
+  --q-hover: rgba(0, 240, 255, .08);
+  --q-pressed: rgba(255, 43, 214, .14);
+  --q-disabled: rgba(255, 43, 214, .04);
+  --q-focus: #00f0ff;
+  --q-radius-xs: 4px;
+  --q-radius-sm: 7px;
+  --q-radius: 10px;
+  --q-radius-md: 10px;
+  --q-radius-lg: 14px;
+  --q-radius-xl: 16px;
+  --q-shadow-sm: 0 6px 18px rgba(0, 0, 0, .45);
+  --q-shadow-md: 0 14px 34px rgba(0, 0, 0, .55), 0 0 22px rgba(139, 92, 246, .08);
+  --q-shadow-lg: 0 24px 60px rgba(0, 0, 0, .6), 0 0 40px rgba(255, 43, 214, .1);
+  --q-shadow: var(--q-shadow-md);
+  --control-primary-bg: #00f0ff;
+  --control-primary-bg-hover: #7df9ff;
+  --control-primary-bg-active: #00b4c2;
+  --control-primary-fg: #03060c;
+  --control-primary-glow: 0 0 0 1px rgba(125, 249, 255, .7), 0 0 22px rgba(0, 240, 255, .45);
+  --control-secondary-bg: rgba(19, 16, 38, .92);
+  --control-secondary-bg-hover: rgba(0, 240, 255, .07);
+  --control-secondary-fg: #cbc6f4;
+  --control-secondary-border: rgba(170, 160, 230, .34);
+  --control-secondary-border-hover: #00f0ff;
+  --control-danger-bg: rgba(255, 43, 214, .07);
+  --control-danger-bg-hover: #ff2bd6;
+  --control-danger-bg-active: #d61fb2;
+  --control-danger-fg: #ff2bd6;
+  --control-ghost-bg: transparent;
+  --control-ghost-bg-hover: rgba(0, 240, 255, .08);
+  --control-ghost-fg: #00f0ff;
+  --control-input-bg: #0b0918;
+  --control-input-border: rgba(167, 139, 250, .3);
+  --control-input-border-hover: rgba(196, 167, 255, .56);
+  --control-input-focus-border: #00f0ff;
+  --control-input-focus-shadow: 0 0 0 1px #00f0ff, 0 0 18px rgba(0, 240, 255, .3);
+  --control-toggle-track: #2a2448;
+  --control-toggle-track-active: #00f0ff;
+  --control-toggle-knob: #07060f;
+  --control-toggle-width: 42px;
+  --control-toggle-height: 20px;
+  --control-toggle-radius: 3px;
+  --control-toggle-offset: 3px;
+  --control-radio-border: rgba(196, 167, 255, .5);
+  --control-radio-selected-bg: #00f0ff;
+  --control-radio-selected-ring: #07060f;
+  --control-radius: 7px;
+  --control-focus-ring: rgba(0, 240, 255, .42);
+  --control-disabled-bg: rgba(255, 43, 214, .04);
+  --control-disabled-fg: rgba(255, 106, 228, .5);
+  --control-shadow: 0 0 0 transparent;
+  --control-hover-shadow: 0 0 0 1px rgba(0, 240, 255, .35), 0 0 18px rgba(0, 240, 255, .28);
+  /* Neon wash, then a violet floor grid, over the void. The grid layers are
+     sized so the lines repeat; the glows sit on top of them at the corners. */
+  --q-ambient-background:
+    radial-gradient(ellipse 58% 48% at 100% 0%, rgba(255, 43, 214, .17), transparent 62%),
+    radial-gradient(ellipse 52% 46% at 0% 100%, rgba(0, 240, 255, .13), transparent 62%),
+    radial-gradient(ellipse 40% 30% at 55% 45%, rgba(139, 92, 246, .07), transparent 70%),
+    linear-gradient(rgba(139, 92, 246, .075) 1px, transparent 1px) 0 0 / 46px 46px,
+    linear-gradient(90deg, rgba(139, 92, 246, .075) 1px, transparent 1px) 0 0 / 46px 46px,
+    #07060f;
+  scrollbar-color: rgba(0, 240, 255, .38) transparent;
   color-scheme: dark;
+}
+
+/* Brutalist. The preset keeps its persisted id, 'qing-nova'. Newsprint
+   cream, black ink, thick rules and hard offset shadows; red is the action,
+   yellow the warning and the highlight. Text-bearing roles stay ink, because
+   red or yellow text on these surfaces would not be readable. */
+:root[data-appearance-preset='qing-nova'] {
+  --br-ink: #111111;
+  --br-paper: #f4ecd2;
+  --br-cream: #fff7d6;
+  --br-red: #ff4d4d;
+  --br-yellow: #ffe14d;
+  --br-blue: #3355ff;
+  --br-stone: #a8a290;
+  --br-display: "Segoe UI Black", "Arial Black", "Microsoft YaHei UI", "Segoe UI", sans-serif;
+  --q-bg: #f4ecd2;
+  --q-sidebar: #111111;
+  --q-nav: #111111;
+  --q-surface: #ffffff;
+  --q-surface-soft: #fff7d6;
+  --q-card: #ffffff;
+  --q-panel: #fff7d6;
+  --q-border: #111111;
+  --q-border-strong: #111111;
+  --q-brand: #111111;
+  --q-accent: #ff4d4d;
+  --q-primary: #111111;
+  --q-primary-hover: #111111;
+  --q-primary-pressed: #000000;
+  --q-brand-soft: #ffe14d;
+  --q-secondary: #ffffff;
+  --q-secondary-hover: #fffbe6;
+  --q-success: #00824a;
+  --q-warning: #a85400;
+  --q-danger: #d61f1f;
+  --q-danger-hover: #ff4d4d;
+  --q-danger-pressed: #b31414;
+  --q-info: #2342e0;
+  --q-input: #ffffff;
+  --q-select: #ffffff;
+  --q-toggle: #ffffff;
+  --q-text: #111111;
+  --q-text-2: #3b3829;
+  --q-text-3: #6b6650;
+  --q-text-muted: #3b3829;
+  --q-text-disabled: #8e8a78;
+  --q-hover: #ffe14d;
+  --q-pressed: #ffd21f;
+  --q-disabled: #efe8cc;
+  --q-focus: #3355ff;
+  --q-radius-xs: 0px;
+  --q-radius-sm: 0px;
+  --q-radius: 14px;
+  --q-radius-md: 14px;
+  --q-radius-lg: 16px;
+  --q-radius-xl: 18px;
+  --q-shadow-sm: 4px 4px 0 #111111;
+  --q-shadow-md: 6px 6px 0 #111111;
+  --q-shadow-lg: 8px 8px 0 #111111;
+  --q-shadow: var(--q-shadow-md);
+  --control-primary-bg: #ff4d4d;
+  --control-primary-bg-hover: #ff6a5e;
+  --control-primary-bg-active: #f03b3b;
+  --control-primary-fg: #111111;
+  --control-primary-glow: 0 0 0 transparent;
+  --control-secondary-bg: #ffffff;
+  --control-secondary-bg-hover: #fffbe6;
+  --control-secondary-fg: #111111;
+  --control-secondary-border: #111111;
+  --control-secondary-border-hover: #111111;
+  --control-danger-bg: #ffe14d;
+  --control-danger-bg-hover: #ffea7a;
+  --control-danger-bg-active: #ffd21f;
+  --control-danger-fg: #111111;
+  --control-ghost-bg: transparent;
+  --control-ghost-bg-hover: #ffe14d;
+  --control-ghost-fg: #111111;
+  --control-input-bg: #ffffff;
+  --control-input-border: #111111;
+  --control-input-border-hover: #111111;
+  --control-input-focus-border: #111111;
+  --control-input-focus-shadow: 4px 4px 0 #111111;
+  --control-toggle-track: #ffffff;
+  --control-toggle-track-active: #ff4d4d;
+  --control-toggle-knob: #111111;
+  --control-toggle-width: 44px;
+  --control-toggle-height: 24px;
+  --control-toggle-radius: 0px;
+  --control-toggle-offset: 5px;
+  --control-radio-border: #111111;
+  --control-radio-selected-bg: #111111;
+  --control-radio-selected-ring: #ffe14d;
+  --control-radius: 0px;
+  --control-focus-ring: rgba(51, 85, 255, .45);
+  --control-disabled-bg: #efe8cc;
+  --control-disabled-fg: #8e8a78;
+  --control-shadow: 4px 4px 0 #111111;
+  --control-hover-shadow: 6px 6px 0 #111111;
+  /* Halftone dots over newsprint: the texture of a cheap printed poster. */
+  --q-ambient-background:
+    radial-gradient(rgba(17, 17, 17, .13) 1.3px, transparent 1.7px) 0 0 / 18px 18px,
+    #f4ecd2;
+  scrollbar-color: #111111 #e7dfc1;
+  color-scheme: light;
 }
 
 /* Preserve the existing light/dark mode contract while allowing each preset
@@ -619,9 +710,6 @@ body { background: var(--q-bg); color: var(--q-text); }
   background: var(--q-hover);
   color: var(--q-primary);
 }
-:root[data-appearance-preset='neon-circuit'] .q-sidebar nav :is(a.router-link-active, button.active) {
-  box-shadow: inset 2px 0 var(--q-accent), 0 0 16px rgba(93, 228, 255, .08);
-}
 .wpf-home-hero { border-radius: var(--q-radius-xl); box-shadow: var(--q-shadow-lg); }
 .q-button, .q-icon-button {
   border-color: var(--q-border);
@@ -673,24 +761,6 @@ select, .logs-level-filter select { background: var(--q-select); }
 .q-switch > span { background: var(--q-toggle); }
 .q-switch[aria-checked='true'] > span { background: var(--q-primary); }
 .q-switch:hover:not(:disabled) { border-color: var(--q-primary); color: var(--q-primary); }
-:root[data-appearance-preset='greenline'] :is(.q-badge, .wpf-stat strong, .module-update-versions strong,
-  .startup-health-values dd, .dashboard-host-state dd),
-:root[data-appearance-preset='qing-nova'] :is(.q-badge, .wpf-stat strong, .module-update-versions strong,
-  .startup-health-values dd, .dashboard-host-state dd) {
-  font-family: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
-  font-variant-numeric: tabular-nums;
-}
-:root[data-appearance-preset='aurora-flow'] .q-workspace {
-  background-size: 135% 135%;
-  animation: q-aurora-flow 18s ease-in-out infinite alternate;
-}
-@keyframes q-aurora-flow {
-  from { background-position: 0% 20%; }
-  to { background-position: 100% 78%; }
-}
-@media (prefers-reduced-motion: reduce) {
-  :root[data-appearance-preset='aurora-flow'] .q-workspace { animation: none; }
-}
 .settings-section-nav, .settings-host-placeholder, .settings-snapshot-notice {
   background: var(--q-panel);
   border-color: var(--q-border);
@@ -714,10 +784,16 @@ select, .logs-level-filter select { background: var(--q-select); }
 .appearance-preset-swatch span:first-child { flex: 1; background: var(--preset-primary); }
 .appearance-preset-swatch span:last-child { width: 32%; background: var(--preset-surface); border: 1px solid color-mix(in srgb, var(--preset-primary) 30%, transparent); }
 .appearance-preset-swatch[data-preset='qing-default'] { --preset-bg: #f3f7fd; --preset-primary: #2563eb; --preset-surface: #fff; }
-.appearance-preset-swatch[data-preset='neon-circuit'] { --preset-bg: #070b16; --preset-primary: #5de4ff; --preset-surface: #111a2d; }
-.appearance-preset-swatch[data-preset='greenline'] { --preset-bg: #061009; --preset-primary: #55f083; --preset-surface: #0c1c11; }
-.appearance-preset-swatch[data-preset='aurora-flow'] { --preset-bg: #080f25; --preset-primary: #718dff; --preset-surface: #142246; }
-.appearance-preset-swatch[data-preset='qing-nova'] { --preset-bg: #071522; --preset-primary: #37b7e8; --preset-surface: #0d2234; }
+.appearance-preset-swatch[data-preset='neon-circuit'] { --preset-bg: #0b0b0d; --preset-primary: linear-gradient(135deg, #8a6a1f, #fff1b8 42%, #d4af37 62%, #9c7a22); --preset-surface: #17151a; box-shadow: inset 0 0 0 1px rgba(212, 175, 55, .6); }
+.appearance-preset-swatch[data-preset='neon-circuit'] span { border-radius: 1px; }
+.appearance-preset-swatch[data-preset='neon-circuit'] span:last-child { border-color: rgba(212, 175, 55, .55); }
+.appearance-preset-swatch[data-preset='greenline'] { --preset-bg: #f3ecdc; --preset-primary: #1d5b73; --preset-surface: #b8322a; box-shadow: inset 0 0 0 1px rgba(60, 52, 40, .2); }
+.appearance-preset-swatch[data-preset='greenline'] span:last-child { border-color: transparent; box-shadow: inset 0 0 0 2px #b8322a, inset 0 0 0 3px rgba(251, 243, 234, .8); }
+.appearance-preset-swatch[data-preset='aurora-flow'] { --preset-bg: #07060f; --preset-primary: #00f0ff; --preset-surface: #2a0f2e; box-shadow: inset 0 0 0 1px rgba(255, 43, 214, .55), 0 0 12px rgba(255, 43, 214, .22); }
+.appearance-preset-swatch[data-preset='aurora-flow'] span:first-child { box-shadow: 0 0 10px rgba(0, 240, 255, .75); }
+.appearance-preset-swatch[data-preset='aurora-flow'] span:last-child { border-color: #ff2bd6; box-shadow: 0 0 8px rgba(255, 43, 214, .5); }
+.appearance-preset-swatch[data-preset='qing-nova'] { --preset-bg: #fff7d6; --preset-primary: #ff4d4d; --preset-surface: #ffe14d; border: 2px solid #111111; border-radius: 0; box-shadow: 3px 3px 0 #111111; }
+.appearance-preset-swatch[data-preset='qing-nova'] span { border: 2px solid #111111; border-radius: 0; }
 @media (max-width: 900px) { .appearance-preset-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 500px) { .appearance-preset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
@@ -994,4 +1070,1356 @@ select:focus-visible, textarea:focus-visible {
   background: var(--radio-selected-bg);
   color: var(--primary-fg);
   box-shadow: 0 0 0 2px var(--control-focus-ring);
+}
+
+/* Signature layers -------------------------------------------------------
+   Tokens alone can only recolour. The two presets below also change shape,
+   type and motion, so each carries a layer of rules scoped to its own id.
+   Every rule here is cosmetic: nothing changes what a control does, only how
+   it looks, and both layers are inert under any other preset. */
+
+/* Cyberpunk signature (preset id 'aurora-flow') ---------------------------- */
+:root[data-appearance-preset='aurora-flow'] ::selection { background: #ff2bd6; color: #07060f; }
+:root[data-appearance-preset='aurora-flow'] :is(input, textarea) { caret-color: #00f0ff; }
+
+/* Static CRT scanlines plus a soft beam that sweeps the screen. Both are fixed
+   overlays that ignore the pointer and sit below drawers, toasts and modals.
+   The scanlines never change, so they are painted once; the beam only moves by
+   transform, so it is composited rather than repainting the UI under it. */
+:root[data-appearance-preset='aurora-flow'] .q-shell::before,
+:root[data-appearance-preset='aurora-flow'] .q-shell::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+:root[data-appearance-preset='aurora-flow'] .q-shell::after {
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(180deg, rgba(255, 255, 255, .024) 0 1px, transparent 1px 3px);
+}
+:root[data-appearance-preset='aurora-flow'] .q-shell::before {
+  top: 0;
+  height: 150px;
+  border-bottom: 1px solid rgba(125, 249, 255, .28);
+  background: linear-gradient(180deg, transparent, rgba(0, 240, 255, .035) 70%, rgba(0, 240, 255, .11));
+  transform: translateY(-170px);
+  animation: q-cyber-scan 9s cubic-bezier(.55, 0, .45, 1) 1.5s infinite;
+  will-change: transform;
+}
+@keyframes q-cyber-scan {
+  0% { transform: translateY(-170px); }
+  48%, 100% { transform: translateY(calc(100vh + 20px)); }
+}
+
+/* Sidebar: a dark rail edged by a magenta-to-cyan light strip. */
+:root[data-appearance-preset='aurora-flow'] .q-sidebar {
+  background: linear-gradient(180deg, #0d0a1c, #07060f 70%);
+  border-right: 1px solid transparent;
+  border-image: linear-gradient(180deg, rgba(255, 43, 214, .75), rgba(139, 92, 246, .2) 48%, rgba(0, 240, 255, .7)) 1;
+  box-shadow: 1px 0 26px rgba(255, 43, 214, .07);
+}
+:root[data-appearance-preset='aurora-flow'] .q-sidebar nav {
+  background: rgba(18, 14, 36, .55);
+  border: 1px solid rgba(167, 139, 250, .12);
+}
+:root[data-appearance-preset='aurora-flow'] .q-sidebar :is(nav a, nav button, .q-sidebar-quick-open) {
+  color: #8f89c4;
+}
+:root[data-appearance-preset='aurora-flow'] .q-sidebar :is(nav a:hover, nav button:hover, .q-sidebar-quick-open:hover) {
+  background: rgba(0, 240, 255, .07);
+  color: #00f0ff;
+}
+:root[data-appearance-preset='aurora-flow'] .q-sidebar :is(nav a.router-link-active, nav button.active) {
+  background: linear-gradient(90deg, rgba(0, 240, 255, .17), rgba(0, 240, 255, .02));
+  color: #00f0ff;
+  box-shadow: inset 0 0 0 1px rgba(0, 240, 255, .3), 0 0 18px rgba(0, 240, 255, .12);
+  text-shadow: 0 0 8px rgba(0, 240, 255, .6);
+}
+:root[data-appearance-preset='aurora-flow'] .q-sidebar :is(nav a.router-link-active, nav button.active) .q-sidebar-icon {
+  filter: drop-shadow(0 0 5px rgba(0, 240, 255, .8));
+}
+:root[data-appearance-preset='aurora-flow'] .q-sidebar nav :is(a, button)::before {
+  background: #00f0ff;
+  box-shadow: 0 0 10px #00f0ff, 0 0 2px #00f0ff;
+}
+:root[data-appearance-preset='aurora-flow'] .q-brand > img {
+  filter: drop-shadow(0 0 6px rgba(0, 240, 255, .55)) drop-shadow(0 0 14px rgba(255, 43, 214, .35));
+}
+:root[data-appearance-preset='aurora-flow'] .q-brand strong {
+  background: linear-gradient(90deg, #00f0ff, #ff2bd6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-family: var(--cp-display);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+/* Panels: dark glass with HUD brackets, cyan top-left and magenta bottom-
+   right. The brackets are background layers, so they cost no markup and never
+   overlap content. */
+:root[data-appearance-preset='aurora-flow'] :is(.q-card, .q-panel, .settings-card, .running-module-card,
+  .wpf-module-card, .wpf-module-details, .dashboard-section, .logs-table, .diagnostics-panel, .diagnostics-tools,
+  .devices-paired, .devices-nearby) {
+  border-color: rgba(167, 139, 250, .22);
+  background:
+    linear-gradient(#00f0ff, #00f0ff) left 6px top 6px / 16px 2px no-repeat,
+    linear-gradient(#00f0ff, #00f0ff) left 6px top 6px / 2px 16px no-repeat,
+    linear-gradient(#ff2bd6, #ff2bd6) right 6px bottom 6px / 16px 2px no-repeat,
+    linear-gradient(#ff2bd6, #ff2bd6) right 6px bottom 6px / 2px 16px no-repeat,
+    linear-gradient(180deg, rgba(24, 19, 46, .95), rgba(12, 10, 24, .95));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .045), 0 12px 32px rgba(0, 0, 0, .5);
+}
+:root[data-appearance-preset='aurora-flow'] :is(.wpf-module-card:hover, .wpf-module-card.selected,
+  .running-module-card:hover) {
+  border-color: rgba(0, 240, 255, .6);
+  box-shadow: 0 0 0 1px rgba(0, 240, 255, .2), 0 0 28px rgba(0, 240, 255, .16), 0 12px 32px rgba(0, 0, 0, .5);
+}
+
+/* Devices: this phone's own card is the page's hero, so it gets the neon
+   edge; the tab strip inside a panel is a ruled header, not a floating box. */
+:root[data-appearance-preset='aurora-flow'] .devices-local {
+  border-color: rgba(0, 240, 255, .45);
+  background:
+    radial-gradient(ellipse 80% 90% at 0% 0%, rgba(0, 240, 255, .16), transparent 62%),
+    radial-gradient(ellipse 70% 80% at 100% 100%, rgba(255, 43, 214, .14), transparent 60%),
+    linear-gradient(135deg, #140f2a, #0a0817);
+  box-shadow: 0 0 34px rgba(0, 240, 255, .12), inset 0 0 50px rgba(0, 240, 255, .04);
+}
+:root[data-appearance-preset='aurora-flow'] .devices-local-mark {
+  border: 1px solid rgba(0, 240, 255, .6);
+  background: #0b0918;
+  color: #00f0ff;
+  box-shadow: 0 0 18px rgba(0, 240, 255, .3), inset 0 0 14px rgba(0, 240, 255, .15);
+}
+:root[data-appearance-preset='aurora-flow'] .devices-local h2 { font-family: var(--cp-display); letter-spacing: .03em; }
+:root[data-appearance-preset='aurora-flow'] .devices-paired .devices-tabs {
+  border: 0;
+  border-bottom: 1px solid rgba(167, 139, 250, .24);
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Home hero: a lit terminal banner with neon slashes across it. */
+:root[data-appearance-preset='aurora-flow'] .dashboard-welcome {
+  border: 1px solid rgba(255, 43, 214, .5);
+  border-radius: 14px;
+  background:
+    linear-gradient(112deg, transparent 0 63%, rgba(255, 43, 214, .16) 63% 63.7%, transparent 63.7% 66%,
+      rgba(0, 240, 255, .12) 66% 66.4%, transparent 66.4%),
+    radial-gradient(ellipse 70% 130% at 0% 0%, rgba(0, 240, 255, .15), transparent 60%),
+    radial-gradient(ellipse 60% 130% at 100% 100%, rgba(255, 43, 214, .2), transparent 60%),
+    linear-gradient(135deg, #150f2c, #0a0817);
+  box-shadow: 0 0 0 1px rgba(255, 43, 214, .12), 0 0 44px rgba(255, 43, 214, .15), inset 0 0 70px rgba(0, 240, 255, .05);
+}
+:root[data-appearance-preset='aurora-flow'] .dashboard-welcome h1 {
+  font-family: var(--cp-display);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  text-shadow: -2px 0 rgba(255, 43, 214, .75), 2px 0 rgba(0, 240, 255, .75), 0 0 20px rgba(0, 240, 255, .35);
+  animation: q-cyber-glitch 7s steps(1, end) 2s infinite;
+}
+@keyframes q-cyber-glitch {
+  0%, 91%, 100% {
+    transform: none;
+    text-shadow: -2px 0 rgba(255, 43, 214, .75), 2px 0 rgba(0, 240, 255, .75), 0 0 20px rgba(0, 240, 255, .35);
+  }
+  92% { transform: translateX(3px) skewX(-8deg); text-shadow: -6px 0 rgba(255, 43, 214, .95), 5px 0 rgba(0, 240, 255, .95); }
+  94% { transform: translateX(-3px); text-shadow: 5px 0 rgba(255, 43, 214, .95), -5px 0 rgba(0, 240, 255, .95); }
+  96% { transform: translateX(1px) skewX(4deg); text-shadow: -3px 0 rgba(255, 43, 214, .9), 3px 0 rgba(0, 240, 255, .9); }
+}
+:root[data-appearance-preset='aurora-flow'] .dashboard-eyebrow {
+  color: #ff2bd6;
+  font-family: var(--cp-display);
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(255, 43, 214, .6);
+}
+:root[data-appearance-preset='aurora-flow'] .dashboard-eyebrow::before {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 2px;
+  margin-right: 9px;
+  vertical-align: middle;
+  background: #ff2bd6;
+  box-shadow: 0 0 8px #ff2bd6;
+}
+:root[data-appearance-preset='aurora-flow'] .dashboard-host-state > div {
+  border-color: rgba(0, 240, 255, .22);
+  border-radius: 6px;
+  background: rgba(7, 6, 15, .62);
+  box-shadow: inset 0 0 18px rgba(0, 240, 255, .05);
+}
+:root[data-appearance-preset='aurora-flow'] :is(.dashboard-host-state dt, .dashboard-overview-grid span,
+  .wpf-home-summary label, .wpf-module-summary label) {
+  font-family: var(--cp-display);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+/* Headings read as display type; numbers glow in the colour they carry. */
+:root[data-appearance-preset='aurora-flow'] .q-page h1 {
+  font-family: var(--cp-display);
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  text-shadow: 0 0 18px rgba(0, 240, 255, .3);
+}
+:root[data-appearance-preset='aurora-flow'] :is(.dashboard-overview > h2, .dashboard-destinations > h2,
+  .dashboard-section h2, .settings-card-title, .settings-section-heading) {
+  font-family: var(--cp-display);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+:root[data-appearance-preset='aurora-flow'] :is(.dashboard-overview > h2, .dashboard-destinations > h2)::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin: 0 10px 2px 0;
+  background: #00f0ff;
+  box-shadow: 0 0 10px #00f0ff;
+}
+:root[data-appearance-preset='aurora-flow'] .wpf-module-card h2 { font-family: var(--cp-display); letter-spacing: .04em; }
+:root[data-appearance-preset='aurora-flow'] :is(.dashboard-overview-grid strong, .wpf-module-summary strong,
+  .wpf-home-summary strong) {
+  font-family: var(--cp-display);
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 14px currentColor;
+}
+/* The module summary tiles have a fixed 70px height in main.css. */
+:root[data-appearance-preset='aurora-flow'] .wpf-module-summary strong { margin-top: 5px; font-size: 24px; line-height: 1.1; }
+/* main.css pins `.info` to a dark navy with !important; on the void it vanishes. */
+:root[data-appearance-preset='aurora-flow'] .info { color: #00f0ff !important; }
+:root[data-appearance-preset='aurora-flow'] :is(.dashboard-overview-grid button, .dashboard-destinations a,
+  .wpf-module-summary article, .wpf-home-summary article) {
+  border-color: rgba(167, 139, 250, .2);
+  background: linear-gradient(160deg, rgba(26, 20, 50, .9), rgba(11, 9, 22, .9));
+}
+:root[data-appearance-preset='aurora-flow'] :is(.dashboard-overview-grid button:hover, .dashboard-destinations a:hover) {
+  border-color: rgba(0, 240, 255, .6);
+  background: linear-gradient(160deg, rgba(0, 240, 255, .1), rgba(11, 9, 22, .9));
+  box-shadow: 0 0 22px rgba(0, 240, 255, .16);
+}
+:root[data-appearance-preset='aurora-flow'] .wpf-status-strip {
+  border: 1px solid rgba(0, 240, 255, .2);
+  border-left: 3px solid #00f0ff;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(0, 240, 255, .1), rgba(0, 240, 255, .015));
+  color: #9ff8ff;
+  font-family: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+}
+:root[data-appearance-preset='aurora-flow'] .wpf-status-strip::after {
+  content: "";
+  display: inline-block;
+  width: .55em;
+  height: 1em;
+  margin-left: 6px;
+  vertical-align: -2px;
+  background: #00f0ff;
+  box-shadow: 0 0 8px #00f0ff;
+  animation: q-cyber-caret 1.1s steps(1, end) infinite;
+}
+@keyframes q-cyber-caret { 50% { opacity: 0; } }
+
+/* Controls ------------------------------------------------------------- */
+:root[data-appearance-preset='aurora-flow'] :is(.q-button, .dashboard-running-list article > button, .wpf-details-button) {
+  font-family: var(--cp-display);
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+/* main.css inks some primary buttons white at a higher specificity than the
+   token rule; white on this cyan is unreadable, so the fill and the ink are
+   pinned to the control tokens here. */
+:root[data-appearance-preset='aurora-flow'] .q-button.is-primary {
+  border-color: #7df9ff;
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+}
+:root[data-appearance-preset='aurora-flow'] .q-button.is-primary:hover:not(:disabled) { background: var(--primary-bg-hover); color: var(--primary-fg); }
+:root[data-appearance-preset='aurora-flow'] .q-button.is-primary:active:not(:disabled) { background: var(--primary-bg-active); color: var(--primary-fg); }
+:root[data-appearance-preset='aurora-flow'] .q-button.is-primary:hover:not(:disabled) {
+  border-color: #c4fcff;
+  animation: q-cyber-flicker .45s linear 1;
+}
+@keyframes q-cyber-flicker {
+  0%, 100% { opacity: 1; }
+  14% { opacity: .55; }
+  20% { opacity: 1; }
+  36% { opacity: .72; }
+  42% { opacity: 1; }
+}
+:root[data-appearance-preset='aurora-flow'] .q-button.is-danger {
+  border-color: #ff2bd6;
+  box-shadow: inset 0 0 14px rgba(255, 43, 214, .16), 0 0 12px rgba(255, 43, 214, .16);
+  text-shadow: 0 0 8px rgba(255, 43, 214, .55);
+}
+:root[data-appearance-preset='aurora-flow'] .q-button.is-danger:is(:hover, :active):not(:disabled) {
+  border-color: #ff6ae4;
+  color: #0a0614;
+  text-shadow: none;
+  box-shadow: 0 0 24px rgba(255, 43, 214, .55);
+}
+:root[data-appearance-preset='aurora-flow'] .q-button.is-ghost:hover:not(:disabled) {
+  text-shadow: 0 0 10px rgba(0, 240, 255, .75);
+}
+:root[data-appearance-preset='aurora-flow'] :is(.q-button, .q-icon-button):disabled {
+  border-color: rgba(255, 43, 214, .24);
+  text-shadow: none;
+}
+:root[data-appearance-preset='aurora-flow'] :is(.dashboard-running-list article > button, .wpf-details-button) {
+  border-color: rgba(170, 160, 230, .34);
+  background: rgba(19, 16, 38, .9);
+  color: #cbc6f4;
+}
+:root[data-appearance-preset='aurora-flow'] :is(.dashboard-running-list article > button, .wpf-details-button):hover {
+  border-color: #00f0ff;
+  color: #00f0ff;
+  box-shadow: 0 0 14px rgba(0, 240, 255, .24);
+}
+:root[data-appearance-preset='aurora-flow'] .q-badge {
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-family: var(--cp-display);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px color-mix(in srgb, currentColor 55%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, currentColor 20%, transparent);
+}
+:root[data-appearance-preset='aurora-flow'] .module-icon {
+  border: 1px solid rgba(0, 240, 255, .55);
+  background: linear-gradient(135deg, rgba(0, 240, 255, .18), rgba(255, 43, 214, .18)), #0b0918;
+  color: #00f0ff;
+  font-family: var(--cp-display);
+  text-shadow: 0 0 8px rgba(0, 240, 255, .8);
+  box-shadow: 0 0 14px rgba(0, 240, 255, .22), inset 0 0 10px rgba(0, 240, 255, .14);
+}
+:root[data-appearance-preset='aurora-flow'] :is(.theme-switch, .filters, [role='tablist']) {
+  border-color: rgba(167, 139, 250, .24);
+  background: rgba(10, 8, 22, .82);
+  box-shadow: none;
+}
+:root[data-appearance-preset='aurora-flow'] :is(.theme-switch button.active, .filters button.active,
+  [role='tab'][aria-selected='true'], [role='tab'][aria-current='page'], .settings-section-nav button[aria-current='page']) {
+  border-color: rgba(0, 240, 255, .5);
+  background: rgba(0, 240, 255, .12);
+  color: #00f0ff;
+  text-shadow: 0 0 8px rgba(0, 240, 255, .6);
+  box-shadow: 0 0 14px rgba(0, 240, 255, .2), inset 0 -2px 0 #00f0ff;
+}
+:root[data-appearance-preset='aurora-flow'] .q-switch[aria-checked='true'] > span {
+  box-shadow: 0 0 12px rgba(0, 240, 255, .6);
+}
+:root[data-appearance-preset='aurora-flow'] :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #00f0ff;
+  outline-offset: 2px;
+}
+
+/* Overlays: dim to the void rather than to a lavender wash, and edge in neon. */
+:root[data-appearance-preset='aurora-flow'] .q-modal-layer { background: rgba(4, 3, 10, .72); }
+:root[data-appearance-preset='aurora-flow'] :is(.q-modal-card, .q-command-palette) {
+  border-color: rgba(255, 43, 214, .5);
+  background: linear-gradient(180deg, #16112d, #0b0918);
+  box-shadow: 0 0 0 1px rgba(0, 240, 255, .12), 0 0 46px rgba(255, 43, 214, .2), 0 24px 60px rgba(0, 0, 0, .6);
+}
+:root[data-appearance-preset='aurora-flow'] .q-toast {
+  border: 1px solid #00f0ff;
+  border-left-width: 4px;
+  border-radius: 4px;
+  background: #0b0918;
+  color: #c4fcff;
+  box-shadow: 0 0 24px rgba(0, 240, 255, .28);
+}
+:root[data-appearance-preset='aurora-flow'] .q-toast.is-success { border-color: #39ff9e; color: #b8ffd9; box-shadow: 0 0 24px rgba(57, 255, 158, .25); }
+:root[data-appearance-preset='aurora-flow'] .q-toast.is-error { border-color: #ff2bd6; color: #ffc2f2; box-shadow: 0 0 24px rgba(255, 43, 214, .3); }
+
+/* Brutalist signature (preset id 'qing-nova') ------------------------------ */
+:root[data-appearance-preset='qing-nova'] ::selection { background: #ffe14d; color: #111111; }
+
+/* Sidebar: a black slab with a red stripe down its edge. The active item is a
+   yellow block thrown forward by a hard red shadow. */
+:root[data-appearance-preset='qing-nova'] .q-sidebar {
+  background: #111111;
+  border-right: 0;
+  /* Inset: an outer shadow would be painted over by the workspace column. */
+  box-shadow: inset -5px 0 0 #ff4d4d;
+}
+:root[data-appearance-preset='qing-nova'] .q-sidebar nav { background: transparent; border-radius: 0; }
+:root[data-appearance-preset='qing-nova'] .q-sidebar :is(nav a, nav button, .q-sidebar-quick-open) {
+  border: 2px solid transparent;
+  border-radius: 0;
+  color: #f4ecd2;
+}
+:root[data-appearance-preset='qing-nova'] .q-sidebar :is(nav a:hover, nav button:hover, .q-sidebar-quick-open:hover) {
+  border-color: #ffe14d;
+  background: transparent;
+  color: #ffe14d;
+}
+:root[data-appearance-preset='qing-nova'] .q-sidebar :is(nav a.router-link-active, nav button.active) {
+  border-color: #ffe14d;
+  background: #ffe14d;
+  color: #111111;
+  box-shadow: 4px 4px 0 #ff4d4d;
+}
+:root[data-appearance-preset='qing-nova'] .q-sidebar nav :is(a, button)::before { display: none; }
+:root[data-appearance-preset='qing-nova'] .q-brand > img { filter: drop-shadow(3px 3px 0 #ffe14d); }
+:root[data-appearance-preset='qing-nova'] .q-brand strong {
+  color: #f4ecd2;
+  font-family: var(--br-display);
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+/* Panels: white cards ruled in black and thrown forward by a hard shadow. */
+:root[data-appearance-preset='qing-nova'] :is(.q-card, .q-panel, .settings-card, .running-module-card,
+  .wpf-module-card, .wpf-module-details, .dashboard-section, .logs-table, .diagnostics-panel, .diagnostics-tools,
+  .settings-section-nav, .settings-host-placeholder, .settings-snapshot-notice, .devices-paired, .devices-nearby) {
+  border: 3px solid #111111;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 6px 6px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] :is(.wpf-module-card, .running-module-card) {
+  transition: transform 90ms ease, box-shadow 90ms ease, background-color 90ms ease;
+}
+:root[data-appearance-preset='qing-nova'] :is(.wpf-module-card:hover, .running-module-card:hover) {
+  transform: translate(-3px, -3px);
+  border-color: #111111;
+  background: #ffffff;
+  box-shadow: 9px 9px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] .wpf-module-card.selected {
+  transform: translate(-3px, -3px);
+  border-color: #111111;
+  background: #fff7d6;
+  box-shadow: 9px 9px 0 #ff4d4d;
+}
+
+/* Devices: this phone's own card is a yellow poster block like the home hero,
+   and the tab strip inside a panel becomes a ruled header. */
+:root[data-appearance-preset='qing-nova'] .devices-local {
+  border: 3px solid #111111;
+  background: #ffe14d;
+  box-shadow: 6px 6px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] .devices-local h2 { font-family: var(--br-display); font-weight: 900; }
+:root[data-appearance-preset='qing-nova'] .devices-local-mark {
+  border: 3px solid #111111;
+  border-radius: 0;
+  background: #ffffff;
+  color: #111111;
+  box-shadow: 4px 4px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] .devices-local-state {
+  border: 2px solid #111111;
+  border-radius: 0;
+  background: #ffffff;
+  color: #111111;
+  font-weight: 700;
+  box-shadow: 3px 3px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] .devices-paired .devices-tabs {
+  border: 0;
+  border-bottom: 3px solid #111111;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Home hero: a yellow poster with a hazard band along its foot. */
+:root[data-appearance-preset='qing-nova'] .dashboard-welcome {
+  padding-bottom: 38px;
+  border: 3px solid #111111;
+  border-radius: 18px;
+  background:
+    repeating-linear-gradient(-45deg, #111111 0 13px, #ffe14d 13px 26px) left bottom / 100% 16px no-repeat,
+    linear-gradient(#111111, #111111) left bottom 16px / 100% 3px no-repeat,
+    #ffe14d;
+  box-shadow: 8px 8px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] .dashboard-welcome h1 {
+  font-family: var(--br-display);
+  font-size: 40px;
+  font-weight: 900;
+  letter-spacing: -.02em;
+  text-shadow: 3px 3px 0 #ff4d4d;
+}
+:root[data-appearance-preset='qing-nova'] .dashboard-welcome-copy > p { color: #111111; font-weight: 600; }
+:root[data-appearance-preset='qing-nova'] .dashboard-eyebrow {
+  display: inline-block;
+  padding: 3px 8px;
+  background: #111111;
+  color: #ffe14d;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+:root[data-appearance-preset='qing-nova'] .dashboard-host-state > div {
+  border: 3px solid #111111;
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: 4px 4px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] :is(.dashboard-host-state dt, .dashboard-overview-grid span,
+  .wpf-home-summary label, .wpf-module-summary label) {
+  color: #111111;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+/* Headings get a highlighter stroke behind the words. It is an underline, so
+   it follows the text without changing any box. */
+:root[data-appearance-preset='qing-nova'] .q-page h1 {
+  font-family: var(--br-display);
+  font-weight: 900;
+  letter-spacing: -.02em;
+}
+:root[data-appearance-preset='qing-nova'] :is(.q-page h1, .dashboard-overview > h2, .dashboard-destinations > h2) {
+  text-decoration: underline;
+  text-decoration-color: #ffe14d;
+  text-decoration-thickness: .34em;
+  text-decoration-skip-ink: none;
+  text-underline-offset: -.18em;
+}
+:root[data-appearance-preset='qing-nova'] .dashboard-welcome h1 { text-decoration: none; }
+:root[data-appearance-preset='qing-nova'] :is(.dashboard-overview > h2, .dashboard-destinations > h2,
+  .dashboard-section h2, .settings-card-title, .settings-section-heading, .wpf-module-card h2) {
+  font-family: var(--br-display);
+  font-weight: 900;
+}
+:root[data-appearance-preset='qing-nova'] :is(.dashboard-overview-grid strong, .wpf-module-summary strong,
+  .wpf-home-summary strong) {
+  font-family: var(--br-display);
+  font-size: 34px;
+  font-weight: 900;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+/* The module summary tiles have a fixed 70px height in main.css, so their
+   numerals stay smaller than the dashboard's free-growing ones. */
+:root[data-appearance-preset='qing-nova'] .wpf-module-summary strong { margin-top: 4px; font-size: 26px; line-height: 1; }
+:root[data-appearance-preset='qing-nova'] :is(.dashboard-overview-grid button, .dashboard-destinations a,
+  .wpf-module-summary article, .wpf-home-summary article) {
+  border: 3px solid #111111;
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: 5px 5px 0 #111111;
+  transition: transform 90ms ease, box-shadow 90ms ease, background-color 90ms ease;
+}
+:root[data-appearance-preset='qing-nova'] :is(.dashboard-overview-grid button:hover, .dashboard-destinations a:hover) {
+  transform: translate(-2px, -2px);
+  border-color: #111111;
+  background: #ffe14d;
+  box-shadow: 7px 7px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] :is(.dashboard-overview-grid button:active, .dashboard-destinations a:active) {
+  transform: translate(4px, 4px);
+  box-shadow: 1px 1px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] .dashboard-destinations a { color: #111111; }
+:root[data-appearance-preset='qing-nova'] .wpf-status-strip {
+  border: 3px solid #111111;
+  border-radius: 0;
+  background: #111111;
+  color: #ffe14d;
+  font-weight: 800;
+  box-shadow: 4px 4px 0 #ff4d4d;
+}
+
+/* Controls ------------------------------------------------------------- */
+:root[data-appearance-preset='qing-nova'] :is(.q-button, .q-icon-button) {
+  border-width: 3px;
+  border-style: solid;
+  font-weight: 800;
+  transition: transform 80ms ease, box-shadow 80ms ease, background-color 80ms ease, color 80ms ease;
+}
+:root[data-appearance-preset='qing-nova'] .q-button:is(.is-primary, .is-danger),
+:root[data-appearance-preset='qing-nova'] .q-button:is(.is-primary, .is-danger):is(:hover, :active):not(:disabled) {
+  border-color: #111111;
+}
+/* main.css fills the home hero's primary button with --q-brand, which is ink
+   here; the action colour has to come from the control token instead. */
+:root[data-appearance-preset='qing-nova'] .q-button.is-primary { background: var(--primary-bg); color: var(--primary-fg); }
+:root[data-appearance-preset='qing-nova'] .q-button.is-primary:hover:not(:disabled) { background: var(--primary-bg-hover); }
+:root[data-appearance-preset='qing-nova'] .q-button.is-primary:active:not(:disabled) { background: var(--primary-bg-active); }
+/* Lift on hover, slam flat on press: the shadow is the depth, so the button
+   travels exactly as far as its shadow is long. */
+:root[data-appearance-preset='qing-nova'] :is(.q-button, .q-icon-button):hover:not(:disabled) {
+  transform: translate(-2px, -2px);
+}
+:root[data-appearance-preset='qing-nova'] :is(.q-button, .q-icon-button):active:not(:disabled) {
+  transform: translate(4px, 4px);
+  box-shadow: 0 0 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] .q-button.is-ghost {
+  border-color: transparent;
+  box-shadow: none;
+  text-decoration: underline 3px;
+  text-underline-offset: 4px;
+}
+:root[data-appearance-preset='qing-nova'] .q-button.is-ghost:is(:hover, :active):not(:disabled) {
+  transform: none;
+  border-color: transparent;
+  background: #ffe14d;
+  box-shadow: none;
+}
+:root[data-appearance-preset='qing-nova'] :is(.q-button, .q-icon-button):disabled {
+  border-color: #a8a290;
+  box-shadow: 4px 4px 0 #a8a290;
+  transform: none;
+}
+:root[data-appearance-preset='qing-nova'] :is(.dashboard-running-list article > button, .wpf-details-button) {
+  border: 2px solid #111111;
+  border-radius: 0;
+  background: #ffffff;
+  color: #111111;
+  font-weight: 800;
+  box-shadow: 3px 3px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] :is(.dashboard-running-list article > button, .wpf-details-button):hover {
+  border-color: #111111;
+  background: #ffe14d;
+  color: #111111;
+}
+:root[data-appearance-preset='qing-nova'] .dashboard-running-list article:hover { background: #fff7d6; }
+
+/* Badges are stickers: ruled, flat-coloured, inked black. */
+:root[data-appearance-preset='qing-nova'] .q-badge {
+  border: 2px solid #111111;
+  border-radius: 0;
+  background: #ffe14d;
+  color: #111111;
+  font-weight: 800;
+  box-shadow: 2px 2px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] .q-badge.is-success { background: #4ee08f; color: #111111; }
+:root[data-appearance-preset='qing-nova'] .q-badge.is-warning { background: #ffb547; color: #111111; }
+:root[data-appearance-preset='qing-nova'] .q-badge.is-danger { background: #ff4d4d; color: #111111; }
+:root[data-appearance-preset='qing-nova'] .q-badge.is-info { background: #9db4ff; color: #111111; }
+:root[data-appearance-preset='qing-nova'] .q-badge:is(.is-neutral, .is-secondary) { background: #ffffff; color: #111111; }
+:root[data-appearance-preset='qing-nova'] .module-icon {
+  border: 3px solid #111111;
+  border-radius: 0;
+  background: #ffe14d;
+  color: #111111;
+  font-family: var(--br-display);
+  font-weight: 900;
+  box-shadow: 3px 3px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] :is(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  border-width: 3px;
+  font-weight: 600;
+}
+:root[data-appearance-preset='qing-nova'] :is(input:not([type='checkbox']):not([type='radio']), select, textarea):focus-visible {
+  background: #fffbe6;
+}
+:root[data-appearance-preset='qing-nova'] :is(.theme-switch, .filters, [role='tablist']) {
+  border: 3px solid #111111;
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: 4px 4px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] :is(.theme-switch button, .filters button, [role='tab'], .settings-section-nav button) {
+  border-radius: 0;
+  color: #111111;
+  font-weight: 700;
+}
+:root[data-appearance-preset='qing-nova'] :is(.theme-switch button, .filters button, [role='tab'], .settings-section-nav button):hover:not(:disabled) {
+  background: #ffe14d;
+  color: #111111;
+}
+:root[data-appearance-preset='qing-nova'] :is(.theme-switch button.active, .filters button.active,
+  [role='tab'][aria-selected='true'], [role='tab'][aria-current='page'], .settings-section-nav button[aria-current='page']) {
+  border-color: #111111;
+  background: #111111;
+  color: #ffe14d;
+  box-shadow: none;
+}
+/* The settings nav pins its label to the text colour, which is the ink the
+   active block is filled with; the label has to follow the block instead. */
+:root[data-appearance-preset='qing-nova'] .settings-section-nav button[aria-current='page'] :is(strong, span, small) {
+  color: inherit;
+}
+:root[data-appearance-preset='qing-nova'] .settings-readonly {
+  border: 3px solid #111111;
+  border-radius: 0;
+  box-shadow: 4px 4px 0 #111111;
+  color: #111111;
+  font-weight: 700;
+}
+:root[data-appearance-preset='qing-nova'] .q-switch > span { box-shadow: inset 0 0 0 3px #111111; }
+:root[data-appearance-preset='qing-nova'] .q-switch:hover:not(:disabled) { transform: translate(-2px, -2px); }
+:root[data-appearance-preset='qing-nova'] .q-switch:active:not(:disabled) { transform: translate(4px, 4px); box-shadow: 0 0 0 #111111; }
+:root[data-appearance-preset='qing-nova'] :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid #3355ff;
+  outline-offset: 3px;
+}
+
+/* Overlays: a flat ink wash, then a ruled card with the heaviest shadow. */
+:root[data-appearance-preset='qing-nova'] .q-modal-layer { background: rgba(17, 17, 17, .5); }
+:root[data-appearance-preset='qing-nova'] :is(.q-modal-card, .q-command-palette) {
+  border: 3px solid #111111;
+  border-radius: 14px;
+  background: #fff7d6;
+  box-shadow: 10px 10px 0 #111111;
+}
+:root[data-appearance-preset='qing-nova'] .q-modal-actions { border-top: 3px solid #111111; }
+:root[data-appearance-preset='qing-nova'] .q-toast {
+  border: 3px solid #111111;
+  border-radius: 0;
+  background: #111111;
+  color: #ffe14d;
+  font-weight: 800;
+  box-shadow: 6px 6px 0 #ff4d4d;
+}
+:root[data-appearance-preset='qing-nova'] .q-toast.is-success { background: #4ee08f; color: #111111; box-shadow: 6px 6px 0 #111111; }
+:root[data-appearance-preset='qing-nova'] .q-toast.is-error { background: #ff4d4d; color: #111111; box-shadow: 6px 6px 0 #111111; }
+
+/* Motion is decoration in both layers, so it all stops for anyone who asked
+   the system for less of it. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-appearance-preset='aurora-flow'] .q-shell::before { display: none; animation: none; }
+  :root[data-appearance-preset='aurora-flow'] :is(.dashboard-welcome h1, .q-button.is-primary, .wpf-status-strip::after) { animation: none !important; }
+  :root[data-appearance-preset='qing-nova'] :is(.q-button, .q-icon-button, .q-switch, .wpf-module-card, .running-module-card,
+    .dashboard-overview-grid button, .dashboard-destinations a) { transition: none; }
+}
+
+/* Gilded Art Deco signature (preset id 'neon-circuit') ---------------------- */
+:root[data-appearance-preset='neon-circuit'] ::selection { background: #d4af37; color: #0c0c0f; }
+:root[data-appearance-preset='neon-circuit'] :is(input, textarea) { caret-color: #f3d98b; }
+
+/* Sidebar: an obsidian column edged by a double gold rule. */
+:root[data-appearance-preset='neon-circuit'] .q-sidebar {
+  background: linear-gradient(180deg, #131116, #08080a);
+  border-right: 0;
+  box-shadow: inset -1px 0 0 rgba(212, 175, 55, .55), inset -4px 0 0 #08080a, inset -5px 0 0 rgba(212, 175, 55, .22);
+}
+:root[data-appearance-preset='neon-circuit'] .q-sidebar nav { background: transparent; border-radius: 2px; }
+:root[data-appearance-preset='neon-circuit'] .q-sidebar :is(nav a, nav button, .q-sidebar-quick-open) {
+  border-radius: 2px;
+  color: #a99e86;
+}
+:root[data-appearance-preset='neon-circuit'] .q-sidebar :is(nav a:hover, nav button:hover, .q-sidebar-quick-open:hover) {
+  background: rgba(212, 175, 55, .07);
+  color: #f3d98b;
+}
+:root[data-appearance-preset='neon-circuit'] .q-sidebar :is(nav a.router-link-active, nav button.active) {
+  background: linear-gradient(90deg, rgba(212, 175, 55, .2), rgba(212, 175, 55, 0));
+  color: #f3d98b;
+  box-shadow: inset 0 0 0 1px rgba(212, 175, 55, .32);
+}
+:root[data-appearance-preset='neon-circuit'] .q-sidebar nav :is(a, button)::before {
+  width: 3px;
+  border-radius: 0;
+  background: var(--deco-foil);
+  box-shadow: 0 0 10px rgba(212, 175, 55, .55);
+}
+/* The brand mark is a raster; a sepia pass turns its blue to old gold. */
+:root[data-appearance-preset='neon-circuit'] .q-brand > img {
+  filter: sepia(1) saturate(2.4) hue-rotate(-10deg) brightness(.95) drop-shadow(0 0 8px rgba(212, 175, 55, .35));
+}
+:root[data-appearance-preset='neon-circuit'] .q-brand strong {
+  background: var(--deco-foil);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-family: var(--deco-display);
+  font-weight: 400;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+
+/* Panels: a double frame (the border, then an inset outline) with stepped
+   deco corners set inside it. */
+:root[data-appearance-preset='neon-circuit'] :is(.q-card, .q-panel, .settings-card, .running-module-card,
+  .wpf-module-card, .wpf-module-details, .dashboard-section, .logs-table, .diagnostics-panel, .diagnostics-tools,
+  .devices-paired, .devices-nearby) {
+  border-color: rgba(212, 175, 55, .3);
+  border-radius: 4px;
+  background:
+    var(--deco-art-corner-tl) left 9px top 9px / 22px 22px no-repeat,
+    var(--deco-art-corner-tr) right 9px top 9px / 22px 22px no-repeat,
+    var(--deco-art-corner-bl) left 9px bottom 9px / 22px 22px no-repeat,
+    var(--deco-art-corner-br) right 9px bottom 9px / 22px 22px no-repeat,
+    linear-gradient(180deg, #17151a, #0e0e11);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, .55);
+  outline: 1px solid rgba(212, 175, 55, .16);
+  outline-offset: -6px;
+}
+:root[data-appearance-preset='neon-circuit'] :is(.wpf-module-card:hover, .wpf-module-card.selected,
+  .running-module-card:hover) {
+  border-color: rgba(243, 217, 139, .65);
+  outline-color: rgba(243, 217, 139, .32);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, .55), 0 0 32px rgba(212, 175, 55, .1);
+}
+
+/* Home hero: a gilt sunburst rising behind the host details. */
+:root[data-appearance-preset='neon-circuit'] .dashboard-welcome {
+  border: 1px solid rgba(212, 175, 55, .55);
+  border-radius: 4px;
+  background:
+    var(--deco-art-sunburst) right -40px bottom -1px / 560px auto no-repeat,
+    radial-gradient(ellipse 55% 95% at 82% 100%, rgba(212, 175, 55, .13), transparent 70%),
+    linear-gradient(160deg, #1b1813, #0b0b0d 62%);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .6), 0 0 60px rgba(212, 175, 55, .07);
+  outline: 1px solid rgba(212, 175, 55, .26);
+  outline-offset: -7px;
+}
+:root[data-appearance-preset='neon-circuit'] .q-page h1 {
+  background: var(--deco-foil);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-family: var(--deco-display);
+  font-weight: 400;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+/* The hero title catches the light: a band of bright foil sweeps across it. */
+:root[data-appearance-preset='neon-circuit'] .dashboard-welcome h1 {
+  background: linear-gradient(100deg, #9c7a22 0%, #e9c96b 20%, #fff4c9 27%, #d4af37 35%, #9c7a22 50%,
+    #e9c96b 70%, #fff4c9 77%, #d4af37 85%, #9c7a22 100%) 0 0 / 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  font-size: 36px;
+  letter-spacing: .16em;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, .7));
+  animation: q-deco-shimmer 9s linear infinite;
+}
+@keyframes q-deco-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+:root[data-appearance-preset='neon-circuit'] .dashboard-eyebrow {
+  color: #d4af37;
+  font-family: var(--deco-display);
+  letter-spacing: .3em;
+  text-transform: uppercase;
+}
+:root[data-appearance-preset='neon-circuit'] .dashboard-eyebrow::before,
+:root[data-appearance-preset='neon-circuit'] .dashboard-eyebrow::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 10px 2px;
+  vertical-align: middle;
+  background: #d4af37;
+  transform: rotate(45deg);
+}
+:root[data-appearance-preset='neon-circuit'] .dashboard-eyebrow::before { margin-left: 0; }
+:root[data-appearance-preset='neon-circuit'] .dashboard-host-state > div {
+  border-color: rgba(212, 175, 55, .28);
+  border-radius: 2px;
+  background: rgba(9, 9, 11, .74);
+}
+:root[data-appearance-preset='neon-circuit'] :is(.dashboard-host-state dt, .dashboard-overview-grid span,
+  .wpf-home-summary label, .wpf-module-summary label) {
+  color: #bfa766;
+  font-family: var(--deco-display);
+  font-weight: 400;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+/* Section titles end in a gilt rule that fades out across the page. */
+:root[data-appearance-preset='neon-circuit'] :is(.dashboard-overview > h2, .dashboard-destinations > h2) {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+:root[data-appearance-preset='neon-circuit'] :is(.dashboard-overview > h2, .dashboard-destinations > h2)::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(212, 175, 55, .65), rgba(212, 175, 55, 0));
+}
+:root[data-appearance-preset='neon-circuit'] :is(.dashboard-overview > h2, .dashboard-destinations > h2,
+  .dashboard-section h2, .settings-card-title, .settings-section-heading) {
+  color: #e3c16f;
+  font-family: var(--deco-display);
+  font-weight: 400;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+}
+:root[data-appearance-preset='neon-circuit'] .wpf-module-card h2 { font-family: var(--deco-display); font-weight: 400; letter-spacing: .08em; }
+:root[data-appearance-preset='neon-circuit'] :is(.dashboard-overview-grid strong, .wpf-home-summary strong) {
+  font-family: var(--deco-figures);
+  font-size: 32px;
+  font-weight: 400;
+}
+:root[data-appearance-preset='neon-circuit'] .wpf-module-summary strong {
+  margin-top: 4px;
+  font-family: var(--deco-figures);
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.1;
+}
+/* main.css pins `.info` to a dark navy with !important; on obsidian it vanishes. */
+:root[data-appearance-preset='neon-circuit'] .info { color: #9cc0e6 !important; }
+:root[data-appearance-preset='neon-circuit'] :is(.dashboard-overview-grid button, .dashboard-destinations a,
+  .wpf-module-summary article, .wpf-home-summary article) {
+  border-color: rgba(212, 175, 55, .22);
+  border-radius: 2px;
+  background: linear-gradient(160deg, #18161b, #0e0e11);
+}
+:root[data-appearance-preset='neon-circuit'] :is(.dashboard-overview-grid button:hover, .dashboard-destinations a:hover) {
+  border-color: rgba(243, 217, 139, .6);
+  background: linear-gradient(160deg, rgba(212, 175, 55, .12), #0e0e11);
+  box-shadow: 0 0 26px rgba(212, 175, 55, .12);
+}
+:root[data-appearance-preset='neon-circuit'] .wpf-status-strip {
+  border: 0;
+  border-top: 1px solid rgba(212, 175, 55, .45);
+  border-bottom: 1px solid rgba(212, 175, 55, .45);
+  border-radius: 0;
+  background: linear-gradient(90deg, transparent, rgba(212, 175, 55, .1), transparent);
+  color: #e3c16f;
+  font-family: var(--deco-display);
+  letter-spacing: .16em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+/* Devices: this computer's own card gets a small sunburst of its own. */
+:root[data-appearance-preset='neon-circuit'] .devices-local {
+  border-color: rgba(212, 175, 55, .55);
+  border-radius: 4px;
+  background:
+    var(--deco-art-sunburst) right -80px bottom -1px / 420px auto no-repeat,
+    linear-gradient(160deg, #1b1813, #0b0b0d 62%);
+  outline: 1px solid rgba(212, 175, 55, .24);
+  outline-offset: -7px;
+}
+:root[data-appearance-preset='neon-circuit'] .devices-local h2 { font-family: var(--deco-display); font-weight: 400; letter-spacing: .1em; }
+:root[data-appearance-preset='neon-circuit'] .devices-local-mark {
+  border: 1px solid rgba(212, 175, 55, .6);
+  border-radius: 2px;
+  background: #0c0c0f;
+  color: #e3c16f;
+  outline: 1px solid rgba(212, 175, 55, .22);
+  outline-offset: -5px;
+}
+:root[data-appearance-preset='neon-circuit'] .devices-paired .devices-tabs {
+  border: 0;
+  border-bottom: 1px solid rgba(212, 175, 55, .3);
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Controls ------------------------------------------------------------- */
+:root[data-appearance-preset='neon-circuit'] :is(.q-button, .dashboard-running-list article > button, .wpf-details-button) {
+  font-family: var(--deco-display);
+  font-weight: 400;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+/* Gold foil, with a band of light that passes across on hover. The band is a
+   background layer, so the button never needs to clip its own children. */
+:root[data-appearance-preset='neon-circuit'] .q-button.is-primary {
+  border-color: rgba(255, 241, 184, .65);
+  background:
+    linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, .6) 50%, transparent 62%) 150% 0 / 250% 100% no-repeat,
+    var(--primary-bg);
+  color: var(--primary-fg);
+}
+:root[data-appearance-preset='neon-circuit'] .q-button.is-primary:hover:not(:disabled) {
+  background:
+    linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, .6) 50%, transparent 62%) 150% 0 / 250% 100% no-repeat,
+    var(--primary-bg-hover);
+  color: var(--primary-fg);
+  animation: q-deco-shine .9s ease-out 1;
+}
+:root[data-appearance-preset='neon-circuit'] .q-button.is-primary:active:not(:disabled) {
+  background: var(--primary-bg-active);
+  color: var(--primary-fg);
+}
+@keyframes q-deco-shine {
+  from { background-position: 150% 0, 0 0; }
+  to { background-position: -60% 0, 0 0; }
+}
+:root[data-appearance-preset='neon-circuit'] .q-button.is-danger,
+:root[data-appearance-preset='neon-circuit'] .q-button.is-danger:is(:hover, :active):not(:disabled) {
+  border-color: rgba(212, 175, 55, .5);
+}
+:root[data-appearance-preset='neon-circuit'] .q-button.is-ghost:hover:not(:disabled) {
+  text-decoration: underline 1px;
+  text-underline-offset: 5px;
+}
+:root[data-appearance-preset='neon-circuit'] :is(.q-button, .q-icon-button):disabled { border-color: rgba(212, 175, 55, .12); }
+:root[data-appearance-preset='neon-circuit'] :is(.dashboard-running-list article > button, .wpf-details-button) {
+  border-color: rgba(212, 175, 55, .42);
+  border-radius: 2px;
+  background: rgba(24, 22, 18, .92);
+  color: #f3ead6;
+}
+:root[data-appearance-preset='neon-circuit'] :is(.dashboard-running-list article > button, .wpf-details-button):hover {
+  border-color: #f3d98b;
+  color: #f3d98b;
+}
+:root[data-appearance-preset='neon-circuit'] .dashboard-running-list article:hover { background: rgba(212, 175, 55, .06); }
+:root[data-appearance-preset='neon-circuit'] .q-badge {
+  border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+  border-radius: 2px;
+  background: transparent;
+  font-family: var(--deco-display);
+  font-weight: 400;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+/* The host tiles are narrow; wide-tracked capitals would break mid-word. */
+:root[data-appearance-preset='neon-circuit'] .dashboard-host-state :is(dt, .q-badge) { letter-spacing: .05em; }
+:root[data-appearance-preset='neon-circuit'] .module-icon {
+  border: 1px solid rgba(212, 175, 55, .6);
+  border-radius: 2px;
+  background: #0c0c0f;
+  color: #e3c16f;
+  font-family: var(--deco-display);
+  font-weight: 400;
+  outline: 1px solid rgba(212, 175, 55, .22);
+  outline-offset: -5px;
+}
+:root[data-appearance-preset='neon-circuit'] :is(.theme-switch, .filters, [role='tablist']) {
+  border-color: rgba(212, 175, 55, .22);
+  border-radius: 2px;
+  background: rgba(9, 9, 11, .62);
+  box-shadow: none;
+}
+:root[data-appearance-preset='neon-circuit'] :is(.theme-switch button.active, .filters button.active,
+  [role='tab'][aria-selected='true'], [role='tab'][aria-current='page'], .settings-section-nav button[aria-current='page']) {
+  border-color: transparent;
+  background: rgba(212, 175, 55, .1);
+  color: #f3d98b;
+  box-shadow: inset 0 -2px 0 #d4af37;
+}
+:root[data-appearance-preset='neon-circuit'] .q-switch[aria-checked='true'] > span { box-shadow: 0 0 10px rgba(212, 175, 55, .4); }
+:root[data-appearance-preset='neon-circuit'] :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #f3d98b;
+  outline-offset: 3px;
+}
+
+/* Overlays: a near-black wash, then a framed card. */
+:root[data-appearance-preset='neon-circuit'] .q-modal-layer { background: rgba(5, 5, 6, .76); }
+:root[data-appearance-preset='neon-circuit'] :is(.q-modal-card, .q-command-palette) {
+  border-color: rgba(212, 175, 55, .55);
+  border-radius: 4px;
+  background: linear-gradient(180deg, #19171c, #0d0d10);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .7), 0 0 50px rgba(212, 175, 55, .08);
+  outline: 1px solid rgba(212, 175, 55, .2);
+  outline-offset: -6px;
+}
+:root[data-appearance-preset='neon-circuit'] .q-toast {
+  border: 1px solid rgba(212, 175, 55, .7);
+  border-radius: 2px;
+  background: #0d0d10;
+  color: #f3ead6;
+  outline: 1px solid rgba(212, 175, 55, .22);
+  outline-offset: -4px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .6);
+}
+:root[data-appearance-preset='neon-circuit'] .q-toast.is-success { border-color: #7fd1ae; }
+:root[data-appearance-preset='neon-circuit'] .q-toast.is-error { border-color: #e06a7c; }
+
+/* Shan Shui signature (preset id 'greenline') ------------------------------ */
+:root[data-appearance-preset='greenline'] ::selection { background: rgba(184, 50, 42, .2); color: #22211e; }
+:root[data-appearance-preset='greenline'] :is(input, textarea) { caret-color: #1d5b73; }
+
+/* Sidebar: a strip of darker paper, its edge drawn with a single brush stroke. */
+:root[data-appearance-preset='greenline'] .q-sidebar {
+  border-right: 0;
+  background:
+    var(--ss-art-brush-v) right top / 7px 100% no-repeat,
+    linear-gradient(180deg, #efe7d3, #e5dbc2);
+}
+:root[data-appearance-preset='greenline'] .q-sidebar nav { background: transparent; }
+:root[data-appearance-preset='greenline'] .q-sidebar :is(nav a, nav button, .q-sidebar-quick-open) {
+  border-radius: 6px;
+  color: #5a5446;
+}
+:root[data-appearance-preset='greenline'] .q-sidebar :is(nav a:hover, nav button:hover, .q-sidebar-quick-open:hover) {
+  background: rgba(29, 91, 115, .07);
+  color: #1d5b73;
+}
+/* The active place is an ink wash with a small cinnabar seal beside it. */
+:root[data-appearance-preset='greenline'] .q-sidebar :is(nav a.router-link-active, nav button.active) {
+  background: radial-gradient(ellipse 95% 130% at 0% 50%, rgba(29, 91, 115, .17), transparent 75%);
+  color: #1d5b73;
+  box-shadow: none;
+}
+:root[data-appearance-preset='greenline'] .q-sidebar nav :is(a, button)::before {
+  left: -9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  background: #b8322a;
+}
+:root[data-appearance-preset='greenline'] .q-brand strong {
+  color: #22211e;
+  font-family: var(--ss-brush);
+  font-weight: 400;
+  letter-spacing: .04em;
+}
+
+/* Panels: rice paper crowned with a tapered ink rule. */
+:root[data-appearance-preset='greenline'] :is(.q-card, .q-panel, .settings-card, .running-module-card,
+  .wpf-module-card, .wpf-module-details, .dashboard-section, .logs-table, .diagnostics-panel, .diagnostics-tools,
+  .devices-paired, .devices-nearby) {
+  border: 1px solid rgba(60, 52, 40, .16);
+  border-radius: 8px;
+  background:
+    var(--ss-art-ink-rule) center top / calc(100% - 28px) 5px no-repeat,
+    linear-gradient(180deg, rgba(253, 251, 245, .975), rgba(249, 244, 232, .975));
+  box-shadow: 0 1px 0 rgba(34, 33, 30, .04), 0 18px 34px -24px rgba(34, 33, 30, .45);
+}
+:root[data-appearance-preset='greenline'] :is(.wpf-module-card:hover, .wpf-module-card.selected,
+  .running-module-card:hover) {
+  border-color: rgba(29, 91, 115, .36);
+  box-shadow: 0 1px 0 rgba(34, 33, 30, .04), 0 24px 40px -22px rgba(29, 91, 115, .45);
+}
+
+/* Home hero: a handscroll. The landscape runs in from the right and fades
+   into blank paper under the words, and the title carries a seal. */
+:root[data-appearance-preset='greenline'] .dashboard-welcome {
+  border: 1px solid rgba(60, 52, 40, .2);
+  border-radius: 10px;
+  background:
+    linear-gradient(90deg, #fbf8f0 0%, rgba(251, 248, 240, .94) 34%, rgba(251, 248, 240, 0) 68%),
+    var(--ss-art-mountains) right bottom / 125% auto no-repeat,
+    var(--ss-art-grain) 0 0 / 240px 240px,
+    #f7f1e2;
+  box-shadow: 0 24px 48px -30px rgba(34, 33, 30, .5);
+}
+:root[data-appearance-preset='greenline'] .dashboard-welcome h1 {
+  font-family: var(--ss-brush);
+  font-size: 38px;
+  font-weight: 400;
+  letter-spacing: .02em;
+}
+:root[data-appearance-preset='greenline'] .dashboard-welcome h1::after {
+  content: "青" / "";
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-left: 16px;
+  vertical-align: 6px;
+  border-radius: 4px;
+  background: radial-gradient(circle at 30% 25%, rgba(255, 255, 255, .14), transparent 45%), #b8322a;
+  box-shadow: inset 0 0 0 2px #b8322a, inset 0 0 0 3px rgba(251, 243, 234, .8);
+  color: #fbf3ea;
+  font-family: "KaiTi", "楷体", "STKaiti", serif;
+  font-size: 22px;
+  line-height: 1;
+  transform: rotate(-6deg);
+  animation: q-seal-stamp .55s cubic-bezier(.2, 1.5, .45, 1) .35s both;
+}
+@keyframes q-seal-stamp {
+  from { opacity: 0; transform: rotate(-6deg) scale(1.9); }
+  to { opacity: 1; transform: rotate(-6deg) scale(1); }
+}
+:root[data-appearance-preset='greenline'] .dashboard-eyebrow {
+  color: #b8322a;
+  font-family: var(--ss-brush);
+  letter-spacing: .18em;
+}
+:root[data-appearance-preset='greenline'] .dashboard-host-state > div {
+  border-color: rgba(60, 52, 40, .18);
+  border-radius: 6px;
+  background: rgba(253, 251, 245, .84);
+}
+:root[data-appearance-preset='greenline'] :is(.dashboard-host-state dt, .dashboard-overview-grid span,
+  .wpf-home-summary label, .wpf-module-summary label) {
+  color: #6e675a;
+  font-family: var(--ss-brush);
+  letter-spacing: .04em;
+}
+
+/* Page titles sit on a cinnabar brush stroke drawn beneath the words. */
+:root[data-appearance-preset='greenline'] .q-page h1 {
+  padding-bottom: .22em;
+  background: var(--ss-art-brush) left bottom / 3.4em .4em no-repeat;
+  font-family: var(--ss-brush);
+  font-weight: 400;
+  letter-spacing: .04em;
+}
+:root[data-appearance-preset='greenline'] .dashboard-welcome h1 { padding-bottom: 0; background: none; }
+:root[data-appearance-preset='greenline'] :is(.dashboard-overview > h2, .dashboard-destinations > h2,
+  .dashboard-section h2, .settings-card-title, .settings-section-heading) {
+  font-family: var(--ss-brush);
+  font-weight: 400;
+  letter-spacing: .04em;
+}
+:root[data-appearance-preset='greenline'] :is(.dashboard-overview > h2, .dashboard-destinations > h2)::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin: 0 10px 3px 2px;
+  border-radius: 1px;
+  background: #b8322a;
+  transform: rotate(45deg);
+}
+:root[data-appearance-preset='greenline'] .wpf-module-card h2 { font-family: var(--ss-brush); font-weight: 400; }
+:root[data-appearance-preset='greenline'] :is(.dashboard-overview-grid strong, .wpf-home-summary strong) {
+  font-family: "Palatino Linotype", Georgia, serif;
+  font-size: 30px;
+  font-weight: 400;
+}
+:root[data-appearance-preset='greenline'] .wpf-module-summary strong {
+  margin-top: 4px;
+  font-family: "Palatino Linotype", Georgia, serif;
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.1;
+}
+:root[data-appearance-preset='greenline'] :is(.dashboard-overview-grid button, .dashboard-destinations a,
+  .wpf-module-summary article, .wpf-home-summary article) {
+  border-color: rgba(60, 52, 40, .16);
+  border-radius: 8px;
+  background: rgba(253, 251, 245, .88);
+}
+:root[data-appearance-preset='greenline'] :is(.dashboard-overview-grid button:hover, .dashboard-destinations a:hover) {
+  border-color: rgba(29, 91, 115, .4);
+  background: #fdfbf5;
+  box-shadow: 0 18px 30px -20px rgba(29, 91, 115, .5);
+}
+/* The status line reads like a colophon: a cinnabar margin rule, no box. */
+:root[data-appearance-preset='greenline'] .wpf-status-strip {
+  border: 0;
+  border-left: 3px solid #b8322a;
+  border-radius: 0;
+  background: linear-gradient(90deg, rgba(184, 50, 42, .07), transparent 65%);
+  color: #514c42;
+  font-family: var(--ss-brush);
+  letter-spacing: .04em;
+}
+
+/* Devices: this computer's card is a small landscape of its own. */
+:root[data-appearance-preset='greenline'] .devices-local {
+  border: 1px solid rgba(60, 52, 40, .2);
+  background:
+    linear-gradient(180deg, rgba(251, 248, 240, .9) 30%, rgba(251, 248, 240, 0) 75%),
+    var(--ss-art-mountains) right bottom / 260% auto no-repeat,
+    #f7f1e2;
+}
+:root[data-appearance-preset='greenline'] .devices-local h2 { font-family: var(--ss-brush); font-weight: 400; }
+:root[data-appearance-preset='greenline'] .devices-local-mark {
+  border-radius: 8px;
+  background: #1d5b73;
+  color: #f8f3e8;
+  box-shadow: inset 0 0 0 3px #1d5b73, inset 0 0 0 4px rgba(248, 243, 232, .5);
+}
+:root[data-appearance-preset='greenline'] .devices-paired .devices-tabs {
+  border: 0;
+  border-bottom: 1px solid rgba(60, 52, 40, .18);
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Controls ------------------------------------------------------------- */
+:root[data-appearance-preset='greenline'] :is(.q-button, .dashboard-running-list article > button, .wpf-details-button) {
+  font-family: var(--ss-brush);
+  font-weight: 400;
+  letter-spacing: .05em;
+}
+/* main.css inks some primary buttons white at a higher specificity; pinning
+   the fill and ink to the tokens keeps every primary button azurite. */
+:root[data-appearance-preset='greenline'] .q-button.is-primary { background: var(--primary-bg); color: var(--primary-fg); }
+:root[data-appearance-preset='greenline'] .q-button.is-primary:hover:not(:disabled) { background: var(--primary-bg-hover); color: var(--primary-fg); }
+:root[data-appearance-preset='greenline'] .q-button.is-primary:active:not(:disabled) { background: var(--primary-bg-active); color: var(--primary-fg); }
+/* A destructive action is a seal: cinnabar ground, a paper-white frame
+   inside it, the way a 白文 seal prints. */
+:root[data-appearance-preset='greenline'] .q-button.is-danger,
+:root[data-appearance-preset='greenline'] .q-button.is-danger:is(:hover, :active):not(:disabled) {
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 2px var(--danger-bg), inset 0 0 0 3px rgba(251, 243, 234, .78);
+}
+:root[data-appearance-preset='greenline'] .q-button.is-danger:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 2px #c9402f, inset 0 0 0 3px rgba(251, 243, 234, .78), 0 8px 18px -10px rgba(184, 50, 42, .8);
+}
+:root[data-appearance-preset='greenline'] .q-button.is-ghost:hover:not(:disabled) {
+  text-decoration: underline 1px;
+  text-underline-offset: 5px;
+}
+:root[data-appearance-preset='greenline'] :is(.q-button, .q-icon-button):disabled { border-color: rgba(60, 52, 40, .14); }
+:root[data-appearance-preset='greenline'] :is(.dashboard-running-list article > button, .wpf-details-button) {
+  border-color: rgba(34, 33, 30, .3);
+  border-radius: 4px;
+  background: rgba(252, 249, 241, .85);
+  color: #22211e;
+}
+:root[data-appearance-preset='greenline'] :is(.dashboard-running-list article > button, .wpf-details-button):hover {
+  border-color: rgba(29, 91, 115, .7);
+  color: #1d5b73;
+}
+:root[data-appearance-preset='greenline'] .dashboard-running-list article:hover { background: rgba(29, 91, 115, .05); }
+:root[data-appearance-preset='greenline'] .q-badge {
+  border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  font-family: var(--ss-brush);
+  font-weight: 400;
+  letter-spacing: .04em;
+}
+/* Module icons are seals: cinnabar, a fine paper frame, a brush letter. */
+:root[data-appearance-preset='greenline'] .module-icon {
+  border-radius: 5px;
+  background: radial-gradient(circle at 30% 25%, rgba(255, 255, 255, .14), transparent 45%), #b8322a;
+  color: #fbf3ea;
+  font-family: var(--ss-brush);
+  font-weight: 400;
+  box-shadow: inset 0 0 0 2px #b8322a, inset 0 0 0 3px rgba(251, 243, 234, .75);
+}
+:root[data-appearance-preset='greenline'] :is(.theme-switch, .filters, [role='tablist']) {
+  border-color: rgba(60, 52, 40, .18);
+  border-radius: 6px;
+  background: rgba(253, 251, 245, .7);
+  box-shadow: none;
+}
+:root[data-appearance-preset='greenline'] :is(.theme-switch button.active, .filters button.active,
+  [role='tab'][aria-selected='true'], [role='tab'][aria-current='page'], .settings-section-nav button[aria-current='page']) {
+  border-color: rgba(60, 52, 40, .2);
+  background: #fdfbf5;
+  color: #1d5b73;
+  box-shadow: inset 0 -2px 0 #b8322a;
+}
+:root[data-appearance-preset='greenline'] :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #2e7d64;
+  outline-offset: 2px;
+}
+
+/* Overlays: a light ink wash, then a sheet of paper. */
+:root[data-appearance-preset='greenline'] .q-modal-layer { background: rgba(34, 33, 30, .3); }
+:root[data-appearance-preset='greenline'] :is(.q-modal-card, .q-command-palette) {
+  border-color: rgba(60, 52, 40, .22);
+  border-radius: 10px;
+  background:
+    var(--ss-art-ink-rule) center top / calc(100% - 32px) 5px no-repeat,
+    var(--ss-art-grain) 0 0 / 240px 240px,
+    #fbf8f0;
+  box-shadow: 0 30px 60px -24px rgba(34, 33, 30, .5);
+}
+:root[data-appearance-preset='greenline'] .q-toast {
+  border: 0;
+  border-left: 4px solid #b8322a;
+  border-radius: 4px;
+  background: #22211e;
+  color: #f3ecdc;
+  box-shadow: 0 16px 34px -16px rgba(34, 33, 30, .7);
+}
+:root[data-appearance-preset='greenline'] .q-toast.is-success { border-left-color: #4fa889; }
+:root[data-appearance-preset='greenline'] .q-toast.is-error { border-left-color: #e0574b; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-appearance-preset='neon-circuit'] :is(.dashboard-welcome h1, .q-button.is-primary) { animation: none !important; }
+  :root[data-appearance-preset='greenline'] .dashboard-welcome h1::after { animation: none; }
 }

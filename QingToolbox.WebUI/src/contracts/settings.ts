@@ -7,6 +7,13 @@ export type EffectiveLanguageCode = 'zh-CN'|'en-US'
 export type FontSource = 'default'|'system'|'imported'
 export type InfoPopupCorner = 'rightTop'|'rightBottom'|'leftTop'|'leftBottom'
 export const DEFAULT_FONT_ID = 'Default'
+export interface UpdateCheckPreferences {
+  checkHostUpdatesOnStartup?: boolean
+  checkModuleUpdatesOnStartup?: boolean
+  hostUpdateIntervalMinutes?: number
+  moduleUpdateIntervalMinutes?: number
+}
+export const validUpdateInterval = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && (value === 0 || value >= 5 && value <= 10080)
 
 export interface SettingsFont {
   id: string
@@ -32,6 +39,10 @@ export interface SettingsLanguage {
 }
 
 export interface SettingsSnapshot {
+  checkHostUpdatesOnStartup?: boolean
+  checkModuleUpdatesOnStartup?: boolean
+  hostUpdateIntervalMinutes?: number
+  moduleUpdateIntervalMinutes?: number
   generatedAt: string
   /** Host-selected workspace appearance. Older hosts may omit this field. */
   appearancePresetId?: string
@@ -140,6 +151,10 @@ export const isSettingsFontImportResponse = (value: unknown): value is SettingsF
 
 export const isSettingsSnapshot = (value: unknown): value is SettingsSnapshot =>
   isRecord(value) && date(value.generatedAt) &&
+  (value.checkHostUpdatesOnStartup === undefined || typeof value.checkHostUpdatesOnStartup === 'boolean') &&
+  (value.checkModuleUpdatesOnStartup === undefined || typeof value.checkModuleUpdatesOnStartup === 'boolean') &&
+  (value.hostUpdateIntervalMinutes === undefined || validUpdateInterval(value.hostUpdateIntervalMinutes)) &&
+  (value.moduleUpdateIntervalMinutes === undefined || validUpdateInterval(value.moduleUpdateIntervalMinutes)) &&
   (!('appearancePresetId' in value) || typeof value.appearancePresetId === 'string') &&
   (!('themeMode' in value) || typeof value.themeMode === 'string') &&
   (!('font' in value) || value.font === null || isFont(value.font)) &&

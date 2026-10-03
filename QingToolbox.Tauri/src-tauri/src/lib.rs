@@ -11,7 +11,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{
     menu::MenuBuilder, tray::TrayIconBuilder, webview::WebviewWindow, DragDropEvent, Emitter,
@@ -20,6 +20,7 @@ use tauri::{
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 mod device_pairing;
+mod device_transfer;
 mod devices;
 mod fonts;
 mod host_update;
@@ -28,6 +29,8 @@ mod launcher_keyboard;
 mod launcher_outside_click;
 mod launcher_overlay;
 mod module_api;
+mod module_repository;
+mod module_updates;
 mod modules;
 mod paths;
 pub mod protocol;
@@ -57,7 +60,6 @@ const MODULE_STATE_CHANGED_EVENT: &str = "qmod:module-state-changed";
 const DEFAULT_LAUNCHER_HOTKEY: &str = "Ctrl+Alt+L";
 const FLOATING_BADGE_WINDOW_LABEL: &str = "floating-badge";
 const INFO_POPUP_WINDOW_LABEL: &str = "info-popup";
-const DEVICE_TRANSFER_MODULE_ID: &str = "qing.qingtransfer";
 
 #[derive(Default)]
 struct InfoPopupQueue {
@@ -88,10 +90,15 @@ pub struct HostState {
     roots: Vec<ModuleRoot>,
     module_index: Mutex<std::collections::BTreeMap<String, modules::ModuleRecord>>,
     scan_gate: Mutex<()>,
+    module_install_gate: Mutex<()>,
     runtime: Mutex<ModuleRuntimeManager>,
     module_activity: Arc<Mutex<std::collections::BTreeSet<String>>>,
     host_update: Mutex<host_update::HostUpdateState>,
     host_update_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    module_repository: Mutex<module_repository::RepositoryState>,
+    module_updates: Mutex<module_updates::UpdateState>,
+    host_update_check_gate: Mutex<()>,
+    update_workers_stopping: AtomicBool,
     update_handoff_token: Option<String>,
     update_shutdown_requested: AtomicBool,
     settings: Mutex<SettingsStore>,
@@ -107,6 +114,7 @@ pub struct HostState {
     launcher_keyboard: Mutex<launcher_keyboard::Recording>,
     launcher_outside_click: Mutex<Option<launcher_outside_click::Observer>>,
     devices: devices::DeviceManager,
+    device_transfer: Arc<device_transfer::TransferEngine>,
 }
 
 impl HostState {
@@ -114,6 +122,20 @@ impl HostState {
         let runtime = ModuleRuntimeManager::new();
         let module_activity = Arc::clone(&runtime.active_modules);
         let generated_at = now_rfc3339();
+        let profile = paths::user_data_root();
+        let devices = devices::DeviceManager::new(profile.as_deref());
+        let (name, identity) = devices.transfer_identity();
+        let transfer_directory = profile
+            .unwrap_or_else(|| std::env::temp_dir().join("qingtoolbox-unavailable-profile"))
+            .join("Devices")
+            .join("Transfer");
+        let legacy_directory = paths::module_data_directory("qing.qingtransfer").ok();
+        let device_transfer = Arc::new(device_transfer::TransferEngine::new(
+            transfer_directory,
+            legacy_directory.as_deref(),
+            name,
+            identity,
+        ));
         let host_update = if host_update_network_enabled() {
             host_update::HostUpdateState::new(env!("CARGO_PKG_VERSION"), generated_at)
         } else {
@@ -123,10 +145,15 @@ impl HostState {
             roots: resolve_module_roots(),
             module_index: Mutex::new(std::collections::BTreeMap::new()),
             scan_gate: Mutex::new(()),
+            module_install_gate: Mutex::new(()),
             runtime: Mutex::new(runtime),
             module_activity,
             host_update: Mutex::new(host_update),
             host_update_cancel: Mutex::new(None),
+            module_repository: Mutex::new(module_repository::RepositoryState::default()),
+            module_updates: Mutex::new(module_updates::UpdateState::default()),
+            host_update_check_gate: Mutex::new(()),
+            update_workers_stopping: AtomicBool::new(false),
             update_handoff_token: host_update::new_update_handoff_token(),
             update_shutdown_requested: AtomicBool::new(false),
             settings: Mutex::new(SettingsStore::new()),
@@ -141,7 +168,8 @@ impl HostState {
             launcher_drop_protection: Mutex::new(launcher_overlay::DropProtection::default()),
             launcher_keyboard: Mutex::new(launcher_keyboard::Recording::default()),
             launcher_outside_click: Mutex::new(None),
-            devices: devices::DeviceManager::new(paths::user_data_root().as_deref()),
+            devices,
+            device_transfer,
         }
     }
 }
@@ -163,6 +191,7 @@ struct HostInfo {
     api_version: u32,
     environment_kind: &'static str,
     environment_display_name: &'static str,
+    background_update_checks: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -247,6 +276,7 @@ fn civil_date_from_days(days_since_unix_epoch: i64) -> (i64, i64, i64) {
 fn get_host_info() -> HostInfo {
     HostInfo {
         product_name: "QingToolbox",
+        background_update_checks: true,
         version: env!("CARGO_PKG_VERSION"),
         device_name: std::env::var("COMPUTERNAME").ok().and_then(|value| {
             let name = value.trim();
@@ -329,11 +359,16 @@ fn get_host_update_snapshot(
 }
 
 #[tauri::command]
-async fn check_host_update(
-    state: State<'_, HostState>,
-    window: WebviewWindow,
-) -> Result<HostUpdateSnapshot, CommandError> {
+async fn check_host_update(window: WebviewWindow) -> Result<HostUpdateSnapshot, CommandError> {
     ensure_main_window(&window)?;
+    let app = window.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || check_host_update_blocking(&app))
+        .await
+        .map_err(|_| repository_error("StateUnavailable"))?
+}
+
+fn check_host_update_blocking(app: &tauri::AppHandle) -> Result<HostUpdateSnapshot, CommandError> {
+    let state = app.state::<HostState>();
     if !host_update_network_enabled() {
         return state
             .host_update
@@ -344,19 +379,23 @@ async fn check_host_update(
             })
             .map(|snapshot| snapshot.snapshot());
     }
+    let _check_guard = state
+        .host_update_check_gate
+        .try_lock()
+        .map_err(|_| repository_error("Busy"))?;
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let started_at = now_rfc3339();
-    if let Ok(active) = state.host_update_cancel.lock() {
-        if let Some(cancel) = active.as_ref() {
-            cancel.store(true, Ordering::Relaxed);
-        }
-    }
     let generation = {
         let mut update = state.host_update.lock().map_err(|_| CommandError {
             code: "stateUnavailable",
             message: "宿主更新状态不可用。".to_string(),
         })?;
-        if update.is_installing() {
+        if update.is_installing()
+            || matches!(
+                update.snapshot().download_state.as_str(),
+                "Downloading" | "Verifying"
+            )
+        {
             return Err(CommandError {
                 code: "updateBusy",
                 message: "宿主更新安装正在进行。".to_string(),
@@ -364,30 +403,38 @@ async fn check_host_update(
         }
         update.begin_check(started_at.clone())
     };
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        host_update::check_official_release(&current_version, started_at)
-    })
-    .await;
+    let _ = app.emit_to(
+        EventTarget::webview_window("main"),
+        "qmod:host-update-changed",
+        (),
+    );
+    let result = host_update::check_official_release(&current_version, started_at);
     let checked_at = result
         .as_ref()
         .ok()
-        .and_then(|value| value.as_ref().ok())
         .map(|value| value.checked_at.clone())
         .unwrap_or_else(now_rfc3339);
     let check_result = match result {
-        Ok(Ok(value)) => Ok(value.release),
-        Ok(Err(_)) | Err(_) => Err("official update check failed".to_string()),
+        Ok(value) => Ok(value.release),
+        Err(_) => Err("official update check failed".to_string()),
     };
     let mut snapshot = state.host_update.lock().map_err(|_| CommandError {
         code: "stateUnavailable",
         message: "宿主更新状态不可用。".to_string(),
     })?;
-    Ok(snapshot.finish_check(
+    let result = snapshot.finish_check(
         generation,
         env!("CARGO_PKG_VERSION"),
         checked_at,
         check_result,
-    ))
+    );
+    drop(snapshot);
+    let _ = app.emit_to(
+        EventTarget::webview_window("main"),
+        "qmod:host-update-changed",
+        (),
+    );
+    Ok(result)
 }
 
 /// Start a backend-owned installer download. The command returns immediately;
@@ -1086,19 +1133,36 @@ fn import_module(
     allow_incompatible_api: Option<bool>,
 ) -> Result<ModuleImportResult, CommandError> {
     ensure_main_window(&window)?;
-    let allow = allow_incompatible_api.unwrap_or(false);
+    let _install_guard = state
+        .module_install_gate
+        .try_lock()
+        .map_err(|_| repository_error("Busy"))?;
+    import_module_package(
+        &state,
+        &source_path,
+        expected_sha256.as_deref(),
+        allow_incompatible_api.unwrap_or(false),
+    )
+}
+
+fn import_module_package(
+    state: &HostState,
+    source_path: &str,
+    expected_sha256: Option<&str>,
+    allow: bool,
+) -> Result<ModuleImportResult, CommandError> {
     if allow && expected_sha256.is_none() {
         return Err(CommandError {
             code: "packageConfirmationMissing",
             message: "请重新选择并确认模块包。".to_string(),
         });
     }
-    let result = import_qmod_confirmed(&source_path, expected_sha256.as_deref(), allow).map_err(
-        |error| CommandError {
+    let result = import_qmod_confirmed(source_path, expected_sha256, allow).map_err(|error| {
+        CommandError {
             code: error.code,
             message: error.message,
-        },
-    )?;
+        }
+    })?;
     // Refresh the in-memory discovery index so the newly imported module is
     // immediately visible. A successful package publication remains valid even
     // if this best-effort UI index refresh cannot acquire its mutex.
@@ -1179,6 +1243,10 @@ fn remove_module(
     module_id: String,
 ) -> Result<(), CommandError> {
     ensure_main_window(&window)?;
+    let _install_guard = state
+        .module_install_gate
+        .try_lock()
+        .map_err(|_| repository_error("Busy"))?;
     if !valid_module_id(&module_id) {
         return Err(CommandError {
             code: "moduleIdInvalid",
@@ -1245,7 +1313,28 @@ fn update_module(
     allow_incompatible_api: Option<bool>,
 ) -> Result<ModuleImportResult, CommandError> {
     ensure_main_window(&window)?;
-    let allow = allow_incompatible_api.unwrap_or(false);
+    let _install_guard = state
+        .module_install_gate
+        .try_lock()
+        .map_err(|_| repository_error("Busy"))?;
+    update_module_package(
+        &app,
+        &state,
+        &module_id,
+        &source_path,
+        expected_sha256.as_deref(),
+        allow_incompatible_api.unwrap_or(false),
+    )
+}
+
+fn update_module_package(
+    app: &tauri::AppHandle,
+    state: &HostState,
+    module_id: &str,
+    source_path: &str,
+    expected_sha256: Option<&str>,
+    allow: bool,
+) -> Result<ModuleImportResult, CommandError> {
     if allow && expected_sha256.is_none() {
         return Err(CommandError {
             code: "packageConfirmationMissing",
@@ -1266,7 +1355,7 @@ fn update_module(
             code: "stateUnavailable",
             message: "模块索引状态不可用。".to_string(),
         })?
-        .get(&module_id)
+        .get(module_id)
         .filter(|record| record.source == ModuleSource::User)
         .cloned();
 
@@ -1294,7 +1383,7 @@ fn update_module(
         let label = module_window_label(&module_id);
         if let Some(module_window) = app.get_webview_window(&label) {
             if module_id == launcher_overlay::MODULE_ID {
-                let _ = launcher_keyboard::stop(window.app_handle());
+                let _ = launcher_keyboard::stop(app);
                 let _ = module_window.destroy();
             } else {
                 let _ = module_window.close();
@@ -1304,32 +1393,33 @@ fn update_module(
             let _ = runtime.stop(&module_id);
         }
         let _ = clear_module_hotkey_binding(&app, &state, &module_id);
+        if module_id == "qing.screenpin" {
+            close_screenpin_windows(app, state);
+        }
     }
 
-    let result =
-        match update_qmod_confirmed(&source_path, &module_id, expected_sha256.as_deref(), allow) {
-            Ok(result) => result,
-            Err(error) => {
-                // An invalid package should not leave a previously running user
-                // module stopped. The old record is still valid whenever the
-                // atomic replacement has not committed; a best-effort restart is
-                // harmless after a committed replacement as well because the
-                // directory identity remains the same.
-                if was_running {
-                    if let (Some(record), Ok(mut runtime)) = (record.as_ref(), state.runtime.lock())
-                    {
-                        let _ = runtime.start(&module_id, record);
-                        if previous_state == ModuleRuntimeState::Running {
-                            let _ = runtime.set_active(&module_id, true);
-                        }
+    let result = match update_qmod_confirmed(source_path, module_id, expected_sha256, allow) {
+        Ok(result) => result,
+        Err(error) => {
+            // An invalid package should not leave a previously running user
+            // module stopped. The old record is still valid whenever the
+            // atomic replacement has not committed; a best-effort restart is
+            // harmless after a committed replacement as well because the
+            // directory identity remains the same.
+            if was_running {
+                if let (Some(record), Ok(mut runtime)) = (record.as_ref(), state.runtime.lock()) {
+                    let _ = runtime.start(&module_id, record);
+                    if previous_state == ModuleRuntimeState::Running {
+                        let _ = runtime.set_active(&module_id, true);
                     }
                 }
-                return Err(CommandError {
-                    code: error.code,
-                    message: error.message,
-                });
             }
-        };
+            return Err(CommandError {
+                code: error.code,
+                message: error.message,
+            });
+        }
+    };
     let discovery = discover_modules(&state.roots);
     if let Ok(mut index) = state.module_index.lock() {
         *index = discovery.records;
@@ -1397,6 +1487,520 @@ fn ensure_main_window(window: &WebviewWindow) -> Result<(), CommandError> {
             code: "mainWindowUnauthorized",
             message: "该操作只能由工具箱主窗口发起。".to_string(),
         })
+    }
+}
+
+fn repository_error(code: &'static str) -> CommandError {
+    CommandError {
+        code,
+        message: code.to_string(),
+    }
+}
+
+fn install_official_package(
+    app: &tauri::AppHandle,
+    state: &HostState,
+    candidate: &module_repository::Candidate,
+    package: &std::path::Path,
+) -> Result<module_repository::Installation, &'static str> {
+    use module_repository::Installation;
+    // Local import/update/removal share this gate. Native commands use
+    // try_lock so the main thread never waits for a worker closing WebViews.
+    let _install_guard = state
+        .module_install_gate
+        .lock()
+        .map_err(|_| "InstallFailed")?;
+    let root = user_modules_root().ok_or("InstallFailed")?;
+    let action = module_repository::installation(candidate, package, &root)?;
+    let discovery = discover_modules(&state.roots);
+    if let Some(record) = discovery.records.get(&candidate.item.id) {
+        if record.source != ModuleSource::User {
+            // Development staged modules are immutable here. Do not shadow a
+            // newer development build with an older published package.
+            let installed =
+                host_update::parse_version(&record.version).map_err(|_| "InstallFailed")?;
+            let incoming = candidate
+                .item
+                .version
+                .as_deref()
+                .and_then(|v| host_update::parse_version(v).ok())
+                .ok_or("InvalidCatalog")?;
+            return if installed >= incoming {
+                Ok(Installation::AlreadyInstalled)
+            } else {
+                Err("InstallFailed")
+            };
+        }
+    }
+    let digest = candidate.sha256()?;
+    let source = package.to_string_lossy();
+    let result = match action {
+        Installation::Import => import_module_package(state, &source, Some(digest), false),
+        Installation::Update => {
+            update_module_package(app, state, &candidate.item.id, &source, Some(digest), false)
+        }
+        Installation::AlreadyInstalled => return Ok(action),
+    };
+    if let Err(error) = result {
+        record_log(
+            state,
+            "Error",
+            "Modules",
+            format!(
+                "Official module installation failed ({}): {}",
+                error.code, error.message
+            ),
+        );
+        return Err("InstallFailed");
+    }
+    let _ = app.emit_to(
+        EventTarget::webview_window("main"),
+        MODULE_STATE_CHANGED_EVENT,
+        serde_json::json!({ "reason": "repositoryInstalled", "moduleId": candidate.item.id }),
+    );
+    Ok(action)
+}
+
+#[tauri::command]
+async fn get_official_modules(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+) -> Result<Vec<module_repository::CatalogItem>, CommandError> {
+    ensure_main_window(&window)?;
+    state
+        .module_repository
+        .lock()
+        .map_err(|_| repository_error("StateUnavailable"))?
+        .begin_catalog()
+        .map_err(repository_error)?;
+    let fetched = tauri::async_runtime::spawn_blocking(module_repository::fetch_catalog)
+        .await
+        .unwrap_or(Err("NetworkUnavailable"));
+    state
+        .module_repository
+        .lock()
+        .map_err(|_| repository_error("StateUnavailable"))?
+        .finish_catalog(fetched)
+        .map_err(repository_error)
+}
+
+#[tauri::command]
+fn get_module_repository_download(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+) -> Result<module_repository::DownloadSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    Ok(state
+        .module_repository
+        .lock()
+        .map_err(|_| repository_error("StateUnavailable"))?
+        .snapshot
+        .clone())
+}
+
+#[tauri::command]
+fn download_official_module(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    module_id: String,
+) -> Result<module_repository::DownloadSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    start_repository_download(window.app_handle(), &state, &module_id, None)
+}
+
+fn start_repository_download(
+    app: &tauri::AppHandle,
+    state: &HostState,
+    module_id: &str,
+    update_candidate: Option<module_repository::Candidate>,
+) -> Result<module_repository::DownloadSnapshot, CommandError> {
+    let downloads = app
+        .path()
+        .download_dir()
+        .map_err(|_| repository_error("StorageUnavailable"))?;
+    let locale = state
+        .settings
+        .lock()
+        .map_err(|_| repository_error("StateUnavailable"))?
+        .snapshot()
+        .language;
+    // Match the native information popup's language convention for System.
+    let locale = if locale == "en-US" { "en-US" } else { "zh-CN" }.to_string();
+    let (job, candidate, snapshot) = {
+        let mut repository = state
+            .module_repository
+            .lock()
+            .map_err(|_| repository_error("StateUnavailable"))?;
+        let (job, candidate) = match update_candidate {
+            Some(candidate) => repository.begin_candidate_download(candidate, &locale),
+            None => repository.begin_download(module_id, &locale),
+        }
+        .map_err(repository_error)?;
+        (job, candidate, repository.snapshot.clone())
+    };
+    emit_repository_state(app, "repositoryDownloadStarted", module_id);
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<HostState>();
+        let downloaded =
+            module_repository::download(&candidate, &downloads, &mut |received, verifying| {
+                if let Ok(mut repository) = state.module_repository.lock() {
+                    repository.progress(job, received, verifying);
+                }
+            });
+        let mut installation = None;
+        let outcome = downloaded.and_then(|path| {
+            let accepted = state
+                .module_repository
+                .lock()
+                .map(|mut repository| repository.begin_installation(job, &path))
+                .unwrap_or(false);
+            if !accepted {
+                return Err("InstallFailed");
+            }
+            emit_repository_state(&app, "repositoryInstalling", &candidate.item.id);
+            installation = Some(install_official_package(&app, &state, &candidate, &path)?);
+            Ok(path)
+        });
+        let completed = if let Ok(mut repository) = state.module_repository.lock() {
+            repository.finish(job, outcome);
+            if repository.snapshot.job_id == job
+                && matches!(
+                    repository.snapshot.status.as_str(),
+                    "Completed" | "InstallFailed"
+                )
+            {
+                Some(repository.snapshot.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        emit_repository_state(&app, "repositoryFinished", &candidate.item.id);
+        if let Some(completed) = completed {
+            let english = locale == "en-US";
+            let failed = completed.status == "InstallFailed";
+            let verb = match (english, installation) {
+                (true, Some(module_repository::Installation::Import)) => "installed",
+                (true, Some(module_repository::Installation::Update)) => "updated",
+                (true, Some(module_repository::Installation::AlreadyInstalled)) => {
+                    "already installed"
+                }
+                (true, None) => "installation failed",
+                (false, Some(module_repository::Installation::Import)) => "安装完成",
+                (false, Some(module_repository::Installation::Update)) => "更新完成",
+                (false, Some(module_repository::Installation::AlreadyInstalled)) => {
+                    "已安装相同或更新版本"
+                }
+                (false, None) => "安装未完成",
+            };
+            let item = device_pairing::ForwardedNotification {
+                id: format!("module-download-{job}"),
+                device_name: "QingToolbox".to_string(),
+                app_name: if english { "Modules" } else { "模块" }.to_string(),
+                title: if english {
+                    format!("{} {verb}", completed.name)
+                } else {
+                    format!("“{}”{verb}", completed.name)
+                },
+                body: if failed && english {
+                    format!(
+                        "The downloaded package was kept. You can import it from:\n{}",
+                        completed.saved_path
+                    )
+                } else if failed {
+                    format!(
+                        "已保留下载的模块包，可从本地导入：\n{}",
+                        completed.saved_path
+                    )
+                } else if english {
+                    "Available in Modules. Load and enable it when needed.".to_string()
+                } else {
+                    "可在模块列表中按需加载和启用。".to_string()
+                },
+            };
+            let show = state
+                .info_popup
+                .lock()
+                .map(|mut queue| queue.enqueue(item))
+                .unwrap_or(false);
+            if show {
+                present_info_popup(app.clone());
+            }
+        }
+    });
+    Ok(snapshot)
+}
+
+fn emit_repository_state(app: &tauri::AppHandle, reason: &str, module_id: &str) {
+    let _ = app.emit_to(
+        EventTarget::webview_window("main"),
+        "qmod:module-repository-changed",
+        (),
+    );
+    let _ = app.emit_to(
+        EventTarget::webview_window("main"),
+        MODULE_STATE_CHANGED_EVENT,
+        serde_json::json!({ "reason": reason, "moduleId": module_id }),
+    );
+}
+
+fn module_update_views(state: &HostState) -> Result<Vec<module_updates::UpdateView>, CommandError> {
+    let modules = discover_modules(&state.roots).payload.modules;
+    let (preferences, locale) = {
+        let settings = state
+            .settings
+            .lock()
+            .map_err(|_| repository_error("StateUnavailable"))?;
+        (
+            settings.update_preferences(),
+            if settings.language() == "en-US" {
+                "en-US"
+            } else {
+                "zh-CN"
+            },
+        )
+    };
+    let download = state
+        .module_repository
+        .lock()
+        .map_err(|_| repository_error("StateUnavailable"))?
+        .snapshot
+        .clone();
+    let updates = state
+        .module_updates
+        .lock()
+        .map_err(|_| repository_error("StateUnavailable"))?;
+    Ok(modules
+        .iter()
+        .map(|module| {
+            updates.view(
+                module,
+                !preferences.module_update_disabled_ids.contains(&module.id),
+                locale,
+                &download,
+            )
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn get_module_updates(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+) -> Result<Vec<module_updates::UpdateView>, CommandError> {
+    ensure_main_window(&window)?;
+    module_update_views(&state)
+}
+
+/// Returns false only when another check/download owns the work. No network
+/// request is ever made while holding the discovery/runtime/settings mutexes.
+fn check_module_updates_blocking(
+    app: &tauri::AppHandle,
+    requested: Option<&str>,
+) -> Result<bool, CommandError> {
+    let state = app.state::<HostState>();
+    if state
+        .module_repository
+        .lock()
+        .map_err(|_| repository_error("StateUnavailable"))?
+        .active()
+    {
+        return Ok(false);
+    }
+    let modules = discover_modules(&state.roots).payload.modules;
+    if requested.is_some_and(|id| !valid_module_id(id) || !modules.iter().any(|m| m.id == id)) {
+        return Err(repository_error("SelectionUnavailable"));
+    }
+    let installed_ids = modules.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+    let tickets = {
+        let mut updates = state
+            .module_updates
+            .lock()
+            .map_err(|_| repository_error("StateUnavailable"))?;
+        // Use the same lock order as the preference command. A switch-off
+        // between selection and begin must not start a new automatic check.
+        let disabled = state
+            .settings
+            .lock()
+            .map_err(|_| repository_error("StateUnavailable"))?
+            .update_preferences()
+            .module_update_disabled_ids;
+        let ids = module_updates::selected_ids(&installed_ids, &disabled, requested);
+        updates.retain(&installed_ids);
+        if ids.is_empty() {
+            return Ok(true);
+        }
+        updates.begin(&ids)
+    };
+    if tickets.is_empty() {
+        return Ok(false);
+    }
+    emit_repository_state(app, "moduleUpdateChecking", requested.unwrap_or(""));
+    let results = module_repository::fetch_installed_updates(
+        &tickets.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
+    );
+    {
+        let mut updates = state
+            .module_updates
+            .lock()
+            .map_err(|_| repository_error("StateUnavailable"))?;
+        match results {
+            Ok(mut results) => {
+                for ticket in &tickets {
+                    updates.finish(
+                        ticket,
+                        results.remove(&ticket.id).unwrap_or(Err("InvalidCatalog")),
+                    );
+                }
+            }
+            Err(error) => {
+                for ticket in &tickets {
+                    updates.finish(ticket, Err(error));
+                }
+            }
+        }
+    }
+    emit_repository_state(app, "moduleUpdateChecked", requested.unwrap_or(""));
+    Ok(true)
+}
+
+#[tauri::command]
+async fn check_module_update(window: WebviewWindow, module_id: String) -> Result<(), CommandError> {
+    ensure_main_window(&window)?;
+    let app = window.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        check_module_updates_blocking(&app, Some(&module_id)).map(|_| ())
+    })
+    .await
+    .map_err(|_| repository_error("StateUnavailable"))?
+}
+
+#[tauri::command]
+fn set_module_update_check(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    module_id: String,
+    enabled: bool,
+) -> Result<(), CommandError> {
+    ensure_main_window(&window)?;
+    if !valid_module_id(&module_id)
+        || !discover_modules(&state.roots)
+            .payload
+            .modules
+            .iter()
+            .any(|m| m.id == module_id)
+    {
+        return Err(repository_error("SelectionUnavailable"));
+    }
+    // Hold the update lock through preference persistence/invalidation, so an
+    // in-flight check cannot restore metadata after the user switched it off.
+    let mut updates = state
+        .module_updates
+        .lock()
+        .map_err(|_| repository_error("StateUnavailable"))?;
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| repository_error("StateUnavailable"))?;
+    let mut disabled = settings.update_preferences().module_update_disabled_ids;
+    disabled.retain(|id| id != &module_id);
+    if !enabled {
+        disabled.push(module_id.clone());
+    }
+    settings
+        .update(SettingsUpdate {
+            module_update_disabled_ids: Some(disabled),
+            ..Default::default()
+        })
+        .map_err(|e| CommandError {
+            code: e.code,
+            message: e.message,
+        })?;
+    updates.set_enabled(&module_id, enabled);
+    drop(settings);
+    drop(updates);
+    emit_repository_state(
+        window.app_handle(),
+        "moduleUpdatePreferenceChanged",
+        &module_id,
+    );
+    Ok(())
+}
+
+#[tauri::command]
+async fn download_module_update(
+    window: WebviewWindow,
+    module_id: String,
+) -> Result<module_repository::DownloadSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    let app = window.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        // Reconfirm current official metadata on every user-triggered download.
+        if !check_module_updates_blocking(&app, Some(&module_id))? {
+            return Err(repository_error("Busy"));
+        }
+        let state = app.state::<HostState>();
+        let module = discover_modules(&state.roots)
+            .payload
+            .modules
+            .into_iter()
+            .find(|m| m.id == module_id)
+            .ok_or_else(|| repository_error("SelectionUnavailable"))?;
+        let candidate = state
+            .module_updates
+            .lock()
+            .map_err(|_| repository_error("StateUnavailable"))?
+            .download_candidate(&module)
+            .map_err(repository_error)?;
+        start_repository_download(&app, &state, &module_id, Some(candidate))
+    })
+    .await
+    .map_err(|_| repository_error("StateUnavailable"))?
+}
+
+fn start_update_workers(app: tauri::AppHandle) {
+    for host in [true, false] {
+        let app = app.clone();
+        thread::spawn(move || {
+            let started = std::time::Instant::now();
+            let mut schedule = module_updates::Schedule::default();
+            loop {
+                let state = app.state::<HostState>();
+                if state.update_workers_stopping.load(Ordering::Relaxed) {
+                    break;
+                }
+                let preferences = state.settings.lock().ok().map(|s| s.update_preferences());
+                if let Some(p) = preferences {
+                    let (startup, interval) = if host {
+                        (
+                            p.check_host_updates_on_startup,
+                            p.host_update_interval_minutes,
+                        )
+                    } else {
+                        (
+                            p.check_module_updates_on_startup,
+                            p.module_update_interval_minutes,
+                        )
+                    };
+                    if schedule.due(started.elapsed(), startup, interval) {
+                        let attempted = if host {
+                            match check_host_update_blocking(&app) {
+                                Err(e) if e.code == "Busy" || e.code == "updateBusy" => false,
+                                _ => true,
+                            }
+                        } else {
+                            check_module_updates_blocking(&app, None).unwrap_or(true)
+                        };
+                        if attempted {
+                            schedule.attempted(started.elapsed());
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_secs(5));
+            }
+        });
     }
 }
 
@@ -1488,6 +2092,10 @@ fn start_module(
     module_id: String,
 ) -> Result<ModuleRuntimeSnapshot, CommandError> {
     ensure_main_window(&window)?;
+    let _install_guard = state
+        .module_install_gate
+        .try_lock()
+        .map_err(|_| repository_error("Busy"))?;
     if !valid_module_id(&module_id) {
         return Err(CommandError {
             code: "moduleIdInvalid",
@@ -1543,6 +2151,10 @@ async fn set_module_active(
     let app = window.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<HostState>();
+        let _install_guard = state
+            .module_install_gate
+            .try_lock()
+            .map_err(|_| repository_error("Busy"))?;
         let snapshot = state
             .runtime
             .lock()
@@ -1604,6 +2216,10 @@ async fn open_module(
     module_id: String,
 ) -> Result<(), CommandError> {
     ensure_main_window(&window)?;
+    let _install_guard = state
+        .module_install_gate
+        .try_lock()
+        .map_err(|_| repository_error("Busy"))?;
     if !valid_module_id(&module_id) {
         return Err(CommandError {
             code: "moduleIdInvalid",
@@ -1684,6 +2300,10 @@ fn stop_module_blocking(
     module_id: String,
 ) -> Result<ModuleRuntimeSnapshot, CommandError> {
     ensure_main_window(&window)?;
+    let _install_guard = state
+        .module_install_gate
+        .try_lock()
+        .map_err(|_| repository_error("Busy"))?;
     if !valid_module_id(&module_id) {
         return Err(CommandError {
             code: "moduleIdInvalid",
@@ -3157,35 +3777,22 @@ fn start_info_popup_pump(app: tauri::AppHandle) {
 
 fn start_device_transfer_pump(app: tauri::AppHandle) {
     thread::spawn(move || {
-        let mut pending_offer: Option<(String, String, u64, std::time::Instant)> = None;
+        let mut pending_offer: Option<(String, String, u64)> = None;
         let mut announced = false;
         let mut last_announcement: Option<std::time::Instant> = None;
         loop {
-            thread::sleep(Duration::from_millis(500));
+            thread::sleep(Duration::from_millis(250));
             let state = app.state::<HostState>();
+            if state.update_workers_stopping.load(Ordering::Acquire) {
+                break;
+            }
             if !state.devices.is_enabled() {
                 pending_offer = None;
                 announced = false;
                 last_announcement = None;
                 continue;
             }
-            let record = state
-                .module_index
-                .lock()
-                .ok()
-                .and_then(|index| index.get(DEVICE_TRANSFER_MODULE_ID).cloned());
-            let Some(record) = record else { continue };
-            let snapshot = state.runtime.lock().ok().and_then(|mut runtime| {
-                runtime
-                    .invoke(
-                        DEVICE_TRANSFER_MODULE_ID,
-                        &record,
-                        "getState",
-                        serde_json::json!({}),
-                    )
-                    .ok()
-            });
-            let Some(snapshot) = snapshot else { continue };
+            let snapshot = state.device_transfer.snapshot();
             let session = &snapshot["session"];
             let platform = session["peer"]["platform"].as_str().unwrap_or_default();
             let device_id = session["peer"]["deviceId"].as_str();
@@ -3207,18 +3814,16 @@ fn start_device_transfer_pump(app: tauri::AppHandle) {
                 } else {
                     "rejectIncomingConnection"
                 };
-                if let Ok(mut runtime) = state.runtime.lock() {
-                    let _ = runtime.invoke(
-                        DEVICE_TRANSFER_MODULE_ID,
-                        &record,
-                        method,
-                        serde_json::json!({}),
-                    );
-                }
+                let _ = state.device_transfer.invoke(method, &serde_json::json!({}));
                 continue;
             }
             let offer = &snapshot["incomingFile"];
             let Some((peer_id, peer_name)) = trusted else {
+                if session["state"] == "Connected" {
+                    let _ = state
+                        .device_transfer
+                        .invoke("disconnect", &serde_json::json!({}));
+                }
                 pending_offer = None;
                 announced = false;
                 last_announcement = None;
@@ -3231,24 +3836,16 @@ fn start_device_transfer_pump(app: tauri::AppHandle) {
                 continue;
             };
             let size = offer["size"].as_u64().unwrap_or_default();
-            let same_offer = pending_offer.as_ref().is_some_and(|(id, name, length, _)| {
+            let same_offer = pending_offer.as_ref().is_some_and(|(id, name, length)| {
                 id == &peer_id && name == file_name && *length == size
             });
             if !same_offer {
-                pending_offer = Some((
-                    peer_id.clone(),
-                    file_name.to_string(),
-                    size,
-                    std::time::Instant::now(),
-                ));
+                pending_offer = Some((peer_id.clone(), file_name.to_string(), size));
                 announced = false;
                 last_announcement = None;
             }
-            if pending_offer
-                .as_ref()
-                .is_some_and(|(_, _, _, since)| since.elapsed() >= Duration::from_millis(800))
-                && (!announced
-                    || last_announcement.is_some_and(|at| at.elapsed() >= Duration::from_secs(3)))
+            if !announced
+                || last_announcement.is_some_and(|at| at.elapsed() >= Duration::from_secs(3))
             {
                 if !announced {
                     show_main_window(&app);
@@ -3358,7 +3955,9 @@ fn set_devices_discovery_enabled(
 ) -> Result<devices::DeviceSnapshot, CommandError> {
     ensure_main_window(&window)?;
     let snapshot = state.devices.set_enabled(enabled);
-    sync_device_transfer_runtime(&state);
+    state
+        .device_transfer
+        .set_enabled(state.devices.is_enabled());
     Ok(snapshot)
 }
 
@@ -3396,6 +3995,153 @@ fn get_device_transfer_target(
 }
 
 #[tauri::command]
+fn get_device_transfer_state(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+) -> Result<Value, CommandError> {
+    ensure_main_window(&window)?;
+    let mut snapshot = state.device_transfer.snapshot();
+    // A missed UI event must not hide a pending offer. Resolve the request on
+    // the host, using the same paired-device boundary as accept/reject.
+    snapshot["incomingRequest"] =
+        pending_device_file_request(&snapshot, paired_transfer_session(&state, &snapshot));
+    Ok(snapshot)
+}
+
+fn pending_device_file_request(snapshot: &Value, paired: Option<(String, String)>) -> Value {
+    if snapshot["session"]["state"] != "Connected" || !snapshot["incomingFile"].is_object() {
+        return Value::Null;
+    }
+    paired
+        .map(|(id, name)| serde_json::json!({ "id": id, "name": name }))
+        .unwrap_or(Value::Null)
+}
+
+// A closed host API, not an arbitrary module method or client-selected endpoint.
+#[derive(Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum DeviceTransferAction {
+    Connect {},
+    Disconnect {},
+    SendFile { path: String },
+    AcceptIncomingFile { destination_path: String },
+    AcceptIncomingFileDefault {},
+    RejectIncomingFile {},
+}
+
+fn transfer_command_error(error: device_transfer::TransferError) -> CommandError {
+    CommandError {
+        code: error.code,
+        message: error.message,
+    }
+}
+
+fn paired_transfer_session(state: &HostState, snapshot: &Value) -> Option<(String, String)> {
+    let peer = &snapshot["session"]["peer"];
+    let addresses = peer["addresses"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    state.devices.paired_transfer_peer(
+        peer["platform"].as_str().unwrap_or_default(),
+        peer["deviceId"].as_str(),
+        &addresses,
+    )
+}
+
+#[tauri::command]
+fn invoke_device_transfer(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    peer_id: String,
+    action: DeviceTransferAction,
+) -> Result<Value, CommandError> {
+    ensure_main_window(&window)?;
+    if matches!(action, DeviceTransferAction::Connect {}) {
+        let target = state
+            .devices
+            .transfer_target(&peer_id)
+            .map_err(|message| CommandError {
+                code: "deviceTransferUnavailable",
+                message,
+            })?;
+        return state
+            .device_transfer
+            .connect_target(&target)
+            .map_err(transfer_command_error);
+    }
+    let snapshot = state.device_transfer.snapshot();
+    let paired = paired_transfer_session(&state, &snapshot);
+    // Disconnect can also cancel a now-offline session. It never alters pairing.
+    let cancel_offline = matches!(action, DeviceTransferAction::Disconnect {}) && paired.is_none();
+    if !cancel_offline && !paired.is_some_and(|(id, _)| id == peer_id) {
+        return Err(CommandError {
+            code: "deviceTransferPeerMismatch",
+            message: "传输会话与所选的已连接设备不匹配。".to_string(),
+        });
+    }
+    let (method, payload) = match action {
+        DeviceTransferAction::Connect {} => unreachable!(),
+        DeviceTransferAction::Disconnect {} => ("disconnect", serde_json::json!({})),
+        DeviceTransferAction::SendFile { path } => {
+            ("sendFile", serde_json::json!({ "path": path }))
+        }
+        DeviceTransferAction::AcceptIncomingFile { destination_path } => (
+            "acceptIncomingFile",
+            serde_json::json!({ "destinationPath": destination_path }),
+        ),
+        DeviceTransferAction::AcceptIncomingFileDefault {} => {
+            ("acceptIncomingFileDefault", serde_json::json!({}))
+        }
+        DeviceTransferAction::RejectIncomingFile {} => {
+            ("rejectIncomingFile", serde_json::json!({}))
+        }
+    };
+    state
+        .device_transfer
+        .invoke(method, &payload)
+        .map_err(transfer_command_error)
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DeviceReceivePreferences {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_directory: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    use_default_directory: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_accept: Option<bool>,
+}
+
+#[tauri::command]
+fn update_device_receive_preferences(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    preferences: DeviceReceivePreferences,
+) -> Result<Value, CommandError> {
+    ensure_main_window(&window)?;
+    let payload = serde_json::to_value(preferences).map_err(|error| CommandError {
+        code: "invalidPreferences",
+        message: error.to_string(),
+    })?;
+    state
+        .device_transfer
+        .invoke("setReceivePreferences", &payload)
+        .map_err(transfer_command_error)
+}
+
+#[tauri::command]
 fn decide_device_pairing(
     window: WebviewWindow,
     state: State<'_, HostState>,
@@ -3426,6 +4172,24 @@ fn decide_device_action(
         .decide_action(&session_id, approve)
         .map_err(|message| CommandError {
             code: "deviceActionFailed",
+            message,
+        })?;
+    Ok(state.devices.snapshot())
+}
+
+#[tauri::command]
+fn set_device_remark(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    peer_id: String,
+    remark: String,
+) -> Result<devices::DeviceSnapshot, CommandError> {
+    ensure_main_window(&window)?;
+    state
+        .devices
+        .set_remark(&peer_id, &remark)
+        .map_err(|message| CommandError {
+            code: "deviceRemarkFailed",
             message,
         })?;
     Ok(state.devices.snapshot())
@@ -3524,6 +4288,13 @@ pub fn run() {
         .manage(HostState::new())
         .invoke_handler(tauri::generate_handler![
             get_host_info,
+            get_official_modules,
+            get_module_repository_download,
+            get_module_updates,
+            check_module_update,
+            download_module_update,
+            set_module_update_check,
+            download_official_module,
             get_devices_snapshot,
             get_info_popup_item,
             get_info_popup_dismiss_seconds,
@@ -3533,6 +4304,7 @@ pub fn run() {
             request_device_pairing,
             decide_device_pairing,
             decide_device_action,
+            set_device_remark,
             set_device_relationship,
             revoke_device_pairing,
             open_project_repository,
@@ -3578,7 +4350,10 @@ pub fn run() {
             control_screenpin_window,
             get_module_runtime,
             get_all_module_runtime,
-            get_device_transfer_target
+            get_device_transfer_target,
+            get_device_transfer_state,
+            invoke_device_transfer,
+            update_device_receive_preferences
         ])
         .setup(|app| {
             if handle_startup_update_shutdown(app.handle()) {
@@ -3586,10 +4361,15 @@ pub fn run() {
             }
             configure_update_handoff(app.handle());
             app.state::<HostState>().devices.restore_enabled();
+            let state = app.state::<HostState>();
+            state
+                .device_transfer
+                .set_enabled(state.devices.is_enabled());
             start_info_popup_pump(app.handle().clone());
             start_runtime_supervisor(app.handle().clone());
             start_authorized_modules(app.handle(), &app.state::<HostState>());
             start_device_transfer_pump(app.handle().clone());
+            start_update_workers(app.handle().clone());
             record_log(
                 &app.state::<HostState>(),
                 "Information",
@@ -3652,7 +4432,11 @@ pub fn run() {
                 tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
             ) {
                 clear_update_handoff(app);
+                app.state::<HostState>()
+                    .update_workers_stopping
+                    .store(true, Ordering::Relaxed);
                 stop_all_modules(app);
+                app.state::<HostState>().device_transfer.shutdown();
                 app.state::<HostState>().devices.stop();
             }
         });
@@ -3990,6 +4774,7 @@ fn shutdown_for_update<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     );
     clear_update_handoff(app);
     stop_all_modules(app);
+    state.device_transfer.shutdown();
     state.devices.stop();
     app.exit(0);
 }
@@ -4110,7 +4895,6 @@ fn start_authorized_modules<R: tauri::Runtime>(app: &tauri::AppHandle<R>, state:
     }
     drop(runtime);
     drop(index);
-    sync_device_transfer_runtime(state);
     if let Some(record) = launcher_record {
         let requested = launcher_hotkey_from_state(state, launcher_overlay::MODULE_ID, &record)
             .unwrap_or_else(|| DEFAULT_LAUNCHER_HOTKEY.to_string());
@@ -4130,21 +4914,6 @@ fn start_authorized_modules<R: tauri::Runtime>(app: &tauri::AppHandle<R>, state:
         "Runtime",
         format!("Startup authorization processed: {started} started, {failed} failed."),
     );
-}
-
-fn sync_device_transfer_runtime(state: &HostState) {
-    let record = state
-        .module_index
-        .lock()
-        .ok()
-        .and_then(|index| index.get(DEVICE_TRANSFER_MODULE_ID).cloned());
-    let Some(record) = record else { return };
-    let enabled = state.devices.is_enabled();
-    if let Ok(mut runtime) = state.runtime.lock() {
-        if runtime.start(DEVICE_TRANSFER_MODULE_ID, &record).is_ok() {
-            let _ = runtime.set_active(DEVICE_TRANSFER_MODULE_ID, enabled);
-        }
-    }
 }
 
 fn stop_all_modules<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
@@ -4342,6 +5111,48 @@ fn install_close_behavior(window: &WebviewWindow) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pending_receive_request_requires_a_connected_offer_and_paired_peer() {
+        use super::pending_device_file_request;
+        let snapshot = serde_json::json!({
+            "session": {"state": "Connected"},
+            "incomingFile": {"name": "photo.png", "size": 1024}
+        });
+        let paired = Some(("paired-id".to_string(), "PHONE".to_string()));
+        assert_eq!(
+            pending_device_file_request(&snapshot, paired.clone()),
+            serde_json::json!({"id": "paired-id", "name": "PHONE"})
+        );
+        assert!(pending_device_file_request(&snapshot, None).is_null());
+        let mut idle = snapshot.clone();
+        idle["session"]["state"] = serde_json::json!("Idle");
+        assert!(pending_device_file_request(&idle, paired.clone()).is_null());
+        let mut completed = snapshot;
+        completed["incomingFile"] = serde_json::Value::Null;
+        assert!(pending_device_file_request(&completed, paired).is_null());
+    }
+
+    #[test]
+    fn device_transfer_api_rejects_arbitrary_methods_and_endpoints() {
+        use super::{DeviceReceivePreferences, DeviceTransferAction};
+        assert!(serde_json::from_value::<DeviceTransferAction>(
+            serde_json::json!({"kind":"connect"})
+        )
+        .is_ok());
+        assert!(serde_json::from_value::<DeviceTransferAction>(
+            serde_json::json!({"kind":"connect", "serviceName":"untrusted"})
+        )
+        .is_err());
+        assert!(serde_json::from_value::<DeviceTransferAction>(
+            serde_json::json!({"kind":"execute", "path":"C:/bad.exe"})
+        )
+        .is_err());
+        assert!(serde_json::from_value::<DeviceReceivePreferences>(
+            serde_json::json!({"autoAccept":"true"})
+        )
+        .is_err());
+    }
+
     use super::{
         civil_date_from_days, module_id_from_window_label, module_window_label, now_rfc3339,
         record_log, sanitize_launcher_drop_paths, startup_status_for, HostState, InfoPopupQueue,

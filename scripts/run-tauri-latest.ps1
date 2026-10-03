@@ -17,6 +17,7 @@ $repoRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $tauriRoot = Join-Path $repoRoot 'QingToolbox.Tauri'
 $rustRoot = Join-Path $tauriRoot 'src-tauri'
 $artifactExe = Join-Path $repoRoot 'artifacts/tauri-production/QingToolbox/QingToolbox.exe'
+$debugExe = Join-Path $rustRoot 'target/debug/qingtoolbox-tauri.exe'
 
 # The local development entry point and its Release candidate are not the
 # production installation. Keep them from registering or repairing the
@@ -133,6 +134,24 @@ $nodePath = Resolve-Node
 $cargoPath = Resolve-Cargo
 $env:Path = "$(Split-Path -Parent $cargoPath);$(Split-Path -Parent $nodePath);$env:Path"
 
+function Get-WorkspaceDebugHost {
+    return @(Get-Process -Name 'qingtoolbox-tauri' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and [IO.Path]::GetFullPath($_.Path) -eq $debugExe })
+}
+
+if ($Configuration -eq 'Debug' -and -not $NoLaunch) {
+    $existing = @(Get-WorkspaceDebugHost)
+    if ($existing.Count -gt 0) {
+        if ($ForceRebuild) { throw 'Stop the workspace development instance before forcing a rebuild.' }
+        # Use the existing single-instance activation instead of starting a
+        # second Vite server or rebuilding module binaries currently in use.
+        $env:QING_TAURI_STARTUP_PRESENTATION = 'main'
+        Start-Process -FilePath $debugExe -WorkingDirectory $rustRoot -WindowStyle Hidden | Out-Null
+        Write-Host "Reusing QingToolbox [Dev] (PID $($existing[0].Id)). Stop it first to rebuild changed sources."
+        exit 0
+    }
+}
+
 if ($Configuration -eq 'Release') {
     if (-not $SkipModuleBuild) {
         & (Join-Path $PSScriptRoot 'build-tauri-modules.ps1') -ForceRebuild:$ForceRebuild
@@ -197,12 +216,32 @@ try {
     $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
     if (-not $npm) { throw 'npm.cmd was not found.' }
     $devConfig = Join-Path $rustRoot 'tauri.dev.conf.json'
-    $process = Start-Process -FilePath $npm.Source -WorkingDirectory $tauriRoot -ArgumentList @('run', 'tauri', '--', 'dev', '--config', $devConfig) -WindowStyle Hidden -PassThru
-    Start-Sleep -Milliseconds 1800
-    if ($process.HasExited) {
-        throw "Tauri Debug host exited during startup with code $($process.ExitCode)."
+    $logRoot = Join-Path $repoRoot 'artifacts/tauri-development'
+    New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
+    $logId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $PID
+    $outputLog = Join-Path $logRoot "$logId.stdout.log"
+    $errorLog = Join-Path $logRoot "$logId.stderr.log"
+    $process = Start-Process -FilePath $npm.Source -WorkingDirectory $tauriRoot -ArgumentList @('run', 'tauri', '--', 'dev', '--config', $devConfig) -WindowStyle Hidden -RedirectStandardOutput $outputLog -RedirectStandardError $errorLog -PassThru
+    Write-Host "Starting QingToolbox [Dev]; waiting for the actual host window. Logs: $logRoot"
+    $deadline = (Get-Date).AddMinutes(5)
+    $nextProgress = (Get-Date).AddSeconds(15)
+    while ((Get-Date) -lt $deadline) {
+        if ($process.HasExited) {
+            Get-Content -LiteralPath $errorLog -Tail 35 | Out-Host
+            throw "Tauri Debug startup exited with code $($process.ExitCode). See $errorLog"
+        }
+        $hosts = @(Get-WorkspaceDebugHost | Where-Object { $_.Responding -and $_.MainWindowHandle -ne 0 })
+        if ($hosts.Count -gt 0) {
+            Write-Host "QingToolbox [Dev] started (host PID $($hosts[0].Id))."
+            exit 0
+        }
+        if ((Get-Date) -ge $nextProgress) {
+            Write-Host "Still building/starting QingToolbox [Dev]. Diagnostics: $errorLog"
+            $nextProgress = (Get-Date).AddSeconds(15)
+        }
+        Start-Sleep -Milliseconds 800
     }
-    Write-Host "QingToolbox Tauri Debug started (PID $($process.Id))."
+    throw "The development window has not appeared within five minutes. Inspect $outputLog and $errorLog"
 }
 finally {
     Pop-Location

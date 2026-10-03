@@ -17,8 +17,7 @@ if (-not (Test-Path -LiteralPath $cargoPath -PathType Leaf)) { throw 'cargo was 
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw 'npm was not found. Install Node.js before building Screen Pin.' }
 Push-Location $uiRoot
 try {
-    npm ci --ignore-scripts --no-audit --no-fund
-    if ($LASTEXITCODE -ne 0) { throw "Screen Pin UI dependency install failed with exit code $LASTEXITCODE" }
+    Restore-QingModuleUiDependencies -UiRoot $uiRoot
     npm run build
     if ($LASTEXITCODE -ne 0) { throw "Screen Pin UI build failed with exit code $LASTEXITCODE" }
 } finally { Pop-Location }

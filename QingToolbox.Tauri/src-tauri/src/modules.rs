@@ -160,12 +160,9 @@ pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
                 .and_then(|name| name.to_str())
                 .unwrap_or("unknown-module")
                 .to_string();
-            // The transfer engine is now host-owned. An older user-installed
-            // QingTransfer package must not shadow the bundled process, whose
-            // discovery identity is required by the Devices page.
-            if root.source == ModuleSource::User
-                && directory_name.eq_ignore_ascii_case("qing.qingtransfer")
-            {
+            // File transfer is compiled into the host, not a hidden module.
+            // Leave legacy package/data on disk, but never load its process.
+            if directory_name.eq_ignore_ascii_case("qing.qingtransfer") {
                 continue;
             }
             // The WPF updater owns this journal/staging directory in the
@@ -194,6 +191,14 @@ pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
                     continue;
                 }
             };
+
+            if manifest
+                .id
+                .as_deref()
+                .is_some_and(|id| id.eq_ignore_ascii_case("qing.qingtransfer"))
+            {
+                continue;
+            }
 
             let (summary, id) = validate_manifest(&manifest, &directory, root.source);
             // A valid module from an earlier (higher-priority) root owns its
@@ -256,12 +261,7 @@ pub fn discover_modules(roots: &[ModuleRoot]) -> DiscoveryResult {
                     },
                 );
             }
-            // QingTransfer is now the Devices page's transfer engine, not a
-            // second user-facing tool card. Keep its validated runtime record
-            // so the device action can start it on demand.
-            if summary.id != "qing.qingtransfer" {
-                modules.push(summary);
-            }
+            modules.push(summary);
         }
     }
 
@@ -758,6 +758,24 @@ mod tests {
                 path: temp,
             },
         )
+    }
+
+    #[test]
+    fn legacy_transfer_is_never_a_runtime_record_in_any_root() {
+        for source in [ModuleSource::Bundled, ModuleSource::User] {
+            for directory in ["qing.qingtransfer", "renamed-legacy-transfer"] {
+                let (temp, mut root) = temp_module(
+                    directory,
+                    r#"{"id":"qing.qingtransfer","name":"Legacy Transfer","version":"0.3.0","entry":"entry.exe","runtimeType":"Process","runtimeIsolation":"OutOfProcess","loadMode":"Manual"}"#,
+                );
+                root.source = source;
+                let result = discover_modules(&[root]);
+                assert!(result.records.is_empty());
+                assert!(result.payload.modules.is_empty());
+                assert!(temp.join(directory).join("module.json").is_file());
+                let _ = fs::remove_dir_all(temp);
+            }
+        }
     }
 
     #[test]

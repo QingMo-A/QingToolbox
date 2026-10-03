@@ -428,7 +428,7 @@ struct ReleaseRecord {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-struct Version {
+pub(crate) struct Version {
     major: u64,
     minor: u64,
     patch: u64,
@@ -519,7 +519,7 @@ pub fn check_official_release(
     })
 }
 
-fn parse_version(raw: &str) -> Result<Version, ()> {
+pub(crate) fn parse_version(raw: &str) -> Result<Version, ()> {
     if raw.is_empty() || raw.chars().count() > 128 || raw.chars().any(char::is_whitespace) {
         return Err(());
     }
@@ -1606,6 +1606,40 @@ fn fetch_asset(
     cancel: &AtomicBool,
     sink: &mut impl FnMut(&[u8], u64) -> Result<(), DownloadFailure>,
 ) -> Result<u64, DownloadFailure> {
+    fetch_http(initial_url, expected_size, true, false, cancel, sink)
+}
+
+/// Repository callers validate the immutable package URL before calling this.
+/// Metadata has a size ceiling, packages require an exact byte count.
+#[cfg(windows)]
+pub(crate) fn fetch_repository(
+    url: &str,
+    size: u64,
+    exact: bool,
+    sink: &mut impl FnMut(&[u8], u64) -> Result<(), DownloadFailure>,
+) -> Result<u64, DownloadFailure> {
+    fetch_http(url, size, exact, true, &AtomicBool::new(false), sink)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn fetch_repository(
+    _url: &str,
+    _size: u64,
+    _exact: bool,
+    _sink: &mut impl FnMut(&[u8], u64) -> Result<(), DownloadFailure>,
+) -> Result<u64, DownloadFailure> {
+    Err(DownloadFailure::SourceUnavailable)
+}
+
+#[cfg(windows)]
+fn fetch_http(
+    initial_url: &str,
+    expected_size: u64,
+    exact: bool,
+    repository: bool,
+    cancel: &AtomicBool,
+    sink: &mut impl FnMut(&[u8], u64) -> Result<(), DownloadFailure>,
+) -> Result<u64, DownloadFailure> {
     use std::{ffi::c_void, mem, ptr};
     use windows_sys::Win32::Networking::WinHttp::{
         WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
@@ -1680,7 +1714,11 @@ fn fetch_asset(
         if cancel.load(AtomicOrdering::Relaxed) {
             return Err(DownloadFailure::Cancelled);
         }
-        let (host_name, path) = parse_allowed_download_url(&url)?;
+        let (host_name, path) = if repository {
+            parse_repository_url(&url)?
+        } else {
+            parse_allowed_download_url(&url)?
+        };
         unsafe {
             let agent = wide("QingToolbox");
             let session = Handle(WinHttpOpen(
@@ -1729,7 +1767,11 @@ fn fetch_asset(
             {
                 return Err(DownloadFailure::SourceUnavailable);
             }
-            let headers = wide("Accept: application/octet-stream\r\n");
+            let headers = wide(if repository && host_name == "api.github.com" {
+                "Accept: application/vnd.github.raw+json\r\nX-GitHub-Api-Version: 2022-11-28\r\n"
+            } else {
+                "Accept: application/octet-stream\r\n"
+            });
             if WinHttpSendRequest(
                 request.0,
                 headers.as_ptr(),
@@ -1784,7 +1826,7 @@ fn fetch_asset(
             let content_length =
                 parse_content_length(query_header(request.0, WINHTTP_QUERY_CONTENT_LENGTH)?)?;
             if let Some(length) = content_length {
-                if length != expected_size {
+                if (exact && length != expected_size) || length > expected_size {
                     return Err(DownloadFailure::SizeMismatch);
                 }
             }
@@ -1821,13 +1863,82 @@ fn fetch_asset(
                 total = total.saturating_add(read as u64);
                 sink(&buffer[..read as usize], total)?;
             }
-            if total != expected_size {
+            if exact && total != expected_size {
                 return Err(DownloadFailure::SizeMismatch);
             }
             return Ok(total);
         }
     }
     Err(DownloadFailure::UntrustedRedirect)
+}
+
+// GitHub release redirects contain signed query strings. Accept them only on
+// GitHub's asset hosts, never on arbitrary hosts or raw metadata URLs.
+fn parse_repository_url(url: &str) -> Result<(String, String), DownloadFailure> {
+    if url.len() > 16 * 1024 || url.contains(['#', '\\', '\0', '\r', '\n']) {
+        return Err(DownloadFailure::UntrustedRedirect);
+    }
+    let rest = url
+        .strip_prefix("https://")
+        .ok_or(DownloadFailure::UntrustedRedirect)?;
+    let slash = rest.find('/').ok_or(DownloadFailure::UntrustedRedirect)?;
+    let host = &rest[..slash];
+    let path = &rest[slash..];
+    let allowed = match host {
+        "raw.githubusercontent.com" => {
+            let pinned = path
+                .strip_prefix("/QingMo-A/QingToolbox/")
+                .and_then(|rest| rest.split_once('/'))
+                .is_some_and(|(commit, asset)| {
+                    commit.len() == 40
+                        && commit
+                            .bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                        && asset.starts_with("modules/")
+                        && asset.ends_with(".qmod")
+                        && asset.split('/').all(|part| {
+                            !part.is_empty()
+                                && part != "."
+                                && part != ".."
+                                && part
+                                    .bytes()
+                                    .all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b))
+                        })
+                });
+            (path.starts_with("/QingMo-A/QingToolbox/modules/modules/") || pinned)
+                && !path.contains('?')
+        }
+        "api.github.com" => {
+            let pinned = path.split_once("?ref=").is_some_and(|(asset, commit)| {
+                commit.len() == 40
+                    && commit
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                    && asset.starts_with("/repos/QingMo-A/QingToolbox/contents/modules/")
+                    && asset.ends_with(".qmod")
+                    && asset.split('/').skip(1).all(|part| {
+                        !part.is_empty()
+                            && part != "."
+                            && part != ".."
+                            && part
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b))
+                    })
+            });
+            path.starts_with("/repos/QingMo-A/QingToolbox/contents/modules/")
+                && (path.ends_with("?ref=modules") || pinned)
+                && path.matches('?').count() == 1
+        }
+        "github.com" => {
+            path.starts_with("/QingMo-A/QingToolbox/releases/download/") && !path.contains('?')
+        }
+        "objects.githubusercontent.com" | "release-assets.githubusercontent.com" => path != "/",
+        _ => false,
+    };
+    if !allowed {
+        return Err(DownloadFailure::UntrustedRedirect);
+    }
+    Ok((host.to_string(), path.to_string()))
 }
 
 #[cfg(not(windows))]
@@ -1873,6 +1984,35 @@ fn fetch_official_releases() -> Result<String, ()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn repository_network_policy_limits_hosts_and_accepts_signed_asset_redirects() {
+        use super::parse_repository_url;
+        assert!(parse_repository_url(
+            "https://raw.githubusercontent.com/QingMo-A/QingToolbox/modules/modules/index.json"
+        )
+        .is_ok());
+        assert!(parse_repository_url(
+            "https://release-assets.githubusercontent.com/assets/test?sig=abc&expires=123"
+        )
+        .is_ok());
+        let commit = "a".repeat(40);
+        assert!(parse_repository_url(&format!("https://raw.githubusercontent.com/QingMo-A/QingToolbox/{commit}/modules/Launcher/packages/qing.launcher-0.3.1-tauri.qmod")).is_ok());
+        assert!(parse_repository_url(&format!("https://api.github.com/repos/QingMo-A/QingToolbox/contents/modules/Launcher/packages/qing.launcher-0.3.1-tauri.qmod?ref={commit}")).is_ok());
+        for bad in [format!("https://raw.githubusercontent.com/QingMo-A/QingToolbox/latest/modules/Launcher/packages/a.qmod"), format!("https://raw.githubusercontent.com/QingMo-A/QingToolbox/{commit}/modules/../a.qmod"), format!("https://api.github.com/repos/QingMo-A/QingToolbox/contents/modules/Launcher/packages/a.qmod?ref=abcd")] {
+            assert!(parse_repository_url(&bad).is_err());
+        }
+        for url in [
+            "http://github.com/test",
+            "https://github.com.evil.test/file",
+            "https://github.com/evil/project/file",
+            "https://raw.githubusercontent.com/evil/repo/file",
+            "https://raw.githubusercontent.com/QingMo-A/QingToolbox/modules/modules/index.json?x=1",
+            "https://github.com:443/QingMo-A/QingToolbox/releases/download/x/y",
+            "https://user@github.com/test",
+        ] {
+            assert!(parse_repository_url(url).is_err(), "{url}");
+        }
+    }
     use super::{
         cache_paths, download_official_release, is_running_version, is_true_unc_path,
         parse_releases, parse_sidecar, parse_version, select_best_release,

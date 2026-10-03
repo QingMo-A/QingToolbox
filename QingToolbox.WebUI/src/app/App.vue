@@ -14,8 +14,8 @@ import { routeTitleKeyByPath } from './router'
 import { applyFontPresentation } from '../presentation/fontPresentation'
 import QTitleBar from '../design-system/components/QTitleBar.vue'
 import { TauriTransport } from '../bridge/transport/TauriTransport'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import DeviceTransferPanel from '../pages/DeviceTransferPanel.vue'
+import { createDeviceTransferRequests, type TransferDevice } from './deviceTransferRequests'
 
 const nativeTitleBar = TauriTransport.isAvailable()
 
@@ -25,11 +25,11 @@ const app = useAppStore()
 const settings = useSettingsStore()
 const client = inject<SettingsClient>('settingsClient')!
 const commandPaletteOpen = ref(false)
-const transferRequest = ref<{ device: { id: string; name: string }; incoming: boolean } | null>(null)
-let unlistenTransfer: UnlistenFn | null = null
+const transferRequests = createDeviceTransferRequests()
+const transferRequest = transferRequests.request
 function openDeviceTransfer(event: Event) {
-  const device = (event as CustomEvent<{ id: string; name: string }>).detail
-  if (device?.id && device.name) transferRequest.value = { device, incoming: false }
+  const device = (event as CustomEvent<TransferDevice>).detail
+  if (nativeTitleBar) void transferRequests.openOutgoing(device)
 }
 const route = useRoute()
 const router = useRouter()
@@ -52,14 +52,12 @@ onMounted(() => {
   appearance.set(appearance.id)
   window.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('qing:open-device-transfer', openDeviceTransfer)
-  if (nativeTitleBar) void listen<{ id: string; name: string }>('qing:incoming-device-file', event => {
-    if (event.payload?.id && event.payload.name) transferRequest.value = { device: event.payload, incoming: true }
-  }).then(unlisten => { unlistenTransfer = unlisten })
+  if (nativeTitleBar) transferRequests.start()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
   window.removeEventListener('qing:open-device-transfer', openDeviceTransfer)
-  unlistenTransfer?.()
+  transferRequests.stop()
 })
 watch(() => app.bridge, bridge => {
   if (bridge === 'Connected' && settings.status === 'idle') void loadSettings()
@@ -94,7 +92,7 @@ watchEffect(() => {
   </QSidebarLayout>
   </div>
   <QCommandPalette :open="commandPaletteOpen" @close="commandPaletteOpen = false" />
-  <DeviceTransferPanel v-if="transferRequest" :key="`${transferRequest.device.id}:${transferRequest.incoming}`" :device="transferRequest.device" :incoming="transferRequest.incoming" @close="transferRequest = null" />
+  <DeviceTransferPanel v-if="transferRequest" :key="`${transferRequest.device.id}:${transferRequest.incoming}`" :device="transferRequest.device" :incoming="transferRequest.incoming" @incoming="transferRequests.showIncoming" @close="transferRequest = null" />
   <QToast />
 </template>
 <style>

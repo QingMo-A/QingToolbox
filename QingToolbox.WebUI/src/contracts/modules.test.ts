@@ -26,7 +26,9 @@ describe('module snapshot contract', () => {
       expect(isModuleSnapshot({generatedAt:new Date().toISOString(),modules:[copy]})).toBe(false)
     }
     expect(isModuleSnapshot({generatedAt:new Date().toISOString(),modules:[{...module,updateStatus:'Unknown'}]})).toBe(false)
-    expect(isModuleSnapshot({generatedAt:new Date().toISOString(),modules:[{...module,downloadStatus:'Installed'}]})).toBe(false)
+    expect(isModuleSnapshot({generatedAt:new Date().toISOString(),modules:[{...module,downloadStatus:'Installed'}]})).toBe(true)
+    expect(isModuleSnapshot({generatedAt:new Date().toISOString(),modules:[{...module,downloadStatus:'Unknown'}]})).toBe(false)
+    expect(isModuleSnapshot({generatedAt:new Date().toISOString(),modules:[{...module,isUpdateCheckEnabled:'false'}]})).toBe(false)
     expect(isModuleSnapshot({generatedAt:new Date().toISOString(),modules:[{...module,downloadBytesReceived:-1}]})).toBe(false)
     expect(isModuleSnapshot({generatedAt:new Date().toISOString(),modules:[{...module,downloadExpectedBytes:Number.NaN}]})).toBe(false)
   })

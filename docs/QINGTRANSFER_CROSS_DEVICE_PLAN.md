@@ -21,7 +21,7 @@ PC 与 Android 的分层消息、配对互通及授权规则草案见 [设备通
 
 ## 2. 仓库现状与集成边界
 
-- Windows 当前的 `QingToolbox.Tauri/native-transfer` 是独立 Rust 进程模块，已有 mDNS 发现、nonce 回显探测、双方确认和文件流传输。它的探测只证明端口响应，不证明设备身份；现有 TCP 握手不能直接作为远控、亲密关系或敏感数据共享的认证基础。
+- Windows 设备传输引擎现位于 `QingToolbox.Tauri/src-tauri/src/device_transfer.rs`，编译进宿主并由设备功能管理生命周期，不再作为模块发现或运行。沿用 Android 兼容的 v1 文件协议、mDNS、nonce 探测、接收确认和 SHA-256 文件校验；旧模块接收设置只迁移一次，不覆盖宿主设置。探测只证明端口响应，配对记录/发现身份匹配并非 QDS1 加密认证，现有 TCP 握手不能直接作为远控或敏感数据共享的认证基础。
 - 现有 Android 规划见 [`../plans/013-android-mobile-shell-and-root-capability-foundation.md`](../plans/013-android-mobile-shell-and-root-capability-foundation.md)：它将四向文件传输列为后续目标。本文是新的产品方向草案，不表示 Android 已有可用的传输/远控实现。
 - **已确认的“内置”产品形态**：Windows 与 Android 安装包均自带设备互联功能，主界面只有统一“设备”入口，用户不必另装 `.qmod`。设备身份、关系、文件传输、远控和共享状态属于同一个设备产品能力；不再把文件传输设计为与“设备”平行的长期独立入口。这被视为原有“本体不内置具体工具功能”原则的一项明确产品特例；实现上仍把发现/配对、传输和音视频/控制引擎隔离在受监督的原生组件中，避免把编解码和网络会话全部塞进 Shell。
 - 设备互联总开关及后台发现要有清晰的首次启用步骤；未启用时不启动远控监听和敏感信息采集。Windows/Android 可有不同的平台适配层，共享的是协议和产品语义，不强求同一套 UI。

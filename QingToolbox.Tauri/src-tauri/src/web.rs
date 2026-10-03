@@ -373,19 +373,10 @@ pub fn open_module_window<R: Runtime>(
                 }
                 return;
             }
-            if let Some(state) = app_for_close.try_state::<HostState>() {
-                let _ = crate::clear_module_hotkey_binding(
-                    &app_for_close,
-                    &state,
-                    &module_id_for_close,
-                );
-                if module_id_for_close == "qing.screenpin" {
-                    crate::close_screenpin_windows(&app_for_close, &state);
-                }
-                if let Ok(mut runtime) = state.runtime.lock() {
-                    let _ = runtime.stop(&module_id_for_close);
-                }
-            }
+            // A normal close releases only the Web surface. Process residency,
+            // activation, global hotkeys and pin windows belong to the module
+            // lifecycle, not to the lifetime of its management page. Explicit
+            // unload/delete/update and host exit perform their own cleanup.
         }
     });
     Ok(())

@@ -181,10 +181,10 @@ the first release.
   written through a temporary file and atomically replaced, and generated
   results are opened through opaque IDs.
 
-- `native-transfer/` is a Rust process module with a Vue surface. It owns
+- `src-tauri/src/device_transfer.rs` is an in-process host service with the Devices Vue surface. It owns
   DNS-SD discovery, a nonce-bound TCP endpoint probe, connection approval,
   bounded JSON control frames, SHA-256 verified file streaming and atomic
-  receive-file publication. Discovery or network failures stay in module
+  receive-file publication. It needs no module installation, discovery, or load state. Discovery or network failures stay in transfer
   state and do not make arbitrary filesystem or process operations available
   to the WebView.
 

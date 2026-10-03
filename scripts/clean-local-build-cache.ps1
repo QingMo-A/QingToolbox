@@ -16,9 +16,8 @@ function Add-Candidate([string]$Relative) {
 }
 
 Add-Candidate 'QingToolbox.Tauri/src-tauri/target/debug'
-foreach ($module in @('native-transfer')) {
-    Add-Candidate "QingToolbox.Tauri/$module/target/debug"
-}
+# Retired transfer-module build cache only; its source is now part of the host.
+Add-Candidate 'QingToolbox.Tauri/native-transfer/target/debug'
 foreach ($project in @(Get-ChildItem -LiteralPath $repo -Directory | Where-Object Name -Like 'QingToolbox.*')) {
     foreach ($generated in @('bin','obj')) { Add-Candidate "$($project.Name)/$generated" }
 }

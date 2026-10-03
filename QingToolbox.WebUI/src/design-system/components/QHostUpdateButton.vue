@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { HostUpdateClient } from '../../bridge/clients/HostUpdateClient'
 import type { HostUpdateSnapshot } from '../../contracts/hostUpdate'
 import { useAppStore } from '../../app/store'
@@ -17,10 +18,13 @@ const autoInstallVersion = ref('')
 let mounted = false
 let timer: number | undefined
 let commandPending = false
+let eventRefreshQueued = false
+let unlistenUpdate: UnlistenFn | null = null
 
-const visible = computed(() => app.snapshot?.environmentKind === 'Production'
+const preview = computed(() => app.snapshot?.environmentKind === 'Development' && store.previewButtonVisible)
+const visible = computed(() => preview.value || (app.snapshot?.environmentKind === 'Production'
   && Boolean(store.snapshot?.latestVersion)
-  && ['UpdateAvailable', 'Installing'].includes(store.snapshot?.state ?? ''))
+  && ['UpdateAvailable', 'Installing'].includes(store.snapshot?.state ?? '')))
 const progress = computed(() => {
   const snapshot = store.snapshot
   return snapshot && snapshot.expectedBytes > 0
@@ -28,10 +32,11 @@ const progress = computed(() => {
 })
 const downloading = computed(() => store.snapshot?.downloadState === 'Downloading')
 const processing = computed(() => ['Verifying', 'Installing'].includes(store.snapshot?.downloadState ?? ''))
-const disabled = computed(() => store.busy || Boolean(autoInstallVersion.value)
+const disabled = computed(() => !preview.value && (store.busy || Boolean(autoInstallVersion.value)
   || downloading.value || processing.value
-  || (!store.snapshot?.canDownload && !store.snapshot?.canInstall))
+  || (!store.snapshot?.canDownload && !store.snapshot?.canInstall)))
 const label = computed(() => {
+  if (preview.value) return t('hostUpdate.banner.download')
   if (downloading.value) return t('hostUpdate.banner.progress', { progress: progress.value })
   if (store.snapshot?.downloadState === 'Verifying') return t('hostUpdate.button.verifying')
   if (store.snapshot?.downloadState === 'Installing') return t('hostUpdate.button.installing')
@@ -90,6 +95,7 @@ async function run(action: () => Promise<HostUpdateSnapshot>) {
   } finally {
     store.busy = false
     commandPending = false
+    if (eventRefreshQueued) { eventRefreshQueued = false; void refreshProgress().finally(syncPolling) }
     syncPolling()
   }
 }
@@ -98,7 +104,7 @@ async function initialize() {
     || app.snapshot?.environmentKind !== 'Production' || store.startupCheckAttempted) return
   store.startupCheckAttempted = true
   const snapshot = await run(() => client.getSnapshot())
-  if (mounted && snapshot?.state === 'NotChecked' && snapshot.canCheck) {
+  if (mounted && app.snapshot?.backgroundUpdateChecks !== true && snapshot?.state === 'NotChecked' && snapshot.canCheck) {
     await run(() => client.check())
   }
 }
@@ -124,6 +130,7 @@ async function advanceInstallation() {
   else toast.show(t('hostUpdate.button.unsupported'), 'error')
 }
 async function update() {
+  if (preview.value) return
   if (!client || disabled.value) return
   if (store.snapshot?.canInstall) {
     await install()
@@ -148,6 +155,10 @@ onMounted(() => {
   mounted = true
   document.addEventListener('visibilitychange', onVisibilityChange)
   void initialize()
+  if ((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) void listen('qmod:host-update-changed', () => {
+    if (commandPending) eventRefreshQueued = true
+    else void refreshProgress().finally(syncPolling)
+  }).then(cleanup => { if (mounted) unlistenUpdate = cleanup; else cleanup() }).catch(() => {})
   syncPolling()
 })
 onBeforeUnmount(() => {
@@ -155,6 +166,7 @@ onBeforeUnmount(() => {
   autoInstallVersion.value = ''
   stopPolling()
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  unlistenUpdate?.()
 })
 </script>
 

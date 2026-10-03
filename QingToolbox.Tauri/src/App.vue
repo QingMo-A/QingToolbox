@@ -365,10 +365,10 @@ onBeforeUnmount(() => {
             <option value="light">浅色</option>
             <option value="dark">深色</option>
             <option value="system">跟随系统</option>
-            <option value="neon-circuit">Neon Circuit</option>
-            <option value="greenline">Greenline</option>
-            <option value="aurora-flow">Aurora Flow</option>
-            <option value="qing-nova">Qing Nova</option>
+            <option value="neon-circuit">鎏金装饰 Art Deco</option>
+            <option value="greenline">青绿山水 Shan Shui</option>
+            <option value="aurora-flow">赛博霓虹 Cyberpunk</option>
+            <option value="qing-nova">粗野冲击 Brutalist</option>
           </select>
         </label>
         <label class="setting-field">

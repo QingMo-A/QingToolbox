@@ -30,7 +30,6 @@ export function resolveModulesRoot(root = hostRoot, environment = process.env) {
 }
 
 export function moduleSource(scope, root = hostRoot) {
-  if (scope === 'transfer') return resolve(root, 'QingToolbox.Tauri/native-transfer')
   const directory = moduleDirectories[scope]
   if (!directory) throw new Error(`Unknown independent module: ${scope}`)
   return resolve(resolveModulesRoot(root), 'modules', directory)

@@ -5,6 +5,7 @@ import mark from '../../assets/QingToolbox.Mark.svg'
 import { useLocalization } from '../../localization/localization'
 import { useAppStore } from '../../app/store'
 import QHostUpdateButton from './QHostUpdateButton.vue'
+import QModuleDownloadStatus from './QModuleDownloadStatus.vue'
 
 const { currentLocale } = useLocalization()
 const app = useAppStore()
@@ -28,6 +29,7 @@ function drag(event: MouseEvent) {
     <div class="q-titlebar-drag" @mousedown="drag" @dblclick="act('toggleMaximize')">
       <img :src="mark" alt="" draggable="false" />
       <span>QingToolbox<template v-if="isDevelopment"> [Dev]</template></span>
+      <QModuleDownloadStatus />
       <QHostUpdateButton />
       <small v-if="error" role="status">{{ error }}</small>
     </div>

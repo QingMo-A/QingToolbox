@@ -30,6 +30,7 @@ export class ModuleClient {
   openDirectory(moduleId: string) { return this.requestManagement('modules.openDirectory', moduleId) }
   remove(moduleId: string) { return this.requestManagement('modules.remove', moduleId) }
   checkUpdate(moduleId: string) { return this.requestSnapshot('modules.checkUpdate', { moduleId }) }
+  setUpdateCheck(moduleId: string, enabled: boolean) { return this.requestSnapshot('modules.setUpdateCheck', { moduleId, enabled }) }
   downloadUpdate(moduleId: string) { return this.requestSnapshot('modules.downloadUpdate', { moduleId }) }
   async installVerifiedUpdate(moduleId: string): Promise<ModuleUpdateInstallResult> {
     const value = await this.requests.request<unknown>('modules.installVerifiedUpdate', { moduleId })

@@ -19,6 +19,6 @@ test('explicit module checkout rejects old WPF catalogs and accepts native catal
 
 test('integrated transfer stays host-owned and unknown modules are rejected', () => {
   const host = resolve('host')
-  assert.equal(moduleSource('transfer', host), resolve(host, 'QingToolbox.Tauri/native-transfer'))
+  assert.throws(() => moduleSource('transfer', host), /Unknown independent module/)
   assert.throws(() => moduleSource('not-a-module', host), /Unknown/)
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { insertionSlot, moveToSlot, previewSlot } from '../../../QingToolbox.Tauri/native-launcher/ui-src/src/gridOrder'
+import { insertionSlot, moveToSlot, previewSlot } from '@launcher-test/gridOrder'
 
 describe('Launcher stable drag slots', () => {
   const ids = ['a', 'b', 'c', 'folder']

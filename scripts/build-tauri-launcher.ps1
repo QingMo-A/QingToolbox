@@ -20,8 +20,7 @@ if (-not $npmCommand) { throw 'npm was not found. Install Node.js before buildin
 
 Push-Location $uiRoot
 try {
-    npm ci --ignore-scripts --no-audit --no-fund
-    if ($LASTEXITCODE -ne 0) { throw "Launcher UI dependency install failed with exit code $LASTEXITCODE" }
+    Restore-QingModuleUiDependencies -UiRoot $uiRoot
     npm run build
     if ($LASTEXITCODE -ne 0) { throw "Launcher UI build failed with exit code $LASTEXITCODE" }
 } finally { Pop-Location }

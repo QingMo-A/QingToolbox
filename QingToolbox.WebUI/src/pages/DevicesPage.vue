@@ -7,13 +7,14 @@ import QIcon from '../design-system/components/QIcon.vue'
 import QButton from '../design-system/components/QButton.vue'
 import QModal from '../design-system/components/QModal.vue'
 import QModalLabel from '../design-system/components/QModalLabel.vue'
+import QModalInput from '../design-system/components/QModalInput.vue'
 import { useLocalization } from '../localization/localization'
 import { TauriTransport } from '../bridge/transport/TauriTransport'
 import DeviceReceiveSettings from './DeviceReceiveSettings.vue'
 
 type DeviceGroup = 'intimate' | 'connected'
 type NearbyDevice = { id: string; name: string; platform: 'windows' | 'android'; status: 'Unverified' }
-type PairedDevice = { id: string; discoveryId: string; name: string; platform: 'windows' | 'android'; relationship: 'Connected' | 'Intimate' }
+type PairedDevice = { id: string; discoveryId: string; name: string; remark?: string | null; platform: 'windows' | 'android'; relationship: 'Connected' | 'Intimate' }
 type PendingPair = { sessionId: string; discoveryId: string; name: string; platform: 'windows' | 'android'; code: string; incoming: boolean; localApproved: boolean }
 type DeviceAction = 'upgrade' | 'disconnect' | 'demote'
 type PendingDeviceAction = { sessionId: string; peerId: string; name: string; action: DeviceAction; localApproved: boolean }
@@ -35,13 +36,17 @@ const discoveryBusy = ref(false)
 const actionBusy = ref<string | null>(null)
 const actionError = ref<string | null>(null)
 const dismissedError = ref<string | null>(null)
+const remarkDevice = ref<PairedDevice | null>(null)
+const remarkDraft = ref('')
+const remarkBusy = ref(false)
+const remarkError = ref<string | null>(null)
 const seenNotices = ref<string[]>([...acknowledgedDeviceNotices])
 const rejectedSessions = ref<string[]>([])
 const currentNotice = computed(() => deviceSnapshot.value?.pairing?.notices?.find(notice => !seenNotices.value.includes(notice.id)))
 const currentPair = computed(() => deviceSnapshot.value?.pairing?.pending.find(pending => !rejectedSessions.value.includes(pending.sessionId)) ?? null)
 const currentAction = computed(() => deviceSnapshot.value?.pairing?.actions?.find(pending => !rejectedSessions.value.includes(pending.sessionId)) ?? null)
 const currentError = computed(() => actionError.value || deviceSnapshot.value?.pairing?.error || null)
-const dialogKind = computed(() => currentPair.value ? 'pair' : currentAction.value ? 'action' : currentNotice.value ? 'notice' : currentError.value && currentError.value !== dismissedError.value ? 'error' : null)
+const dialogKind = computed(() => remarkDevice.value ? 'remark' : currentPair.value ? 'pair' : currentAction.value ? 'action' : currentNotice.value ? 'notice' : currentError.value && currentError.value !== dismissedError.value ? 'error' : null)
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let refreshGeneration = 0
 const localStatus = computed(() => {
@@ -107,6 +112,7 @@ async function deviceAction(command: string, args: Record<string, unknown>, key:
   }
 }
 async function refreshDevices() {
+  if (remarkBusy.value || actionBusy.value || discoveryBusy.value) return
   const generation = ++refreshGeneration
   try {
     const snapshot = await invoke<DeviceSnapshot>('get_devices_snapshot')
@@ -151,7 +157,41 @@ function onTabKeydown(event: KeyboardEvent, group: DeviceGroup) {
   void nextTick(() => document.getElementById(`device-tab-${selectedGroup.value}`)?.focus())
 }
 function openTransfer(device: PairedDevice) {
-  window.dispatchEvent(new CustomEvent('qing:open-device-transfer', { detail: { id: device.id, name: device.name } }))
+  window.dispatchEvent(new CustomEvent('qing:open-device-transfer', { detail: { id: device.id, name: displayDeviceName(device) } }))
+}
+function displayDeviceName(device: PairedDevice) {
+  return device.remark ? `${device.remark}(${device.name})` : device.name
+}
+function editRemark(device: PairedDevice) {
+  if (actionBusy.value || dialogKind.value) return
+  remarkDevice.value = device
+  remarkDraft.value = device.remark ?? ''
+  remarkError.value = null
+}
+function closeRemark() {
+  if (!remarkBusy.value) remarkDevice.value = null
+}
+async function saveRemark() {
+  if (!remarkDevice.value || remarkBusy.value) return
+  const remark = remarkDraft.value.trim()
+  if (Array.from(remark).length > 80 || /[\u0000-\u001f\u007f-\u009f]/.test(remark)) {
+    remarkError.value = t('devices.remark.invalid')
+    return
+  }
+  remarkBusy.value = true
+  remarkError.value = null
+  const generation = ++refreshGeneration
+  try {
+    const snapshot = await invoke<DeviceSnapshot>('set_device_remark', { peerId: remarkDevice.value.id, remark })
+    if (generation === refreshGeneration) {
+      applySnapshot(snapshot)
+      remarkDevice.value = null
+    }
+  } catch {
+    if (generation === refreshGeneration) remarkError.value = t('devices.remark.failed')
+  } finally {
+    remarkBusy.value = false
+  }
 }
 </script>
 
@@ -212,12 +252,20 @@ function openTransfer(device: PairedDevice) {
                 <template v-if="pairedDevices.length">
                   <div v-for="device in pairedDevices" :key="device.id" class="devices-paired-item">
                     <span class="devices-nearby-icon" :data-platform="device.platform"><QIcon :name="device.platform === 'android' ? 'phoneDevice' : 'desktopDevice'" :size="20" /></span>
-                    <span class="devices-nearby-details"><strong>{{ device.name }}</strong><small class="devices-peer-meta"><span>{{ t(device.platform === 'android' ? 'devices.list.android' : 'devices.list.windows') }}</span><span class="devices-presence" :class="{ online: onlineIds.has(device.id) }" :title="t('devices.presence.hint')"><i aria-hidden="true" />{{ t(onlineIds.has(device.id) ? 'devices.presence.online' : 'devices.presence.offline') }}</span><span v-if="batteryFor(device.id)">{{ t('devices.battery.status', { percent: batteryFor(device.id)?.percent ?? 0, charging: batteryFor(device.id)?.charging ? t('devices.battery.charging') : '' }) }}</span></small></span>
+                    <div class="devices-nearby-details">
+                      <div class="devices-peer-name">
+                        <strong :title="displayDeviceName(device)">{{ displayDeviceName(device) }}</strong>
+                        <button class="devices-remark-action" type="button" :title="t('devices.remark.title')" :aria-label="t('devices.remark.edit', { name: displayDeviceName(device) })" :disabled="Boolean(actionBusy || dialogKind)" @click="editRemark(device)"><QIcon name="edit" :size="16" /></button>
+                      </div>
+                      <small class="devices-peer-meta"><span>{{ t(device.platform === 'android' ? 'devices.list.android' : 'devices.list.windows') }}</span><span class="devices-presence" :class="{ online: onlineIds.has(device.id) }" :title="t('devices.presence.hint')"><i aria-hidden="true" />{{ t(onlineIds.has(device.id) ? 'devices.presence.online' : 'devices.presence.offline') }}</span><span v-if="batteryFor(device.id)">{{ t('devices.battery.status', { percent: batteryFor(device.id)?.percent ?? 0, charging: batteryFor(device.id)?.charging ? t('devices.battery.charging') : '' }) }}</span></small>
+                    </div>
+                    <div class="devices-peer-actions">
                     <button class="devices-small-action" type="button" :disabled="Boolean(actionBusy)" @click="deviceAction('set_device_relationship', { peerId: device.id, intimate: selectedGroup !== 'intimate' }, device.id)">
                       {{ t(selectedGroup === 'intimate' ? 'devices.pairing.demote' : 'devices.pairing.promote') }}
                     </button>
                     <button class="devices-small-action devices-revoke" type="button" :disabled="Boolean(actionBusy)" @click="deviceAction('revoke_device_pairing', { peerId: device.id }, device.id)">{{ t('devices.pairing.revoke') }}</button>
                     <button class="devices-small-action devices-transfer-action" type="button" :disabled="!onlineIds.has(device.id)" :title="t('devices.transfer.action')" :aria-label="t('devices.transfer.action')" @click="openTransfer(device)"><QIcon name="folder" :size="17" /></button>
+                    </div>
                   </div>
                 </template>
                 <template v-else>
@@ -254,6 +302,11 @@ function openTransfer(device: PairedDevice) {
     </div>
   </QPage>
   <DeviceReceiveSettings v-if="receiveSettingsOpen" @close="receiveSettingsOpen = false" />
+  <QModal :open="dialogKind === 'remark'" :title="t('devices.remark.title')" :busy="remarkBusy" :close-label="t('devices.transfer.close')" @close="closeRemark">
+    <QModalInput v-model="remarkDraft" :label="t('devices.remark.label')" :placeholder="remarkDevice?.name" :disabled="remarkBusy" @keydown.enter.prevent="saveRemark" />
+    <QModalLabel v-if="remarkError" class="devices-remark-error" role="alert">{{ remarkError }}</QModalLabel>
+    <template #actions><QButton variant="primary" :disabled="remarkBusy" @click="saveRemark">{{ t('devices.remark.confirm') }}</QButton></template>
+  </QModal>
   <QModal :open="dialogKind === 'pair'" :title="currentPair ? t(currentPair.incoming ? 'devices.pairing.incoming' : 'devices.pairing.outgoing') : ''" :busy="Boolean(currentPair?.localApproved || actionBusy)" :close-label="t('devices.pairing.reject')" @close="closeDialog">
     <QModalLabel>{{ currentPair?.name }}</QModalLabel>
     <QModalLabel>{{ t('devices.pairing.compare') }}</QModalLabel>
@@ -288,14 +341,14 @@ function openTransfer(device: PairedDevice) {
 </template>
 
 <style scoped>
-.devices-page { padding: 32px 34px; }
-.devices-workspace { width: min(100%, 1080px); margin: 0 auto; }
-.devices-heading { display:flex;align-items:end;justify-content:space-between;gap:14px;margin-bottom: 25px; animation: devices-enter 420ms both; }
+.devices-page { padding: clamp(24px, 3vh, 36px) clamp(24px, 3vw, 42px); }
+.devices-workspace { width: 100%; height: 100%; min-height: 690px; display: grid; grid-template-rows: auto minmax(260px, .9fr) minmax(320px, 1fr); gap: 22px; }
+.devices-heading { display:flex;align-items:end;justify-content:space-between;gap:14px; animation: devices-enter 420ms both; }
 .devices-eyebrow { color: var(--q-brand); font-size: 11px; font-weight: 750; letter-spacing: .13em; }
 .devices-heading h1 { margin: 6px 0 0; font-size: clamp(27px, 3vw, 34px); letter-spacing: -.035em; }
-.devices-upper { display: grid; grid-template-columns: minmax(260px, .82fr) minmax(0, 1.55fr); gap: 18px; align-items: stretch; }
+.devices-upper { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(0, 1.6fr); gap: 22px; min-height: 0; align-items: stretch; }
 .devices-local, .devices-paired, .devices-nearby { border: 1px solid var(--q-border); border-radius: var(--q-radius-lg); background: var(--q-surface); box-shadow: 0 9px 25px rgba(43,76,120,.045); }
-.devices-local { display: flex; flex-direction: column; justify-content: space-between; gap: 16px; min-width: 0; min-height: 205px; padding: 24px; border-color: color-mix(in srgb, var(--q-brand) 20%, var(--q-border)); background: linear-gradient(135deg, var(--q-surface), color-mix(in srgb, var(--q-brand-soft) 38%, var(--q-surface))); animation: devices-enter 480ms 50ms both; }
+.devices-local { display: flex; flex-direction: column; justify-content: space-between; gap: 16px; min-width: 0; min-height: 260px; padding: clamp(24px, 2.4vw, 34px); border-color: color-mix(in srgb, var(--q-brand) 20%, var(--q-border)); background: linear-gradient(135deg, var(--q-surface), color-mix(in srgb, var(--q-brand-soft) 38%, var(--q-surface))); animation: devices-enter 480ms 50ms both; }
 .devices-local-main { display: flex; align-items: center; gap: 18px; min-width: 0; }
 .devices-local-mark { flex: 0 0 auto; width: 72px; height: 72px; display: grid; place-items: center; border-radius: 20px; background: var(--q-brand-soft); color: var(--q-brand); }
 .devices-local-content { min-width: 0; }
@@ -308,7 +361,7 @@ function openTransfer(device: PairedDevice) {
 .devices-discovery-button:hover { border-color: var(--q-brand); background: var(--q-brand-soft); }
 .devices-discovery-button:disabled { opacity: .55; cursor: wait; }
 .devices-error { margin: 0; color: #d13b49; font-size: 12px; overflow-wrap: anywhere; }
-.devices-paired { min-width: 0; height: 205px; display: flex; flex-direction: column; overflow: hidden; animation: devices-enter 500ms 95ms both; }
+.devices-paired { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; animation: devices-enter 500ms 95ms both; }
 .devices-tabs { flex: 0 0 auto; display: flex; gap: 6px; margin: 0 20px; padding: 14px 0 10px; border-bottom: 1px solid var(--q-border); }
 .devices-tabs button { border: 0; border-radius: 9px; padding: 9px 15px; background: transparent; color: var(--q-text-2); font-size: 13px; font-weight: 650; cursor: pointer; }
 .devices-tabs button:hover { background: var(--q-surface-soft); color: var(--q-text); }
@@ -316,15 +369,22 @@ function openTransfer(device: PairedDevice) {
 .devices-paired-scroll, .devices-nearby-scroll { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--q-brand) 36%, var(--q-border)) transparent; }
 .devices-paired-scroll::-webkit-scrollbar, .devices-nearby-scroll::-webkit-scrollbar { width: 7px; }
 .devices-paired-scroll::-webkit-scrollbar-thumb, .devices-nearby-scroll::-webkit-scrollbar-thumb { border-radius: 7px; background: color-mix(in srgb, var(--q-brand) 36%, var(--q-border)); }
-.devices-nearby { display: flex; flex-direction: column; min-height: 328px; margin-top: 18px; overflow: hidden; animation: devices-enter 500ms 140ms both; }
+.devices-nearby { display: flex; flex-direction: column; min-height: 0; overflow: hidden; animation: devices-enter 500ms 140ms both; }
 .devices-nearby-heading { flex: 0 0 auto; display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 23px 25px 17px; border-bottom: 1px solid var(--q-border); }
 .devices-nearby-heading h2 { margin: 0; font-size: 18px; }
 .devices-nearby-heading span { color: var(--q-text-3); font-size: 12px; }
-.devices-nearby-scroll { min-height: 250px; max-height: 380px; }
+.devices-nearby-scroll > .devices-empty { height: 100%; }
 .devices-nearby-list { list-style: none; margin: 0; padding: 10px 15px; }
 .devices-paired-list { padding: 7px 13px; }
-.devices-paired-item { display: flex; align-items: center; gap: 10px; min-height: 61px; padding: 7px; }
-.devices-paired-item .devices-nearby-details { flex: 1; }
+.devices-paired-item { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 76px; padding: 10px 7px; }
+.devices-peer-name { display: flex; align-items: center; min-width: 0; gap: 5px; }
+.devices-paired-item .devices-peer-name strong { font-size: 15px; }
+.devices-remark-action { display: inline-grid; place-items: center; flex: 0 0 auto; width: 27px; height: 27px; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--q-text-3); cursor: pointer; }
+.devices-remark-action:hover { background: var(--q-brand-soft); color: var(--q-brand); transform: translateY(-1px); }
+.devices-remark-action:active { transform: scale(.92); }
+.devices-remark-action:disabled { opacity: .45; cursor: default; transform: none; }
+.devices-remark-error { color: var(--q-danger); }
+.devices-peer-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 .devices-peer-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 9px; }
 .devices-presence { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; color: var(--q-text-3); }
 .devices-presence i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
@@ -354,8 +414,9 @@ function openTransfer(device: PairedDevice) {
 .devices-swap-enter-from { opacity: 0; transform: translateY(7px); }
 .devices-swap-leave-to { opacity: 0; transform: translateY(-5px); }
 @keyframes devices-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-@media (max-width: 850px) { .devices-upper { grid-template-columns: 1fr; } .devices-local { min-height: 160px; } .devices-paired { height: 205px; } }
+@container (max-width: 590px) { .devices-paired-item { grid-template-columns: 38px minmax(0, 1fr); gap: 5px 10px; } .devices-peer-actions { grid-column: 2; } }
+@media (max-width: 850px) { .devices-workspace { height: auto; min-height: 100%; grid-template-rows: auto auto minmax(340px, 1fr); } .devices-upper { grid-template-columns: 1fr; } .devices-local { min-height: 200px; } .devices-paired { height: clamp(260px, 38vh, 440px); } }
 @media (max-width: 720px) { .devices-page { padding: 19px 16px; } .devices-local { padding: 21px; } .devices-local-mark { width: 64px; height: 64px; } .devices-nearby-heading { display: block; padding: 20px 18px 14px; } .devices-nearby-heading span { display: block; margin-top: 6px; } .devices-tabs { margin: 0 18px; flex-wrap: wrap; } }
 @media (max-width: 420px) { .devices-local-main { gap: 13px; } .devices-local-mark { width: 54px; height: 54px; } }
-@media (prefers-reduced-motion: reduce) { .devices-heading, .devices-local, .devices-paired, .devices-nearby { animation: none; } .devices-swap-enter-active, .devices-swap-leave-active { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .devices-heading, .devices-local, .devices-paired, .devices-nearby { animation: none; } .devices-swap-enter-active, .devices-swap-leave-active, .devices-remark-action { transition: none; } .devices-remark-action:hover, .devices-remark-action:active { transform: none; } }
 </style>

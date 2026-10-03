@@ -286,7 +286,7 @@ fn update_qmod_into(
     update_qmod_into_with_options(source_path, expected_module_id, modules_root, None, false)
 }
 
-fn update_qmod_into_with_options(
+pub(crate) fn update_qmod_into_with_options(
     source_path: &str,
     expected_module_id: &str,
     modules_root: &Path,
@@ -450,7 +450,7 @@ fn import_qmod_into(
     import_qmod_into_with_options(source_path, modules_root, None, false)
 }
 
-fn import_qmod_into_with_options(
+pub(crate) fn import_qmod_into_with_options(
     source_path: &str,
     modules_root: &Path,
     expected_sha256: Option<&str>,

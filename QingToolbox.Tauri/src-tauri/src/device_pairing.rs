@@ -107,6 +107,9 @@ pub struct PairedDevice {
     pub id: String,
     pub discovery_id: String,
     pub name: String,
+    // Local display metadata only; never used as the authenticated peer identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remark: Option<String>,
     pub platform: String,
     pub relationship: Relationship,
 }
@@ -323,6 +326,16 @@ impl PairingCore {
             let result = core.run_management(stream, false, None, None, stop);
             core.finish_session(result, None);
         });
+    }
+
+    pub fn set_remark(&self, peer_id: &str, remark: &str) -> Result<(), String> {
+        let remark = normalize_remark(remark)?;
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let mut records = state.records.clone();
+        records.get_mut(peer_id).ok_or("设备未配对。")?.remark = remark;
+        self.persist(&records)?;
+        state.records = records;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -995,6 +1008,7 @@ impl PairingCore {
             id: key,
             discovery_id: remote.discovery_id,
             name: remote.name,
+            remark: None,
             platform: remote.platform,
             relationship: Relationship::Connected,
         })
@@ -1365,6 +1379,14 @@ fn safe_name(value: &str) -> String {
     }
 }
 
+fn normalize_remark(value: &str) -> Result<Option<String>, String> {
+    let value = value.trim();
+    if value.chars().count() > 80 || value.chars().any(char::is_control) {
+        return Err("备注不能超过 80 个字符，且不能包含控制字符。".to_string());
+    }
+    Ok((!value.is_empty()).then(|| value.to_string()))
+}
+
 fn read_records(file: &Path) -> Result<BTreeMap<String, PairedDevice>, String> {
     let data = match fs::read(file) {
         Ok(data) => data,
@@ -1381,7 +1403,8 @@ fn read_records(file: &Path) -> Result<BTreeMap<String, PairedDevice>, String> {
     }
     let mut records = BTreeMap::new();
     let mut discovery_ids = BTreeSet::new();
-    for peer in saved.peers {
+    for mut peer in saved.peers {
+        peer.remark = normalize_remark(peer.remark.as_deref().unwrap_or_default())?;
         if peer.id.len() != 64
             || !peer.id.bytes().all(|byte| byte.is_ascii_hexdigit())
             || !valid_id(&peer.discovery_id)
@@ -1555,6 +1578,7 @@ mod tests {
             id: "a".repeat(64),
             discovery_id: "b".repeat(32),
             name: "Phone".to_string(),
+            remark: None,
             platform: "android".to_string(),
             relationship: Relationship::Connected,
         };
@@ -1760,6 +1784,77 @@ mod tests {
     }
 
     #[test]
+    fn device_remarks_are_local_and_do_not_change_pairing_identity() {
+        let core = PairingCore::ephemeral("0123456789abcdef0123456789abcdef", "One");
+        let peer = PairedDevice {
+            id: "a".repeat(64),
+            discovery_id: "f".repeat(32),
+            name: "24122RKC7C".to_string(),
+            remark: None,
+            platform: "android".to_string(),
+            relationship: Relationship::Intimate,
+        };
+        core.save_new_pair(peer.clone()).unwrap();
+        core.cancel_pending(); // Remarks work even when the paired device is offline.
+        core.set_remark(&peer.id, "  QingMo的设备  ").unwrap();
+        let snapshot = core.snapshot();
+        let saved = &snapshot.paired[0];
+        assert_eq!(saved.remark.as_deref(), Some("QingMo的设备"));
+        assert_eq!(saved.name, peer.name);
+        assert_eq!(saved.id, peer.id);
+        assert_eq!(saved.discovery_id, peer.discovery_id);
+        assert_eq!(saved.relationship, peer.relationship);
+        assert!(snapshot.online.is_empty());
+        assert!(core.set_remark("unknown", "Other").is_err());
+        assert!(core.set_remark(&peer.id, &"a".repeat(81)).is_err());
+        assert!(core.set_remark(&peer.id, "bad\u{0000}remark").is_err());
+        assert_eq!(
+            core.snapshot().paired[0].remark.as_deref(),
+            Some("QingMo的设备")
+        );
+        core.set_remark(&peer.id, " \t ").unwrap();
+        assert!(core.snapshot().paired[0].remark.is_none());
+    }
+
+    #[test]
+    fn failed_remark_persistence_does_not_change_the_display_name() {
+        let mut core = PairingCore::ephemeral("0123456789abcdef0123456789abcdef", "One");
+        let peer = PairedDevice {
+            id: "a".repeat(64),
+            discovery_id: "f".repeat(32),
+            name: "Phone".to_string(),
+            remark: Some("Original".to_string()),
+            platform: "android".to_string(),
+            relationship: Relationship::Connected,
+        };
+        core.save_new_pair(peer.clone()).unwrap();
+        Arc::get_mut(&mut core).unwrap().records_file = Some(
+            std::env::temp_dir()
+                .join(random_id().unwrap())
+                .join("missing/paired.json"),
+        );
+        assert!(core.set_remark(&peer.id, "Replacement").is_err());
+        assert_eq!(
+            core.snapshot().paired[0].remark.as_deref(),
+            Some("Original")
+        );
+    }
+
+    #[test]
+    fn old_pairing_records_without_remarks_remain_compatible() {
+        let record: PairedDevice = serde_json::from_value(serde_json::json!({
+            "id": "a".repeat(64), "discoveryId": "f".repeat(32),
+            "name": "Phone", "platform": "android", "relationship": "Connected"
+        }))
+        .unwrap();
+        assert!(record.remark.is_none());
+        assert!(serde_json::to_value(record)
+            .unwrap()
+            .get("remark")
+            .is_none());
+    }
+
+    #[test]
     fn manual_relationships_require_existing_pair() {
         let core = PairingCore::ephemeral("0123456789abcdef0123456789abcdef", "One");
         assert!(core
@@ -1769,6 +1864,7 @@ mod tests {
             id: "a".repeat(64),
             discovery_id: "f".repeat(32),
             name: "Two".to_string(),
+            remark: None,
             platform: "windows".to_string(),
             relationship: Relationship::Connected,
         };
@@ -1799,6 +1895,7 @@ mod tests {
             id: "a".repeat(64),
             discovery_id: "f".repeat(32),
             name: "Two".to_string(),
+            remark: None,
             platform: "android".to_string(),
             relationship: Relationship::Connected,
         };
@@ -1846,6 +1943,7 @@ mod tests {
             id: "a".repeat(64),
             discovery_id: "f".repeat(32),
             name: "Second PC".to_string(),
+            remark: None,
             platform: "windows".to_string(),
             relationship: Relationship::Connected,
         };
@@ -1853,15 +1951,24 @@ mod tests {
         first
             .set_relationship(&peer.id, Relationship::Intimate)
             .unwrap();
+        first.set_remark(&peer.id, "QingMo的设备").unwrap();
         let original_private = first.identity.private.clone();
         drop(first);
         let restored = PairingCore::new(&profile, id, "First PC").unwrap();
         assert_eq!(restored.identity.private, original_private);
         assert_eq!(
+            restored.snapshot().paired[0].remark.as_deref(),
+            Some("QingMo的设备")
+        );
+        assert_eq!(
             restored.snapshot().paired[0].relationship,
             Relationship::Intimate
         );
+        restored.set_remark(&peer.id, "").unwrap();
         drop(restored);
+        let cleared = PairingCore::new(&profile, id, "First PC").unwrap();
+        assert!(cleared.snapshot().paired[0].remark.is_none());
+        drop(cleared);
         fs::remove_dir_all(&profile).unwrap();
     }
 
@@ -1878,6 +1985,7 @@ mod tests {
             id: "a".repeat(64),
             discovery_id: "f".repeat(32),
             name: "Second PC".to_string(),
+            remark: None,
             platform: "windows".to_string(),
             relationship: Relationship::Connected,
         };

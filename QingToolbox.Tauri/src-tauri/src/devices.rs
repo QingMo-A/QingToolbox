@@ -88,6 +88,10 @@ pub struct DeviceManager {
 }
 
 impl DeviceManager {
+    pub(crate) fn transfer_identity(&self) -> (&str, Option<String>) {
+        (&self.name, self.identity.as_ref().ok().cloned())
+    }
+
     pub fn is_enabled(&self) -> bool {
         self.shared
             .lock()
@@ -242,6 +246,13 @@ impl DeviceManager {
             .as_ref()
             .map_err(Clone::clone)?
             .decide(session_id, approve)
+    }
+
+    pub fn set_remark(&self, peer_id: &str, remark: &str) -> Result<(), String> {
+        self.pairing
+            .as_ref()
+            .map_err(Clone::clone)?
+            .set_remark(peer_id, remark)
     }
 
     pub fn set_relationship(&self, peer_id: &str, intimate: bool) -> Result<(), String> {

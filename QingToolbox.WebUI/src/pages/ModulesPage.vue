@@ -3,6 +3,7 @@ import { computed, inject, onBeforeUnmount, onMounted, reactive, ref, watch } fr
 import type { ModuleClient } from '../bridge/clients/ModuleClient'
 import { useAppStore } from '../app/store'
 import { useModuleStore, type ModuleFilter } from '../app/moduleStore'
+import { useModuleRepositoryStore } from '../app/moduleRepositoryStore'
 import type { ModuleImportPrompt, ModuleImportResult, ModuleSnapshotItem } from '../contracts/modules'
 import { useToastStore } from '../app/toastStore'
 import QPage from '../design-system/components/QPage.vue'
@@ -13,6 +14,8 @@ import QSkeleton from '../design-system/components/QSkeleton.vue'
 import QIcon from '../design-system/components/QIcon.vue'
 import QModal from '../design-system/components/QModal.vue'
 import QModalLabel from '../design-system/components/QModalLabel.vue'
+import QModuleImportMenu from '../design-system/components/QModuleImportMenu.vue'
+import OfficialModuleDialog from './OfficialModuleDialog.vue'
 import ModuleIcon from '../modules/ModuleIcon.vue'
 import {
   summarizeModuleStates,
@@ -32,9 +35,19 @@ import {
 const client = inject<ModuleClient>('moduleClient')!
 const app = useAppStore()
 const store = useModuleStore()
+const repository = useModuleRepositoryStore()
 const toast = useToastStore()
 const { t } = useLocalization()
 const isImporting = ref(false)
+const repositoryOpen = ref(false)
+const updatingCheckPreference = ref<string|null>(null)
+async function toggleUpdateCheck(module: ModuleSnapshotItem) {
+  if (!hostOperationsAvailable.value || updatingCheckPreference.value) return
+  updatingCheckPreference.value = module.id
+  try { store.complete(await client.setUpdateCheck(module.id, module.isUpdateCheckEnabled === false)) }
+  catch { toast.show(t('modules.update.preferenceFailed'), 'error') }
+  finally { updatingCheckPreference.value = null }
+}
 const replacingModuleId = ref<string | null>(null)
 const pendingApiPrompt = ref<ModuleImportPrompt | null>(null)
 const isConfirmingApiImport = ref(false)
@@ -252,18 +265,18 @@ function closeRemoveConfirmation(moduleId: string) {
 const updateStatusKey = (status: ModuleSnapshotItem['updateStatus']): TranslationKey => `modules.update.status.${status}`
 const downloadStatusKey = (status: ModuleSnapshotItem['downloadStatus']): TranslationKey => `modules.update.download.${status}`
 const updateTone = (module: ModuleSnapshotItem) => {
-  if (module.downloadStatus === 'Verified' || module.downloadStatus === 'AlreadyVerified' || module.updateStatus === 'UpToDate') return 'success'
+  if (module.downloadStatus === 'Installed' || module.downloadStatus === 'Verified' || module.downloadStatus === 'AlreadyVerified' || module.updateStatus === 'UpToDate') return 'success'
   if (['SourceUnavailable','SourceInvalid','InvalidLocalVersion'].includes(module.updateStatus) ||
-      ['SizeMismatch','HashMismatch','SourceUnavailable','SourceInvalid','UntrustedRedirect','StorageUnavailable','Failed','TransferTimedOut'].includes(module.downloadStatus)) return 'danger'
+      ['SizeMismatch','HashMismatch','SourceUnavailable','SourceInvalid','UntrustedRedirect','StorageUnavailable','Failed','TransferTimedOut','InstallFailed'].includes(module.downloadStatus)) return 'danger'
   if (['HostUpdateRequired','ModuleApiIncompatible','HostVersionIncompatible','DisabledByEnvironment'].includes(module.updateStatus) ||
       ['MetadataChanged','MetadataStale','Cancelled','DisabledByEnvironment'].includes(module.downloadStatus)) return 'warning'
   return module.updateStatus === 'UpdateAvailable' ? 'info' : 'neutral'
 }
 const isVerifiedUpdate = (module: ModuleSnapshotItem) => module.downloadStatus === 'Verified' || module.downloadStatus === 'AlreadyVerified'
 const hasDownloadStatus = (module: ModuleSnapshotItem) => module.downloadStatus !== 'NotDownloaded'
-const downloadPercentage = (module: ModuleSnapshotItem) => module.downloadExpectedBytes > 0
-  ? Math.max(0, Math.min(100, module.downloadBytesReceived * 100 / module.downloadExpectedBytes))
-  : null
+const progressBytes = (module: ModuleSnapshotItem) => repository.snapshot?.moduleId === module.id && repository.active
+  ? { received: repository.snapshot.bytesReceived, expected: repository.snapshot.expectedBytes }
+  : { received: module.downloadBytesReceived, expected: module.downloadExpectedBytes }
 const formatBytes = (bytes: number) => {
   const value = Math.max(0, bytes)
   if (value < 1024) return `${value.toFixed(0)} B`
@@ -277,9 +290,9 @@ const formatBytes = (bytes: number) => {
   return `${scaled < 10 ? scaled.toFixed(1) : scaled.toFixed(0)} ${unit}`
 }
 const downloadProgressText = (module: ModuleSnapshotItem) => {
-  const percentage = downloadPercentage(module)
-  if (percentage !== null) return `${formatBytes(module.downloadBytesReceived)} / ${formatBytes(module.downloadExpectedBytes)} · ${percentage.toFixed(0)}%`
-  return module.downloadBytesReceived > 0 ? formatBytes(module.downloadBytesReceived) : null
+  const { received, expected } = progressBytes(module)
+  if (expected > 0) return `${formatBytes(received)} / ${formatBytes(expected)} · ${Math.max(0, Math.min(100, received * 100 / expected)).toFixed(0)}%`
+  return received > 0 ? formatBytes(received) : null
 }
 const overallUpdateStatusKey = (module: ModuleSnapshotItem): TranslationKey => {
   if (isVerifiedUpdate(module)) return 'modules.update.verifiedBadge'
@@ -299,6 +312,9 @@ const updateConditionDetail = (module: ModuleSnapshotItem) => {
 }
 const downloadToast = (status: ModuleSnapshotItem['downloadStatus']): { key: TranslationKey; kind: 'info'|'success'|'warning'|'error' } => {
   if (status === 'Verified' || status === 'AlreadyVerified') return { key: 'modules.update.toast.verified', kind: 'success' }
+  if (['Downloading','Verifying','Installing'].includes(status)) return { key: 'modules.update.toast.started', kind: 'info' }
+  if (status === 'Installed') return { key: 'modules.update.toast.installed', kind: 'success' }
+  if (status === 'InstallFailed') return { key: 'modules.repository.installFailed', kind: 'error' }
   if (status === 'SizeMismatch' || status === 'HashMismatch') return { key: 'modules.update.toast.validationFailed', kind: 'error' }
   if (status === 'SourceUnavailable' || status === 'SourceInvalid' || status === 'UntrustedRedirect') return { key: 'modules.update.toast.sourceRejected', kind: 'error' }
   if (status === 'StorageUnavailable') return { key: 'modules.update.toast.storageFailed', kind: 'error' }
@@ -407,7 +423,7 @@ watch(() => store.selectedModule && [store.selectedModule.version, store.selecte
 })
 const summary = computed(() => summarizeModuleStates(store.modules))
 const hasConfirmedSnapshot = computed(() => store.lastUpdatedAt !== null)
-const hostOperationsAvailable = computed(() => app.bridge === 'Connected' && store.status === 'ready')
+const hostOperationsAvailable = computed(() => app.bridge === 'Connected' && store.status === 'ready' && repository.snapshot?.status !== 'Installing')
 const canRefresh = computed(() => app.bridge === 'Connected' && store.status !== 'loading' && !isImporting.value)
 const snapshotStatusMessage = computed(() => {
   if (!hasConfirmedSnapshot.value) return null
@@ -438,10 +454,11 @@ onBeforeUnmount(() => {
 
 <template>
   <QPage class="modules-page">
+    <OfficialModuleDialog :open="repositoryOpen" @close="repositoryOpen = false" />
     <header class="wpf-page-header">
       <div><h1>{{ t('modules.page.title') }}</h1><p>{{ t('modules.page.description') }}</p></div>
       <div class="module-page-actions">
-        <QButton class="module-import-button" variant="primary" :aria-busy="isImporting" @click="importModule" :disabled="!hostOperationsAvailable || isImporting"><span v-if="isImporting" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="import" /> {{ t(isImporting ? 'modules.page.importing' : 'modules.page.import') }}</QButton>
+        <QModuleImportMenu :importing="isImporting" :disabled="!hostOperationsAvailable || repository.active" @local="importModule" @repository="repositoryOpen = true" />
         <QButton class="module-refresh-button" variant="secondary" @click="refresh(true)" :disabled="!canRefresh"><QIcon name="refresh" /> {{ t(store.status === 'loading' ? 'modules.page.refreshing' : 'modules.page.refresh') }}</QButton>
       </div>
     </header>
@@ -467,7 +484,7 @@ onBeforeUnmount(() => {
       <section class="wpf-module-list">
         <div v-if="store.status === 'loading' && !hasConfirmedSnapshot" class="wpf-module-stack"><QSkeleton v-for="n in 3" :key="n" /></div>
         <QEmptyState v-else-if="store.status === 'error' && !hasConfirmedSnapshot" :title="t('modules.empty.unavailable')" :description="t('modules.empty.unavailableDescription')"><QButton :disabled="!canRefresh" @click="refresh()">{{ t('modules.empty.retry') }}</QButton></QEmptyState>
-        <QEmptyState v-else-if="store.visibleModules.length === 0" :title="t(store.modules.length ? 'modules.empty.noResults' : 'modules.empty.noInstalled')" :description="t(store.modules.length ? 'modules.empty.searchHint' : 'modules.empty.importHint')"><QButton v-if="store.modules.length === 0" class="module-import-button" variant="primary" :aria-busy="isImporting" :disabled="!hostOperationsAvailable || isImporting" @click="importModule"><span v-if="isImporting" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="import" /> {{ t(isImporting ? 'modules.page.importing' : 'modules.page.import') }}</QButton></QEmptyState>
+        <QEmptyState v-else-if="store.visibleModules.length === 0" :title="t(store.modules.length ? 'modules.empty.noResults' : 'modules.empty.noInstalled')" :description="t(store.modules.length ? 'modules.empty.searchHint' : 'modules.empty.importHint')"><QModuleImportMenu v-if="store.modules.length === 0" :importing="isImporting" :disabled="!hostOperationsAvailable || repository.active" @local="importModule" @repository="repositoryOpen = true" /></QEmptyState>
         <div v-else class="wpf-module-stack">
           <article v-for="module in store.visibleModules" :key="module.id" class="wpf-module-card" :class="{ selected: store.selectedModuleId === module.id }" tabindex="0" :aria-label="`${t('modules.card.details')}: ${module.displayName}`" @click="openDetailsFromCard($event, module.id)" @keydown.enter.self.prevent="openDetails(module.id)" @keydown.space.self.prevent="openDetails(module.id)">
             <header>
@@ -513,6 +530,7 @@ onBeforeUnmount(() => {
         <template v-if="store.selectedModule.errors.length"><h3>{{ t('modules.details.issues') }}</h3><ul><li v-for="error in store.selectedModule.errors" :key="error">{{ error }}</li></ul></template>
         <div class="wpf-detail-divider" />
         <section class="module-update">
+          <div class="settings-switch-row module-update-check-setting"><strong>{{ t('modules.update.autoCheck') }}</strong><button class="q-switch module-update-check-toggle" type="button" role="switch" :aria-label="t('modules.update.autoCheck')" :aria-checked="store.selectedModule.isUpdateCheckEnabled !== false" :disabled="!hostOperationsAvailable || updatingCheckPreference !== null" @click="toggleUpdateCheck(store.selectedModule)"><span /><em>{{ t(store.selectedModule.isUpdateCheckEnabled !== false ? 'modules.startup.on' : 'modules.startup.off') }}</em></button></div>
           <h3>{{ t('modules.update.title') }}</h3>
           <p>{{ t('modules.update.description') }}</p>
           <div class="module-update-overview">
@@ -534,7 +552,7 @@ onBeforeUnmount(() => {
           <div v-else-if="updateConditionDetailKey(store.selectedModule)" class="module-update-detail module-update-condition" :class="`is-${updateTone(store.selectedModule)}`" role="status"><QIcon :name="updateTone(store.selectedModule) === 'danger' ? 'statusDanger' : 'statusWarning'" /><div><strong>{{ t(updateStatusKey(store.selectedModule.updateStatus)) }}</strong><p>{{ updateConditionDetail(store.selectedModule) }}</p></div></div>
           <div class="module-update-actions">
             <QButton class="module-check-update" variant="secondary" :aria-busy="store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy" :disabled="!hostOperationsAvailable || !store.selectedModule.canCheckForUpdate || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy || store.selectedModule.isUpdateCheckBusy" @click="checkModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="refresh" />{{ t(store.operations[store.selectedModule.id] === 'checkUpdate' || store.selectedModule.isUpdateCheckBusy ? 'modules.update.checking' : 'modules.update.check') }}</QButton>
-            <QButton v-if="(store.selectedModule.canDownloadUpdate || store.selectedModule.isDownloadActive) && !isVerifiedUpdate(store.selectedModule)" class="module-download-update" variant="primary" :aria-busy="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy || store.selectedModule.isDownloadActive" @click="downloadModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="download" />{{ t(store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive ? 'modules.update.downloading' : 'modules.update.download') }}</QButton>
+            <QButton v-if="(store.selectedModule.canDownloadUpdate || store.selectedModule.isDownloadActive) && !isVerifiedUpdate(store.selectedModule)" class="module-download-update" variant="primary" :aria-busy="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy || store.selectedModule.isDownloadActive" @click="downloadModuleUpdate(store.selectedModule)"><span v-if="store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive" class="module-operation-spinner" aria-hidden="true" /><QIcon v-else name="download" />{{ t(store.operations[store.selectedModule.id] === 'downloadUpdate' || store.selectedModule.isDownloadActive ? 'modules.update.downloading' : 'modules.repository.download') }}</QButton>
             <QButton v-if="isVerifiedUpdate(store.selectedModule) && store.selectedModule.canInstallVerifiedUpdate" class="module-install-update" variant="primary" :aria-expanded="installConfirmationModuleId === store.selectedModule.id" aria-controls="module-install-confirmation" :disabled="!hostOperationsAvailable || !!store.operations[store.selectedModule.id] || store.selectedModule.isBusy" @click="openInstallConfirmation(store.selectedModule.id)"><QIcon name="install" />{{ t('modules.update.install.action') }}</QButton>
           </div>
           <div v-if="installConfirmationModuleId === store.selectedModule.id" id="module-install-confirmation" class="module-install-confirmation" role="group" aria-labelledby="module-install-confirmation-title">
@@ -580,6 +598,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.module-update-check-setting { margin-bottom: 16px; gap: 16px; }
 .module-api-comparison{display:flex;align-items:center;flex-wrap:wrap;gap:9px;padding:11px 12px;border:1px solid color-mix(in srgb,var(--q-warning) 28%,var(--q-border));border-radius:10px;background:color-mix(in srgb,var(--q-warning) 7%,var(--q-surface));color:var(--q-text-2);font-size:12px}.module-api-comparison strong{margin-left:4px;color:var(--q-text);font-size:14px}
 .module-page-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 0; }
 .module-page-actions .q-button { flex: 0 0 auto; margin-top: 0; white-space: nowrap; }

@@ -5,6 +5,7 @@ import type { TranslationParameters } from '../localization/localization'
 import type { TranslationKey } from '../localization/messages/en-US'
 import { bridgeStateKey } from '../presentation/workspacePresentation'
 import { useAppStore } from '../app/store'
+import { useHostUpdateStore } from '../app/hostUpdateStore'
 import type { AppClient } from '../bridge/clients/AppClient'
 import QPage from '../design-system/components/QPage.vue'
 import QButton from '../design-system/components/QButton.vue'
@@ -18,6 +19,7 @@ type DiagnosticAction = 'ping' | 'snapshot' | null
 
 const app = inject<AppClient>('appClient')!
 const store = useAppStore()
+const hostUpdate = useHostUpdateStore()
 const activeAction = ref<DiagnosticAction>(null)
 type DiagnosticNotice={key:TranslationKey;parameters?:TranslationParameters;tone:'success'|'warning'|'danger'}
 const actionNotice=ref<DiagnosticNotice|null>(null)
@@ -68,6 +70,10 @@ async function refreshSnapshot() {
 
 function reload() { window.location.reload() }
 
+function showDownloadButton() {
+  if (store.snapshot?.environmentKind === 'Development') hostUpdate.previewButtonVisible = true
+}
+
 function openModalDemo(kind: Exclude<ModalDemo, null>) {
   modalInput.value = ''
   modalDemo.value = kind
@@ -105,7 +111,24 @@ function confirmApiDemo() {
 
         <section class="diagnostics-panel diagnostics-activity" aria-labelledby="activity-title"><header><div><h2 id="activity-title">{{t('diagnostics.activity')}}</h2><p>{{t('diagnostics.activityHint')}}</p></div></header><dl class="diagnostics-activity-grid"><div><dt>{{t('diagnostics.lastSnapshot')}}</dt><dd>{{store.snapshot?localTime(store.snapshot.generatedAt):t('diagnostics.notAvailable')}}</dd></div><div><dt>{{t('diagnostics.lastEvent')}}</dt><dd>{{store.lastEvent}}</dd></div><div><dt>{{t('diagnostics.lastPing')}}</dt><dd>{{store.pingMs===null?t('diagnostics.notRun'):`${store.pingMs} ms`}}</dd></div></dl></section>
 
-        <section class="diagnostics-tools" aria-labelledby="tools-title"><header><h2 id="tools-title">{{t('diagnostics.tools')}}</h2><p>{{t('diagnostics.toolsHint')}}</p></header><div class="diagnostics-tool-groups"><section><h3>{{t('diagnostics.hostChecks')}}</h3><article><div><strong>{{t('diagnostics.ping')}}</strong><p>{{t('diagnostics.pingHint')}}</p></div><QButton :disabled="hostActionsDisabled" @click="ping"><QIcon name="statusInfo" />{{t(activeAction==='ping'?'diagnostics.pinging':'diagnostics.ping')}}</QButton></article><article><div><strong>{{t('diagnostics.refresh')}}</strong><p>{{t('diagnostics.refreshHint')}}</p></div><QButton :disabled="hostActionsDisabled" @click="refreshSnapshot"><QIcon name="refresh" />{{t(activeAction==='snapshot'?'diagnostics.refreshing':'diagnostics.refresh')}}</QButton></article></section><section><h3>{{t('diagnostics.web')}}</h3><article><div><strong>{{t('diagnostics.reload')}}</strong><p>{{t('diagnostics.reloadHint')}}</p></div><QButton @click="reload"><QIcon name="refresh" />{{t('diagnostics.reload')}}</QButton></article><article><div><strong>{{t('diagnostics.modalControls')}}</strong><p>{{t('diagnostics.modalControlsHint')}}</p></div><QButton @click="openModalDemo('controls')">{{t('diagnostics.openModal')}}</QButton></article><article><div><strong>{{t('diagnostics.modalApi')}}</strong><p>{{t('diagnostics.modalApiHint')}}</p></div><QButton @click="openModalDemo('api')">{{t('diagnostics.openModal')}}</QButton></article></section></div><p v-if="modalOutcome" class="diagnostics-modal-outcome" role="status">{{ modalOutcome.kind === 'controls' ? t('diagnostics.modalInputResult', { value: modalOutcome.value }) : t('diagnostics.modalApiResult') }}</p></section>
+        <section class="diagnostics-tools" aria-labelledby="tools-title">
+          <header><h2 id="tools-title">{{t('diagnostics.tools')}}</h2><p>{{t('diagnostics.toolsHint')}}</p></header>
+          <div class="diagnostics-tool-groups">
+            <section>
+              <h3>{{t('diagnostics.hostChecks')}}</h3>
+              <article><div><strong>{{t('diagnostics.ping')}}</strong><p>{{t('diagnostics.pingHint')}}</p></div><QButton :disabled="hostActionsDisabled" @click="ping"><QIcon name="statusInfo" />{{t(activeAction==='ping'?'diagnostics.pinging':'diagnostics.ping')}}</QButton></article>
+              <article><div><strong>{{t('diagnostics.refresh')}}</strong><p>{{t('diagnostics.refreshHint')}}</p></div><QButton :disabled="hostActionsDisabled" @click="refreshSnapshot"><QIcon name="refresh" />{{t(activeAction==='snapshot'?'diagnostics.refreshing':'diagnostics.refresh')}}</QButton></article>
+            </section>
+            <section>
+              <h3>{{t('diagnostics.web')}}</h3>
+              <article><div><strong>{{t('diagnostics.reload')}}</strong><p>{{t('diagnostics.reloadHint')}}</p></div><QButton @click="reload"><QIcon name="refresh" />{{t('diagnostics.reload')}}</QButton></article>
+              <article><div><strong>{{t('diagnostics.modalControls')}}</strong><p>{{t('diagnostics.modalControlsHint')}}</p></div><QButton @click="openModalDemo('controls')">{{t('diagnostics.openModal')}}</QButton></article>
+              <article><div><strong>{{t('diagnostics.modalApi')}}</strong><p>{{t('diagnostics.modalApiHint')}}</p></div><QButton @click="openModalDemo('api')">{{t('diagnostics.openModal')}}</QButton></article>
+              <article v-if="store.snapshot?.environmentKind === 'Development'"><div><strong>{{t('hostUpdate.panel.title')}}</strong></div><QButton data-test="show-download-button" @click="showDownloadButton"><QIcon name="download" />{{t('diagnostics.showDownloadButton')}}</QButton></article>
+            </section>
+          </div>
+          <p v-if="modalOutcome" class="diagnostics-modal-outcome" role="status">{{ modalOutcome.kind === 'controls' ? t('diagnostics.modalInputResult', { value: modalOutcome.value }) : t('diagnostics.modalApiResult') }}</p>
+        </section>
     </div>
   </QPage>
 

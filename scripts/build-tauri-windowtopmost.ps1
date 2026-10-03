@@ -20,8 +20,7 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw 'npm was not f
 
 Push-Location $uiRoot
 try {
-    npm ci --ignore-scripts --no-audit --no-fund
-    if ($LASTEXITCODE -ne 0) { throw "Window Topmost UI dependency install failed with exit code $LASTEXITCODE" }
+    Restore-QingModuleUiDependencies -UiRoot $uiRoot
     npm run build
     if ($LASTEXITCODE -ne 0) { throw "Window Topmost UI build failed with exit code $LASTEXITCODE" }
 } finally { Pop-Location }

@@ -7,6 +7,7 @@ import QModal from '../design-system/components/QModal.vue'
 import { useLocalization } from '../localization/localization'
 import { matchesDeviceTransferTarget, type DeviceTransferTarget } from './deviceTransferTarget'
 import DeviceReceiveSettings from './DeviceReceiveSettings.vue'
+import { formatFileSize } from '../presentation/fileSize'
 
 type Device = { id: string; name: string }
 type Peer = { serviceName: string; displayName: string; deviceId?: string | null; platform: string; addresses: string[]; online: boolean }
@@ -19,11 +20,11 @@ type TransferState = {
   transfer: { name: string; completed: number; total: number; receiving: boolean } | null
   lastCompleted: string | null
   lastError: string | null
+  incomingRequest?: Device | null
 }
 
 const props = withDefaults(defineProps<{ device: Device; incoming?: boolean }>(), { incoming: false })
-const emit = defineEmits<{ close: [] }>()
-const moduleId = 'qing.qingtransfer'
+const emit = defineEmits<{ close: []; incoming: [device: Device] }>()
 const { t } = useLocalization()
 const target = ref<DeviceTransferTarget | null>(null)
 const state = ref<TransferState | null>(null)
@@ -54,8 +55,8 @@ function matchingPeer(): Peer | null {
 function sessionMatchesTarget(): boolean {
   const peer = state.value?.session.peer
   if (!peer) return false
-  // Incoming offers are emitted by the host only after it has authenticated the
-  // transfer session against a paired device. Re-resolving the peer through
+  // Incoming offers are emitted only after the host matches the legacy
+  // transfer session to a paired device. Re-resolving the peer through
   // nearby discovery here is both redundant and racy: discovery can briefly be
   // between announcements while the already-established socket is healthy.
   if (props.incoming && acceptedIncomingTarget) return true
@@ -67,7 +68,11 @@ function sessionMatchesTarget(): boolean {
 }
 
 async function call(method: string, payload: Record<string, unknown> = {}): Promise<TransferState> {
-  const next = await invoke<TransferState>('invoke_module', { moduleId, method, payload })
+  const next = method === 'getState'
+    ? await invoke<TransferState>('get_device_transfer_state')
+    : await invoke<TransferState>('invoke_device_transfer', {
+      peerId: props.device.id, action: { kind: method, ...payload },
+    })
   if (!next || !next.session || !next.discovery) throw new Error(t('devices.transfer.unavailable'))
   if (!closed) state.value = next
   return next
@@ -86,11 +91,19 @@ async function poll() {
 
 async function advanceOutgoing(next: TransferState) {
   if (!pendingPath || busy.value || closed) return
+  // An offer may arrive while the native file picker is open. Receiving takes
+  // precedence; never submit a second send into the occupied receive session.
+  if (next.incomingRequest) {
+    pendingPath = null
+    emit('incoming', next.incomingRequest)
+    return
+  }
+  if (next.incomingFile || next.transfer) return
   if (next.session.state === 'Idle' && !connectAttempted) {
     const peer = next.discovery.peers.find(item => target.value && matchesDeviceTransferTarget(item, target.value))
     if (peer) {
       connectAttempted = true
-      await action('connect', { serviceName: peer.serviceName })
+      await action('connect')
     }
   } else if (next.session.state === 'Connected' && sessionMatchesTarget()) {
     const path = pendingPath
@@ -146,7 +159,7 @@ async function close() {
   if (busy.value || (state.value?.transfer && sessionMatchesTarget())) return
   closed = true
   if (pollTimer) clearInterval(pollTimer)
-  try { if (sessionMatchesTarget()) await invoke('invoke_module', { moduleId, method: 'disconnect', payload: {} }) }
+  try { if (sessionMatchesTarget()) await invoke('invoke_device_transfer', { peerId: props.device.id, action: { kind: 'disconnect' } }) }
   catch { /* The host may already be shutting down. */ }
   emit('close')
 }
@@ -157,6 +170,9 @@ onMounted(async () => {
     acceptedIncomingTarget = props.incoming
     if (closed) return
     if (!props.incoming) {
+      const current = await call('getState')
+      if (closed) return
+      if (current.incomingRequest) { emit('incoming', current.incomingRequest); return }
       target.value = await invoke<DeviceTransferTarget>('get_device_transfer_target', { peerId: props.device.id })
       if (closed) return
       const path = await open({ multiple: false, directory: false, title: t('devices.transfer.chooseFile') })
@@ -165,15 +181,10 @@ onMounted(async () => {
       pendingPath = path
       transferStarted = true
     }
-    await invoke('list_modules')
-    if (closed) return
-    await invoke('start_module', { moduleId })
-    if (closed) return
-    await invoke('set_module_active', { moduleId, active: true })
-    if (closed) return
     const next = await call('getState')
     if (closed) return
     pollTimer = setInterval(() => void poll(), 500)
+    busy.value = false
     if (!props.incoming) await advanceOutgoing(next)
   } catch (reason) { error.value = message(reason) }
   finally { busy.value = false }
@@ -183,7 +194,7 @@ onUnmounted(() => {
   closed = true
   if (pollTimer) clearInterval(pollTimer)
   if (cleanup) {
-    void invoke('invoke_module', { moduleId, method: 'disconnect', payload: {} }).catch(() => undefined)
+    void invoke('invoke_device_transfer', { peerId: props.device.id, action: { kind: 'disconnect' } }).catch(() => undefined)
   }
 })
 </script>
@@ -199,10 +210,10 @@ onUnmounted(() => {
         <p v-if="state.lastError" class="transfer-error" role="alert">{{ state.lastError }}</p>
         <div v-if="state.incomingFile && sessionMatchesTarget()" class="transfer-section">
           <strong>{{ t('devices.transfer.receiveFile', { name: state.incomingFile.name }) }}</strong>
-          <span>{{ t('devices.transfer.fileSize', { size: state.incomingFile.size }) }}</span>
+          <span>{{ t('devices.transfer.fileSize', { size: formatFileSize(state.incomingFile.size) }) }}</span>
           <div class="transfer-actions"><QButton variant="primary" :disabled="busy" @click="chooseReceivePath">{{ t('devices.transfer.save') }}</QButton><QButton :disabled="busy" @click="action('rejectIncomingFile')">{{ t('devices.transfer.reject') }}</QButton></div>
         </div>
-        <p v-if="state.transfer && sessionMatchesTarget()" role="status">{{ t(state.transfer.receiving ? 'devices.transfer.receiving' : 'devices.transfer.sending') }} {{ state.transfer.name }} · {{ state.transfer.completed }} / {{ state.transfer.total }} {{ t('devices.transfer.bytes') }}</p>
+        <p v-if="state.transfer && sessionMatchesTarget()" role="status">{{ t(state.transfer.receiving ? 'devices.transfer.receiving' : 'devices.transfer.sending') }} {{ state.transfer.name }} · {{ formatFileSize(state.transfer.completed) }} / {{ formatFileSize(state.transfer.total) }}</p>
         <progress v-if="state.transfer && sessionMatchesTarget()" :value="state.transfer.completed" :max="Math.max(1, state.transfer.total)" />
         <p v-if="state.session.state === 'Connecting' || state.session.state === 'WaitingApproval'" role="status">{{ t(state.session.state === 'Connecting' ? 'devices.transfer.connecting' : 'devices.transfer.waiting') }}</p>
         <p v-else-if="state.session.state === 'Connected' && sessionMatchesTarget()" role="status">{{ t('devices.transfer.connected') }}</p>

@@ -7,6 +7,8 @@ const executable = process.argv[2]
 if (!executable) throw new Error('usage: node smoke-tauri-module-window.mjs <tauri-executable>')
 const executablePath = resolve(executable)
 const nativeDesktop = process.argv.includes('--native-desktop')
+const moduleCloseOnly = process.argv.includes('--module-close-only')
+const deviceTransferOnly = process.argv.includes('--device-transfer-only')
 
 // A fixed WebView2 debugging port can still be owned by a previous smoke
 // process whose renderer is shutting down. Pick an ephemeral free port for
@@ -14,16 +16,17 @@ const nativeDesktop = process.argv.includes('--native-desktop')
 // browser profile so a stale target can never satisfy this smoke test.
 const port = Number(process.env.QING_TAURI_DEBUG_PORT ?? await findFreePort())
 const userDataFolder = `${process.env.TEMP ?? process.env.TMP ?? '.'}\\qingtoolbox-tauri-window-smoke-${port}-${process.pid}`
-const isolatedEnvironment = nativeDesktop ? {
+const isolatedEnvironment = nativeDesktop || moduleCloseOnly || deviceTransferOnly ? {
   LOCALAPPDATA: resolve(userDataFolder, 'local'),
   APPDATA: resolve(userDataFolder, 'roaming'),
 } : {}
 for (const path of Object.values(isolatedEnvironment)) mkdirSync(path, { recursive: true })
 const host = spawn(executablePath, [], {
-  cwd: dirname(executablePath),
+  cwd: moduleCloseOnly ? resolve('QingToolbox.Tauri/src-tauri') : dirname(executablePath),
   env: {
     ...process.env,
     ...isolatedEnvironment,
+    ...(deviceTransferOnly ? { QING_TAURI_ALLOW_WORKSPACE_RESOURCES: '0' } : {}),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
     WEBVIEW2_USER_DATA_FOLDER: userDataFolder,
     QING_TAURI_DISABLE_SINGLE_INSTANCE: '1',
@@ -31,6 +34,7 @@ const host = spawn(executablePath, [], {
     QING_TAURI_STARTUP_PRESENTATION: 'main',
   },
   stdio: 'ignore',
+  windowsHide: true,
 })
 
 let target
@@ -58,6 +62,14 @@ async function smoke() {
     spawnError,
     spawnExit,
   ])
+  if (moduleCloseOnly) {
+    await checkModuleSurfaceLifecycle()
+    return
+  }
+  if (deviceTransferOnly) {
+    await checkHostDeviceTransfer(true)
+    return
+  }
   await waitFor(async () => Boolean(await evaluate(target, `!document.querySelector('.empty-state')?.textContent?.includes('正在读取') && !document.querySelector('.status-label')?.textContent?.includes('扫描模块')`)), 10000)
   await waitFor(() => evaluate(target, `document.querySelectorAll('.q-titlebar-actions button').length === 4`), 10000)
   const startup = await evaluate(target, `window.__TAURI_INTERNALS__.invoke('get_startup_registration_status')`)
@@ -218,18 +230,7 @@ async function smoke() {
   await closeTarget(moduleTarget)
   moduleTarget = undefined
 
-  moduleTarget = await openModuleCard('QingTransfer', 'qing.qingtransfer')
-  await waitFor(() => evaluate(moduleTarget, `({
-    shell: Boolean(document.querySelector('.shell')),
-    loading: document.querySelector('.runtime-pill')?.textContent?.includes('正在准备') ?? true,
-    error: document.querySelector('.alert.danger')?.textContent ?? '',
-  })`).then((value) => value.shell && !value.loading && !value.error), 15000)
-  const transferSnapshot = await evaluate(moduleTarget, `({ text: document.body.innerText })`)
-  if (!String(transferSnapshot?.text).includes('QingTransfer') || !String(transferSnapshot?.text).includes('附近设备')) {
-    throw new Error('QingTransfer UI did not finish rendering')
-  }
-  await closeTarget(moduleTarget)
-  moduleTarget = undefined
+  await checkHostDeviceTransfer()
 
   moduleTarget = await openModuleCard('Text Tools', 'qing.texttools')
   await waitFor(() => evaluate(moduleTarget, `({
@@ -353,6 +354,131 @@ async function openModuleCard(name, moduleId) {
   })()`)
   await delay(250)
   return waitForTarget((value) => value.url.includes(moduleId) || value.title.includes(name), 15000)
+}
+
+async function checkHostDeviceTransfer(emptyModules = false) {
+  const invoke = (command, payload = {}) => evaluate(target, `window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)}, ${JSON.stringify(payload)})`)
+  const { payload: listed } = await invoke('list_modules')
+  if (listed.modules.some(item => item.id === 'qing.qingtransfer')) throw Error('Legacy transfer is still displayed as a module')
+  if (emptyModules && listed.modules.length !== 0) throw Error('Transfer isolation smoke unexpectedly discovered modules')
+  const initial = await invoke('get_device_transfer_state')
+  if (!initial.session || !initial.receive || !initial.discovery) throw Error('Host transfer state is unavailable without a module')
+  const denied = await evaluate(target, `window.__TAURI_INTERNALS__.invoke('invoke_device_transfer', {
+    peerId: 'not-a-paired-device', action: { kind: 'connect' },
+  }).then(() => null, error => ({ code: error?.code, message: error?.message ?? String(error) }))`)
+  if (denied?.code !== 'deviceTransferUnavailable' || String(denied.message).includes('清单')) throw Error('Unexpected transfer target rejection: '+JSON.stringify(denied))
+  if (emptyModules) {
+    const preferences = { defaultDirectory: isolatedEnvironment.LOCALAPPDATA, useDefaultDirectory: true, autoAccept: false }
+    const updated = await invoke('update_device_receive_preferences', { preferences })
+    if (!updated.receive.useDefaultDirectory || updated.receive.autoAccept) throw Error('Host receive preferences were not saved')
+    await invoke('set_devices_discovery_enabled', { enabled: false })
+    const stopped = await invoke('get_device_transfer_state')
+    if (stopped.discovery.running || stopped.session.state !== 'Idle' || !stopped.receive.useDefaultDirectory) throw Error('Stopping discovery lost transfer preferences or left a session alive')
+    await evaluate(target, `location.hash='#/devices';true`)
+    await waitFor(() => evaluate(target, `Boolean(document.querySelector('.devices-page'))`), 10000)
+    await evaluate(target, `document.querySelector('.devices-page .devices-heading button')?.click();true`)
+    await waitFor(() => evaluate(target, `Boolean(document.querySelector('.receive-toggle'))`), 10000)
+    const text = await evaluate(target, 'document.body.innerText')
+    if (text.includes('清单无效') || text.includes('模块尚未发现')) throw Error('Receive settings still require a module')
+    await evaluate(target, `document.querySelector('.q-modal-close')?.click();true`)
+    await waitFor(() => evaluate(target, `!document.querySelector('.q-modal-card')`), 5000)
+    // Exercise the bundled global receiver without a wake event. Only this
+    // isolated smoke WebView gets a synthetic host snapshot; no pairing,
+    // network transfer, acceptance, or production data is modified.
+    await evaluate(target, `(() => {
+      const original = window.fetch;
+      window.__smokeTransferCalls = [];
+      window.__smokeRestoreTransferInvoke = () => { window.fetch = original };
+      window.fetch = (input, options) => {
+        const url = String(input);
+        if (url.includes('get_device_transfer_state')) {
+          window.__smokeTransferCalls.push('get_device_transfer_state');
+          return Promise.resolve(new Response(JSON.stringify({
+          discovery: { running: true, peers: [] },
+          session: { state: 'Connected', peer: { platform: 'android', addresses: ['127.0.0.1'] } },
+          incomingRequest: { id: 'smoke-paired-phone', name: 'Smoke Phone' },
+          incomingFile: { name: 'receive-wakeup-test.txt', size: 1024 },
+          transfer: { name: 'receive-wakeup-test.txt', completed: 0, total: 1024, receiving: true },
+          receive: { defaultDirectory: null, useDefaultDirectory: false, autoAccept: false },
+          lastCompleted: null, lastError: null,
+          }), { headers: { 'Content-Type': 'application/json', 'Tauri-Response': 'ok' } }));
+        }
+        return original(input, options);
+      };
+      return true;
+    })()`)
+    try {
+      await waitFor(() => evaluate(target, `Boolean(document.querySelector('.q-modal-card')?.textContent.includes('receive-wakeup-test.txt'))`), 4000)
+      const initialDialog = await evaluate(target, `document.querySelector('.q-modal-header h2').id`)
+      await delay(1100)
+      const stableDialog = await evaluate(target, `document.querySelector('.q-modal-header h2').id`)
+      if (initialDialog !== stableDialog) throw Error('Repeated receive snapshots remounted the confirmation dialog')
+      const buttons = await evaluate(target, `Array.from(document.querySelectorAll('.transfer-actions button')).map(button => button.textContent)`)
+      if (buttons.length !== 2) throw Error('The incoming confirmation has no accept/reject actions')
+      const sizeText = await evaluate(target, `document.querySelector('.q-modal-card').textContent`)
+      if (!sizeText.includes('1 KB') || !sizeText.includes('0 B / 1 KB')) throw Error('File size or transfer progress still displays raw bytes: '+sizeText)
+      console.log('Incoming file confirmation recovered without a native event or an outgoing send; repeated polls kept the dialog stable')
+    } catch (error) {
+      const diagnostics = await evaluate(target, `({ text: document.body.innerText, calls: window.__smokeTransferCalls, dialogs: Array.from(document.querySelectorAll('.q-modal-card')).map(node=>node.textContent) })`)
+      throw Error(String(error)+'; incoming UI diagnostics: '+JSON.stringify(diagnostics))
+    } finally {
+      await evaluate(target, `window.__smokeRestoreTransferInvoke();delete window.__smokeRestoreTransferInvoke;true`)
+    }
+  }
+  console.log('Built-in device transfer: state, paired-target boundary and receive settings passed'+(emptyModules ? ' with an empty module directory' : ''))
+}
+
+async function checkModuleSurfaceLifecycle() {
+  const id = 'qing.texttools'
+  const matchesModule = value => value.url.includes(id) || value.title.includes('Text Tools')
+  const invoke = (command, payload = {}) => evaluate(target, `window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)}, ${JSON.stringify(payload)})`)
+  await evaluate(target, `location.hash='#/modules';true`)
+  await waitFor(() => evaluate(target, `!!document.querySelector('.wpf-module-card')`), 12000)
+  moduleTarget = await openModuleCard('Text Tools', id)
+  await waitFor(() => evaluate(moduleTarget, `Boolean(document.querySelector('.editor-grid'))`), 12000)
+  await invoke('invoke_module', { moduleId: id, method: 'setInput', payload: { text: 'resident text survives closing the operation page' } })
+  const initial = await invoke('get_module_runtime', { moduleId: id })
+  if (initial.state !== 'loaded') throw Error('Isolated module was not loaded inactive')
+  for (const [active, expected] of [[null, 'loaded'], [true, 'running'], [false, 'deactivated']]) {
+    if (active !== null) await invoke('set_module_active', { moduleId: id, active })
+    // Open twice must focus one window, not create another runtime/surface.
+    await invoke('open_module', { moduleId: id })
+    const focused = (await listTargets()).find(value => value.id === moduleTarget.id)
+    if (!focused) throw Error('Module target disappeared after focusing: '+JSON.stringify(await listTargets()))
+    if ((await listTargets()).filter(matchesModule).length !== 1) throw Error('Open duplicated the module operation page')
+    await closeNativeModule('Text Tools')
+    const closedTargetId = moduleTarget.id
+    await waitFor(async () => !(await listTargets()).some(value => value.id === closedTargetId), 8000)
+    moduleTarget = undefined
+    const closed = await invoke('get_module_runtime', { moduleId: id })
+    if (closed.state !== expected || closed.generation !== initial.generation) throw Error('Closing UI changed module residency/activation: '+JSON.stringify(closed))
+    const state = await invoke('invoke_module', { moduleId: id, method: 'getState', payload: {} })
+    if (state.input !== 'resident text survives closing the operation page') throw Error('Closing UI lost resident backend data')
+    moduleTarget = await openModuleCard('Text Tools', id)
+    const reopened = await invoke('get_module_runtime', { moduleId: id })
+    if (reopened.state !== expected || reopened.generation !== initial.generation) throw Error('Reopening restarted or activated the module')
+    console.log(`Module page close/reopen: ${expected}, stable generation and resident data passed`)
+  }
+  const unloaded = await invoke('stop_module', { moduleId: id })
+  if (unloaded.state !== 'stopped') throw Error('Explicit unload no longer stops the module')
+  await waitFor(async () => !(await listTargets()).some(matchesModule), 8000)
+  moduleTarget = undefined
+  const denied = await invoke('open_module', { moduleId: id }).then(() => false, () => true)
+  if (!denied) throw Error('An unloaded module reopened implicitly')
+  console.log('Explicit unload still releases the operation page and rejects stale open passed.')
+}
+
+async function closeNativeModule(moduleName) {
+  const helper = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    resolve('scripts/close-module-smoke-window.ps1'), '-HostProcessId', String(host.pid), '-ModuleName', moduleName],
+  { stdio: 'pipe', windowsHide: true })
+  let output = ''
+  helper.stdout.on('data', value => output += value)
+  helper.stderr.on('data', value => output += value)
+  await new Promise((resolve, reject) => {
+    helper.once('error', reject)
+    helper.once('exit', code => code === 0 ? resolve() : reject(Error(output || 'Native module close failed')))
+  })
 }
 
 async function listTargets() {

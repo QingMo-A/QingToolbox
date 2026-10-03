@@ -10,7 +10,7 @@ import { useSettingsStore } from '../app/settingsStore'
 import { useThemeStore } from '../app/themeStore'
 import { useToastStore } from '../app/toastStore'
 import { useModuleStore } from '../app/moduleStore'
-import type { LanguageCode, SettingsSnapshot } from '../contracts/settings'
+import type { LanguageCode, SettingsSnapshot, UpdateCheckPreferences } from '../contracts/settings'
 import type { ModuleSnapshot, ModuleSnapshotItem } from '../contracts/modules'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
@@ -39,6 +39,7 @@ type PageOptions = {
   launchImpl?: (value: boolean) => Promise<SettingsSnapshot>
   repairImpl?: () => Promise<SettingsSnapshot>
   moduleImpl?: () => Promise<ModuleSnapshot>
+  updateChecksImpl?: (update: UpdateCheckPreferences) => Promise<SettingsSnapshot>
 }
 
 function page(options: PageOptions = {}) {
@@ -65,9 +66,10 @@ function page(options: PageOptions = {}) {
   const repairStartupRegistration = vi.fn(options.repairImpl ?? (async () => ({ ...snapshot, launchAtLogin: true, canRepairStartup: false, generatedAt: '2026-07-25T13:00:00Z' })))
   const getModuleSnapshot = vi.fn(options.moduleImpl ?? (async () => ({ generatedAt: '2026-07-25T12:01:00Z', modules: [] })))
   const openRepository = vi.fn(async () => undefined)
-  const wrapper = mount(SettingsPage, { global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setWindowSize, getCurrentWindowSize, setStartupFullscreen, applyWindowSize, setStartupPresentationMode, setAppearancePreset, setThemeMode, setFont, importFont, setLaunchAtLogin, repairStartupRegistration, openRepository }, moduleClient: { getSnapshot: getModuleSnapshot } } } })
+  const setUpdatePreferences = vi.fn(options.updateChecksImpl ?? (async (update: UpdateCheckPreferences) => ({ ...settings.snapshot!, ...update })))
+  const wrapper = mount(SettingsPage, { global: { plugins: [pinia], provide: { settingsClient: { getSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setWindowSize, getCurrentWindowSize, setStartupFullscreen, applyWindowSize, setStartupPresentationMode, setAppearancePreset, setThemeMode, setFont, importFont, setLaunchAtLogin, repairStartupRegistration, setUpdatePreferences, openRepository }, moduleClient: { getSnapshot: getModuleSnapshot } } } })
   wrappers.push(wrapper)
-  return { wrapper, app, settings, modules: useModuleStore(), getSnapshot, getModuleSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setWindowSize, getCurrentWindowSize, setStartupFullscreen, applyWindowSize, setStartupPresentationMode, setAppearancePreset, setThemeMode, setFont, importFont, setLaunchAtLogin, repairStartupRegistration, openRepository, theme: useThemeStore(), toast: useToastStore() }
+  return { wrapper, app, settings, modules: useModuleStore(), getSnapshot, getModuleSnapshot, setLanguage, setShowLogsInSidebar, setMainWindowCloseBehavior, setWindowSize, getCurrentWindowSize, setStartupFullscreen, applyWindowSize, setStartupPresentationMode, setAppearancePreset, setThemeMode, setFont, importFont, setLaunchAtLogin, repairStartupRegistration, setUpdatePreferences, openRepository, theme: useThemeStore(), toast: useToastStore() }
 }
 
 async function openSection(wrapper: VueWrapper, title: string) {
@@ -77,6 +79,33 @@ async function openSection(wrapper: VueWrapper, title: string) {
 }
 
 describe('SettingsPage information architecture', () => {
+  it('persists independent startup checks and bounded intervals without discarding unsaved input', async () => {
+    const x = page(); await openSection(x.wrapper, 'Startup')
+    expect(x.wrapper.get('.check-host-updates').attributes('aria-checked')).toBe('true')
+    expect(x.wrapper.get('.check-module-updates').attributes('aria-checked')).toBe('true')
+    await x.wrapper.get('.host-update-interval').setValue('0')
+    await x.wrapper.get('.module-update-interval').setValue('15')
+    await x.wrapper.get('.check-host-updates').trigger('click'); await flushPromises()
+    expect(x.setUpdatePreferences).toHaveBeenCalledWith({ checkHostUpdatesOnStartup: false })
+    expect((x.wrapper.get('.host-update-interval').element as HTMLInputElement).value).toBe('0')
+    expect(x.wrapper.get('.check-module-updates').attributes('aria-checked')).toBe('true')
+    await x.wrapper.get('.save-update-intervals').trigger('click'); await flushPromises()
+    expect(x.setUpdatePreferences).toHaveBeenLastCalledWith({ hostUpdateIntervalMinutes: 0, moduleUpdateIntervalMinutes: 15 })
+    expect(x.settings.snapshot).toMatchObject({ checkHostUpdatesOnStartup: false, hostUpdateIntervalMinutes: 0, moduleUpdateIntervalMinutes: 15 })
+    await x.wrapper.get('.module-update-interval').setValue('1')
+    expect(x.wrapper.get('.save-update-intervals').attributes('disabled')).toBeDefined()
+    await x.wrapper.get('.module-update-interval').setValue('10081')
+    expect(x.wrapper.get('.save-update-intervals').attributes('disabled')).toBeDefined()
+  })
+  it('does not optimistically change failed update-check settings and disables them when disconnected', async () => {
+    const x = page({ updateChecksImpl: async () => { throw Error('private failure') } }); await openSection(x.wrapper, 'Startup')
+    await x.wrapper.get('.check-module-updates').trigger('click'); await flushPromises()
+    expect(x.wrapper.get('.check-module-updates').attributes('aria-checked')).toBe('true')
+    expect(x.toast.message).not.toContain('private failure')
+    x.app.bridge = 'Unavailable'; await x.wrapper.vm.$nextTick()
+    expect(x.wrapper.get('.check-module-updates').attributes('disabled')).toBeDefined()
+    expect(x.wrapper.get('.save-update-intervals').attributes('disabled')).toBeDefined()
+  })
   it('shows General by default', () => expect(page().wrapper.get('#settings-general-title').text()).toBe('General'))
   it('provides exactly four native section buttons', () => { const buttons = page().wrapper.findAll('.settings-section-nav button'); expect(buttons).toHaveLength(4); expect(buttons.map(x => x.element.tagName)).toEqual(['BUTTON','BUTTON','BUTTON','BUTTON']); expect(buttons.map(x => x.text())).toEqual(expect.arrayContaining([expect.stringContaining('General'), expect.stringContaining('Window'), expect.stringContaining('Startup'), expect.stringContaining('About')])) })
   it('marks the active section accessibly', async () => { const x = page(); expect(x.wrapper.findAll('.settings-section-nav button')[0].attributes('aria-current')).toBe('page'); await openSection(x.wrapper, 'About'); expect(x.wrapper.findAll('.settings-section-nav button')[3].attributes('aria-current')).toBe('page') })

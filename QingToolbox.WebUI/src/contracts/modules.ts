@@ -1,7 +1,8 @@
 export type StartupAuthorizationState = 'NotEnabled'|'Enabled'|'ChangedNeedsConfirmation'|'Missing'|'Unavailable'
-export type ModuleUpdateStatus = 'NotChecked'|'Checking'|'NotOfficial'|'NoPublishedRelease'|'UpToDate'|'UpdateAvailable'|'HostUpdateRequired'|'ModuleApiIncompatible'|'HostVersionIncompatible'|'LocalVersionNewer'|'InvalidLocalVersion'|'SourceUnavailable'|'SourceInvalid'|'DisabledByEnvironment'
-export type ModuleDownloadStatus = 'NotDownloaded'|'ConfirmingMetadata'|'MetadataChanged'|'MetadataStale'|'Downloading'|'Verifying'|'Verified'|'AlreadyVerified'|'Cancelled'|'SizeMismatch'|'HashMismatch'|'SourceUnavailable'|'SourceInvalid'|'UntrustedRedirect'|'StorageUnavailable'|'Failed'|'DisabledByEnvironment'|'TransferTimedOut'
+export type ModuleUpdateStatus = 'NotChecked'|'Checking'|'NotOfficial'|'NoPublishedRelease'|'UpToDate'|'UpdateAvailable'|'HostUpdateRequired'|'ModuleApiIncompatible'|'HostVersionIncompatible'|'LocalVersionNewer'|'InvalidLocalVersion'|'SourceUnavailable'|'SourceInvalid'|'DisabledByEnvironment'|'CheckDisabled'|'PlatformIncompatible'
+export type ModuleDownloadStatus = 'NotDownloaded'|'ConfirmingMetadata'|'MetadataChanged'|'MetadataStale'|'Downloading'|'Verifying'|'Verified'|'AlreadyVerified'|'Cancelled'|'SizeMismatch'|'HashMismatch'|'SourceUnavailable'|'SourceInvalid'|'UntrustedRedirect'|'StorageUnavailable'|'Failed'|'DisabledByEnvironment'|'TransferTimedOut'|'Installing'|'Installed'|'InstallFailed'
 export interface ModuleSnapshotItem {
+  isUpdateCheckEnabled?: boolean
   id: string; displayName: string; displayDescription: string; version: string; author: string
   runtimeType: string; loadMode: string; runtimeState: string; isValid: boolean; errorCount: number
   errors: string[]; permissions: string[]; minimumHostVersion: string; isUserInstalled: boolean; canRemove: boolean
@@ -51,8 +52,8 @@ export const isModuleIconDataUrl = (value: unknown): value is string => {
   const decodedBytes = encoded.length / 4 * 3 - padding
   return decodedBytes > 0 && decodedBytes <= maximumModuleIconBytes
 }
-const updateStatuses: ModuleUpdateStatus[] = ['NotChecked','Checking','NotOfficial','NoPublishedRelease','UpToDate','UpdateAvailable','HostUpdateRequired','ModuleApiIncompatible','HostVersionIncompatible','LocalVersionNewer','InvalidLocalVersion','SourceUnavailable','SourceInvalid','DisabledByEnvironment']
-const downloadStatuses: ModuleDownloadStatus[] = ['NotDownloaded','ConfirmingMetadata','MetadataChanged','MetadataStale','Downloading','Verifying','Verified','AlreadyVerified','Cancelled','SizeMismatch','HashMismatch','SourceUnavailable','SourceInvalid','UntrustedRedirect','StorageUnavailable','Failed','DisabledByEnvironment','TransferTimedOut']
+const updateStatuses: ModuleUpdateStatus[] = ['NotChecked','Checking','NotOfficial','NoPublishedRelease','UpToDate','UpdateAvailable','HostUpdateRequired','ModuleApiIncompatible','HostVersionIncompatible','LocalVersionNewer','InvalidLocalVersion','SourceUnavailable','SourceInvalid','DisabledByEnvironment','CheckDisabled','PlatformIncompatible']
+const downloadStatuses: ModuleDownloadStatus[] = ['NotDownloaded','ConfirmingMetadata','MetadataChanged','MetadataStale','Downloading','Verifying','Verified','AlreadyVerified','Cancelled','SizeMismatch','HashMismatch','SourceUnavailable','SourceInvalid','UntrustedRedirect','StorageUnavailable','Failed','DisabledByEnvironment','TransferTimedOut','Installing','Installed','InstallFailed']
 const nonNegativeFinite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
 const isItem = (value: any): value is ModuleSnapshotItem => !!value &&
   ['id','displayName','displayDescription','version','author','runtimeType','loadMode','runtimeState','minimumHostVersion'].every(key => typeof value[key] === 'string') &&
@@ -65,6 +66,7 @@ const isItem = (value: any): value is ModuleSnapshotItem => !!value &&
   updateStatuses.includes(value.updateStatus) && (value.targetVersion === null || typeof value.targetVersion === 'string') &&
   (value.releaseNotes === null || typeof value.releaseNotes === 'string') && typeof value.isFromStaleCache === 'boolean' &&
   typeof value.canCheckForUpdate === 'boolean' && typeof value.isUpdateCheckBusy === 'boolean' &&
+  (value.isUpdateCheckEnabled === undefined || typeof value.isUpdateCheckEnabled === 'boolean') &&
   typeof value.canDownloadUpdate === 'boolean' && downloadStatuses.includes(value.downloadStatus) &&
   typeof value.isDownloadActive === 'boolean' && nonNegativeFinite(value.downloadBytesReceived) &&
   nonNegativeFinite(value.downloadExpectedBytes) && typeof value.canInstallVerifiedUpdate === 'boolean' &&

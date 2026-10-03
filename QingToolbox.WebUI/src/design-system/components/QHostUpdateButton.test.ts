@@ -8,9 +8,12 @@ import { useHostUpdateStore } from '../../app/hostUpdateStore'
 import { useToastStore } from '../../app/toastStore'
 import QHostUpdateButton from './QHostUpdateButton.vue'
 import QTitleBar from './QTitleBar.vue'
+import DevelopmentHomePage from '../../pages/DevelopmentHomePage.vue'
 
 const invoke = vi.hoisted(() => vi.fn(async () => undefined))
+const events = vi.hoisted(() => new Map<string, () => void>())
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async (name: string, callback: () => void) => { events.set(name, callback); return () => events.delete(name) }) }))
 
 const wrappers: VueWrapper[] = []
 let visibility: DocumentVisibilityState = 'visible'
@@ -28,6 +31,7 @@ const downloading = () => snapshot({ downloadState: 'Downloading', bytesReceived
 
 function render(overrides: Partial<HostUpdateClient> = {}, options: {
   environment?: 'Production' | 'Development'; connected?: boolean; titlebar?: boolean;
+  backgroundUpdateChecks?: boolean;
 } = {}) {
   const pinia = createPinia(); setActivePinia(pinia)
   const app = useAppStore()
@@ -35,6 +39,7 @@ function render(overrides: Partial<HostUpdateClient> = {}, options: {
     environmentKind: options.environment ?? 'Production', environmentDisplayName: 'QingToolbox',
     hostVersion: '0.3.2-alpha', protocolVersion: 4, totalModuleCount: 0, validModuleCount: 0,
     runningModuleCount: 0, generatedAt: new Date().toISOString(),
+    backgroundUpdateChecks: options.backgroundUpdateChecks,
   })
   if (options.connected !== false) connect()
   const client = {
@@ -49,15 +54,35 @@ function render(overrides: Partial<HostUpdateClient> = {}, options: {
     global: { plugins: [pinia], provide: { hostUpdateClient: client } },
   })
   wrappers.push(wrapper)
-  return { wrapper, client, connect, store: useHostUpdateStore(), toast: useToastStore() }
+  return { wrapper, client, connect, pinia, store: useHostUpdateStore(), toast: useToastStore() }
 }
 afterEach(() => {
   wrappers.splice(0).forEach(wrapper => wrapper.unmount())
   vi.useRealTimers(); vi.restoreAllMocks(); invoke.mockClear()
   visibility = 'visible'
+  vi.unstubAllGlobals(); events.clear()
 })
 
 describe('titlebar host update', () => {
+  it('refreshes a backend completion that races the initial hidden startup snapshot', async () => {
+    vi.stubGlobal('__TAURI_INTERNALS__', {})
+    let resolve!: (value: HostUpdateSnapshot) => void
+    const getSnapshot = vi.fn().mockImplementationOnce(() => new Promise(r => { resolve = r })).mockResolvedValue(snapshot())
+    const { wrapper, client } = render({ getSnapshot }, { backgroundUpdateChecks: true })
+    await flushPromises()
+    events.get('qmod:host-update-changed')!()
+    resolve(snapshot({ state: 'NotChecked', canDownload: false })); await flushPromises()
+    expect(wrapper.find('button').exists()).toBe(true)
+    expect(client.check).not.toHaveBeenCalled()
+    expect(getSnapshot).toHaveBeenCalledTimes(2)
+  })
+  it('does not bypass native startup preferences with a duplicate frontend check', async () => {
+    const { wrapper, client } = render({ getSnapshot: vi.fn().mockResolvedValue(snapshot({ state: 'NotChecked', canDownload: false })) }, { backgroundUpdateChecks: true })
+    await flushPromises()
+    expect(client.getSnapshot).toHaveBeenCalledTimes(1)
+    expect(client.check).not.toHaveBeenCalled()
+    expect(wrapper.find('button').exists()).toBe(false)
+  })
   it('checks once on startup, even when the main window starts hidden', async () => {
     vi.useFakeTimers()
     visibility = 'hidden'
@@ -107,6 +132,24 @@ describe('titlebar host update', () => {
     expect(wrapper.find('button').exists()).toBe(false)
   })
 
+  it('shows the diagnostic preview with the real titlebar button without checking, downloading, or installing', async () => {
+    const { wrapper, client, pinia, store } = render({}, { environment: 'Development', titlebar: true })
+    const diagnostics = mount(DevelopmentHomePage, {
+      global: { plugins: [pinia], provide: { appClient: {} } },
+    })
+    wrappers.push(diagnostics)
+    expect(wrapper.find('.q-host-update-button').exists()).toBe(false)
+    await diagnostics.get('[data-test="show-download-button"]').trigger('click')
+    const previewButton = wrapper.get('.q-host-update-button')
+    expect(previewButton.attributes('disabled')).toBeUndefined()
+    await previewButton.trigger('click'); await flushPromises()
+    expect(client.getSnapshot).not.toHaveBeenCalled()
+    expect(client.check).not.toHaveBeenCalled()
+    expect(client.download).not.toHaveBeenCalled()
+    expect(client.install).not.toHaveBeenCalled()
+    expect(store.snapshot).toBeNull()
+  })
+
   it('places the icon beside the title and does not start dragging or maximizing', async () => {
     const { wrapper } = render({}, { titlebar: true })
     await flushPromises()
@@ -114,7 +157,7 @@ describe('titlebar host update', () => {
     expect(button.attributes('aria-label')).toContain('0.3.3-alpha')
     await button.trigger('mousedown', { button: 0 })
     await button.trigger('dblclick')
-    expect(invoke).not.toHaveBeenCalled()
+    expect(invoke.mock.calls.filter(args => (args as unknown as string[])[0] === 'control_main_window')).toHaveLength(0)
     expect(wrapper.find('.q-host-update-banner').exists()).toBe(false)
   })
 

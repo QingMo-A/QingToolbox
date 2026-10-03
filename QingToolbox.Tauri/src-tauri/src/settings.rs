@@ -23,6 +23,20 @@ pub const MIN_WINDOW_WIDTH: u32 = 760;
 pub const MIN_WINDOW_HEIGHT: u32 = 520;
 pub const MAX_WINDOW_WIDTH: u32 = 7680;
 pub const MAX_WINDOW_HEIGHT: u32 = 4320;
+pub const DEFAULT_HOST_UPDATE_INTERVAL_MINUTES: u32 = 360;
+pub const DEFAULT_MODULE_UPDATE_INTERVAL_MINUTES: u32 = 60;
+pub fn valid_update_interval(value: u32) -> bool {
+    value == 0 || (5..=10080).contains(&value)
+}
+
+#[derive(Clone)]
+pub struct UpdatePreferences {
+    pub check_host_updates_on_startup: bool,
+    pub check_module_updates_on_startup: bool,
+    pub host_update_interval_minutes: u32,
+    pub module_update_interval_minutes: u32,
+    pub module_update_disabled_ids: Vec<String>,
+}
 
 /// The small public settings surface shared by the Rust host and Vue shell.
 /// It deliberately contains preferences, not filesystem paths or executable
@@ -57,6 +71,11 @@ pub struct SettingsSnapshot {
     pub show_logs_in_sidebar: bool,
     pub recent_module_ids: Vec<String>,
     pub startup_module_ids: Vec<String>,
+    pub check_host_updates_on_startup: bool,
+    pub check_module_updates_on_startup: bool,
+    pub host_update_interval_minutes: u32,
+    pub module_update_interval_minutes: u32,
+    pub module_update_disabled_ids: Vec<String>,
 }
 
 /// A partial update accepted by the typed Tauri command. Unknown JSON fields
@@ -83,6 +102,11 @@ pub struct SettingsUpdate {
     pub show_logs_in_sidebar: Option<bool>,
     pub recent_module_ids: Option<Vec<String>>,
     pub startup_module_ids: Option<Vec<String>>,
+    pub check_host_updates_on_startup: Option<bool>,
+    pub check_module_updates_on_startup: Option<bool>,
+    pub host_update_interval_minutes: Option<u32>,
+    pub module_update_interval_minutes: Option<u32>,
+    pub module_update_disabled_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +131,11 @@ struct Settings {
     show_logs_in_sidebar: bool,
     recent_module_ids: Vec<String>,
     startup_module_ids: Vec<String>,
+    check_host_updates_on_startup: bool,
+    check_module_updates_on_startup: bool,
+    host_update_interval_minutes: u32,
+    module_update_interval_minutes: u32,
+    module_update_disabled_ids: Vec<String>,
     /// Preserve settings owned by a newer/legacy host when this migration
     /// writes the shared document. They are never exposed to Vue.
     extra: BTreeMap<String, Value>,
@@ -137,6 +166,11 @@ impl Default for Settings {
             show_logs_in_sidebar: false,
             recent_module_ids: Vec::new(),
             startup_module_ids: Vec::new(),
+            check_host_updates_on_startup: true,
+            check_module_updates_on_startup: true,
+            host_update_interval_minutes: DEFAULT_HOST_UPDATE_INTERVAL_MINUTES,
+            module_update_interval_minutes: DEFAULT_MODULE_UPDATE_INTERVAL_MINUTES,
+            module_update_disabled_ids: Vec::new(),
             extra: BTreeMap::new(),
         }
     }
@@ -177,6 +211,11 @@ struct SettingsDocument {
     recent_module_ids: Option<Vec<String>>,
     #[serde(alias = "StartupModuleIds")]
     startup_module_ids: Option<Vec<String>>,
+    check_host_updates_on_startup: Option<bool>,
+    check_module_updates_on_startup: Option<bool>,
+    host_update_interval_minutes: Option<u32>,
+    module_update_interval_minutes: Option<u32>,
+    module_update_disabled_ids: Option<Vec<String>>,
     #[serde(flatten)]
     extra: BTreeMap<String, Value>,
 }
@@ -205,6 +244,11 @@ impl From<&Settings> for SettingsDocument {
             show_logs_in_sidebar: Some(settings.show_logs_in_sidebar),
             recent_module_ids: Some(settings.recent_module_ids.clone()),
             startup_module_ids: Some(settings.startup_module_ids.clone()),
+            check_host_updates_on_startup: Some(settings.check_host_updates_on_startup),
+            check_module_updates_on_startup: Some(settings.check_module_updates_on_startup),
+            host_update_interval_minutes: Some(settings.host_update_interval_minutes),
+            module_update_interval_minutes: Some(settings.module_update_interval_minutes),
+            module_update_disabled_ids: Some(settings.module_update_disabled_ids.clone()),
             extra: settings.extra.clone(),
         }
     }
@@ -232,6 +276,19 @@ pub struct SettingsStore {
 }
 
 impl SettingsStore {
+    pub fn language(&self) -> &str {
+        &self.settings.language
+    }
+    /// Scheduler reads must not enumerate the font catalog every few seconds.
+    pub fn update_preferences(&self) -> UpdatePreferences {
+        UpdatePreferences {
+            check_host_updates_on_startup: self.settings.check_host_updates_on_startup,
+            check_module_updates_on_startup: self.settings.check_module_updates_on_startup,
+            host_update_interval_minutes: self.settings.host_update_interval_minutes,
+            module_update_interval_minutes: self.settings.module_update_interval_minutes,
+            module_update_disabled_ids: self.settings.module_update_disabled_ids.clone(),
+        }
+    }
     pub fn new() -> Self {
         Self::from_path(settings_path())
     }
@@ -269,6 +326,11 @@ impl SettingsStore {
             show_logs_in_sidebar: self.settings.show_logs_in_sidebar,
             recent_module_ids: self.settings.recent_module_ids.clone(),
             startup_module_ids: self.settings.startup_module_ids.clone(),
+            check_host_updates_on_startup: self.settings.check_host_updates_on_startup,
+            check_module_updates_on_startup: self.settings.check_module_updates_on_startup,
+            host_update_interval_minutes: self.settings.host_update_interval_minutes,
+            module_update_interval_minutes: self.settings.module_update_interval_minutes,
+            module_update_disabled_ids: self.settings.module_update_disabled_ids.clone(),
         }
     }
 
@@ -282,6 +344,45 @@ impl SettingsStore {
         resolve_font: fn(&str) -> Option<fonts::FontOption>,
     ) -> Result<SettingsSnapshot, SettingsError> {
         let mut candidate = self.settings.clone();
+        if let Some(value) = update.check_host_updates_on_startup {
+            candidate.check_host_updates_on_startup = value;
+        }
+        if let Some(value) = update.check_module_updates_on_startup {
+            candidate.check_module_updates_on_startup = value;
+        }
+        for (value, target) in [
+            (
+                update.host_update_interval_minutes,
+                &mut candidate.host_update_interval_minutes,
+            ),
+            (
+                update.module_update_interval_minutes,
+                &mut candidate.module_update_interval_minutes,
+            ),
+        ] {
+            if let Some(value) = value {
+                if !valid_update_interval(value) {
+                    return Err(SettingsError {
+                        code: "updateIntervalInvalid",
+                        message: "检查间隔须为 5–10080 分钟，或 0（关闭定期检查）。".to_string(),
+                    });
+                }
+                *target = value;
+            }
+        }
+        if let Some(ids) = update.module_update_disabled_ids {
+            if ids.len() > 256 || ids.iter().any(|id| !crate::valid_module_id(id)) {
+                return Err(SettingsError {
+                    code: "moduleIdInvalid",
+                    message: "模块更新设置无效。".to_string(),
+                });
+            }
+            candidate.module_update_disabled_ids = ids
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+        }
         if let Some(value) = update.language {
             candidate.language = normalize_language(&value);
         }
@@ -549,6 +650,26 @@ fn settings_from_document(document: &SettingsDocument) -> Settings {
         startup_module_ids: normalize_module_ids(
             document.startup_module_ids.clone().unwrap_or_default(),
         ),
+        check_host_updates_on_startup: document.check_host_updates_on_startup.unwrap_or(true),
+        check_module_updates_on_startup: document.check_module_updates_on_startup.unwrap_or(true),
+        host_update_interval_minutes: document
+            .host_update_interval_minutes
+            .filter(|v| valid_update_interval(*v))
+            .unwrap_or(DEFAULT_HOST_UPDATE_INTERVAL_MINUTES),
+        module_update_interval_minutes: document
+            .module_update_interval_minutes
+            .filter(|v| valid_update_interval(*v))
+            .unwrap_or(DEFAULT_MODULE_UPDATE_INTERVAL_MINUTES),
+        module_update_disabled_ids: document
+            .module_update_disabled_ids
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|id| crate::valid_module_id(id))
+            .take(256)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect(),
         extra: document.extra.clone(),
     };
     // A future schema may add fields, but old settings remain readable. Keep
@@ -834,6 +955,7 @@ mod tests {
                 "bad/id".to_string(),
             ]),
             extra: BTreeMap::new(),
+            ..SettingsDocument::default()
         };
         let settings = settings_from_document(&document);
         assert_eq!(settings.language, "zh-CN");
@@ -920,6 +1042,63 @@ mod tests {
         assert_eq!(reloaded.snapshot().window_height, 900);
         assert!(reloaded.snapshot().startup_fullscreen);
         let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn update_preferences_default_for_old_profiles_and_persist_independently() {
+        let (directory, path) = test_path("update-checks");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(&path, br#"{"language":"en-US","Unrelated":{"keep":true}}"#).unwrap();
+        let mut store = SettingsStore::from_path(Some(path.clone()));
+        let defaults = store.update_preferences();
+        assert!(defaults.check_host_updates_on_startup);
+        assert!(defaults.check_module_updates_on_startup);
+        assert_eq!(defaults.host_update_interval_minutes, 360);
+        assert_eq!(defaults.module_update_interval_minutes, 60);
+        store
+            .update(SettingsUpdate {
+                check_host_updates_on_startup: Some(false),
+                check_module_updates_on_startup: Some(true),
+                host_update_interval_minutes: Some(0),
+                module_update_interval_minutes: Some(5),
+                module_update_disabled_ids: Some(vec!["qing.test".into(), "qing.test".into()]),
+                ..Default::default()
+            })
+            .unwrap();
+        let reloaded = SettingsStore::from_path(Some(path.clone())).update_preferences();
+        assert!(!reloaded.check_host_updates_on_startup);
+        assert!(reloaded.check_module_updates_on_startup);
+        assert_eq!(reloaded.host_update_interval_minutes, 0);
+        assert_eq!(reloaded.module_update_interval_minutes, 5);
+        assert_eq!(reloaded.module_update_disabled_ids, vec!["qing.test"]);
+        let saved: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["Unrelated"]["keep"], true);
+        for bad in [1, 4, 10081, u32::MAX] {
+            assert_eq!(
+                store
+                    .update(SettingsUpdate {
+                        check_host_updates_on_startup: Some(true),
+                        module_update_interval_minutes: Some(bad),
+                        ..Default::default()
+                    })
+                    .unwrap_err()
+                    .code,
+                "updateIntervalInvalid"
+            );
+            assert!(!store.update_preferences().check_host_updates_on_startup);
+            assert_eq!(store.update_preferences().module_update_interval_minutes, 5);
+        }
+        assert!(store
+            .update(SettingsUpdate {
+                module_update_disabled_ids: Some(vec!["../bad".into()]),
+                ..Default::default()
+            })
+            .is_err());
+        assert_eq!(
+            store.update_preferences().module_update_disabled_ids,
+            vec!["qing.test"]
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

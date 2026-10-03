@@ -219,7 +219,7 @@ QingToolbox/
 ├─ QingToolbox.Tauri/            # 新宿主：Rust 核心 + Tauri 2
 │  ├─ src-tauri/src/             # 路径、设置、清单、协议、运行时、Web 资源
 │  ├─ native-launcher/           # 各原生模块：独立 Rust 进程 + Vue 界面
-│  ├─ native-pdf/  native-transfer/  native-texttools/
+│  ├─ src-tauri/src/device_transfer.rs # 内置设备传输，无模块依赖
 │  ├─ native-windowtopmost/  native-powerguard/  native-screenpin/
 │  └─ native-module-canary/      # 最小可复现进程模块样例
 ├─ QingToolbox.WebUI/            # 正式 Vue 3 前端（设计系统 + 全部工作区）
@@ -239,7 +239,7 @@ QingToolbox/
 
 | 发行线 | 当前版本 | 状态 |
 | --- | --- | --- |
-| Tauri 宿主（主线） | `0.3.2-alpha` | 最新已发布 `v0.3.2-alpha`（2026-09-29） |
+| Tauri 宿主（主线） | `0.3.3-alpha` | 发布目标 `v0.3.3-alpha`（2026-10-03） |
 | WPF 宿主（历史） | `0.2.9-alpha` | 已冻结，仅维护历史安装链 |
 
 `0.3.0-alpha` 是首个 Rust/Tauri 2/Vue 3 宿主预览，沿用原有 QingToolbox 产品 AppId，因此可以就地覆盖既有的 WPF 或 Tauri 安装，不会产生第二条卸载记录。
@@ -349,6 +349,7 @@ QingToolbox/
 
 | 版本 | 发行线 | 日期 |
 | --- | --- | --- |
+| [`0.3.3-alpha`](docs/releases/0.3.3-alpha.md) | Tauri 宿主 | 2026-10-03 |
 | [`0.3.2-alpha`](docs/releases/0.3.2-alpha.md) | Tauri 宿主 | 2026-09-29 |
 | [`0.3.0-alpha`](docs/releases/0.3.0-alpha.md) | Tauri 宿主 | 2026-09-25 |
 | [`tauri-modules-0.3.0-alpha`](docs/releases/tauri-modules-0.3.0-alpha.md) | 原生模块包清单 | 2026-09-25 |

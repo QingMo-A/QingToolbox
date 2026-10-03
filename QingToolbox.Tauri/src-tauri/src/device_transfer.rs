@@ -1,18 +1,13 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
-//! Native QingTransfer module.
-//!
-//! The module owns the local-network discovery and transfer session in a small
-//! Rust process.  The Tauri host only supervises this process and forwards the
-//! manifest-declared JSON operations; it never receives a filesystem path from
-//! the WebView for execution.  mDNS is used for discovery, while every resolved
-//! endpoint must answer a nonce-bound probe before it is shown as a device.
+//! Host-owned device file transfer. The engine runs inside QingToolbox, without
+//! a module manifest, module process, or module discovery dependency.
+//! The existing Android-compatible v1 wire protocol is retained. Its legacy
+//! identity matching is not a replacement for the planned QDS authenticated session.
 
 use std::{
     collections::BTreeMap,
     env,
     fs::{self, File, OpenOptions},
-    io::{self, BufRead, BufReader, BufWriter, Read, Write},
+    io::{self, Read, Write},
     net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
     sync::{
@@ -28,8 +23,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
-const HOST_PROTOCOL_VERSION: u16 = 1;
-const HOST_MAX_FRAME_BYTES: usize = 1024 * 1024;
 const NETWORK_PROTOCOL_VERSION: u8 = 1;
 const NETWORK_MAX_FRAME_BYTES: usize = 4096;
 const MAX_FIELD_LENGTH: usize = 128;
@@ -45,40 +38,13 @@ const NETWORK_BUFFER_BYTES: usize = 128 * 1024;
 
 static NONCE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct HostEnvelope {
-    protocol_version: u16,
-    message_type: String,
-    request_id: String,
-    payload: Value,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct HostResponse<'a> {
-    protocol_version: u16,
-    message_type: &'a str,
-    request_id: &'a str,
-    payload: Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<HostErrorBody>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct HostErrorBody {
-    code: &'static str,
-    message: String,
-}
-
 #[derive(Debug, Clone)]
-struct ModuleError {
-    code: &'static str,
-    message: String,
+pub(crate) struct TransferError {
+    pub code: &'static str,
+    pub message: String,
 }
 
-impl ModuleError {
+impl TransferError {
     fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code,
@@ -277,7 +243,8 @@ struct DiscoveryRuntime {
     workers: Vec<thread::JoinHandle<()>>,
 }
 
-struct TransferApp {
+pub(crate) struct TransferEngine {
+    lifecycle: Mutex<()>,
     state: Arc<Mutex<SharedState>>,
     process_stop: Arc<AtomicBool>,
     active: AtomicBool,
@@ -287,24 +254,21 @@ struct TransferApp {
     device_id: Option<String>,
 }
 
-impl TransferApp {
-    fn new() -> Self {
-        let data_directory = env::var_os("QINGTOOLBOX_MODULE_DATA_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(default_data_directory);
-        let _ = fs::create_dir_all(&data_directory);
+impl TransferEngine {
+    pub(crate) fn new(
+        data_directory: PathBuf,
+        legacy_directory: Option<&Path>,
+        friendly_name: &str,
+        device_id: Option<String>,
+    ) -> Self {
+        migrate_receive_settings(&data_directory, legacy_directory);
         let receive = load_receive_settings(&data_directory);
-        let friendly_name =
-            sanitize_display_name(&env::var("QINGTOOLBOX_TRANSFER_NAME").unwrap_or_else(|_| {
-                env::var("COMPUTERNAME")
-                    .or_else(|_| env::var("HOSTNAME"))
-                    .unwrap_or_else(|_| "QingToolbox".to_string())
-            }));
-        let device_id = env::var("QINGTOOLBOX_DEVICE_ID")
-            .ok()
+        let friendly_name = sanitize_display_name(friendly_name);
+        let device_id = device_id
             .filter(|value| value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
             .map(|value| value.to_ascii_lowercase());
         Self {
+            lifecycle: Mutex::new(()),
             state: Arc::new(Mutex::new(SharedState {
                 receive,
                 ..SharedState::default()
@@ -348,7 +312,11 @@ impl TransferApp {
                 return;
             }
         };
-        let instance_name = sanitize_dns_label(&self.friendly_name);
+        let instance_name = sanitize_dns_label(&format!(
+            "{}-{}",
+            self.friendly_name,
+            self.device_id.as_deref().unwrap_or("unavailable")
+        ));
         let host_name = format!(
             "{}.local.",
             sanitize_dns_label(
@@ -433,10 +401,59 @@ impl TransferApp {
         lock_recover(&self.state).discovery_running = false;
     }
 
-    fn shutdown(&self) {
+    pub(crate) fn set_enabled(self: &Arc<Self>, enabled: bool) {
+        let _gate = lock_recover(&self.lifecycle);
+        if enabled && !self.process_stop.load(Ordering::Acquire) {
+            self.start_discovery();
+            let running = lock_recover(&self.state).discovery_running;
+            self.active.store(running, Ordering::Release);
+        } else {
+            self.active.store(false, Ordering::Release);
+            self.stop_discovery();
+            // Drain accept first; otherwise a late incoming socket can survive disable.
+            self.disconnect();
+            lock_recover(&self.state).peers.clear();
+        }
+    }
+
+    pub(crate) fn shutdown(&self) {
+        let _gate = lock_recover(&self.lifecycle);
         self.process_stop.store(true, Ordering::Release);
-        self.disconnect();
+        self.active.store(false, Ordering::Release);
         self.stop_discovery();
+        self.disconnect();
+    }
+
+    pub(crate) fn connect_target(
+        self: &Arc<Self>,
+        target: &crate::devices::TransferTarget,
+    ) -> Result<Value, TransferError> {
+        let service_name = {
+            let state = lock_recover(&self.state);
+            let matches = state
+                .peers
+                .values()
+                .filter(|peer| {
+                    peer.online
+                        && peer.platform == target.platform
+                        && match &peer.device_id {
+                            Some(id) => id == &target.device_id,
+                            None => peer
+                                .addresses
+                                .iter()
+                                .any(|ip| target.addresses.contains(&ip.to_string())),
+                        }
+                })
+                .collect::<Vec<_>>();
+            if matches.len() != 1 {
+                return Err(TransferError::new(
+                    "peer_unavailable",
+                    "设备传输端点暂不可用，请稍后重试。",
+                ));
+            }
+            matches[0].service_name.clone()
+        };
+        self.invoke("connect", &json!({ "serviceName": service_name }))
     }
 
     fn set_error(&self, message: String) {
@@ -447,7 +464,7 @@ impl TransferApp {
         lock_recover(&self.state).last_error = None;
     }
 
-    fn snapshot(&self) -> Value {
+    pub(crate) fn snapshot(&self) -> Value {
         let state = lock_recover(&self.state);
         let peers = state.peers.values().map(peer_json).collect::<Vec<_>>();
         let active_peer = state.active_peer.as_ref().map(peer_json);
@@ -478,7 +495,11 @@ impl TransferApp {
         })
     }
 
-    fn invoke(self: &Arc<Self>, method: &str, payload: &Value) -> Result<Value, ModuleError> {
+    pub(crate) fn invoke(
+        self: &Arc<Self>,
+        method: &str,
+        payload: &Value,
+    ) -> Result<Value, TransferError> {
         if !self.active.load(Ordering::Acquire)
             && matches!(
                 method,
@@ -487,16 +508,20 @@ impl TransferApp {
                     | "sendFile"
                     | "acceptIncomingConnection"
                     | "acceptIncomingFile"
+                    | "acceptIncomingFileDefault"
             )
         {
-            return Err(ModuleError::new("module_inactive", "请先启用模块。"));
+            return Err(TransferError::new(
+                "transfer_inactive",
+                "请先开启设备发现。",
+            ));
         }
         match method {
             "getState" => Ok(self.snapshot()),
             "refresh" => {
                 lock_recover(&self.state).peers.clear();
                 self.clear_error();
-                self.start_discovery();
+                self.set_enabled(true);
                 Ok(self.snapshot())
             }
             "connect" => {
@@ -543,13 +568,13 @@ impl TransferApp {
                 let destination = validate_destination_path(&destination)?;
                 let session = lock_recover(&self.state).session.clone();
                 let Some(session) = session else {
-                    return Err(ModuleError::new(
+                    return Err(TransferError::new(
                         "no_incoming_file",
                         "当前没有等待接收的文件。",
                     ));
                 };
                 if lock_recover(&self.state).incoming_file.is_none() {
-                    return Err(ModuleError::new(
+                    return Err(TransferError::new(
                         "no_incoming_file",
                         "当前没有等待接收的文件。",
                     ));
@@ -561,14 +586,14 @@ impl TransferApp {
                 let (session, destination) = {
                     let state = lock_recover(&self.state);
                     let session = state.session.clone().ok_or_else(|| {
-                        ModuleError::new("no_incoming_file", "当前没有等待接收的文件。")
+                        TransferError::new("no_incoming_file", "当前没有等待接收的文件。")
                     })?;
                     let offer = state.incoming_file.as_ref().ok_or_else(|| {
-                        ModuleError::new("no_incoming_file", "当前没有等待接收的文件。")
+                        TransferError::new("no_incoming_file", "当前没有等待接收的文件。")
                     })?;
                     let destination = default_destination(&state.receive, &offer.name, false)
                         .ok_or_else(|| {
-                            ModuleError::new(
+                            TransferError::new(
                                 "default_directory_unavailable",
                                 "默认接收文件夹不可用。",
                             )
@@ -598,31 +623,28 @@ impl TransferApp {
                 self.clear_error();
                 Ok(self.snapshot())
             }
-            _ => Err(ModuleError::new(
-                "unknown_method",
-                "未知的 QingTransfer 操作。",
-            )),
+            _ => Err(TransferError::new("unknown_method", "未知的设备传输操作。")),
         }
     }
 
-    fn update_receive_preferences(&self, payload: &Value) -> Result<(), ModuleError> {
+    fn update_receive_preferences(&self, payload: &Value) -> Result<(), TransferError> {
         let mut settings = lock_recover(&self.state).receive.clone();
         if let Some(value) = payload.get("useDefaultDirectory") {
             settings.use_default_directory = value.as_bool().ok_or_else(|| {
-                ModuleError::new("invalid_payload", "useDefaultDirectory 必须是布尔值。")
+                TransferError::new("invalid_payload", "useDefaultDirectory 必须是布尔值。")
             })?;
         }
         if let Some(value) = payload.get("autoAccept") {
-            settings.auto_accept = value
-                .as_bool()
-                .ok_or_else(|| ModuleError::new("invalid_payload", "autoAccept 必须是布尔值。"))?;
+            settings.auto_accept = value.as_bool().ok_or_else(|| {
+                TransferError::new("invalid_payload", "autoAccept 必须是布尔值。")
+            })?;
         }
         if let Some(value) = payload.get("defaultDirectory") {
             if value.is_null() {
                 settings.default_directory = None;
             } else {
                 let path = value.as_str().ok_or_else(|| {
-                    ModuleError::new("invalid_payload", "defaultDirectory 必须是字符串。")
+                    TransferError::new("invalid_payload", "defaultDirectory 必须是字符串。")
                 })?;
                 settings.default_directory =
                     Some(validate_directory_path(path)?.to_string_lossy().to_string());
@@ -633,13 +655,13 @@ impl TransferApp {
         Ok(())
     }
 
-    fn begin_connect(self: &Arc<Self>, service_name: &str) -> Result<(), ModuleError> {
+    fn begin_connect(self: &Arc<Self>, service_name: &str) -> Result<(), TransferError> {
         let (peer, cancel) = {
             let mut state = lock_recover(&self.state);
             if state.session_state != SessionState::Idle {
-                return Err(ModuleError::new(
+                return Err(TransferError::new(
                     "session_active",
-                    "已有一个 QingTransfer 会话正在运行。",
+                    "已有一个文件传输会话正在运行。",
                 ));
             }
             let peer = state
@@ -647,9 +669,9 @@ impl TransferApp {
                 .values()
                 .find(|peer| canonical_name(&peer.service_name) == canonical_name(service_name))
                 .cloned()
-                .ok_or_else(|| ModuleError::new("peer_unavailable", "所选设备已不在线。"))?;
+                .ok_or_else(|| TransferError::new("peer_unavailable", "所选设备已不在线。"))?;
             if peer.port == 0 || peer.addresses.is_empty() {
-                return Err(ModuleError::new(
+                return Err(TransferError::new(
                     "peer_unavailable",
                     "所选设备没有可用端点。",
                 ));
@@ -666,20 +688,20 @@ impl TransferApp {
         Ok(())
     }
 
-    fn begin_send_file(self: &Arc<Self>, raw_path: &str) -> Result<(), ModuleError> {
+    fn begin_send_file(self: &Arc<Self>, raw_path: &str) -> Result<(), TransferError> {
         let path = validate_existing_file(raw_path)?;
         let session = {
             let mut state = lock_recover(&self.state);
             if state.session_state != SessionState::Connected {
-                return Err(ModuleError::new("not_connected", "请先连接到设备。"));
+                return Err(TransferError::new("not_connected", "请先连接到设备。"));
             }
             if state.transfer.is_some() {
-                return Err(ModuleError::new("transfer_active", "已有文件正在传输。"));
+                return Err(TransferError::new("transfer_active", "已有文件正在传输。"));
             }
             let session = state
                 .session
                 .clone()
-                .ok_or_else(|| ModuleError::new("not_connected", "请先连接到设备。"))?;
+                .ok_or_else(|| TransferError::new("not_connected", "请先连接到设备。"))?;
             session.offer_response.clear();
             session.result_response.clear();
             let metadata = fs::metadata(&path)
@@ -847,208 +869,6 @@ fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn default_data_directory() -> PathBuf {
-    env::temp_dir().join("qingtoolbox-qingtransfer")
-}
-
-fn main() {
-    let app = Arc::new(TransferApp::new());
-    let module_id =
-        env::var("QINGTOOLBOX_MODULE_ID").unwrap_or_else(|_| "qing.qingtransfer".to_string());
-    let nonce = env::var("QINGTOOLBOX_MODULE_NONCE").unwrap_or_default();
-    let stdin = io::stdin();
-    let stdout = io::stdout();
-    let mut reader = BufReader::new(stdin.lock());
-    let mut writer = BufWriter::new(stdout.lock());
-    let mut line = Vec::new();
-    let mut handshaken = false;
-
-    loop {
-        line.clear();
-        let read = match reader.read_until(b'\n', &mut line) {
-            Ok(read) => read,
-            Err(_) => break,
-        };
-        if read == 0 {
-            break;
-        }
-        if line.len() > HOST_MAX_FRAME_BYTES {
-            write_host_error(
-                &mut writer,
-                "module.protocol.request",
-                "unknown",
-                "frame_too_large",
-                "模块请求帧过大。".to_string(),
-            );
-            break;
-        }
-        let envelope = match serde_json::from_slice::<HostEnvelope>(&line) {
-            Ok(envelope) if valid_host_envelope(&envelope) => envelope,
-            _ => {
-                write_host_error(
-                    &mut writer,
-                    "module.protocol.response",
-                    "unknown",
-                    "invalid_frame",
-                    "模块请求帧无效。".to_string(),
-                );
-                continue;
-            }
-        };
-        match envelope.message_type.as_str() {
-            "module.lifecycle.request" if handshaken => {
-                let Some(active) = envelope.payload.get("active").and_then(Value::as_bool) else {
-                    break;
-                };
-                if active {
-                    app.start_discovery();
-                } else {
-                    app.active.store(false, Ordering::Release);
-                    app.stop_discovery();
-                    // Drain the accepting thread before disconnecting so it
-                    // cannot install a late incoming session after disable.
-                    app.disconnect();
-                }
-                if active && !lock_recover(&app.state).discovery_running {
-                    write_host_error(
-                        &mut writer,
-                        "module.lifecycle.response",
-                        &envelope.request_id,
-                        "activation_failed",
-                        "局域网发现启动失败。".to_string(),
-                    );
-                    continue;
-                }
-                app.active.store(active, Ordering::Release);
-                let response = serde_json::json!({
-                    "protocolVersion": 1, "messageType": "module.lifecycle.response",
-                    "requestId": envelope.request_id, "payload": { "active": active }
-                });
-                let _ = serde_json::to_writer(&mut writer, &response);
-                let _ = writeln!(writer);
-                let _ = writer.flush();
-            }
-            "module.hello.request" if !handshaken => {
-                let valid = envelope.payload.get("moduleId").and_then(Value::as_str)
-                    == Some(module_id.as_str())
-                    && envelope.payload.get("nonce").and_then(Value::as_str)
-                        == Some(nonce.as_str());
-                if !valid {
-                    write_host_error(
-                        &mut writer,
-                        "module.hello.response",
-                        &envelope.request_id,
-                        "hello_rejected",
-                        "模块 hello 校验失败。".to_string(),
-                    );
-                    break;
-                }
-                handshaken = true;
-                write_host_response(
-                    &mut writer,
-                    "module.hello.response",
-                    &envelope.request_id,
-                    json!({ "moduleId": module_id, "nonce": nonce, "lifecycleVersion": 1, "name": "QingTransfer", "protocolVersion": HOST_PROTOCOL_VERSION }),
-                );
-            }
-            "module.invoke.request" if handshaken => {
-                let method = envelope
-                    .payload
-                    .get("method")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let payload = envelope.payload.get("payload").unwrap_or(&Value::Null);
-                match app.invoke(method, payload) {
-                    Ok(value) => write_host_response(
-                        &mut writer,
-                        "module.invoke.response",
-                        &envelope.request_id,
-                        value,
-                    ),
-                    Err(error) => write_host_error(
-                        &mut writer,
-                        "module.invoke.response",
-                        &envelope.request_id,
-                        error.code,
-                        error.message,
-                    ),
-                }
-            }
-            "module.shutdown.request" if handshaken => {
-                app.shutdown();
-                write_host_response(
-                    &mut writer,
-                    "module.shutdown.response",
-                    &envelope.request_id,
-                    json!({}),
-                );
-                break;
-            }
-            _ => write_host_error(
-                &mut writer,
-                "module.protocol.response",
-                &envelope.request_id,
-                "invalid_message",
-                "模块消息顺序或类型无效。".to_string(),
-            ),
-        }
-    }
-    app.shutdown();
-}
-
-fn valid_host_envelope(envelope: &HostEnvelope) -> bool {
-    envelope.protocol_version == HOST_PROTOCOL_VERSION
-        && valid_token(&envelope.message_type, 64)
-        && valid_token(&envelope.request_id, 128)
-}
-
-fn valid_token(value: &str, max: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= max
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b':'))
-}
-
-fn write_host_response(
-    writer: &mut impl Write,
-    message_type: &str,
-    request_id: &str,
-    payload: Value,
-) {
-    let response = HostResponse {
-        protocol_version: HOST_PROTOCOL_VERSION,
-        message_type,
-        request_id,
-        payload,
-        error: None,
-    };
-    if serde_json::to_writer(&mut *writer, &response).is_ok() {
-        let _ = writer.write_all(b"\n");
-        let _ = writer.flush();
-    }
-}
-
-fn write_host_error(
-    writer: &mut impl Write,
-    message_type: &str,
-    request_id: &str,
-    code: &'static str,
-    message: String,
-) {
-    let response = HostResponse {
-        protocol_version: HOST_PROTOCOL_VERSION,
-        message_type,
-        request_id,
-        payload: Value::Null,
-        error: Some(HostErrorBody { code, message }),
-    };
-    if serde_json::to_writer(&mut *writer, &response).is_ok() {
-        let _ = writer.write_all(b"\n");
-        let _ = writer.flush();
-    }
-}
-
 fn peer_json(peer: &Peer) -> Value {
     json!({
         "serviceName": peer.service_name,
@@ -1064,17 +884,17 @@ fn peer_json(peer: &Peer) -> Value {
     })
 }
 
-fn required_string(payload: &Value, name: &str) -> Result<String, ModuleError> {
+fn required_string(payload: &Value, name: &str) -> Result<String, TransferError> {
     payload
         .get(name)
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
-        .ok_or_else(|| ModuleError::new("invalid_payload", format!("缺少 {name}。")))
+        .ok_or_else(|| TransferError::new("invalid_payload", format!("缺少 {name}。")))
 }
 
-fn io_error(code: &'static str, prefix: &str, error: io::Error) -> ModuleError {
-    ModuleError::new(code, format!("{prefix}：{error}"))
+fn io_error(code: &'static str, prefix: &str, error: io::Error) -> TransferError {
+    TransferError::new(code, format!("{prefix}：{error}"))
 }
 
 fn unix_time_millis() -> u64 {
@@ -1202,7 +1022,7 @@ fn parse_peer(info: &ResolvedService, own_fullname: &str) -> Option<Peer> {
 }
 
 fn browse_loop(
-    app: Arc<TransferApp>,
+    app: Arc<TransferEngine>,
     receiver: mdns_sd::Receiver<ServiceEvent>,
     stop: Arc<AtomicBool>,
     own_fullname: String,
@@ -1237,7 +1057,7 @@ fn browse_loop(
     }
 }
 
-fn accept_loop(app: Arc<TransferApp>, listener: TcpListener, stop: Arc<AtomicBool>) {
+fn accept_loop(app: Arc<TransferEngine>, listener: TcpListener, stop: Arc<AtomicBool>) {
     while !stop.load(Ordering::Acquire) && !app.process_stop.load(Ordering::Acquire) {
         match listener.accept() {
             Ok((mut stream, _)) => {
@@ -1289,7 +1109,7 @@ fn confirm_peer(peer: &Peer) -> bool {
     false
 }
 
-fn connect_worker(app: Arc<TransferApp>, peer: Peer, cancel: Arc<AtomicBool>) {
+fn connect_worker(app: Arc<TransferEngine>, peer: Peer, cancel: Arc<AtomicBool>) {
     let mut last_error = "无法连接到所选设备。".to_string();
     for address in &peer.addresses {
         if cancel.load(Ordering::Acquire) {
@@ -1332,7 +1152,7 @@ fn connect_worker(app: Arc<TransferApp>, peer: Peer, cancel: Arc<AtomicBool>) {
     app.finish_connect_failure(&cancel, last_error);
 }
 
-fn incoming_approval_worker(app: Arc<TransferApp>, session: Arc<Session>) {
+fn incoming_approval_worker(app: Arc<TransferEngine>, session: Arc<Session>) {
     let decision = wait_decision(
         &session.connection_decision,
         &session.cancelled,
@@ -1368,11 +1188,11 @@ fn incoming_approval_worker(app: Arc<TransferApp>, session: Arc<Session>) {
     app.clear_session_if(&session, None);
 }
 
-fn spawn_session_reader(app: Arc<TransferApp>, session: Arc<Session>) {
+fn spawn_session_reader(app: Arc<TransferEngine>, session: Arc<Session>) {
     thread::spawn(move || session_reader(app, session));
 }
 
-fn session_reader(app: Arc<TransferApp>, session: Arc<Session>) {
+fn session_reader(app: Arc<TransferEngine>, session: Arc<Session>) {
     let Ok(stream) = session.stream.lock().map(|stream| stream.try_clone()) else {
         app.clear_session_if(&session, Some("无法读取连接流。".to_string()));
         return;
@@ -1406,7 +1226,7 @@ fn session_reader(app: Arc<TransferApp>, session: Arc<Session>) {
 }
 
 fn receive_offer(
-    app: &TransferApp,
+    app: &TransferEngine,
     session: &Arc<Session>,
     reader: &mut TcpStream,
     offer: FileOfferWire,
@@ -1422,6 +1242,7 @@ fn receive_offer(
             let _ = send_wire(session, &WireMessage::FileReject);
             return;
         }
+        session.file_decision.clear();
         state.incoming_file = Some(IncomingFile {
             name: offer.name.clone(),
             size: offer.size,
@@ -1434,7 +1255,6 @@ fn receive_offer(
         });
         state.last_completed = None;
     }
-    session.file_decision.clear();
     let automatic = {
         let state = lock_recover(&app.state);
         default_destination(&state.receive, &offer.name, true)
@@ -1444,7 +1264,7 @@ fn receive_offer(
         .or_else(|| wait_decision(&session.file_decision, &session.cancelled, DECISION_TIMEOUT));
     let Some(FileDecision::Accept(destination)) = decision else {
         let _ = send_wire(session, &WireMessage::FileReject);
-        app.clear_transfer(None);
+        app.clear_transfer(Some("已拒绝接收文件或接收确认已超时。".to_string()));
         return;
     };
     {
@@ -1465,19 +1285,19 @@ fn receive_offer(
 }
 
 fn receive_bytes(
-    app: &TransferApp,
+    app: &TransferEngine,
     session: &Arc<Session>,
     reader: &mut TcpStream,
     offer: &FileOfferWire,
     destination: &Path,
-) -> Result<(), ModuleError> {
+) -> Result<(), TransferError> {
     let parent = destination
         .parent()
-        .ok_or_else(|| ModuleError::new("destination_invalid", "接收目录无效。"))?;
+        .ok_or_else(|| TransferError::new("destination_invalid", "接收目录无效。"))?;
     fs::create_dir_all(parent)
         .map_err(|error| io_error("destination_unavailable", "无法创建接收目录", error))?;
     if destination.exists() {
-        return Err(ModuleError::new("destination_exists", "目标文件已存在。"));
+        return Err(TransferError::new("destination_exists", "目标文件已存在。"));
     }
     let temporary = parent.join(format!(".{}.qingtransfer.part", offer.name));
     let _ = fs::remove_file(&temporary);
@@ -1493,14 +1313,17 @@ fn receive_bytes(
     let result = (|| {
         while remaining > 0 {
             if session.cancelled.load(Ordering::Acquire) {
-                return Err(ModuleError::new("cancelled", "传输已取消。"));
+                return Err(TransferError::new("cancelled", "传输已取消。"));
             }
             let wanted = remaining.min(buffer.len() as u64) as usize;
             let read = reader
                 .read(&mut buffer[..wanted])
                 .map_err(|error| io_error("transfer_failed", "读取传输数据失败", error))?;
             if read == 0 {
-                return Err(ModuleError::new("transfer_failed", "设备提前关闭了连接。"));
+                return Err(TransferError::new(
+                    "transfer_failed",
+                    "设备提前关闭了连接。",
+                ));
             }
             hash.update(&buffer[..read]);
             output
@@ -1517,13 +1340,13 @@ fn receive_bytes(
         let end = read_wire(reader)
             .map_err(|error| io_error("transfer_failed", "读取文件校验信息失败", error))?;
         let WireMessage::FileEnd(actual) = end else {
-            return Err(ModuleError::new(
+            return Err(TransferError::new(
                 "transfer_failed",
                 "设备未发送文件校验信息。",
             ));
         };
         if actual != expected {
-            return Err(ModuleError::new("transfer_failed", "文件校验失败。"));
+            return Err(TransferError::new("transfer_failed", "文件校验失败。"));
         }
         fs::rename(&temporary, destination)
             .map_err(|error| io_error("destination_unavailable", "无法发布接收文件", error))?;
@@ -1535,7 +1358,7 @@ fn receive_bytes(
     result
 }
 
-fn send_file_worker(app: Arc<TransferApp>, session: Arc<Session>, path: PathBuf) {
+fn send_file_worker(app: Arc<TransferEngine>, session: Arc<Session>, path: PathBuf) {
     let name = path
         .file_name()
         .and_then(|value| value.to_str())
@@ -1562,7 +1385,7 @@ fn send_file_worker(app: Arc<TransferApp>, session: Arc<Session>, path: PathBuf)
         app.clear_transfer(Some("对方拒绝了文件。".to_string()));
         return;
     }
-    let result = (|| -> Result<(), ModuleError> {
+    let result = (|| -> Result<(), TransferError> {
         let mut input = File::open(&path)
             .map_err(|error| io_error("file_unavailable", "无法打开要发送的文件", error))?;
         let mut hash = Sha256::new();
@@ -1570,7 +1393,7 @@ fn send_file_worker(app: Arc<TransferApp>, session: Arc<Session>, path: PathBuf)
         let mut buffer = vec![0u8; NETWORK_BUFFER_BYTES];
         loop {
             if session.cancelled.load(Ordering::Acquire) {
-                return Err(ModuleError::new("cancelled", "传输已取消。"));
+                return Err(TransferError::new("cancelled", "传输已取消。"));
             }
             let read = input
                 .read(&mut buffer)
@@ -1598,7 +1421,7 @@ fn send_file_worker(app: Arc<TransferApp>, session: Arc<Session>, path: PathBuf)
         )
         .unwrap_or(false)
         {
-            return Err(ModuleError::new(
+            return Err(TransferError::new(
                 "transfer_failed",
                 "接收设备未能保存文件。",
             ));
@@ -1800,36 +1623,36 @@ fn is_safe_file_name(value: &str) -> bool {
         && !value.ends_with(['.', ' '])
 }
 
-fn validate_existing_file(raw: &str) -> Result<PathBuf, ModuleError> {
+fn validate_existing_file(raw: &str) -> Result<PathBuf, TransferError> {
     validate_path_string(raw, "文件路径无效。")?;
     let path =
         fs::canonicalize(raw).map_err(|error| io_error("file_unavailable", "文件不可用", error))?;
     let metadata =
         fs::metadata(&path).map_err(|error| io_error("file_unavailable", "文件不可用", error))?;
     if !metadata.is_file() || metadata.len() > MAX_FILE_BYTES {
-        return Err(ModuleError::new("file_invalid", "文件大小超出支持范围。"));
+        return Err(TransferError::new("file_invalid", "文件大小超出支持范围。"));
     }
     let name = path
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or_default();
     if !is_safe_file_name(name) {
-        return Err(ModuleError::new("file_invalid", "文件名无效。"));
+        return Err(TransferError::new("file_invalid", "文件名无效。"));
     }
     Ok(path)
 }
 
-fn validate_directory_path(raw: &str) -> Result<PathBuf, ModuleError> {
+fn validate_directory_path(raw: &str) -> Result<PathBuf, TransferError> {
     validate_path_string(raw, "目录路径无效。")?;
     let path = fs::canonicalize(raw)
         .map_err(|error| io_error("directory_unavailable", "目录不可用", error))?;
     if !path.is_dir() {
-        return Err(ModuleError::new("directory_invalid", "必须选择文件夹。"));
+        return Err(TransferError::new("directory_invalid", "必须选择文件夹。"));
     }
     Ok(path)
 }
 
-fn validate_destination_path(raw: &str) -> Result<PathBuf, ModuleError> {
+fn validate_destination_path(raw: &str) -> Result<PathBuf, TransferError> {
     validate_path_string(raw, "目标路径无效。")?;
     let path = PathBuf::from(raw);
     let name = path
@@ -1837,13 +1660,16 @@ fn validate_destination_path(raw: &str) -> Result<PathBuf, ModuleError> {
         .and_then(|value| value.to_str())
         .unwrap_or_default();
     if !is_safe_file_name(name) {
-        return Err(ModuleError::new("destination_invalid", "目标文件名无效。"));
+        return Err(TransferError::new(
+            "destination_invalid",
+            "目标文件名无效。",
+        ));
     }
     let parent = path
         .parent()
-        .ok_or_else(|| ModuleError::new("destination_invalid", "目标目录无效。"))?;
+        .ok_or_else(|| TransferError::new("destination_invalid", "目标目录无效。"))?;
     if !parent.is_absolute() {
-        return Err(ModuleError::new(
+        return Err(TransferError::new(
             "destination_invalid",
             "目标路径必须是绝对路径。",
         ));
@@ -1851,14 +1677,14 @@ fn validate_destination_path(raw: &str) -> Result<PathBuf, ModuleError> {
     Ok(path)
 }
 
-fn validate_path_string(raw: &str, message: &str) -> Result<(), ModuleError> {
+fn validate_path_string(raw: &str, message: &str) -> Result<(), TransferError> {
     if raw.is_empty()
         || raw.chars().count() > 32_767
         || raw.contains('\0')
         || raw.chars().any(char::is_control)
         || !Path::new(raw).is_absolute()
     {
-        return Err(ModuleError::new("path_invalid", message));
+        return Err(TransferError::new("path_invalid", message));
     }
     Ok(())
 }
@@ -1904,8 +1730,29 @@ fn settings_path(data_directory: &Path) -> PathBuf {
     data_directory.join("receive-settings.json")
 }
 
+fn migrate_receive_settings(data_directory: &Path, legacy_directory: Option<&Path>) {
+    if settings_path(data_directory).exists() {
+        return;
+    }
+    let Some(legacy) = legacy_directory else {
+        return;
+    };
+    let path = settings_path(legacy);
+    if !fs::metadata(&path).is_ok_and(|metadata| metadata.len() <= 64 * 1024) {
+        return;
+    }
+    let Ok(bytes) = fs::read(path) else { return };
+    if serde_json::from_slice::<ReceiveSettings>(&bytes).is_ok() {
+        // Preserve the old file and do not overwrite host-owned preferences.
+        let _ = save_receive_settings(data_directory, &load_receive_settings(legacy));
+    }
+}
+
 fn load_receive_settings(data_directory: &Path) -> ReceiveSettings {
     let path = settings_path(data_directory);
+    if !fs::metadata(&path).is_ok_and(|metadata| metadata.len() <= 64 * 1024) {
+        return ReceiveSettings::default();
+    }
     let Ok(bytes) = fs::read(path) else {
         return ReceiveSettings::default();
     };
@@ -1923,13 +1770,13 @@ fn load_receive_settings(data_directory: &Path) -> ReceiveSettings {
 fn save_receive_settings(
     data_directory: &Path,
     settings: &ReceiveSettings,
-) -> Result<(), ModuleError> {
+) -> Result<(), TransferError> {
     fs::create_dir_all(data_directory)
         .map_err(|error| io_error("settings_unavailable", "无法创建接收设置目录", error))?;
     let path = settings_path(data_directory);
     let temporary = path.with_extension(format!("json.tmp.{}", unique_id()));
     let bytes = serde_json::to_vec_pretty(settings)
-        .map_err(|error| ModuleError::new("settings_unavailable", error.to_string()))?;
+        .map_err(|error| TransferError::new("settings_unavailable", error.to_string()))?;
     fs::write(&temporary, bytes)
         .map_err(|error| io_error("settings_unavailable", "无法保存接收设置", error))?;
     if let Err(error) = replace_file(&temporary, &path) {
@@ -1939,7 +1786,7 @@ fn save_receive_settings(
     Ok(())
 }
 
-fn replace_file(temporary: &Path, destination: &Path) -> Result<(), ModuleError> {
+fn replace_file(temporary: &Path, destination: &Path) -> Result<(), TransferError> {
     if destination.exists() {
         let backup = destination.with_extension(format!("json.bak-{}", unique_id()));
         fs::rename(destination, &backup)
@@ -1959,6 +1806,199 @@ fn replace_file(temporary: &Path, destination: &Path) -> Result<(), ModuleError>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TestEngine {
+        app: Arc<TransferEngine>,
+        directory: PathBuf,
+    }
+
+    impl TestEngine {
+        fn new(name: &str, identity: &str) -> Self {
+            let directory = env::temp_dir().join(format!("qing-host-transfer-{}", unique_id()));
+            let app = Arc::new(TransferEngine::new(
+                directory.clone(),
+                None,
+                name,
+                Some(identity.to_string()),
+            ));
+            Self { app, directory }
+        }
+    }
+
+    impl Drop for TestEngine {
+        fn drop(&mut self) {
+            self.app.shutdown();
+            let _ = fs::remove_dir_all(&self.directory);
+        }
+    }
+
+    fn until(mut ready: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        while !ready() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "transfer state timed out"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn peer(identity: &str, platform: &str, port: u16) -> Peer {
+        Peer {
+            service_name: format!("test-{identity}"),
+            display_name: "Test device".to_string(),
+            platform: platform.to_string(),
+            protocol_version: "1".to_string(),
+            capabilities: vec!["file".to_string()],
+            addresses: vec!["127.0.0.1".parse().unwrap()],
+            port,
+            device_id: Some(identity.to_string()),
+            online: true,
+            last_seen: None,
+        }
+    }
+
+    #[test]
+    fn host_engine_needs_no_manifest_and_migrates_preferences_once() {
+        let old = TestEngine::new("Old", "11111111111111111111111111111111");
+        fs::create_dir_all(&old.directory).unwrap();
+        let settings = ReceiveSettings {
+            default_directory: Some(old.directory.to_string_lossy().to_string()),
+            use_default_directory: true,
+            auto_accept: true,
+        };
+        save_receive_settings(&old.directory, &settings).unwrap();
+        let new = TestEngine::new("PC", "22222222222222222222222222222222");
+        migrate_receive_settings(&new.directory, Some(&old.directory));
+        let migrated = load_receive_settings(&new.directory);
+        assert!(migrated.use_default_directory && migrated.auto_accept);
+        assert!(settings_path(&old.directory).is_file());
+        save_receive_settings(&new.directory, &ReceiveSettings::default()).unwrap();
+        migrate_receive_settings(&new.directory, Some(&old.directory));
+        assert!(!load_receive_settings(&new.directory).auto_accept);
+        assert_eq!(new.app.snapshot()["session"]["state"], "Idle");
+        assert_eq!(
+            new.app
+                .invoke("sendFile", &json!({"path": "relative.txt"}))
+                .unwrap_err()
+                .code,
+            "transfer_inactive"
+        );
+        assert!(!new.directory.join("module.json").exists());
+    }
+
+    #[test]
+    fn paired_target_is_resolved_by_identity_not_a_client_endpoint() {
+        let engine = TestEngine::new("PC", "11111111111111111111111111111111");
+        let mut wrong = peer("22222222222222222222222222222222", "android", 12345);
+        // Same IP but a different advertised identity must not match.
+        wrong.addresses = vec!["127.0.0.1".parse().unwrap()];
+        lock_recover(&engine.app.state)
+            .peers
+            .insert(wrong.service_name.clone(), wrong);
+        let target = crate::devices::TransferTarget {
+            device_id: "33333333333333333333333333333333".to_string(),
+            platform: "android".to_string(),
+            addresses: vec!["127.0.0.1".to_string()],
+        };
+        assert_eq!(
+            engine.app.connect_target(&target).unwrap_err().code,
+            "peer_unavailable"
+        );
+    }
+
+    #[test]
+    fn host_engine_streams_in_both_directions_with_receiver_confirmation() {
+        let pc = TestEngine::new("PC", "11111111111111111111111111111111");
+        let phone = TestEngine::new("Phone fixture", "22222222222222222222222222222222");
+        pc.app.active.store(true, Ordering::Release);
+        phone.app.active.store(true, Ordering::Release);
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let remote = peer(
+            phone.app.device_id.as_deref().unwrap(),
+            "android",
+            address.port(),
+        );
+        lock_recover(&pc.app.state)
+            .peers
+            .insert(remote.service_name.clone(), remote.clone());
+        let server = Arc::clone(&phone.app);
+        // Use a real socket and the existing Android wire format; no mDNS or module process.
+        let accept = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).unwrap();
+            let WireMessage::Hello(hello) = read_wire(&mut stream).unwrap() else {
+                panic!("missing hello")
+            };
+            server.install_incoming(stream, hello);
+        });
+        pc.app
+            .connect_target(&crate::devices::TransferTarget {
+                device_id: remote.device_id.unwrap(),
+                platform: "android".to_string(),
+                addresses: vec!["127.0.0.1".to_string()],
+            })
+            .unwrap();
+        until(|| phone.app.snapshot()["session"]["state"] == "WaitingApproval");
+        phone
+            .app
+            .invoke("acceptIncomingConnection", &json!({}))
+            .unwrap();
+        until(|| {
+            pc.app.snapshot()["session"]["state"] == "Connected"
+                && phone.app.snapshot()["session"]["state"] == "Connected"
+        });
+        accept.join().unwrap();
+        fs::create_dir_all(&pc.directory).unwrap();
+        fs::create_dir_all(&phone.directory).unwrap();
+        phone.app.invoke("setReceivePreferences", &json!({
+            "defaultDirectory": phone.directory.to_string_lossy(), "useDefaultDirectory": true, "autoAccept": false,
+        })).unwrap();
+        let outgoing = pc.directory.join("pc-file.bin");
+        let bytes = vec![0x5au8; NETWORK_BUFFER_BYTES * 2 + 17];
+        fs::write(&outgoing, &bytes).unwrap();
+        pc.app
+            .invoke("sendFile", &json!({"path": outgoing.to_string_lossy()}))
+            .unwrap();
+        until(|| phone.app.snapshot()["incomingFile"]["name"] == "pc-file.bin");
+        assert!(
+            !phone.directory.join("pc-file.bin").exists(),
+            "must wait for receiver approval"
+        );
+        phone
+            .app
+            .invoke("acceptIncomingFileDefault", &json!({}))
+            .unwrap();
+        until(|| {
+            pc.app.snapshot()["lastCompleted"] == "pc-file.bin"
+                && phone.app.snapshot()["lastCompleted"] == "pc-file.bin"
+        });
+        assert_eq!(
+            fs::read(phone.directory.join("pc-file.bin")).unwrap(),
+            bytes
+        );
+        pc.app.invoke("setReceivePreferences", &json!({
+            "defaultDirectory": pc.directory.to_string_lossy(), "useDefaultDirectory": true, "autoAccept": true,
+        })).unwrap();
+        let incoming = phone.directory.join("android-file.bin");
+        fs::write(&incoming, b"Android to PC").unwrap();
+        phone
+            .app
+            .invoke("sendFile", &json!({"path": incoming.to_string_lossy()}))
+            .unwrap();
+        until(|| {
+            pc.app.snapshot()["lastCompleted"] == "android-file.bin"
+                && phone.app.snapshot()["lastCompleted"] == "android-file.bin"
+        });
+        assert_eq!(
+            fs::read(pc.directory.join("android-file.bin")).unwrap(),
+            b"Android to PC"
+        );
+        pc.app.set_enabled(false);
+        assert_eq!(pc.app.snapshot()["session"]["state"], "Idle");
+        assert!(!pc.app.snapshot()["discovery"]["running"].as_bool().unwrap());
+    }
 
     #[test]
     fn probe_messages_are_strict_and_nonce_bound() {
@@ -2045,11 +2085,5 @@ mod tests {
         assert!(default_destination(&settings, "a.txt", false).is_some());
         assert!(default_destination(&settings, "a.txt", true).is_none());
         let _ = fs::remove_dir_all(temp);
-    }
-
-    #[test]
-    fn host_tokens_are_bounded() {
-        assert!(valid_token("module.invoke.request", 64));
-        assert!(!valid_token("../escape", 64));
     }
 }

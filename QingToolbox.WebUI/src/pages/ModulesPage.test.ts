@@ -47,6 +47,26 @@ const summaryValues = (wrapper: ReturnType<typeof mount>) => Object.fromEntries(
 const iconDataUrl = 'data:image/svg+xml;base64,PHN2Zy8+'
 
 describe('ModulesPage lifecycle controls', () => {
+  it('saves the per-module check switch through the authoritative host snapshot', async () => {
+    const disabled = item({ isUpdateCheckEnabled: false, updateStatus: 'CheckDisabled' })
+    const setUpdateCheck = vi.fn(async () => ({ generatedAt: new Date().toISOString(), modules: [disabled] }))
+    const { wrapper, store } = page(item(), { setUpdateCheck })
+    store.selectedModuleId = 'qing.text'; await wrapper.vm.$nextTick()
+    const toggle = wrapper.get('.module-update-check-setting [role="switch"]')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    await toggle.trigger('click'); await flushPromises()
+    expect(setUpdateCheck).toHaveBeenCalledWith('qing.text', false)
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('.module-check-update').attributes('disabled')).toBeUndefined()
+  })
+  it('retains the last check preference on failure and explains missing official identities', async () => {
+    const { wrapper, store } = page(item({ updateStatus: 'NotOfficial' }), { setUpdateCheck: vi.fn().mockRejectedValue(Error('private failure')) }, { language: 'zh-CN', effectiveLanguage: 'zh-CN' })
+    store.selectedModuleId = 'qing.text'; await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('该模块未在官方仓库中记录')
+    await wrapper.get('.module-update-check-setting [role="switch"]').trigger('click'); await flushPromises()
+    expect(wrapper.get('.module-update-check-setting [role="switch"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.text()).not.toContain('private failure')
+  })
   it('imports once through the native picker and selects the confirmed module', async () => {
     let resolve!: (value: unknown) => void
     const imported = item({ id: 'qing.imported', displayName: 'Imported Tool' })
@@ -59,7 +79,7 @@ describe('ModulesPage lifecycle controls', () => {
     expect(button.classes()).toContain('is-primary')
     expect(refresh.classes()).toContain('is-secondary')
     expect(button.attributes('aria-busy')).toBe('false')
-    await button.trigger('click'); await button.trigger('click')
+    await button.trigger('click'); await wrapper.get('.module-import-local').trigger('click'); await button.trigger('click')
     expect(importModule).toHaveBeenCalledTimes(1)
     expect(button.text()).toContain('Importing…')
     expect(button.find('.module-operation-spinner').exists()).toBe(true)
@@ -78,6 +98,7 @@ describe('ModulesPage lifecycle controls', () => {
     const { wrapper, store } = page(item())
     store.searchQuery = 'Text'; store.stateFilter = 'notLoaded'; store.selectedModuleId = 'qing.text'
     await wrapper.findAll('.wpf-page-header .q-button').find(item => item.text().includes('Import module'))!.trigger('click')
+    await wrapper.get('.module-import-local').trigger('click')
     await flushPromises()
     expect(store.searchQuery).toBe('Text'); expect(store.stateFilter).toBe('notLoaded'); expect(store.selectedModuleId).toBe('qing.text')
     expect(useToastStore().message).toBe('')
@@ -93,6 +114,7 @@ describe('ModulesPage lifecycle controls', () => {
     const confirmIncompatibleImport = vi.fn(async () => ({ disposition: 'Imported', importedModuleId: future.id, snapshot: { generatedAt: new Date().toISOString(), modules: [future] } }))
     const { wrapper, store } = page(item(), { importModule, confirmIncompatibleImport })
     await wrapper.get('.wpf-page-header .module-import-button').trigger('click')
+    await wrapper.get('.module-import-local').trigger('click')
     await flushPromises()
     const dialog = document.querySelector<HTMLElement>('.q-modal-card')!
     expect(dialog.getAttribute('role')).toBe('dialog')
@@ -112,6 +134,7 @@ describe('ModulesPage lifecycle controls', () => {
     const cancelPendingImport = vi.fn(async () => undefined)
     const { wrapper, client } = page(item(), { importModule: vi.fn(async () => prompt), cancelPendingImport })
     await wrapper.get('.wpf-page-header .module-import-button').trigger('click')
+    await wrapper.get('.module-import-local').trigger('click')
     await flushPromises()
     document.querySelectorAll<HTMLButtonElement>('.q-modal-actions button')[0].click()
     await flushPromises()
@@ -127,7 +150,7 @@ describe('ModulesPage lifecycle controls', () => {
     expect(emptyImport.text()).toBe('导入模块')
     expect(emptyImport.classes()).toContain('is-primary')
     expect(emptyImport.find('.q-icon').exists()).toBe(true)
-    await emptyImport.trigger('click'); await flushPromises()
+    await emptyImport.trigger('click'); await wrapper.get('.q-empty .module-import-local').trigger('click'); await flushPromises()
     expect(client.importModule).toHaveBeenCalledTimes(1)
     expect(emptyImport.attributes('aria-busy')).toBe('false')
   })
@@ -818,7 +841,7 @@ describe('ModulesPage host-authoritative update presentation', () => {
     await wrapper.get('.wpf-module-card').trigger('click')
     expect(wrapper.get('.module-update').text()).toContain('模块更新')
     expect(wrapper.get('.module-check-update').text()).toContain('检查更新')
-    expect(wrapper.get('.module-download-update').text()).toContain('下载并验证')
+    expect(wrapper.get('.module-download-update').text()).toContain('下载并安装')
     expect(wrapper.get('.module-card-badges').text()).toContain('有可用更新')
   })
 

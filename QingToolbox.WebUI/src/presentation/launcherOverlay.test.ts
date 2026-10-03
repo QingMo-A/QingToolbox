@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { OverlayInteraction } from '../../../QingToolbox.Tauri/native-launcher/ui-src/src/overlayInteraction'
+import { OverlayInteraction } from '@launcher-test/overlayInteraction'
 
 describe('Launcher overlay dismissal', () => {
   it('requires a complete blank-area click', () => {

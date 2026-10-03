@@ -37,8 +37,8 @@ only for package extraction; it is not a general filesystem bridge.
 Qing PDF carries the official qpdf 12.4.1 Windows runtime under
 `modules` branch: `modules/QingPdf/third-party/qpdf/`, including its `LICENSE.txt`, `NOTICE.md` and
 `SHA256SUMS`; the build script verifies every copied file against the pinned
-hashes. QingTransfer uses the fixed `mdns-sd` 0.21.0 crate for DNS-SD discovery;
-its transitive versions are recorded in `native-transfer/Cargo.lock`. No build
+hashes. The host-owned device transfer uses the fixed `mdns-sd` 0.21.0 crate for DNS-SD discovery;
+its transitive versions are recorded in `src-tauri/Cargo.lock`. No build
 step downloads a moving `latest` runtime.
 
 Text Tools uses the fixed `base64` 0.22.1 crate and `windows-sys` 0.61.2 for

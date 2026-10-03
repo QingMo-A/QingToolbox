@@ -24,8 +24,7 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
 
 Push-Location $uiRoot
 try {
-    npm ci --ignore-scripts --no-audit --no-fund
-    if ($LASTEXITCODE -ne 0) { throw "Qing PDF UI dependency install failed with exit code $LASTEXITCODE" }
+    Restore-QingModuleUiDependencies -UiRoot $uiRoot
     npm run build
     if ($LASTEXITCODE -ne 0) { throw "Qing PDF UI build failed with exit code $LASTEXITCODE" }
 } finally { Pop-Location }

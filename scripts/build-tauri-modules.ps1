@@ -2,7 +2,7 @@
 param([switch]$ForceRebuild)
 $ErrorActionPreference = 'Stop'
 $cache = Join-Path $PSScriptRoot 'tauri-build-cache.mjs'
-foreach ($module in @('canary', 'launcher', 'pdf', 'transfer', 'texttools', 'windowtopmost', 'powerguard', 'screenpin')) {
+foreach ($module in @('canary', 'launcher', 'pdf', 'texttools', 'windowtopmost', 'powerguard', 'screenpin')) {
     & node $cache check $module
     if (-not $ForceRebuild -and $LASTEXITCODE -eq 0) {
         Write-Host "Reusing unchanged Tauri module: $module"

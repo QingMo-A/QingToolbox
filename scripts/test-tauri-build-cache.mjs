@@ -49,6 +49,8 @@ test('content cache reuses unchanged work and rejects changed/missing outputs', 
   write('modules/Launcher/target/ignored', 'generated')
   write('modules/Launcher/ui-src/node_modules/ignored', 'dependency cache')
   assert.equal(run('check', 'launcher').status, 0)
+  write('modules/Launcher/packages/qing.launcher-1.0.0-tauri.qmod', 'published package')
+  assert.equal(run('check', 'launcher').status, 0)
   write(src, 'two')
   assert.equal(run('check', 'launcher').status, 1)
   assert.notEqual(run('save', 'launcher', before).status, 0)

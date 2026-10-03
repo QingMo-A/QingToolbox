@@ -12,12 +12,9 @@ const { t } = useLocalization()
 const receive = ref<Receive | null>(null)
 const busy = ref(false)
 const error = ref('')
-const moduleId = 'qing.qingtransfer'
 
 async function getSettings() {
-  await invoke('list_modules')
-  await invoke('start_module', { moduleId })
-  const state = await invoke<{ receive: Receive }>('invoke_module', { moduleId, method: 'getState', payload: {} })
+  const state = await invoke<{ receive: Receive }>('get_device_transfer_state')
   receive.value = state.receive
 }
 
@@ -26,7 +23,7 @@ async function change(payload: Partial<Receive>) {
   busy.value = true
   error.value = ''
   try {
-    const state = await invoke<{ receive: Receive }>('invoke_module', { moduleId, method: 'setReceivePreferences', payload })
+    const state = await invoke<{ receive: Receive }>('update_device_receive_preferences', { preferences: payload })
     receive.value = state.receive
   } catch (reason) { error.value = reason instanceof Error ? reason.message : String(reason) }
   finally { busy.value = false }

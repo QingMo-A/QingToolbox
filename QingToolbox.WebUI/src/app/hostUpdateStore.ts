@@ -7,6 +7,7 @@ export const useHostUpdateStore = defineStore('hostUpdate', {
     busy: false,
     error: '',
     startupCheckAttempted: false,
+    previewButtonVisible: false,
     revision: 0,
   }),
   actions: {

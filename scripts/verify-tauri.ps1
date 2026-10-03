@@ -39,14 +39,12 @@ if (-not (Test-Path -LiteralPath $cargoPath)) {
 $canaryExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.canary/bin/qing-module-canary.exe'
 $launcherExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.launcher/bin/qing-launcher-module.exe'
 $pdfExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.pdf/bin/qing-pdf-module.exe'
-$transferExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.qingtransfer/bin/qing-transfer-module.exe'
 $textToolsExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.texttools/bin/qing-texttools-module.exe'
 $windowTopmostExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.windowtopmost/bin/qing-windowtopmost-module.exe'
 $powerGuardExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.powerguard/bin/qing-powerguard-module.exe'
 $screenPinExecutable = Join-Path $appRoot 'src-tauri/resources/modules/qing.screenpin/bin/qing-screenpin-module.exe'
 $launcherRoot = Resolve-QingModuleSource 'launcher'
 $pdfRoot = Resolve-QingModuleSource 'pdf'
-$transferRoot = Join-Path $appRoot 'native-transfer'
 $textToolsRoot = Resolve-QingModuleSource 'texttools'
 $windowTopmostRoot = Resolve-QingModuleSource 'windowtopmost'
 $powerGuardRoot = Resolve-QingModuleSource 'powerguard'
@@ -62,8 +60,7 @@ if (-not $SkipPdf) {
     & (Join-Path $repoRoot 'scripts/smoke-tauri-pdf.ps1') -ExecutablePath $pdfExecutable
 }
 if (-not $SkipTransfer) {
-    & (Join-Path $repoRoot 'scripts/build-tauri-transfer.ps1')
-    & (Join-Path $repoRoot 'scripts/smoke-tauri-transfer.ps1') -ExecutablePath $transferExecutable
+    & (Join-Path $repoRoot 'scripts/smoke-tauri-device-transfer.ps1')
 }
 if (-not $SkipTextTools) {
     & (Join-Path $repoRoot 'scripts/build-tauri-texttools.ps1')
@@ -108,20 +105,6 @@ if (-not $SkipPdf) {
         if ($LASTEXITCODE -ne 0) { throw "Qing PDF cargo test failed with exit code $LASTEXITCODE" }
         & $cargoPath clippy --locked --all-targets -- -D warnings
         if ($LASTEXITCODE -ne 0) { throw "Qing PDF cargo clippy failed with exit code $LASTEXITCODE" }
-    } finally {
-        Pop-Location
-    }
-}
-
-if (-not $SkipTransfer) {
-    Push-Location $transferRoot
-    try {
-        & $cargoPath fmt -- --check
-        if ($LASTEXITCODE -ne 0) { throw "QingTransfer cargo fmt check failed with exit code $LASTEXITCODE" }
-        & $cargoPath test --locked
-        if ($LASTEXITCODE -ne 0) { throw "QingTransfer cargo test failed with exit code $LASTEXITCODE" }
-        & $cargoPath clippy --locked --all-targets -- -D warnings
-        if ($LASTEXITCODE -ne 0) { throw "QingTransfer cargo clippy failed with exit code $LASTEXITCODE" }
     } finally {
         Pop-Location
     }

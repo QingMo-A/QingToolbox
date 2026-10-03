@@ -7,6 +7,7 @@ Residency and activation are separate. Installing/removing packages is a third c
 | Load | Loaded; process and state resident | Off | Kept |
 | Enable | Running; same process/generation | On | Kept |
 | Disable | Deactivated; same process/generation | Off | Kept |
+| Close UI | Web surface closed; same process/generation and activation | Unchanged | Kept |
 | Unload | Stopped; process and Web surface released | Off | Kept |
 | Delete | Unload, then remove validated user-package directory | Off | Removed |
 
@@ -15,6 +16,12 @@ they do not implicitly enable background work. An unloaded module cannot be
 reloaded by stale UI calls, events, or queued hotkey callbacks. Startup-authorized
 modules explicitly load **and** enable. Disable does not revoke a user's separate
 startup authorization.
+
+Closing a module's operation page does not unload or disable it, clear its
+global hotkeys, or close Screen Pin's separate pin windows. Reopening focuses
+an existing surface or creates a new one against the same resident process.
+Launcher keeps its existing close-to-hide overlay behavior. Explicit unload,
+delete, package replacement and host exit still release the related resources.
 
 ## Process contract
 
@@ -46,3 +53,7 @@ Host runtime tests use `QING_TAURI_CANARY_PATH` to check stable process ID/gener
 idempotent enable/disable, resident calls after disable, and no implicit reload.
 `scripts/test-tauri-module-lifecycle.mjs` exercises the packaged native modules
 using isolated temporary data; it never modifies the user's module configuration.
+`scripts/smoke-tauri-module-window.mjs <host-executable> --module-close-only`
+checks real WebView2 close/reopen across Loaded, Running and Deactivated states,
+resident backend data, single-window focusing, and explicit unload using an
+isolated profile; it does not modify the user's development or installed profile.

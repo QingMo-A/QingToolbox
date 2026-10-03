@@ -2,6 +2,7 @@ import { assetBuildId, protocolVersion, type AppSnapshot, type BridgeEvent, type
 import type { Transport } from './Transport'
 import type { ModuleSnapshot, ModuleSnapshotItem } from '../../contracts/modules'
 import type { EffectiveLanguageCode, LanguageCode } from '../../contracts/settings'
+import { validUpdateInterval, type UpdateCheckPreferences } from '../../contracts/settings'
 import { projectRepositoryUrl } from '../../contracts/project'
 export class MockTransport implements Transport {
   readonly mode='Mock' as const; private readonly listeners=new Set<(event:BridgeEvent)=>void>(); private disposed=false
@@ -21,6 +22,7 @@ export class MockTransport implements Transport {
   private windowWidth=1100
   private windowHeight=720
   private startupFullscreen=false
+  private updatePreferences: UpdateCheckPreferences = { checkHostUpdatesOnStartup: true, checkModuleUpdatesOnStartup: true, hostUpdateIntervalMinutes: 360, moduleUpdateIntervalMinutes: 60 }
   private startupPresentationMode:'MainWindow'|'Minimized'|'FloatingBadge'='FloatingBadge'
   private launchAtLogin=false
   canConfigureLaunchAtLogin=true
@@ -56,6 +58,13 @@ export class MockTransport implements Transport {
       const item=this.modules[index];if(item.isBusy)return this.error(message,'ModuleBusy');if(item.isExecutionBlocked)return this.error(message,'ModuleExecutionBlocked')
       if(message.command==='modules.remove'){if(!item.canRemove)return this.error(message,'ModuleOperationUnavailable');this.modules.splice(index,1)}
       return this.ok(message,{disposition:'Succeeded',snapshot:this.moduleSnapshot()})
+    }
+    if(message.command==='modules.setUpdateCheck'){
+      if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated')
+      const index=this.modules.findIndex(item=>item.id===message.payload.moduleId)
+      if(index<0||typeof message.payload.enabled!=='boolean'||Object.keys(message.payload).length!==2)return this.error(message,'InvalidPayload')
+      this.modules[index]={...this.modules[index]!,isUpdateCheckEnabled:message.payload.enabled}
+      return this.ok(message,this.moduleSnapshot())
     }
     if(message.command==='modules.checkUpdate'||message.command==='modules.downloadUpdate'){
       if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated')
@@ -104,6 +113,11 @@ export class MockTransport implements Transport {
       return this.ok(message,this.moduleSnapshot())
     }
     if(message.command==='logs.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length!==0)return this.error(message,'InvalidPayload');return this.ok(message,{generatedAt:'2026-07-25T12:00:03.000Z',entries:[{timestamp:'2026-07-25T12:00:01.000Z',level:'Information',category:'Application',message:'Session started.'},{timestamp:'2026-07-25T12:00:02.000Z',level:'Warning',category:'Modules',message:'Example warning.'},{timestamp:'2026-07-25T12:00:03.000Z',level:'Error',category:'Bridge',message:'Example error.'}]})}
+    if(message.command==='settings.setUpdatePreferences'){
+      if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated')
+      if(Object.entries(message.payload).some(([key,value])=>!(key in this.updatePreferences)||(key.endsWith('OnStartup')?typeof value!=='boolean':!validUpdateInterval(value))))return this.error(message,'InvalidPayload')
+      this.updatePreferences={...this.updatePreferences,...message.payload};return this.ok(message,this.settingsSnapshot())
+    }
     if(message.command==='settings.getSnapshot'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');if(Object.keys(message.payload).length!==0)return this.error(message,'InvalidPayload');return this.ok(message,this.settingsSnapshot())}
     if(message.command==='settings.setLanguage'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');const value=message.payload.languageCode;if(Object.keys(message.payload).length!==1||value!=='system'&&value!=='zh-CN'&&value!=='en-US')return this.error(message,'InvalidPayload');this.configuredLanguageCode=value;this.effectiveLanguageCode=value==='system'?'en-US':value;return this.ok(message,this.settingsSnapshot())}
     if(message.command==='settings.setAppearancePreset'){if(this.phase!=='Activated')return this.error(message,'BridgeNotActivated');const value=message.payload.appearancePresetId;if(Object.keys(message.payload).length!==1||value!=='qing-default'&&value!=='neon-circuit'&&value!=='greenline'&&value!=='aurora-flow'&&value!=='qing-nova')return this.error(message,'InvalidPayload');this.appearancePresetId=value;return this.ok(message,this.settingsSnapshot())}
@@ -125,7 +139,7 @@ export class MockTransport implements Transport {
   subscribe(listener:(event:BridgeEvent)=>void){this.listeners.add(listener);return()=>this.listeners.delete(listener)} emit(event:BridgeEvent){this.listeners.forEach(x=>x(event))}
   dispose(){this.disposed=true;this.nonce=null;this.sessionToken=null;this.listeners.clear()}
   private randomToken(){return crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','')}
-  private settingsSnapshot(){const options=[{code:'system' as const,displayName:'System Default',nativeName:'跟随系统'},{code:'zh-CN' as const,displayName:'Simplified Chinese',nativeName:'简体中文'},{code:'en-US' as const,displayName:'English',nativeName:'English'}];const selected=options.find(option=>option.code===this.configuredLanguageCode)!;return{generatedAt:new Date().toISOString(),appearancePresetId:this.appearancePresetId,themeMode:this.themeMode,font:this.fonts.find(font=>font.id===this.fontId)!,fonts:this.fonts,language:{code:this.configuredLanguageCode,effectiveCode:this.effectiveLanguageCode,displayName:selected.displayName,options},showLogsInSidebar:this.showLogsInSidebar,mainWindowCloseBehavior:this.mainWindowCloseBehavior,windowWidth:this.windowWidth,windowHeight:this.windowHeight,startupFullscreen:this.startupFullscreen,closeBehaviorMessage:'The selected behavior applies the next time the main window is closed.',launchAtLogin:this.launchAtLogin,canConfigureLaunchAtLogin:this.canConfigureLaunchAtLogin,canRepairStartup:this.canRepairStartup,startupPresentationMode:this.startupPresentationMode,startupBackend:'Registry Run',startupStatus:this.canRepairStartup?'Degraded':'Healthy',startupMessage:this.canRepairStartup?'Windows startup registration requires repair.':'Windows startup registration is healthy.'}}
+  private settingsSnapshot(){const options=[{code:'system' as const,displayName:'System Default',nativeName:'跟随系统'},{code:'zh-CN' as const,displayName:'Simplified Chinese',nativeName:'简体中文'},{code:'en-US' as const,displayName:'English',nativeName:'English'}];const selected=options.find(option=>option.code===this.configuredLanguageCode)!;return{...this.updatePreferences,generatedAt:new Date().toISOString(),appearancePresetId:this.appearancePresetId,themeMode:this.themeMode,font:this.fonts.find(font=>font.id===this.fontId)!,fonts:this.fonts,language:{code:this.configuredLanguageCode,effectiveCode:this.effectiveLanguageCode,displayName:selected.displayName,options},showLogsInSidebar:this.showLogsInSidebar,mainWindowCloseBehavior:this.mainWindowCloseBehavior,windowWidth:this.windowWidth,windowHeight:this.windowHeight,startupFullscreen:this.startupFullscreen,closeBehaviorMessage:'The selected behavior applies the next time the main window is closed.',launchAtLogin:this.launchAtLogin,canConfigureLaunchAtLogin:this.canConfigureLaunchAtLogin,canRepairStartup:this.canRepairStartup,startupPresentationMode:this.startupPresentationMode,startupBackend:'Registry Run',startupStatus:this.canRepairStartup?'Degraded':'Healthy',startupMessage:this.canRepairStartup?'Windows startup registration requires repair.':'Windows startup registration is healthy.'}}
   private moduleSnapshot():ModuleSnapshot{return{generatedAt:new Date().toISOString(),modules:this.modules.map(item=>({...item,errors:[...item.errors],permissions:[...item.permissions]}))}}
   private ok(r:BridgeRequest,payload:unknown):BridgeResponse{return{protocolVersion,requestId:r.requestId,success:true,payload,error:null}}
   private error(r:BridgeRequest,code:string):BridgeResponse{return{protocolVersion,requestId:r.requestId,success:false,payload:{},error:{code,message:'Mock bridge rejected the request.'}}}

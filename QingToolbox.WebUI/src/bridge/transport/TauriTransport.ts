@@ -106,10 +106,20 @@ export class TauriTransport implements Transport {
         await invoke('set_module_startup_authorization', { moduleId: requiredString(message.payload.moduleId), enabled: Boolean(message.payload.enabled) })
         return this.moduleSnapshot()
       case 'modules.checkUpdate':
+        await invoke('check_module_update', { moduleId: requiredString(message.payload.moduleId) }); return this.moduleSnapshot()
       case 'modules.downloadUpdate':
+        await invoke('download_module_update', { moduleId: requiredString(message.payload.moduleId) }); return this.moduleSnapshot()
+      case 'modules.setUpdateCheck':
+        if (typeof message.payload.enabled !== 'boolean') throw new Error('InvalidPayload: a boolean is required.')
+        await invoke('set_module_update_check', { moduleId: requiredString(message.payload.moduleId), enabled: message.payload.enabled }); return this.moduleSnapshot()
       case 'modules.installVerifiedUpdate':
-        throw new Error('UnsupportedInTauri: this operation is not exposed by the migrated Rust host yet.')
+        throw new Error('ModuleUpdateUnavailable: native module downloads already include verified installation.')
       case 'settings.getSnapshot': return this.settingsSnapshot()
+      case 'settings.setUpdatePreferences': {
+        const allowed = ['checkHostUpdatesOnStartup', 'checkModuleUpdatesOnStartup', 'hostUpdateIntervalMinutes', 'moduleUpdateIntervalMinutes']
+        if (Object.keys(message.payload).some(key => !allowed.includes(key))) throw new Error('InvalidPayload: unexpected fields.')
+        return this.updateSettings(message.payload)
+      }
       case 'settings.setLanguage': return this.updateSettings({ language: requiredString(message.payload.languageCode) })
       case 'settings.setAppearancePreset': return this.updateSettings({ appearancePresetId: requiredString(message.payload.appearancePresetId) })
       case 'settings.setThemeMode': return this.updateSettings({ themeMode: requiredString(message.payload.themeMode) })
@@ -143,10 +153,12 @@ export class TauriTransport implements Transport {
   }
 
   private async moduleSnapshot() {
-    const [listed, runtime, settings] = await Promise.all([invoke<{ payload: ModuleListPayload }>('list_modules'), invoke<ModuleRuntimeSnapshot[]>('get_all_module_runtime'), invoke<TauriSettingsSnapshot>('get_settings')])
+    const [listed, runtime, settings, updates] = await Promise.all([invoke<{ payload: ModuleListPayload }>('list_modules'), invoke<ModuleRuntimeSnapshot[]>('get_all_module_runtime'), invoke<TauriSettingsSnapshot>('get_settings'), invoke<import('./tauriTypes').ModuleUpdateView[]>('get_module_updates')])
     const runtimeById = new Map(runtime.map(item => [item.moduleId, item]))
     const startupIds = new Set(settings.startupModuleIds)
-    return { generatedAt: new Date().toISOString(), modules: listed.payload.modules.map(module => toWebModule(module, runtimeById.get(module.id), startupIds.has(module.id))) }
+    if (!Array.isArray(updates)) throw new Error('InvalidModuleUpdates: invalid native update snapshot.')
+    const updateById = new Map(updates.map(update => [update.moduleId, update]))
+    return { generatedAt: new Date().toISOString(), modules: listed.payload.modules.map(module => toWebModule(module, runtimeById.get(module.id), startupIds.has(module.id), updateById.get(module.id))) }
   }
 
   private async importModule() {
@@ -223,9 +235,10 @@ export class TauriTransport implements Transport {
 function requiredString(value: unknown): string { if (typeof value !== 'string' || !value.trim()) throw new Error('InvalidPayload: a non-empty string is required.'); return value }
 function requiredDimension(value: unknown, min: number, max: number): number { if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) throw new Error('InvalidPayload: window size is out of range.'); return value }
 type ModulePackagePreview = { id: string; name: string; version: string; apiVersion: number; hostApiVersion: number; compatible: boolean; sha256: string }
-type TauriHostInfo = { version: string; deviceName?: string | null; apiVersion?: number; environmentKind?: 'Development' | 'Production'; environmentDisplayName?: string }
+type TauriHostInfo = { version: string; deviceName?: string | null; apiVersion?: number; backgroundUpdateChecks?: boolean; environmentKind?: 'Development' | 'Production'; environmentDisplayName?: string }
 function appSnapshot(host: TauriHostInfo, modules: ModuleSummary[], runtime: ModuleRuntimeSnapshot[]) {
   return {
+    backgroundUpdateChecks: host.backgroundUpdateChecks === true,
     environmentKind: host.environmentKind === 'Development' ? 'Development' : 'Production',
     environmentDisplayName: host.environmentDisplayName ?? 'QingToolbox',
     hostVersion: host.version,
@@ -238,9 +251,9 @@ function appSnapshot(host: TauriHostInfo, modules: ModuleSummary[], runtime: Mod
     generatedAt: new Date().toISOString(),
   }
 }
-export function toWebModule(module: ModuleSummary, runtime?: ModuleRuntimeSnapshot, startupEnabled = false) {
+export function toWebModule(module: ModuleSummary, runtime?: ModuleRuntimeSnapshot, startupEnabled = false, update?: import('./tauriTypes').ModuleUpdateView) {
   const state = runtime?.state === 'running' ? 'Running' : runtime?.state === 'loaded' ? 'Loaded' : runtime?.state === 'deactivated' ? 'Deactivated' : runtime?.state === 'starting' ? 'Starting' : runtime?.state === 'failed' ? 'Failed' : runtime?.state === 'stopped' ? 'Unloaded' : 'NotLoaded'; const valid = module.valid
-  return { id: module.id, displayName: module.name, displayDescription: module.description ?? '', version: module.version, author: module.author ?? '', runtimeType: module.runtimeType ?? 'process', loadMode: 'Process', runtimeState: state, isValid: valid, errorCount: module.issues.length, errors: module.issues.map(issue => issue.message), permissions: [], minimumHostVersion: '', isUserInstalled: module.source === 'user', canRemove: module.source === 'user', canLoad: valid && (state === 'NotLoaded' || state === 'Unloaded' || state === 'Failed'), canActivate: valid && (state === 'Loaded' || state === 'Deactivated'), canOpen: valid && ['Loaded', 'Running', 'Deactivated'].includes(state) && module.uiKind === 'Web', canDeactivate: state === 'Running', canUnload: ['Loaded', 'Running', 'Deactivated'].includes(state), isBusy: state === 'Starting', isExecutionBlocked: !valid, isStartupEnabled: startupEnabled, startupAuthorizationState: valid ? startupEnabled ? 'Enabled' : 'NotEnabled' : 'Unavailable', canChangeStartupAuthorization: valid, isStartupAuthorizationBusy: false, updateStatus: 'DisabledByEnvironment', targetVersion: null, releaseNotes: null, isFromStaleCache: false, canCheckForUpdate: false, isUpdateCheckBusy: false, canDownloadUpdate: false, downloadStatus: 'DisabledByEnvironment', isDownloadActive: false, downloadBytesReceived: 0, downloadExpectedBytes: 0, canInstallVerifiedUpdate: false, iconDataUrl: module.iconDataUrl }
+  return { id: module.id, displayName: module.name, displayDescription: module.description ?? '', version: module.version, author: module.author ?? '', runtimeType: module.runtimeType ?? 'process', loadMode: 'Process', runtimeState: state, isValid: valid, errorCount: module.issues.length, errors: module.issues.map(issue => issue.message), permissions: [], minimumHostVersion: '', isUserInstalled: module.source === 'user', canRemove: module.source === 'user', canLoad: valid && (state === 'NotLoaded' || state === 'Unloaded' || state === 'Failed'), canActivate: valid && (state === 'Loaded' || state === 'Deactivated'), canOpen: valid && ['Loaded', 'Running', 'Deactivated'].includes(state) && module.uiKind === 'Web', canDeactivate: state === 'Running', canUnload: ['Loaded', 'Running', 'Deactivated'].includes(state), isBusy: state === 'Starting', isExecutionBlocked: !valid, isStartupEnabled: startupEnabled, startupAuthorizationState: valid ? startupEnabled ? 'Enabled' : 'NotEnabled' : 'Unavailable', canChangeStartupAuthorization: valid, isStartupAuthorizationBusy: false, updateStatus: update?.updateStatus ?? 'NotChecked', targetVersion: update?.targetVersion ?? null, releaseNotes: update?.releaseNotes ?? null, isFromStaleCache: false, isUpdateCheckEnabled: update?.isUpdateCheckEnabled ?? true, canCheckForUpdate: update?.canCheckForUpdate ?? true, isUpdateCheckBusy: update?.isUpdateCheckBusy ?? false, canDownloadUpdate: update?.canDownloadUpdate ?? false, downloadStatus: update?.downloadStatus ?? 'NotDownloaded', isDownloadActive: update?.isDownloadActive ?? false, downloadBytesReceived: update?.downloadBytesReceived ?? 0, downloadExpectedBytes: update?.downloadExpectedBytes ?? 0, canInstallVerifiedUpdate: update?.canInstallVerifiedUpdate ?? false, iconDataUrl: module.iconDataUrl }
 }
 function toWebSettings(value: TauriSettingsSnapshot, startup?: StartupRegistrationSnapshot | null) {
   const code = value.language === 'en-US' ? 'en-US' : value.language === 'zh-CN' ? 'zh-CN' : 'system'
@@ -249,7 +262,7 @@ function toWebSettings(value: TauriSettingsSnapshot, startup?: StartupRegistrati
   const current = fonts.find(font => font.id === value.fontId) ?? defaultFont
   if (!fonts.some(font => font.id === defaultFont.id)) fonts.unshift(defaultFont)
   const registration = startup ?? { canConfigure: true, registered: value.launchAtLogin, canRepair: false, status: 'Unavailable', message: '无法读取登录启动注册状态。' }
-  return { generatedAt: new Date().toISOString(), appearancePresetId: value.appearancePresetId, themeMode: value.themeMode, font: current, fonts, language: { code, effectiveCode: code === 'en-US' ? 'en-US' : 'zh-CN', displayName: code === 'en-US' ? 'English' : '系统默认', options: [{ code: 'system', displayName: 'System', nativeName: '系统默认' }, { code: 'zh-CN', displayName: 'Chinese', nativeName: '简体中文' }, { code: 'en-US', displayName: 'English', nativeName: 'English' }] }, showLogsInSidebar: value.showLogsInSidebar, mainWindowCloseBehavior: value.closeBehavior === 'exit' ? 'ExitApplication' : value.closeBehavior === 'tray' ? 'MinimizeToNotificationArea' : 'Ask', windowWidth: value.windowWidth, windowHeight: value.windowHeight, startupFullscreen: value.startupFullscreen, infoPopupCorner: value.infoPopupCorner ?? 'rightTop', infoPopupAnimation: value.infoPopupAnimation ?? true, infoPopupDurationMs: value.infoPopupDurationMs ?? 380, infoPopupDismissSeconds: value.infoPopupDismissSeconds ?? 15, closeBehaviorMessage: '', launchAtLogin: value.launchAtLogin, canConfigureLaunchAtLogin: registration.canConfigure, canRepairStartup: registration.canRepair, startupPresentationMode: value.startupPresentation === 'tray' ? 'FloatingBadge' : value.startupPresentation === 'minimized' ? 'Minimized' : 'MainWindow', startupBackend: 'Tauri autostart', startupStatus: registration.status, startupMessage: registration.message }
+  return { generatedAt: new Date().toISOString(), checkHostUpdatesOnStartup: value.checkHostUpdatesOnStartup ?? true, checkModuleUpdatesOnStartup: value.checkModuleUpdatesOnStartup ?? true, hostUpdateIntervalMinutes: value.hostUpdateIntervalMinutes ?? 360, moduleUpdateIntervalMinutes: value.moduleUpdateIntervalMinutes ?? 60, appearancePresetId: value.appearancePresetId, themeMode: value.themeMode, font: current, fonts, language: { code, effectiveCode: code === 'en-US' ? 'en-US' : 'zh-CN', displayName: code === 'en-US' ? 'English' : '系统默认', options: [{ code: 'system', displayName: 'System', nativeName: '系统默认' }, { code: 'zh-CN', displayName: 'Chinese', nativeName: '简体中文' }, { code: 'en-US', displayName: 'English', nativeName: 'English' }] }, showLogsInSidebar: value.showLogsInSidebar, mainWindowCloseBehavior: value.closeBehavior === 'exit' ? 'ExitApplication' : value.closeBehavior === 'tray' ? 'MinimizeToNotificationArea' : 'Ask', windowWidth: value.windowWidth, windowHeight: value.windowHeight, startupFullscreen: value.startupFullscreen, infoPopupCorner: value.infoPopupCorner ?? 'rightTop', infoPopupAnimation: value.infoPopupAnimation ?? true, infoPopupDurationMs: value.infoPopupDurationMs ?? 380, infoPopupDismissSeconds: value.infoPopupDismissSeconds ?? 15, closeBehaviorMessage: '', launchAtLogin: value.launchAtLogin, canConfigureLaunchAtLogin: registration.canConfigure, canRepairStartup: registration.canRepair, startupPresentationMode: value.startupPresentation === 'tray' ? 'FloatingBadge' : value.startupPresentation === 'minimized' ? 'Minimized' : 'MainWindow', startupBackend: 'Tauri autostart', startupStatus: registration.status, startupMessage: registration.message }
 }
 function toWebFont(font: FontOption): FontOption { return { id: font.id, source: font.source, displayName: font.displayName, familyName: font.familyName ?? null, resourceUrl: font.resourceUrl ?? null } }
 function closeBehaviorToRust(value: string) { return value === 'ExitApplication' ? 'exit' : value === 'MinimizeToNotificationArea' ? 'tray' : 'ask' }

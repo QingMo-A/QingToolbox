@@ -9,10 +9,23 @@ import { TauriTransport } from '../bridge/transport/TauriTransport'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
   vi.mocked(invoke).mockReset()
   document.querySelectorAll('.q-modal-layer').forEach(element => element.remove())
 })
+
+function remarkSnapshot(remark: string | null = null, relationship: 'Connected' | 'Intimate' = 'Intimate') {
+  return { enabled: false, error: null, nearby: [], pairing: { error: null, pending: [], online: [], paired: [
+    { id: 'phone-key', discoveryId: 'phone', name: '24122RKC7C', remark, platform: 'android', relationship },
+  ] } }
+}
+
+function enterRemark(value: string) {
+  const input = document.querySelector('.q-modal-field input') as HTMLInputElement
+  input.value = value
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+}
 
 function page(deviceName: string | null = 'QING-PC') {
   const pinia = createPinia()
@@ -24,6 +37,106 @@ function page(deviceName: string | null = 'QING-PC') {
 }
 
 describe('DevicesPage', () => {
+  it.each(['Connected', 'Intimate'] as const)('saves a local remark for an offline %s device using the project input modal', async relationship => {
+    vi.spyOn(TauriTransport, 'isAvailable').mockReturnValue(true)
+    vi.mocked(invoke).mockResolvedValue(remarkSnapshot(null, relationship))
+    const { wrapper } = page()
+    await flushPromises()
+    if (relationship === 'Connected') await wrapper.get('#device-tab-connected').trigger('click')
+    expect(wrapper.get('.devices-remark-action').attributes('disabled')).toBeUndefined()
+    await wrapper.get('.devices-remark-action').trigger('click')
+    expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe('Edit device remark')
+    expect(document.querySelectorAll('.q-modal-actions button')).toHaveLength(1)
+    expect((document.querySelector('.q-modal-field input') as HTMLInputElement).value).toBe('')
+    enterRemark('  QingMo的设备  ')
+    await wrapper.vm.$nextTick()
+    vi.mocked(invoke).mockResolvedValueOnce(remarkSnapshot('QingMo的设备', relationship))
+    ;(document.querySelector('.q-modal-actions .is-primary') as HTMLButtonElement).click()
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('set_device_remark', { peerId: 'phone-key', remark: 'QingMo的设备' })
+    expect(wrapper.get('.devices-peer-name strong').text()).toBe('QingMo的设备(24122RKC7C)')
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('prefills the saved remark and removes it when confirming a whitespace-only input', async () => {
+    vi.spyOn(TauriTransport, 'isAvailable').mockReturnValue(true)
+    vi.mocked(invoke).mockResolvedValue(remarkSnapshot('QingMo的设备'))
+    const { wrapper } = page()
+    await flushPromises()
+    await wrapper.get('.devices-remark-action').trigger('click')
+    expect((document.querySelector('.q-modal-field input') as HTMLInputElement).value).toBe('QingMo的设备')
+    enterRemark('   ')
+    await wrapper.vm.$nextTick()
+    vi.mocked(invoke).mockResolvedValueOnce(remarkSnapshot())
+    ;(document.querySelector('.q-modal-field input') as HTMLInputElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('set_device_remark', { peerId: 'phone-key', remark: '' })
+    expect(wrapper.get('.devices-peer-name strong').text()).toBe('24122RKC7C')
+    wrapper.unmount()
+  })
+
+  it('keeps the old name and input open on save failure and cancels without changing the device', async () => {
+    vi.spyOn(TauriTransport, 'isAvailable').mockReturnValue(true)
+    vi.mocked(invoke).mockResolvedValue(remarkSnapshot('Original'))
+    const { wrapper } = page()
+    await flushPromises()
+    await wrapper.get('.devices-remark-action').trigger('click')
+    enterRemark('Replacement')
+    await wrapper.vm.$nextTick()
+    vi.mocked(invoke).mockRejectedValueOnce({ message: 'storage unavailable' })
+    ;(document.querySelector('.q-modal-actions .is-primary') as HTMLButtonElement).click()
+    await flushPromises()
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe('Could not save the remark. Please try again.')
+    expect(wrapper.get('.devices-peer-name strong').text()).toBe('Original(24122RKC7C)')
+    expect((document.querySelector('.q-modal-field input') as HTMLInputElement).value).toBe('Replacement')
+    const calls = vi.mocked(invoke).mock.calls.length
+    ;(document.querySelector('.q-modal-close') as HTMLButtonElement).click()
+    await flushPromises()
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(vi.mocked(invoke).mock.calls).toHaveLength(calls)
+    wrapper.unmount()
+  })
+
+  it('does not allow polling or duplicate confirmations to overwrite a pending remark save', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    vi.spyOn(TauriTransport, 'isAvailable').mockReturnValue(true)
+    vi.mocked(invoke).mockResolvedValue(remarkSnapshot())
+    const { wrapper } = page()
+    await flushPromises()
+    await wrapper.get('.devices-remark-action').trigger('click')
+    enterRemark('New name')
+    await wrapper.vm.$nextTick()
+    let finishSave!: (value: ReturnType<typeof remarkSnapshot>) => void
+    vi.mocked(invoke).mockReturnValueOnce(new Promise(resolve => { finishSave = resolve }))
+    ;(document.querySelector('.q-modal-actions .is-primary') as HTMLButtonElement).click()
+    await wrapper.vm.$nextTick()
+    expect((document.querySelector('.q-modal-actions button') as HTMLButtonElement).disabled).toBe(true)
+    vi.advanceTimersByTime(5000)
+    expect(vi.mocked(invoke).mock.calls.map(call => call[0])).toEqual(['get_devices_snapshot', 'set_device_remark'])
+    finishSave(remarkSnapshot('New name'))
+    await flushPromises()
+    expect(wrapper.get('.devices-peer-name strong').text()).toBe('New name(24122RKC7C)')
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('validates remarks before saving and keeps nearby devices without remark actions', async () => {
+    vi.spyOn(TauriTransport, 'isAvailable').mockReturnValue(true)
+    vi.mocked(invoke).mockResolvedValue({ ...remarkSnapshot(), nearby: [{ id: 'other', name: 'Nearby', platform: 'windows', status: 'Unverified' }] })
+    const { wrapper } = page()
+    await flushPromises()
+    expect(wrapper.find('.devices-nearby-item .devices-remark-action').exists()).toBe(false)
+    await wrapper.get('.devices-remark-action').trigger('click')
+    enterRemark('a'.repeat(81))
+    await wrapper.vm.$nextTick()
+    ;(document.querySelector('.q-modal-actions .is-primary') as HTMLButtonElement).click()
+    await flushPromises()
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('80 characters')
+    expect(vi.mocked(invoke).mock.calls).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('shows the host-provided name without claiming an unpaired device is trusted', () => {
     const { wrapper } = page()
     expect(wrapper.get('.devices-local h2').text()).toBe('QING-PC')

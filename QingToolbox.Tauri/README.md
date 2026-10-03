@@ -39,7 +39,7 @@ TextTools、WindowTopmost、PowerGuard、ScreenPin 和开发诊断 Canary。
 宿主通过 Git worktree 列表定位该分支；单独检出时设置
 `QINGTOOLBOX_MODULES_ROOT` 为模块仓库根目录。构建入口不再维护另一份模块源码。
 模块 Vue 在构建时复用本体共享 UI，通过模块窗口 IPC 调用独立 Rust 进程。
-`native-transfer/` 保留为设备页的内部传输引擎，不是官方模块下载项目。
+`src-tauri/src/device_transfer.rs` 是编译进工具箱本体的设备传输引擎，无独立模块进程、清单或安装包。
 
 ## 本地运行
 
@@ -53,8 +53,12 @@ npm run build
 npm run tauri dev
 ```
 
-仓库根目录也提供了 `run-tauri-dev.bat`：它会先构建协议 canary 和 Rust
-Launcher 模块，再启动 Tauri 开发宿主。
+仓库根目录也提供了 `run-tauri-dev.bat`：它会按内容缓存准备独立模块，复用
+与锁文件一致且完整的 npm 依赖，然后启动 Tauri 开发宿主。文件传输已经内置
+本体，不再构建旧 transfer 模块。启动成功以实际 `[Dev]` 主窗口出现为准；
+Vite、编译和宿主日志保存在 `artifacts/tauri-development/`。
+重复运行会唤起本工作区已有的开发实例，不再启动第二个 Vite 服务；如需重新
+构建已修改的模块，先停止开发实例再启动。正式安装版不会被这个入口关闭。
 
 桌面构建完成后可用仓库脚本运行启动、单实例以及全部已迁移模块的窗口烟测：
 

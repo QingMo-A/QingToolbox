@@ -3,7 +3,7 @@ import { computed, inject, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { SettingsClient } from '../bridge/clients/SettingsClient'
 import type { ModuleClient } from '../bridge/clients/ModuleClient'
-import { normalizeFont, normalizeFontOptions, type InfoPopupCorner, type LanguageCode, type MainWindowCloseBehavior, type SettingsFont, type StartupPresentationMode } from '../contracts/settings'
+import { normalizeFont, normalizeFontOptions, validUpdateInterval, type UpdateCheckPreferences, type InfoPopupCorner, type LanguageCode, type MainWindowCloseBehavior, type SettingsFont, type StartupPresentationMode } from '../contracts/settings'
 import { useAppStore } from '../app/store'
 import { useSettingsStore } from '../app/settingsStore'
 import { useModuleStore } from '../app/moduleStore'
@@ -51,6 +51,10 @@ const startupPresentations: StartupPresentationMode[] = ['MainWindow', 'Minimize
 const windowWidth = ref('1100')
 const windowHeight = ref('720')
 const isSavingWindow = ref(false)
+const isSavingUpdateChecks = ref(false)
+const hostUpdateInterval = ref('360')
+const moduleUpdateInterval = ref('60')
+const updateIntervalsValid = computed(() => String(hostUpdateInterval.value).trim() !== '' && String(moduleUpdateInterval.value).trim() !== '' && validUpdateInterval(Number(hostUpdateInterval.value)) && validUpdateInterval(Number(moduleUpdateInterval.value)))
 const isSavingInfoPopup = ref(false)
 const isPreviewingInfoPopup = ref(false)
 const infoPopupDuration = ref('380')
@@ -148,6 +152,16 @@ watch(() => settings.snapshot?.infoPopupDismissSeconds, value => {
 }, { immediate: true })
 
 const yesNo = (value: boolean) => t(value ? 'settings.startup.yes' : 'settings.startup.no')
+watch([() => settings.snapshot?.hostUpdateIntervalMinutes, () => settings.snapshot?.moduleUpdateIntervalMinutes], ([host, module]) => {
+  hostUpdateInterval.value = String(host ?? 360); moduleUpdateInterval.value = String(module ?? 60)
+}, { immediate: true })
+async function saveUpdatePreferences(update: UpdateCheckPreferences) {
+  if (!settings.snapshot || hostMutationDisabled.value || isSavingUpdateChecks.value) return
+  isSavingUpdateChecks.value = true
+  try { settings.complete(await client.setUpdatePreferences(update)); toast.show(t('settings.startup.updatesSaved'), 'success') }
+  catch { toast.show(t('settings.startup.updatesFailed'), 'error') }
+  finally { isSavingUpdateChecks.value = false }
+}
 const bridgeLabel = computed(() => {
   const key = bridgeStateKey(app.bridge)
   return key ? t(key) : app.bridge
@@ -414,6 +428,16 @@ async function repairStartup() {
 
           <section v-else-if="activeSection === 'startup'" aria-labelledby="settings-startup-title">
             <header class="settings-section-heading"><h2 id="settings-startup-title">{{ t('settings.section.startup') }}</h2></header>
+            <article v-if="settings.snapshot" class="settings-card update-check-settings">
+              <h3>{{ t('settings.startup.updateChecks') }}</h3>
+              <div class="settings-switch-row"><strong>{{ t('settings.startup.checkHostUpdates') }}</strong><button class="q-switch check-host-updates" type="button" role="switch" :aria-label="t('settings.startup.checkHostUpdates')" :aria-checked="settings.snapshot.checkHostUpdatesOnStartup !== false" :disabled="hostMutationDisabled || isSavingUpdateChecks" @click="saveUpdatePreferences({ checkHostUpdatesOnStartup: settings.snapshot.checkHostUpdatesOnStartup === false })"><span /><em>{{ t(settings.snapshot.checkHostUpdatesOnStartup !== false ? 'settings.navigation.on' : 'settings.navigation.off') }}</em></button></div>
+              <div class="settings-switch-row"><strong>{{ t('settings.startup.checkModuleUpdates') }}</strong><button class="q-switch check-module-updates" type="button" role="switch" :aria-label="t('settings.startup.checkModuleUpdates')" :aria-checked="settings.snapshot.checkModuleUpdatesOnStartup !== false" :disabled="hostMutationDisabled || isSavingUpdateChecks" @click="saveUpdatePreferences({ checkModuleUpdatesOnStartup: settings.snapshot.checkModuleUpdatesOnStartup === false })"><span /><em>{{ t(settings.snapshot.checkModuleUpdatesOnStartup !== false ? 'settings.navigation.on' : 'settings.navigation.off') }}</em></button></div>
+              <div class="update-check-intervals">
+                <label><span>{{ t('settings.startup.hostUpdateInterval') }}</span><input v-model="hostUpdateInterval" class="host-update-interval" type="number" min="0" max="10080" step="1" :aria-label="t('settings.startup.hostUpdateInterval')" :disabled="hostMutationDisabled || isSavingUpdateChecks" /></label>
+                <label><span>{{ t('settings.startup.moduleUpdateInterval') }}</span><input v-model="moduleUpdateInterval" class="module-update-interval" type="number" min="0" max="10080" step="1" :aria-label="t('settings.startup.moduleUpdateInterval')" :disabled="hostMutationDisabled || isSavingUpdateChecks" /></label>
+              </div>
+              <div class="window-size-actions"><QButton class="save-update-intervals" :disabled="hostMutationDisabled || isSavingUpdateChecks || !updateIntervalsValid" @click="saveUpdatePreferences({ hostUpdateIntervalMinutes: Number(hostUpdateInterval), moduleUpdateIntervalMinutes: Number(moduleUpdateInterval) })">{{ t('settings.startup.saveIntervals') }}</QButton></div>
+            </article>
             <template v-if="settings.snapshot">
               <article class="settings-card"><div class="settings-card-title"><div><h3>{{ t('settings.startup.presentation') }}</h3></div><QBadge tone="info">{{ t('settings.startup.editable') }}</QBadge></div><div class="close-behavior-group presentation-mode-group" role="radiogroup" :aria-label="t('settings.startup.presentationAriaLabel')" :aria-busy="settings.isUpdatingStartupPresentation"><button v-for="value in startupPresentations" :key="value" type="button" role="radio" :aria-checked="settings.snapshot.startupPresentationMode === value" :disabled="hostMutationDisabled || settings.isUpdatingStartupPresentation || settings.startupRepairBusy" @click="selectStartupPresentation(value)"><span class="close-radio" /><span><strong>{{ t(startupPresentation(value).labelKey) }}</strong></span></button></div><p v-if="settings.isUpdatingStartupPresentation" class="settings-saving">{{ t('settings.language.saving') }}</p><p v-else-if="settings.startupPresentationError" class="settings-inline-error">{{ t('settings.startup.unchanged') }}</p></article>
               <article class="settings-card windows-startup-card"><div class="settings-card-title"><div><h3>{{ t('settings.startup.windows') }}</h3></div></div><div class="settings-switch-row"><div><strong>{{ t('settings.startup.launchAtLogin') }}</strong></div><button type="button" class="q-switch" role="switch" :aria-checked="settings.snapshot.launchAtLogin" :aria-busy="settings.launchAtLoginBusy" :disabled="hostMutationDisabled || !settings.snapshot.canConfigureLaunchAtLogin || settings.launchAtLoginBusy || settings.startupRepairBusy" @click="toggleLaunchAtLogin"><span /><em>{{ t(settings.snapshot.launchAtLogin ? 'settings.navigation.on' : 'settings.navigation.off') }}</em></button></div><p v-if="!settings.snapshot.canConfigureLaunchAtLogin" class="settings-inline-error">{{ t('settings.startup.unavailableEnvironment') }}</p><p v-else-if="settings.launchAtLoginError" class="settings-inline-error">{{ t('settings.error.launchUnchanged') }}</p></article>
@@ -435,6 +459,10 @@ async function repairStartup() {
 </template>
 
 <style scoped>
+.update-check-settings { margin-bottom: 16px; }
+.update-check-intervals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 16px; margin: 14px 0 16px; }
+.update-check-intervals label { display: grid; gap: 8px; min-width: 0; color: var(--q-text-2); font-size: 13px; }
+.update-check-intervals input { width: 100%; min-width: 0; }
 .window-size-fields { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 15px; }
 .window-size-fields label { display: grid; gap: 6px; min-width: 120px; color: var(--q-text-2); font-size: 12px; }
 .window-size-fields input { width: 140px; min-height: 38px; padding: 0 10px; border: 1px solid var(--q-border); border-radius: 9px; background: var(--q-surface-soft); color: var(--q-text); font: inherit; font-size: 14px; }

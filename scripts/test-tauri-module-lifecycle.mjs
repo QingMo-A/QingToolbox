@@ -11,11 +11,13 @@ for (const entry of await readdir(root, { withFileTypes: true })) {
   if (!entry.isDirectory()) continue
   const directory = join(root, entry.name)
   const manifest = JSON.parse(await readFile(join(directory, 'module.json'), 'utf8'))
+  // Ignore stale generated legacy packages; transfer is no longer a module.
+  if (manifest.id === 'qing.qingtransfer') continue
   const data = await mkdtemp(join(tmpdir(), 'qing-lifecycle-'))
   const child = spawn(join(directory, manifest.entry), [], { cwd: directory, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: {
     ...process.env, QINGTOOLBOX_MODULE_ID: manifest.id, QINGTOOLBOX_MODULE_NONCE: 'lifecycle-test',
     QINGTOOLBOX_MODULE_DIRECTORY: directory, QINGTOOLBOX_MODULE_DATA_DIR: data,
-    QING_LAUNCHER_EVERYTHING_SERVICE: '0', QINGTOOLBOX_TRANSFER_NAME: 'Qing lifecycle test',
+    QING_LAUNCHER_EVERYTHING_SERVICE: '0',
   } })
   let sequence = 0
   const pending = new Map()
@@ -35,7 +37,6 @@ for (const entry of await readdir(root, { withFileTypes: true })) {
     const method = manifest.id === 'qing.canary' ? 'ping' : 'getState'
     const initial = await invoke(method)
     assert.equal(initial.error, undefined)
-    if (manifest.id === 'qing.qingtransfer') assert.equal(initial.payload.discovery.running, false)
     if (manifest.id === 'qing.powerguard') assert.equal(initial.payload.settings.guardEnabled, false)
     if (manifest.id === 'qing.texttools') await invoke('setInput', { text: 'resident unsaved text' })
     const pid = child.pid
@@ -48,12 +49,7 @@ for (const entry of await readdir(root, { withFileTypes: true })) {
       assert.equal(child.exitCode, null)
       const state = await invoke(method)
       assert.equal(state.error, undefined)
-      if (manifest.id === 'qing.qingtransfer') assert.equal(state.payload.discovery.running, active)
       if (manifest.id === 'qing.texttools') assert.equal(state.payload.input, 'resident unsaved text')
-    }
-    if (manifest.id === 'qing.qingtransfer') {
-      assert.equal((await invoke('refresh')).error.code, 'module_inactive')
-      assert.equal((await invoke('getState')).payload.discovery.running, false)
     }
     if (manifest.id === 'qing.launcher') {
       assert.equal((await invoke('searchEverything', { mode: 'everything-all', query: 'test', requestId: 'test' })).error.code, 'module_inactive')

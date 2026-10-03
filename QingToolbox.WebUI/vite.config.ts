@@ -1,11 +1,15 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { sourceIdentity } from './tools/asset-identity.mjs'
+import { moduleSource } from '../scripts/module-sources.mjs'
 
-export default defineConfig(async ({ command }) => {
+export default defineConfig(async ({ command, mode }) => {
   const buildId=(await sourceIdentity()).slice(0,32)
   return {
     base: './',
+    // Module regression tests belong to the independent checkout, not the host
+    // application bundle. Never resolve module sources for production builds.
+    resolve: mode === 'test' ? { alias: { '@launcher-test': `${moduleSource('launcher')}/ui-src/src` } } : undefined,
     plugins: [vue(), {
       name: 'qing-development-csp',
       // Development needs Vite's style injection and WebSocket; production

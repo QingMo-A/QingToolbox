@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { moduleSource } from '../../../../scripts/module-sources.mjs'
 import { adoptHostAppearance, applyAppearance } from './hostAppearance'
 
 describe('independently packaged module design system', () => {
@@ -48,9 +49,9 @@ describe('independently packaged module design system', () => {
     expect(css).toContain("@import '../tokens/appearancePresets.css'")
     expect(css).not.toContain('main.css')
     for (const module of ['launcher', 'pdf', 'powerguard', 'screenpin', 'texttools', 'windowtopmost']) {
-      const root = resolve(`../QingToolbox.Tauri/native-${module}/ui-src`)
-      expect(readFileSync(resolve(root, 'src/main.ts'), 'utf8')).toContain('design-system/module/module.css')
-      expect(readFileSync(resolve(root, 'src/App.vue'), 'utf8')).toContain('design-system/module')
+      const root = resolve(moduleSource(module), 'ui-src')
+      expect(readFileSync(resolve(root, 'src/main.ts'), 'utf8')).toContain('@qingtoolbox/module-ui/module.css')
+      expect(readFileSync(resolve(root, 'src/App.vue'), 'utf8')).toContain('@qingtoolbox/module-ui')
       expect(readFileSync(resolve(root, 'vite.config.ts'), 'utf8')).toContain("dedupe: ['vue']")
     }
   })
