@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.3.3",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.0-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-04T15:58:25Z",
+      "package": {
+        "fileName": "qing.launcher-0.3.3-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/e51f636219e2c22d759e8843648a3c448186f95d/modules/Launcher/packages/qing.launcher-0.3.3-tauri.qmod",
+        "size": 1493375,
+        "sha256": "43c2e1d1079d7a1f4859c0491958aaa3bf20e78d25bfb602df4aab3a71d122c5"
+      },
+      "releaseNotes": {
+        "zh-CN": "启动台设置加入 Everything 结果数量（默认 200）和可选分批加载（默认关闭）；输入 / 可补全搜索指令并自动加空格，支持鼠标与键盘操作。",
+        "en-US": "Add a configurable Everything result limit (default 200), opt-in batch loading and slash-command completion with a trailing space. Preserve existing Launcher UI and interactions."
+      }
+    },
+    {
       "version": "0.3.2",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
