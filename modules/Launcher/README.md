@@ -10,10 +10,19 @@ sends an executable path to the host. `launchItem` accepts only an item id that
 the module previously returned from its own state snapshot.
 
 The current migration slice covers `.exe`/`.lnk`/`.url` items visible on the
-user Desktop, custom/alphabetical/desktop projections, persistent custom
+user and public Desktop, custom/alphabetical/desktop projections, persistent custom
 ordering (including Desktop refreshes), launch-by-id, and custom-mode folders
 with bounded rename/move/order operations. Folder state is module-owned and
 stored atomically beside the launcher data.
+
+Desktop roots are resolved on every scan/refresh through Windows
+`SHGetKnownFolderPath(FOLDERID_Desktop/FOLDERID_PublicDesktop)` with default
+flags. This follows drive/OneDrive redirection and localized directory names;
+it does not scan stale `USERPROFILE/Desktop` or guessed OneDrive folders.
+Duplicate paths are removed, a failing root does not block other roots, and
+resolution/read failures are written to module stderr for host diagnostics.
+This remains an application/shortcut projection, not a listing of ordinary
+desktop documents, directories or virtual Shell icons.
 
 The search box also supports an isolated Everything mode. `/e query`,
 `/e:f query`, and `/e:d query` are sent to a fixed Everything 1.4.1.1032

@@ -12,6 +12,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod desktop;
 mod everything;
 mod icons;
 
@@ -1309,20 +1310,25 @@ fn ensure_desktop(store: &mut LauncherStore, loaded: &mut bool) {
 }
 
 fn scan_desktop() -> Vec<LauncherItem> {
-    let mut roots = Vec::new();
-    if let Some(profile) = env::var_os("USERPROFILE") {
-        roots.push(PathBuf::from(profile).join("Desktop"));
-    }
-    if let Some(one_drive) = env::var_os("OneDrive") {
-        roots.push(PathBuf::from(one_drive).join("Desktop"));
-    }
+    scan_desktop_roots(desktop::roots())
+}
+
+fn scan_desktop_roots(roots: impl IntoIterator<Item = PathBuf>) -> Vec<LauncherItem> {
     let mut entries = Vec::new();
+    let mut seen = BTreeSet::new();
     for root in roots {
-        let Ok(read_dir) = fs::read_dir(root) else {
-            continue;
+        let read_dir = match fs::read_dir(&root) {
+            Ok(entries) => entries,
+            Err(error) => {
+                eprintln!("[desktop] cannot read {}: {error}", root.display());
+                continue;
+            }
         };
         for entry in read_dir.flatten() {
             let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
             let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
                 continue;
             };
@@ -1336,6 +1342,9 @@ fn scan_desktop() -> Vec<LauncherItem> {
                 continue;
             };
             let target = normalize_path(&path);
+            if !seen.insert(identity_key(&target)) {
+                continue;
+            }
             entries.push(LauncherItem {
                 id: stable_id(&target),
                 name: name.trim().to_string(),
@@ -1354,6 +1363,7 @@ fn scan_desktop() -> Vec<LauncherItem> {
             .cmp(&right.name.to_ascii_lowercase())
     });
     entries.truncate(MAX_ITEMS);
+    eprintln!("[desktop] discovered {} launcher items", entries.len());
     entries
 }
 
@@ -1926,6 +1936,94 @@ fn write_response(stdout: &mut impl Write, response: Response<'_>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct DesktopFixture(PathBuf);
+
+    impl DesktopFixture {
+        fn new() -> Self {
+            let root = env::temp_dir().join(unique_id("qing-launcher-desktop-test"));
+            fs::create_dir(&root).expect("isolated desktop fixture");
+            Self(root)
+        }
+
+        fn directory(&self, name: &str) -> PathBuf {
+            let path = self.0.join(name);
+            fs::create_dir(&path).expect("fixture directory");
+            path
+        }
+    }
+
+    impl Drop for DesktopFixture {
+        fn drop(&mut self) {
+            // Only this test's freshly created directory is ever removed.
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn desktop_scan_combines_redirected_unicode_and_public_shortcuts() {
+        let fixture = DesktopFixture::new();
+        let user = fixture.directory("用户桌面");
+        let public = fixture.directory("公共桌面");
+        for name in ["中文应用.lnk", "Browser.url", "Portable.EXE", "notes.txt"] {
+            fs::write(user.join(name), []).unwrap();
+        }
+        fs::write(public.join("Public app.lnk"), []).unwrap();
+        fs::create_dir(user.join("Not an app.lnk")).unwrap();
+
+        let items = scan_desktop_roots([user.clone(), public.clone()]);
+        assert_eq!(items.len(), 4);
+        let names = items
+            .iter()
+            .map(|item| item.name.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            names,
+            BTreeSet::from(["中文应用", "Browser", "Portable", "Public app"])
+        );
+        assert!(items.iter().all(|item| item.source == "desktop"));
+        assert!(items
+            .iter()
+            .any(|item| item.target == normalize_path(&user.join("中文应用.lnk"))));
+        assert!(items
+            .iter()
+            .any(|item| item.target == normalize_path(&public.join("Public app.lnk"))));
+    }
+
+    #[test]
+    fn desktop_scan_skips_unreadable_roots_and_deduplicates_path_aliases() {
+        let fixture = DesktopFixture::new();
+        let user = fixture.directory("Desktop");
+        fs::write(user.join("Only.lnk"), []).unwrap();
+        let items = scan_desktop_roots([fixture.0.join("missing"), user.clone(), user.join(".")]);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "Only");
+    }
+
+    #[test]
+    fn desktop_refresh_follows_changed_roots_without_touching_custom_items() {
+        let fixture = DesktopFixture::new();
+        let old = fixture.directory("Old Desktop");
+        let moved = fixture.directory("新桌面");
+        let public = fixture.directory("Public");
+        fs::write(old.join("Old.lnk"), []).unwrap();
+        fs::write(moved.join("New.lnk"), []).unwrap();
+        fs::write(public.join("Shared.lnk"), []).unwrap();
+        let mut store = test_store();
+        store.synchronize_desktop(scan_desktop_roots([old, public.clone()]));
+        store.desktop_items.reverse();
+        assert_eq!(store.desktop_items[0].name, "Shared");
+        let shared_id = store.desktop_items[0].id.clone();
+
+        store.synchronize_desktop(scan_desktop_roots([moved, public]));
+        assert_eq!(store.desktop_items.len(), 2);
+        assert_eq!(store.desktop_items[0].id, shared_id);
+        assert_eq!(store.desktop_items[1].name, "New");
+        assert!(!store.desktop_items.iter().any(|item| item.name == "Old"));
+        assert_eq!(store.items.len(), 1);
+        assert_eq!(store.items[0].id, "one");
+        let _ = fs::remove_file(&store.path);
+    }
 
     fn test_store() -> LauncherStore {
         LauncherStore {
