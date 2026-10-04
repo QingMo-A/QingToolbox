@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import LauncherIcon from './LauncherIcon.vue'
+import { commandSuggestions, completeCommand } from './searchCommands'
 import { QButton, QIconButton, QModal, QModalInput, QModalLabel } from '@qingtoolbox/module-ui'
 import LauncherAppIcon from './LauncherAppIcon.vue'
 import { OverlayInteraction } from './overlayInteraction'
@@ -96,12 +97,23 @@ const state = ref<LauncherState>(structuredClone(emptyState))
 // temporal dead zone and leave Vue with an empty root.
 const hotkeyDraft = ref(DEFAULT_HOTKEY)
 const query = ref('')
+const searchFocused = ref(false)
+const commandDismissed = ref(false)
+const commandIndex = ref(0)
+const suggestions = computed(() => searchFocused.value && !commandDismissed.value ? commandSuggestions(query.value) : [])
+const searchLimitDraft = ref('200')
+const batchLoadingDraft = ref(false)
+const searchSettingsError = ref('')
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const everythingResults = ref<EverythingResult[]>([])
 const everythingStatus = ref<EverythingSearchResponse['status']>('idle')
 const everythingError = ref('')
+const nextEverythingCursor = ref<string | null>(null)
+const everythingMoreLoading = ref(false)
+const everythingMoreError = ref('')
+const everythingLimited = ref(false)
 const runtimeStatus = ref<EverythingRuntimeStatus['status'] | 'checking'>('checking')
 const runtimeStatusError = ref('')
 const selectedEverythingIndex = ref(-1)
@@ -379,6 +391,57 @@ async function resetHotkey(): Promise<void> {
   await saveHotkey()
 }
 
+async function saveLauncherSettings(): Promise<void> {
+  const resultLimit = Number(searchLimitDraft.value)
+  searchSettingsError.value = ''
+  if (!Number.isInteger(resultLimit) || resultLimit < 1 || resultLimit > 1000) {
+    searchSettingsError.value = '请输入 1–1000 的整数。'
+    return
+  }
+  try {
+    const next = hotkeySpecFromText(hotkeyDraft.value)
+    if (hotkeyText(next) !== hotkeyText(state.value.hotkey)) {
+      await saveHotkey()
+      if (hotkeyError.value) return
+    }
+    stopHotkeyRecording()
+    hotkeySaving.value = true
+    state.value = await invokeModule<LauncherState>('setEverythingSettings', { resultLimit, batchLoading: batchLoadingDraft.value })
+    if (everythingActive.value) scheduleEverythingSearch()
+    hotkeyPanelOpen.value = false
+  } catch (reason) {
+    searchSettingsError.value = messageOf(reason)
+  } finally {
+    hotkeySaving.value = false
+  }
+}
+
+async function resetLauncherSettings(): Promise<void> {
+  searchLimitDraft.value = '200'
+  batchLoadingDraft.value = false
+  hotkeyDraft.value = DEFAULT_HOTKEY
+  await saveLauncherSettings()
+}
+
+function applySearchCommand(prefix: string): void {
+  query.value = completeCommand(prefix)
+  void nextTick(() => searchInput.value?.focus({ preventScroll: true }))
+}
+
+function onSearchKeydown(event: KeyboardEvent): void {
+  if (!suggestions.value.length || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || (event.key === 'Tab' && event.shiftKey)) return
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    commandIndex.value = (commandIndex.value + (event.key === 'ArrowDown' ? 1 : -1) + suggestions.value.length) % suggestions.value.length
+  } else if (event.key === 'Enter' || event.key === 'Tab') {
+    event.preventDefault()
+    applySearchCommand(suggestions.value[commandIndex.value]?.prefix ?? suggestions.value[0].prefix)
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
+    commandDismissed.value = true
+  }
+}
+
 const filteredItems = computed(() => {
   if (everythingActive.value) return []
   const needle = query.value.trim().toLocaleLowerCase()
@@ -475,6 +538,10 @@ function scheduleEverythingSearch(): void {
   if (everythingDebounceTimer !== undefined) window.clearTimeout(everythingDebounceTimer)
   const serial = ++everythingRequestSerial
   everythingResults.value = []
+  nextEverythingCursor.value = null
+  everythingMoreLoading.value = false
+  everythingMoreError.value = ''
+  everythingLimited.value = false
   selectedEverythingIndex.value = -1
   resultMenu.value = null
   everythingError.value = ''
@@ -503,6 +570,8 @@ async function runEverythingSearch(serial: number, mode: EverythingSearchMode, v
     everythingStatus.value = response.status
     everythingResults.value = Array.isArray(response.results) ? response.results : []
     everythingError.value = response.error ?? ''
+    nextEverythingCursor.value = response.nextCursor ?? null
+    everythingLimited.value = response.limited ?? false
     selectedEverythingIndex.value = everythingResults.value.length ? 0 : -1
   } catch (reason) {
     if (serial !== everythingRequestSerial || search.value.mode !== mode) return
@@ -510,6 +579,47 @@ async function runEverythingSearch(serial: number, mode: EverythingSearchMode, v
     everythingResults.value = []
     everythingError.value = messageOf(reason)
   }
+}
+
+async function loadMoreEverything(): Promise<void> {
+  const cursor = nextEverythingCursor.value
+  if (!cursor || everythingMoreLoading.value || !everythingActive.value) return
+  const serial = everythingRequestSerial
+  everythingMoreLoading.value = true
+  everythingMoreError.value = ''
+  try {
+    const response = await invokeModule<EverythingSearchResponse>('loadMoreEverything', { cursor, requestId: `ui-${serial}-more` })
+    if (serial !== everythingRequestSerial || cursor !== nextEverythingCursor.value || !everythingActive.value) return
+    if (response.status !== 'ready') throw new Error(response.error || '加载失败，请重试。')
+    const known = new Set(everythingResults.value.map(result => result.id))
+    everythingResults.value.push(...response.results.filter(result => !known.has(result.id)))
+    nextEverythingCursor.value = response.nextCursor ?? null
+    everythingLimited.value = response.limited ?? false
+  } catch (reason) {
+    if (serial === everythingRequestSerial) everythingMoreError.value = messageOf(reason)
+  } finally {
+    if (serial === everythingRequestSerial) everythingMoreLoading.value = false
+  }
+}
+
+function maybeLoadMore(event: Event): void {
+  const list = event.target as HTMLElement
+  if (!everythingMoreError.value && list.scrollHeight - list.scrollTop - list.clientHeight < 100) void loadMoreEverything()
+}
+
+async function moveEverythingSelection(delta: number): Promise<void> {
+  const serial = everythingRequestSerial
+  const count = everythingResults.value.length
+  if (delta > 0 && selectedEverythingIndex.value === count - 1 && nextEverythingCursor.value) {
+    await loadMoreEverything()
+    if (serial !== everythingRequestSerial) return
+    selectedEverythingIndex.value = Math.min(count, everythingResults.value.length - 1)
+  } else {
+    selectedEverythingIndex.value = (selectedEverythingIndex.value + delta + count) % count
+  }
+  await nextTick()
+  const result = everythingResults.value[selectedEverythingIndex.value]
+  if (result) document.getElementById(`everything-result-${result.id}`)?.scrollIntoView({ block: 'nearest' })
 }
 
 function resultTypeLabel(result: EverythingResult): string {
@@ -607,9 +717,7 @@ function onWindowKeydown(event: KeyboardEvent): void {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       if (!everythingResults.value.length) return
       event.preventDefault()
-      const delta = event.key === 'ArrowDown' ? 1 : -1
-      const count = everythingResults.value.length
-      selectedEverythingIndex.value = (selectedEverythingIndex.value + delta + count) % count
+      void moveEverythingSelection(event.key === 'ArrowDown' ? 1 : -1)
       return
     }
     if (event.key === 'Enter') {
@@ -799,8 +907,16 @@ async function moveFolderItem(folder: LauncherState['folders'][number], index: n
   await invokeState('setFolderOrder', { folderId: folder.id, ids })
 }
 
-watch(query, () => scheduleEverythingSearch())
-watch(hotkeyPanelOpen, open => { if (!open) stopHotkeyRecording() })
+watch(query, () => { commandIndex.value = 0; commandDismissed.value = false; scheduleEverythingSearch() })
+watch(hotkeyPanelOpen, open => {
+  if (!open) stopHotkeyRecording()
+  else {
+    searchLimitDraft.value = String(state.value.everythingSettings?.resultLimit ?? 200)
+    batchLoadingDraft.value = state.value.everythingSettings?.batchLoading ?? false
+    searchSettingsError.value = ''
+    commandDismissed.value = true
+  }
+})
 watch(recentContainer, element => {
   recentObserver?.disconnect()
   if (element) recentObserver?.observe(element)
@@ -883,18 +999,26 @@ onBeforeUnmount(() => {
     <section class="search-row" aria-label="搜索应用">
       <LauncherIcon class="search-icon" name="search" />
       <span v-if="everythingActive" class="everything-badge" :title="everythingBadge">{{ everythingBadge }}</span>
-      <input ref="searchInput" v-model="query" type="search" aria-label="搜索应用" placeholder="搜索应用…" autocomplete="off" spellcheck="false" />
+      <input ref="searchInput" v-model="query" type="search" role="combobox" aria-autocomplete="list" :aria-expanded="suggestions.length > 0" :aria-controls="suggestions.length ? 'launcher-command-suggestions' : undefined" :aria-activedescendant="suggestions.length ? `launcher-command-${commandIndex}` : undefined" aria-label="搜索应用" placeholder="搜索应用…" autocomplete="off" spellcheck="false" @focus="searchFocused = true; commandDismissed = false" @blur="searchFocused = false" @keydown="onSearchKeydown" />
       <span v-if="!query" class="search-hints" aria-hidden="true">
         <span><kbd>/e</kbd>全盘搜索</span>
         <span><kbd>Esc</kbd>关闭</span>
       </span>
       <span v-else-if="!everythingActive" class="search-count" aria-live="polite">{{ filteredItems.length }} 个应用</span>
       <QIconButton v-if="query" class="clear" label="清空搜索" @click="query = ''"><LauncherIcon name="close" /></QIconButton>
+      <Transition name="command-hints">
+        <div v-if="suggestions.length" id="launcher-command-suggestions" class="command-suggestions" role="listbox" aria-label="搜索指令">
+          <button v-for="(command, index) in suggestions" :id="`launcher-command-${index}`" :key="command.prefix" type="button" role="option" :aria-selected="commandIndex === index" :class="{ selected: commandIndex === index }" @mousedown.prevent @mouseenter="commandIndex = index" @click="applySearchCommand(command.prefix)">
+            <kbd>{{ command.prefix }}</kbd><strong>{{ command.label }}</strong><span>{{ command.description }}</span>
+          </button>
+        </div>
+      </Transition>
     </section>
 
 
 
-    <QModal :open="hotkeyPanelOpen" title="快捷键" :busy="hotkeySaving" close-label="关闭设置" panel-class="launcher-settings-card" @close="stopHotkeyRecording(); hotkeyPanelOpen = false">
+    <QModal :open="hotkeyPanelOpen" title="启动台设置" :busy="hotkeySaving" close-label="关闭设置" panel-class="launcher-settings-card" @close="stopHotkeyRecording(); hotkeyPanelOpen = false">
+      <QModalLabel>快捷键</QModalLabel>
       <div class="hotkey-controls">
         <input
           ref="hotkeyInput"
@@ -912,9 +1036,14 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="hotkeyError" class="hotkey-error" role="alert">{{ hotkeyError }}</p>
       <p class="hotkey-current">当前：{{ formatHotkey(state.hotkey) }}</p>
+      <div class="launcher-search-settings">
+        <label class="search-limit-field"><span>{{ batchLoadingDraft ? '每批结果数量' : '搜索结果上限' }}</span><input v-model="searchLimitDraft" class="search-limit-input" type="number" min="1" max="1000" step="1" aria-label="Everything 结果数量" :disabled="hotkeySaving" @keydown.enter.prevent="saveLauncherSettings" /></label>
+        <label class="batch-loading-field"><input v-model="batchLoadingDraft" type="checkbox" :disabled="hotkeySaving" /><span>分批加载</span></label>
+        <p v-if="searchSettingsError" class="hotkey-error" role="alert">{{ searchSettingsError }}</p>
+      </div>
       <template #actions>
-        <QButton class="hotkey-action secondary" :disabled="hotkeySaving" @click="resetHotkey">恢复默认</QButton>
-        <QButton class="hotkey-action secondary" variant="primary" :disabled="hotkeySaving || !hotkeyDraft" @click="saveHotkey">保存</QButton>
+        <QButton class="hotkey-action secondary" :disabled="hotkeySaving" @click="resetLauncherSettings">恢复默认</QButton>
+        <QButton class="hotkey-action secondary" variant="primary" :disabled="hotkeySaving || !hotkeyDraft" @click="saveLauncherSettings">保存</QButton>
       </template>
     </QModal>
 
@@ -944,7 +1073,7 @@ onBeforeUnmount(() => {
           <small v-else>{{ everythingError ? '普通启动台搜索仍可正常使用' : '支持 *.exe、file:、folder: 等 Everything 查询语法' }}</small>
           <QButton v-if="everythingStatus === 'indexing' || everythingStatus === 'unavailable' || everythingStatus === 'error'" class="everything-retry" @click="scheduleEverythingSearch">重试</QButton>
         </div>
-        <div v-else class="everything-list" role="listbox" aria-label="Everything 搜索结果" :aria-activedescendant="selectedEverythingIndex >= 0 ? `everything-result-${everythingResults[selectedEverythingIndex]?.id}` : undefined">
+        <div v-else class="everything-list" role="listbox" aria-label="Everything 搜索结果" :aria-activedescendant="selectedEverythingIndex >= 0 ? `everything-result-${everythingResults[selectedEverythingIndex]?.id}` : undefined" @scroll.passive="maybeLoadMore">
           <article
             v-for="(result, index) in everythingResults"
             :id="`everything-result-${result.id}`"
@@ -965,8 +1094,13 @@ onBeforeUnmount(() => {
             </span>
             <span class="everything-result-type">{{ resultTypeLabel(result) }}</span>
           </article>
+          <div v-if="nextEverythingCursor" class="everything-more">
+            <p v-if="everythingMoreError" class="hotkey-error" role="alert">{{ everythingMoreError }}</p>
+            <QButton :disabled="everythingMoreLoading" @click="loadMoreEverything">{{ everythingMoreLoading ? '正在加载…' : everythingMoreError ? '重试加载' : '加载更多' }}</QButton>
+          </div>
         </div>
-        <footer v-if="everythingResults.length" class="everything-footer" aria-hidden="true">
+        <footer v-if="everythingResults.length" class="everything-footer">
+          <span class="everything-count">{{ everythingResults.length }} 个结果{{ everythingLimited ? ' · 已达显示上限' : '' }}</span>
           <span><kbd>↑</kbd><kbd>↓</kbd>选择</span>
           <span><kbd>Enter</kbd>打开</span>
           <span>右键更多操作</span>

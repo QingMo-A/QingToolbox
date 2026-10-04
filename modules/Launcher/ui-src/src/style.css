@@ -301,6 +301,16 @@ kbd {
 .recent-empty { padding-left: 9px; color: var(--q-text-3); font-size: 12px; }
 
 /* Everything --------------------------------------------------------- */
+.command-suggestions { position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 45; display: grid; gap: 4px; padding: 7px; border: 1px solid var(--q-border); border-radius: var(--control-radius); background: var(--q-surface); box-shadow: 0 12px 32px var(--ql-ink-soft); }
+.command-suggestions button { display: flex; align-items: center; gap: 12px; min-height: 43px; padding: 9px 12px; border: 0; border-radius: calc(var(--control-radius) - 3px); background: transparent; color: var(--q-text); text-align: left; cursor: pointer; transition: background-color 160ms ease, transform 160ms var(--ql-spring); }
+.command-suggestions button.selected { background: var(--ql-ink-soft); }
+.command-suggestions button:active { transform: scale(.99); }
+.command-suggestions kbd { min-width: 48px; color: var(--q-primary); font: 12px "Cascadia Code", Consolas, monospace; }
+.command-suggestions strong { font-size: 12px; font-weight: 600; }
+.command-suggestions span { margin-left: auto; color: var(--q-text-3); font-size: 11px; }
+.command-hints-enter-active, .command-hints-leave-active { transition: opacity 150ms ease, transform 180ms var(--ql-out); }
+.command-hints-enter-from, .command-hints-leave-to { opacity: 0; transform: translateY(-5px); }
+.search-row { position: relative; }
 .everything-panel { min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .everything-loading { flex: 1; display: flex; align-items: center; justify-content: center; gap: 11px; color: var(--q-text-3); font-size: 12px; }
 .everything-list { flex: 1; min-height: 0; display: grid; align-content: start; gap: 4px; overflow-y: auto; padding: 2px 4px 8px 2px; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--q-text) 20%, transparent) transparent; }
@@ -328,6 +338,18 @@ kbd {
 .everything-result-type { flex: 0 0 auto; padding: 3px 8px; border: 1px solid color-mix(in srgb, var(--q-border) 90%, transparent); border-radius: 999px; color: var(--q-text-2); font-size: 10.5px; }
 .everything-footer { flex: 0 0 auto; display: flex; justify-content: flex-end; gap: 14px; padding-top: 9px; border-top: 1px solid color-mix(in srgb, var(--q-border) 65%, transparent); color: var(--q-text-3); font-size: 11px; }
 .everything-footer > span { display: inline-flex; align-items: center; gap: 5px; }
+.everything-footer .everything-count { margin-right: auto; }
+.everything-more { display: grid; justify-items: center; gap: 8px; padding: 12px; }
+.launcher-search-settings { display: grid; gap: 14px; padding-top: 15px; border-top: 1px solid var(--q-border); }
+.search-limit-field { display: grid; grid-template-columns: 1fr 104px; align-items: center; gap: 12px; color: var(--q-text); font-size: 12px; font-weight: 600; }
+.search-limit-input { box-sizing: border-box; width: 100%; height: 39px; padding: 0 11px; border: 1px solid var(--q-border); border-radius: 9px; background: var(--q-surface-soft); color: var(--q-text); font: inherit; font-weight: 400; transition: border-color 150ms ease; }
+.search-limit-input:focus-visible, .batch-loading-field input:focus-visible { outline: 2px solid color-mix(in srgb, var(--q-primary) 45%, transparent); outline-offset: 2px; }
+.batch-loading-field { display: flex; align-items: center; gap: 9px; color: var(--q-text); font-size: 12px; cursor: pointer; }
+.batch-loading-field input { width: 17px; height: 17px; margin: 0; accent-color: var(--q-primary); cursor: pointer; transition: transform 150ms var(--ql-spring); }
+.batch-loading-field input:active { transform: scale(.92); }
+.search-limit-input:disabled, .batch-loading-field input:disabled { opacity: .55; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .command-hints-enter-active, .command-hints-leave-active, .command-suggestions button, .search-limit-input, .batch-loading-field input { transition: none; } }
+@media (max-width: 480px) { .command-suggestions button { gap: 7px; } .command-suggestions span { display: none; } .everything-footer { flex-wrap: wrap; } }
 
 .result-menu-backdrop { position: fixed; inset: 0; z-index: 30; }
 .result-menu {

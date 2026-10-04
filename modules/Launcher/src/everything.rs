@@ -15,11 +15,14 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const MAX_QUERY_BYTES: usize = 4096;
-pub const MAX_RESULTS: usize = 20;
+pub const MAX_RESULT_LIMIT: usize = 1000;
+const MAX_SESSION_RESULTS: usize = 5000;
+const MAX_SESSION_PATH_BYTES: usize = 8 * 1024 * 1024;
+const RESULTS_BYTE_BUDGET: usize = 700 * 1024;
 const MAX_RESULT_TEXT_CHARS: usize = 2048;
 const MAX_EXPORT_BYTES: u64 = 8 * 1024 * 1024;
 
@@ -30,6 +33,29 @@ const SERVICE_SECURITY_DESCRIPTOR: &str = "D:(A;OICI;GRGW;;;AU)";
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
 const QUERY_TIMEOUT: Duration = Duration::from_secs(18);
 const PROCESS_POLL: Duration = Duration::from_millis(40);
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SearchSettings {
+    pub result_limit: usize,
+    pub batch_loading: bool,
+}
+
+impl Default for SearchSettings {
+    fn default() -> Self {
+        Self {
+            result_limit: 200,
+            batch_loading: false,
+        }
+    }
+}
+
+impl SearchSettings {
+    pub fn normalized(mut self) -> Self {
+        self.result_limit = self.result_limit.clamp(1, MAX_RESULT_LIMIT);
+        self
+    }
+}
 
 const ASSET_HASHES: &[(&str, &str)] = &[
     (
@@ -130,6 +156,8 @@ pub struct EverythingSearchResponse {
     pub query: String,
     pub status: &'static str,
     pub results: Vec<EverythingResultView>,
+    pub next_cursor: Option<String>,
+    pub limited: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -201,6 +229,15 @@ struct StoredResult {
     is_directory: bool,
 }
 
+#[derive(Clone)]
+struct SearchSession {
+    cursor: String,
+    mode: EverythingSearchMode,
+    query: String,
+    settings: SearchSettings,
+    offset: usize,
+}
+
 /// Owns only the Everything client instance created by this module.  The
 /// dedicated service, when enabled, is intentionally left installed/running;
 /// it is not a user-owned Everything instance and makes later startups fast.
@@ -216,6 +253,8 @@ pub struct EverythingRuntime {
     assets_checked: bool,
     result_map: HashMap<String, StoredResult>,
     next_result_id: u64,
+    search_session: Option<SearchSession>,
+    result_path_bytes: usize,
 }
 
 impl EverythingRuntime {
@@ -238,6 +277,8 @@ impl EverythingRuntime {
             assets_checked: false,
             result_map: HashMap::new(),
             next_result_id: 0,
+            search_session: None,
+            result_path_bytes: 0,
         }
     }
 
@@ -246,8 +287,10 @@ impl EverythingRuntime {
         mode: EverythingSearchMode,
         query: String,
         request_id: String,
+        settings: SearchSettings,
     ) -> Result<EverythingSearchResponse, EverythingError> {
         validate_query(&query)?;
+        self.clear_search();
         if query.is_empty() {
             self.result_map.clear();
             return Ok(EverythingSearchResponse {
@@ -256,6 +299,8 @@ impl EverythingRuntime {
                 query,
                 status: "ready",
                 results: Vec::new(),
+                next_cursor: None,
+                limited: false,
                 error: None,
             });
         }
@@ -263,8 +308,44 @@ impl EverythingRuntime {
         // Result ids are scoped to the latest search. Invalidate them before
         // touching the runtime so a failed/new query cannot leave an old id
         // usable through a stale UI event.
-        self.result_map.clear();
         self.ensure_ready()?;
+        self.search_page(mode, query, request_id, settings.normalized(), 0)
+    }
+
+    pub fn clear_search(&mut self) {
+        self.result_map.clear();
+        self.search_session = None;
+        self.result_path_bytes = 0;
+    }
+
+    pub fn load_more(
+        &mut self,
+        cursor: &str,
+        request_id: String,
+    ) -> Result<EverythingSearchResponse, EverythingError> {
+        let session = self
+            .search_session
+            .as_ref()
+            .filter(|session| session.cursor == cursor)
+            .cloned()
+            .ok_or_else(|| EverythingError::failed("搜索已改变，请重新搜索。"))?;
+        self.search_page(
+            session.mode,
+            session.query,
+            request_id,
+            session.settings,
+            session.offset,
+        )
+    }
+
+    fn search_page(
+        &mut self,
+        mode: EverythingSearchMode,
+        query: String,
+        request_id: String,
+        settings: SearchSettings,
+        offset: usize,
+    ) -> Result<EverythingSearchResponse, EverythingError> {
         let export_token = self.next_token();
         let export_path = self
             .data_directory
@@ -274,7 +355,10 @@ impl EverythingRuntime {
             .active_es
             .clone()
             .ok_or_else(|| EverythingError::ipc("Everything IPC 客户端不可用。"))?;
-        let result = self.run_export(&es, &export_path, &constrained);
+        let page_size = settings
+            .result_limit
+            .min(MAX_SESSION_RESULTS.saturating_sub(offset));
+        let result = self.run_export(&es, &export_path, &constrained, offset, page_size + 1);
         let bytes = match result {
             Ok(_) => {
                 let size = fs::metadata(&export_path)
@@ -294,7 +378,7 @@ impl EverythingRuntime {
         };
         let _ = fs::remove_file(&export_path);
         let bytes = bytes?;
-        let paths = parse_export(&bytes);
+        let paths = parse_export(&bytes, page_size + 1);
         // A successful query with zero rows is ambiguous while the private
         // database is first being built. Distinguish an empty index from a
         // legitimate no-match query before telling the UI there are no files.
@@ -303,9 +387,41 @@ impl EverythingRuntime {
                 "Everything 索引尚未建立或索引为空，请稍后重试。",
             ));
         }
-        self.result_map.clear();
-        let mut views = Vec::with_capacity(paths.len());
-        for path in paths.into_iter().take(MAX_RESULTS) {
+        Ok(self.project_page(paths, mode, query, request_id, settings, offset))
+    }
+
+    fn project_page(
+        &mut self,
+        paths: Vec<PathBuf>,
+        mode: EverythingSearchMode,
+        query: String,
+        request_id: String,
+        settings: SearchSettings,
+        offset: usize,
+    ) -> EverythingSearchResponse {
+        let mut views = Vec::with_capacity(settings.result_limit);
+        let available = paths.len();
+        let mut consumed = 0;
+        let mut bytes = 0;
+        let mut limited = false;
+        let mut seen_paths = self
+            .result_map
+            .values()
+            .map(|result| super::identity_key(&result.path.to_string_lossy()))
+            .collect::<std::collections::HashSet<_>>();
+        for path in paths.into_iter().take(settings.result_limit) {
+            if seen_paths.contains(&super::identity_key(&path.to_string_lossy())) {
+                consumed += 1;
+                continue;
+            }
+            let path_bytes = path.as_os_str().len().saturating_mul(4);
+            if offset + consumed >= MAX_SESSION_RESULTS
+                || self.result_map.len() >= MAX_SESSION_RESULTS
+                || self.result_path_bytes + path_bytes > MAX_SESSION_PATH_BYTES
+            {
+                limited = true;
+                break;
+            }
             let is_directory = path.is_dir();
             let id = self.next_result_token();
             let name = path
@@ -323,24 +439,57 @@ impl EverythingRuntime {
                 .chars()
                 .take(MAX_RESULT_TEXT_CHARS)
                 .collect::<String>();
-            self.result_map
-                .insert(id.clone(), StoredResult { path, is_directory });
-            views.push(EverythingResultView {
-                id,
+            let view = EverythingResultView {
+                id: id.clone(),
                 name,
                 parent_path,
                 is_directory,
                 result_type: if is_directory { "directory" } else { "file" },
-            });
+            };
+            // Account for JSON escaping, not just string character counts.
+            // Keep room for the query, cursor and host envelope in the 1 MiB IPC frame.
+            let size = serde_json::to_vec(&view)
+                .map(|value| value.len() + 1)
+                .unwrap_or(RESULTS_BYTE_BUDGET + 1);
+            if bytes + size > RESULTS_BYTE_BUDGET {
+                break;
+            }
+            bytes += size;
+            consumed += 1;
+            self.result_path_bytes += path_bytes;
+            seen_paths.insert(super::identity_key(&path.to_string_lossy()));
+            self.result_map
+                .insert(id, StoredResult { path, is_directory });
+            views.push(view);
         }
-        Ok(EverythingSearchResponse {
+        if offset + consumed >= MAX_SESSION_RESULTS {
+            limited = available > consumed;
+        }
+        let more = available > consumed && !limited;
+        let next_cursor = if settings.batch_loading && more {
+            let cursor = format!("qec-{}", self.next_token());
+            self.search_session = Some(SearchSession {
+                cursor: cursor.clone(),
+                mode,
+                query: query.clone(),
+                settings,
+                offset: offset + consumed,
+            });
+            Some(cursor)
+        } else {
+            self.search_session = None;
+            None
+        };
+        EverythingSearchResponse {
             request_id,
             mode: mode.as_wire(),
             query,
             status: "ready",
             results: views,
+            next_cursor,
+            limited: limited || (!settings.batch_loading && more),
             error: None,
-        })
+        }
     }
 
     /// Check the private index, not merely whether its IPC process exists.
@@ -668,13 +817,20 @@ impl EverythingRuntime {
         es: &Path,
         export_path: &Path,
         query: &str,
+        offset: usize,
+        count: usize,
     ) -> Result<(), EverythingError> {
         let mut command = hidden_process(es);
         command.args([
             "-instance",
             &self.instance_name,
             "-n",
-            "20",
+            &(offset + count).to_string(),
+            "-viewport-offset",
+            &offset.to_string(),
+            "-viewport-count",
+            &count.to_string(),
+            "-s",
             "-timeout",
             "15000",
             "-utf8-bom",
@@ -789,7 +945,7 @@ fn validate_query(query: &str) -> Result<(), EverythingError> {
     Ok(())
 }
 
-fn parse_export(bytes: &[u8]) -> Vec<PathBuf> {
+fn parse_export(bytes: &[u8], limit: usize) -> Vec<PathBuf> {
     let text = decode_export_text(bytes);
     let mut seen = std::collections::HashSet::new();
     text.lines()
@@ -802,7 +958,7 @@ fn parse_export(bytes: &[u8]) -> Vec<PathBuf> {
             }
             Some(path)
         })
-        .take(MAX_RESULTS)
+        .take(limit.min(MAX_RESULT_LIMIT + 1))
         .collect()
 }
 
@@ -1221,6 +1377,198 @@ fn copy_text_to_clipboard(_value: &str) -> io::Result<()> {
 mod tests {
     use super::*;
 
+    fn runtime() -> EverythingRuntime {
+        EverythingRuntime::new(PathBuf::from("missing-runtime"), std::env::temp_dir())
+    }
+
+    fn paths(start: usize, count: usize) -> Vec<PathBuf> {
+        (start..start + count)
+            .map(|index| PathBuf::from(format!(r"C:\search\item-{index:04}.txt")))
+            .collect()
+    }
+
+    #[test]
+    fn result_settings_default_to_200_and_no_batch_loading() {
+        assert_eq!(
+            SearchSettings::default(),
+            SearchSettings {
+                result_limit: 200,
+                batch_loading: false
+            }
+        );
+        assert_eq!(
+            serde_json::from_str::<SearchSettings>("{}").unwrap(),
+            SearchSettings::default()
+        );
+        assert_eq!(
+            SearchSettings {
+                result_limit: usize::MAX,
+                batch_loading: true
+            }
+            .normalized()
+            .result_limit,
+            1000
+        );
+        assert_eq!(
+            SearchSettings {
+                result_limit: 0,
+                batch_loading: false
+            }
+            .normalized()
+            .result_limit,
+            1
+        );
+    }
+
+    #[test]
+    fn default_page_returns_200_without_a_continuation() {
+        let mut runtime = runtime();
+        let response = runtime.project_page(
+            paths(0, 201),
+            EverythingSearchMode::All,
+            "item".into(),
+            "test".into(),
+            SearchSettings::default(),
+            0,
+        );
+        assert_eq!(response.results.len(), 200);
+        assert!(response.next_cursor.is_none());
+        assert!(response.limited);
+        assert_eq!(runtime.result_map.len(), 200);
+    }
+
+    #[test]
+    fn batched_pages_retain_old_ids_and_invalidate_consumed_or_stale_cursors() {
+        let mut runtime = runtime();
+        let settings = SearchSettings {
+            result_limit: 200,
+            batch_loading: true,
+        };
+        let first = runtime.project_page(
+            paths(0, 201),
+            EverythingSearchMode::File,
+            "*.txt".into(),
+            "first".into(),
+            settings,
+            0,
+        );
+        let first_id = first.results[0].id.clone();
+        let cursor = first.next_cursor.unwrap();
+        assert_eq!(runtime.search_session.as_ref().unwrap().offset, 200);
+        let second = runtime.project_page(
+            paths(200, 201),
+            EverythingSearchMode::File,
+            "*.txt".into(),
+            "second".into(),
+            settings,
+            200,
+        );
+        assert!(runtime.result_map.contains_key(&first_id));
+        assert!(runtime.result_map.contains_key(&second.results[0].id));
+        assert!(runtime.load_more(&cursor, "replay".into()).is_err());
+        let cursor = second.next_cursor.unwrap();
+        runtime.clear_search();
+        assert!(runtime.load_more(&cursor, "stale".into()).is_err());
+        assert!(runtime.lookup_result(&first_id).is_err());
+        assert!(runtime
+            .load_more(r"C:\untrusted.txt", "path".into())
+            .is_err());
+    }
+
+    #[test]
+    fn final_batch_has_no_cursor_and_changed_index_does_not_duplicate_paths() {
+        let mut runtime = runtime();
+        let settings = SearchSettings {
+            result_limit: 2,
+            batch_loading: true,
+        };
+        runtime.project_page(
+            paths(0, 3),
+            EverythingSearchMode::All,
+            "item".into(),
+            "first".into(),
+            settings,
+            0,
+        );
+        let response = runtime.project_page(
+            paths(1, 2),
+            EverythingSearchMode::All,
+            "item".into(),
+            "second".into(),
+            settings,
+            2,
+        );
+        assert_eq!(response.results.len(), 1);
+        assert!(response.next_cursor.is_none());
+        assert!(!response.limited);
+        assert_eq!(runtime.result_map.len(), 3);
+    }
+
+    #[test]
+    fn oversized_unicode_pages_stay_inside_the_ipc_envelope() {
+        let mut runtime = runtime();
+        let settings = SearchSettings {
+            result_limit: 1000,
+            batch_loading: true,
+        };
+        let long = "😀".repeat(MAX_RESULT_TEXT_CHARS);
+        let paths = (0..1001)
+            .map(|index| PathBuf::from(format!(r"C:\{long}\{index}{long}.txt")))
+            .collect();
+        let response = runtime.project_page(
+            paths,
+            EverythingSearchMode::All,
+            "\u{1}".repeat(MAX_QUERY_BYTES),
+            "test".into(),
+            settings,
+            0,
+        );
+        assert!(!response.results.is_empty());
+        assert!(response.results.len() < 1000);
+        assert!(response.next_cursor.is_some());
+        let envelope = super::super::Response {
+            protocol_version: 1,
+            message_type: "module.invoke.response",
+            request_id: "test",
+            payload: serde_json::to_value(response).unwrap(),
+            error: None,
+        };
+        assert!(serde_json::to_vec(&envelope).unwrap().len() < super::super::MAX_FRAME_BYTES);
+    }
+
+    #[test]
+    fn retained_result_and_path_budgets_end_pagination_safely() {
+        let mut runtime = runtime();
+        let settings = SearchSettings {
+            result_limit: 200,
+            batch_loading: true,
+        };
+        let response = runtime.project_page(
+            paths(0, 3),
+            EverythingSearchMode::All,
+            "item".into(),
+            "test".into(),
+            settings,
+            MAX_SESSION_RESULTS - 1,
+        );
+        assert_eq!(response.results.len(), 1);
+        assert!(response.limited);
+        assert!(response.next_cursor.is_none());
+        runtime.clear_search();
+        runtime.result_path_bytes = MAX_SESSION_PATH_BYTES;
+        let response = runtime.project_page(
+            paths(0, 2),
+            EverythingSearchMode::All,
+            "item".into(),
+            "test".into(),
+            settings,
+            0,
+        );
+        assert!(response.limited);
+        assert!(response.results.is_empty());
+        assert!(response.next_cursor.is_none());
+    }
+
     #[test]
     fn parses_everything_prefixes_without_mixing_normal_mode() {
         assert_eq!(
@@ -1255,7 +1603,10 @@ mod tests {
 
     #[test]
     fn export_parser_is_bounded_and_does_not_accept_relative_paths() {
-        let parsed = parse_export("\u{feff}C:\\one.txt\r\nrelative.txt\nC:\\one.txt\n".as_bytes());
+        let parsed = parse_export(
+            "\u{feff}C:\\one.txt\r\nrelative.txt\nC:\\one.txt\n".as_bytes(),
+            200,
+        );
         assert_eq!(parsed, vec![PathBuf::from("C:\\one.txt")]);
     }
 

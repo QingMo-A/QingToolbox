@@ -32,6 +32,7 @@ export type LauncherState = {
   hotkey: { ctrl: boolean; alt: boolean; shift: boolean; win: boolean; virtualKey: number; keyLabel: string }
   hotkeyStatus: string
   active: boolean
+  everythingSettings?: { resultLimit: number; batchLoading: boolean }
 }
 
 export type EverythingSearchMode = 'normal' | 'everything-all' | 'everything-file' | 'everything-directory'
@@ -56,6 +57,8 @@ export type EverythingSearchResponse = {
   status: 'ready' | 'indexing' | 'unavailable' | 'error' | string
   results: EverythingResult[]
   error?: string
+  nextCursor?: string | null
+  limited?: boolean
 }
 
 export type EverythingRuntimeStatus = {

@@ -18,6 +18,7 @@ mod icons;
 
 use everything::{
     parse_search_mode, EverythingRuntime, EverythingSearchMode, EverythingSearchResponse,
+    SearchSettings,
 };
 
 const PROTOCOL_VERSION: u16 = 1;
@@ -135,6 +136,7 @@ struct StoreDocument {
     folders: Option<Vec<LauncherFolder>>,
     custom_order: Option<Vec<String>>,
     hotkey: Option<HotkeySpec>,
+    everything_settings: Option<Value>,
 }
 
 #[derive(Debug)]
@@ -146,6 +148,7 @@ struct LauncherStore {
     folders: Vec<LauncherFolder>,
     custom_order: Vec<String>,
     hotkey: HotkeySpec,
+    everything_settings: SearchSettings,
 }
 
 #[derive(Debug, Serialize)]
@@ -177,6 +180,7 @@ struct LauncherState {
     hotkey: HotkeyView,
     hotkey_status: String,
     active: bool,
+    everything_settings: SearchSettings,
 }
 
 #[derive(Debug, Serialize)]
@@ -206,6 +210,11 @@ impl LauncherStore {
             folders: document.folders.unwrap_or_default(),
             custom_order: document.custom_order.unwrap_or_default(),
             hotkey: document.hotkey.unwrap_or_default().normalized(),
+            everything_settings: document
+                .everything_settings
+                .and_then(|value| serde_json::from_value::<SearchSettings>(value).ok())
+                .unwrap_or_default()
+                .normalized(),
         };
         store.normalize_folders();
         store.normalize_order();
@@ -220,6 +229,7 @@ impl LauncherStore {
             folders: Some(self.folders.clone()),
             custom_order: Some(self.custom_order.clone()),
             hotkey: Some(self.hotkey.clone()),
+            everything_settings: Some(json!(self.everything_settings)),
         };
         let bytes = serde_json::to_vec_pretty(&document)
             .map_err(|error| io::Error::other(error.to_string()))?;
@@ -762,6 +772,7 @@ impl LauncherStore {
             },
             hotkey_status: "HostManaged".to_string(),
             active: true,
+            everything_settings: self.everything_settings,
         }
     }
 }
@@ -862,7 +873,10 @@ fn main() {
                     );
                     continue;
                 };
-                if matches!(method, "searchEverything" | "getEverythingStatus") && !lifecycle_active
+                if matches!(
+                    method,
+                    "searchEverything" | "loadMoreEverything" | "getEverythingStatus"
+                ) && !lifecycle_active
                 {
                     write_error(
                         &mut stdout,
@@ -1001,6 +1015,47 @@ fn handle_method(
 ) -> Result<Value, (&'static str, String)> {
     match method {
         "ping" => Ok(json!({ "pong": true })),
+        "setEverythingSettings" => {
+            let limit = payload
+                .get("resultLimit")
+                .and_then(Value::as_u64)
+                .filter(|value| (1..=everything::MAX_RESULT_LIMIT as u64).contains(value))
+                .ok_or((
+                    "invalid_payload",
+                    "结果数量须为 1–1000 的整数。".to_string(),
+                ))?;
+            let batch_loading = payload
+                .get("batchLoading")
+                .and_then(Value::as_bool)
+                .ok_or((
+                    "invalid_payload",
+                    "batchLoading must be a boolean".to_string(),
+                ))?;
+            let previous = store.everything_settings;
+            store.everything_settings = SearchSettings {
+                result_limit: limit as usize,
+                batch_loading,
+            };
+            if let Err(error) = store.save() {
+                store.everything_settings = previous;
+                return Err(("save_failed", format!("搜索设置保存失败：{error}")));
+            }
+            everything.clear_search();
+            Ok(json!(store.state()))
+        }
+        "loadMoreEverything" => {
+            let cursor = required_string(&payload, "cursor")?;
+            let request_id = payload
+                .get("requestId")
+                .and_then(Value::as_str)
+                .filter(|value| valid_token(value, 128))
+                .unwrap_or("request")
+                .to_string();
+            let response = everything
+                .load_more(&cursor, request_id)
+                .map_err(|error| ("everything_page_failed", error.message))?;
+            Ok(json!(response))
+        }
         "getItemIcon" => {
             let id = required_string(&payload, "id")?;
             let item = store
@@ -1248,13 +1303,20 @@ fn handle_method(
                 query.clone()
             };
             let response = everything
-                .search(mode, effective_query.clone(), request_id.clone())
+                .search(
+                    mode,
+                    effective_query.clone(),
+                    request_id.clone(),
+                    store.everything_settings,
+                )
                 .unwrap_or_else(|error| EverythingSearchResponse {
                     request_id,
                     mode: mode.as_wire(),
                     query: effective_query,
                     status: error.status(),
                     results: Vec::new(),
+                    next_cursor: None,
+                    limited: false,
                     error: Some(error.message),
                 });
             serde_json::to_value(response).map_err(|_| {
@@ -2043,7 +2105,99 @@ mod tests {
             folders: Vec::new(),
             custom_order: vec!["one".to_string()],
             hotkey: HotkeySpec::default(),
+            everything_settings: SearchSettings::default(),
         }
+    }
+
+    #[test]
+    fn everything_settings_migrate_old_stores_and_preserve_items_when_invalid() {
+        let fixture = DesktopFixture::new();
+        let original = test_store();
+        for settings in [
+            Value::Null,
+            json!({"resultLimit": "bad", "batchLoading": true}),
+        ] {
+            fs::write(
+                fixture.0.join("launcher.json"),
+                serde_json::to_vec(
+                    &json!({"items": original.items, "everythingSettings": settings}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            let loaded = LauncherStore::load(&fixture.0);
+            assert_eq!(loaded.everything_settings, SearchSettings::default());
+            assert_eq!(loaded.items.len(), 1);
+        }
+    }
+
+    #[test]
+    fn search_settings_are_validated_and_persisted_without_changing_apps() {
+        let fixture = DesktopFixture::new();
+        let mut store = test_store();
+        store.path = fixture.0.join("launcher.json");
+        let mut runtime = EverythingRuntime::new(fixture.0.clone(), fixture.0.clone());
+        let mut desktop_loaded = true;
+        for payload in [
+            json!({"resultLimit": 0, "batchLoading": false}),
+            json!({"resultLimit": 1001, "batchLoading": true}),
+            json!({"resultLimit": 1.5, "batchLoading": true}),
+            json!({"resultLimit": 200, "batchLoading": "true"}),
+        ] {
+            assert!(handle_method(
+                "setEverythingSettings",
+                payload,
+                &mut store,
+                &mut desktop_loaded,
+                &mut runtime
+            )
+            .is_err());
+            assert_eq!(store.everything_settings, SearchSettings::default());
+        }
+        let state = handle_method(
+            "setEverythingSettings",
+            json!({"resultLimit": 350, "batchLoading": true}),
+            &mut store,
+            &mut desktop_loaded,
+            &mut runtime,
+        )
+        .unwrap();
+        assert_eq!(
+            state["everythingSettings"],
+            json!({"resultLimit": 350, "batchLoading": true})
+        );
+        assert_eq!(
+            LauncherStore::load(&fixture.0)
+                .everything_settings
+                .result_limit,
+            350
+        );
+        assert_eq!(store.items.len(), 1);
+        assert!(handle_method(
+            "loadMoreEverything",
+            json!({"cursor": "fake", "requestId": "stale"}),
+            &mut store,
+            &mut desktop_loaded,
+            &mut runtime
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn search_settings_save_failure_restores_previous_settings() {
+        let fixture = DesktopFixture::new();
+        let mut store = test_store();
+        store.path = fixture.0.join("missing").join("launcher.json");
+        let mut runtime = EverythingRuntime::new(fixture.0.clone(), fixture.0.clone());
+        let result = handle_method(
+            "setEverythingSettings",
+            json!({"resultLimit": 300, "batchLoading": true}),
+            &mut store,
+            &mut true,
+            &mut runtime,
+        );
+        assert_eq!(result.unwrap_err().0, "save_failed");
+        assert_eq!(store.everything_settings, SearchSettings::default());
     }
 
     #[test]

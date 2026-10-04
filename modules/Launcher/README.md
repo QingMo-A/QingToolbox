@@ -46,6 +46,17 @@ boundary, canonicalized there, and delivered as the manifest-declared
 `launcher.externalDrop` event. The module hotkey is persisted here while its
 global registration and window toggle stay owned by the Rust host.
 
+Launcher Settings also persist an Everything result limit (default 200,
+1–1000) and opt-in batch loading (default off). With batching off the limit
+applies to the initial results; with batching on it is the page size. ES
+exports a bounded full-path-sorted viewport and the backend owns continuation
+cursors, preserving previously returned result IDs until the query changes.
+Every page stays below the host's 1 MiB frame budget; a search is capped at
+5000 retained results / 8 MiB of retained paths. The UI can load the next batch
+by scrolling or clicking Load More, and stale pages cannot replace a new query.
+Typing `/` suggests `/e`, `/e:f`, `/e:d`; mouse, arrow keys, Tab and Enter
+complete the chosen prefix with a trailing space.
+
 The bounded integration smoke uses `-Everything` with a temporary indexed
 folder. On a machine where the dedicated service has already been authorized,
 `-EverythingService` exercises the production service connection against a
