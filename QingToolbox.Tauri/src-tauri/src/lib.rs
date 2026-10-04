@@ -19,6 +19,7 @@ use tauri::{
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
+mod device_diagnostics;
 mod device_pairing;
 mod device_transfer;
 mod devices;
@@ -123,6 +124,7 @@ impl HostState {
         let module_activity = Arc::clone(&runtime.active_modules);
         let generated_at = now_rfc3339();
         let profile = paths::user_data_root();
+        device_diagnostics::initialize(profile.as_deref());
         let devices = devices::DeviceManager::new(profile.as_deref());
         let (name, identity) = devices.transfer_identity();
         let transfer_directory = profile
@@ -828,7 +830,7 @@ fn repair_startup_registration(
     Ok(settings.snapshot())
 }
 
-/// Return the bounded in-memory event history for the current host session.
+/// Return bounded host-session events and the retained device diagnostic metadata.
 /// Paths and process handles are never exposed through this DTO.
 #[tauri::command]
 fn get_session_logs(
@@ -840,9 +842,12 @@ fn get_session_logs(
         code: "stateUnavailable",
         message: "会话日志状态不可用。".to_string(),
     })?;
+    let mut combined = entries.clone();
+    combined.extend(device_diagnostics::snapshot());
+    combined.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
     Ok(SessionLogSnapshot {
         generated_at: now_rfc3339(),
-        entries: entries.clone(),
+        entries: combined,
     })
 }
 
@@ -3863,6 +3868,7 @@ fn start_device_transfer_pump(app: tauri::AppHandle) {
 }
 
 fn present_info_popup(app: tauri::AppHandle) {
+    use device_diagnostics::{self as diag, Event as E, Level as L, Reason as R};
     let generation = app
         .state::<HostState>()
         .info_popup_move_generation
@@ -3870,6 +3876,14 @@ fn present_info_popup(app: tauri::AppHandle) {
         + 1;
     thread::spawn(move || {
         let Some(window) = app.get_webview_window(INFO_POPUP_WINDOW_LABEL) else {
+            diag::record(
+                L::Error,
+                E::NotificationPopupFailed,
+                R::NoEndpoint,
+                None,
+                None,
+                true,
+            );
             return;
         };
         let Some(monitor) = window
@@ -3910,13 +3924,33 @@ fn present_info_popup(app: tauri::AppHandle) {
             queue.exit_x = Some(start_x);
         }
         let target = tauri::PhysicalPosition::new(end_x, end_y);
-        if !config.info_popup_animation {
+        let shown = if !config.info_popup_animation {
             let _ = window.set_position(target);
-            let _ = window.show();
+            window.show()
         } else {
             let _ = window.set_position(tauri::PhysicalPosition::new(start_x, end_y));
-            let _ = window.show();
-        }
+            window.show()
+        };
+        diag::record(
+            if shown.is_ok() {
+                L::Information
+            } else {
+                L::Error
+            },
+            if shown.is_ok() {
+                E::NotificationPopupShown
+            } else {
+                E::NotificationPopupFailed
+            },
+            if shown.is_ok() {
+                R::None
+            } else {
+                R::Unexpected
+            },
+            None,
+            None,
+            false,
+        );
         let _ = app.emit_to(
             EventTarget::webview_window(INFO_POPUP_WINDOW_LABEL),
             "qing:info-popup-changed",

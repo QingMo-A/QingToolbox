@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, ref, watch, onMounted, onUnmounted } from 'vue'
 import type { LogClient } from '../bridge/clients/LogClient'
 import type { LogLevel } from '../contracts/logs'
 import { useAppStore } from '../app/store'
@@ -55,6 +55,13 @@ const time = (value: string) => new Date(value).toLocaleTimeString(currentLocale
 const tone = (level: LogLevel): 'info'|'warning'|'danger' => level === 'Error' ? 'danger' : level === 'Warning' ? 'warning' : 'info'
 async function refresh() { logs.begin(); try { logs.complete(await client.getSnapshot()) } catch (error) { logs.fail(error) } }
 function clearFilters() { searchQuery.value = ''; levelFilter.value = 'All' }
+let refreshTimer: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  refreshTimer = setInterval(() => {
+    if (app.bridge === 'Connected' && logs.status !== 'loading') void refresh()
+  }, 2000)
+})
+onUnmounted(() => { if (refreshTimer !== undefined) clearInterval(refreshTimer) })
 
 watch(() => app.bridge, bridge => {
   if (bridge === 'Connected' && logs.status === 'idle') void refresh()

@@ -10,7 +10,7 @@ import {useSettingsStore}from'../app/settingsStore'
 const chinese=()=>useSettingsStore().complete({generatedAt:new Date().toISOString(),language:{code:'system',effectiveCode:'zh-CN',displayName:'System',options:[{code:'system',displayName:'System',nativeName:'跟随系统'},{code:'zh-CN',displayName:'Chinese',nativeName:'简体中文'},{code:'en-US',displayName:'English',nativeName:'English'}]},showLogsInSidebar:true,mainWindowCloseBehavior:'Ask',closeBehaviorMessage:'',launchAtLogin:false,canConfigureLaunchAtLogin:true,canRepairStartup:false,startupPresentationMode:'FloatingBadge',startupBackend:'None',startupStatus:'Unavailable',startupMessage:''})
 
 const wrappers: VueWrapper[] = []
-afterEach(() => wrappers.splice(0).forEach(wrapper => wrapper.unmount()))
+afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); vi.useRealTimers() })
 
 const snapshot: LogSnapshot = { generatedAt: '2026-07-25T12:00:04Z', entries: [
   { timestamp: '2026-07-25T12:00:01Z', level: 'Information', category: 'Application', message: 'Workspace ready' },
@@ -38,6 +38,24 @@ describe('LogsPage everyday workspace', () => {
   it('reactively localizes levels and searches Chinese and English labels without reloading',async()=>{const x=page();chinese();await x.wrapper.vm.$nextTick();expect(x.wrapper.text()).toContain('会话日志');expect(severityButtons(x.wrapper).map(b=>b.text())).toEqual(expect.arrayContaining([expect.stringContaining('全部'),expect.stringContaining('警告')]));await x.wrapper.get('input').setValue('警告');expect(x.wrapper.text()).toContain('Module response was slow');await x.wrapper.get('input').setValue('warning');expect(x.wrapper.text()).toContain('Module response was slow');expect(x.getSnapshot).not.toHaveBeenCalled()})
   it('keeps the /logs route', () => expect(router.resolve('/logs').matched).toHaveLength(1))
   it('loads once from connected idle state', async () => { const x = page({ status: 'idle', hasSnapshot: false }); await flushPromises(); expect(x.getSnapshot).toHaveBeenCalledTimes(1) })
+  it('refreshes visible logs and stops polling after unmount', async () => {
+    vi.useFakeTimers()
+    const x = page()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(x.getSnapshot).toHaveBeenCalledTimes(1)
+    x.wrapper.unmount()
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(x.getSnapshot).toHaveBeenCalledTimes(1)
+  })
+  it('does not poll while disconnected or while a snapshot is loading', async () => {
+    vi.useFakeTimers()
+    const x = page({ bridge: 'Unavailable' })
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(x.getSnapshot).not.toHaveBeenCalled()
+    x.app.bridge = 'Connected'; x.logs.begin()
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(x.getSnapshot).not.toHaveBeenCalled()
+  })
   it('does not reload a ready snapshot automatically', async () => { const x = page(); await flushPromises(); expect(x.getSnapshot).not.toHaveBeenCalled() })
   it('shows the snapshot refresh time', () => expect(page().wrapper.text()).toContain('Last refreshed'))
   it('formats log times with the effective locale', async () => { const format=vi.spyOn(Date.prototype,'toLocaleTimeString').mockReturnValue('localized-time'); const x=page(); expect(format).toHaveBeenCalledWith('en-US'); chinese(); await x.wrapper.vm.$nextTick(); expect(format.mock.calls.some(call=>call[0]==='zh-CN')).toBe(true); format.mockRestore() })

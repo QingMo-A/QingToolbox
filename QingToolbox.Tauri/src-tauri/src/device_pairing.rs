@@ -14,6 +14,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use crate::device_diagnostics::{self as diag, Event as E, Level as L, Reason as R};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use snow::{Builder, HandshakeState, TransportState};
@@ -179,6 +180,7 @@ struct PairState {
     last_ping: BTreeMap<String, Instant>,
     ping_inflight: BTreeMap<String, Instant>,
     last_authenticated: BTreeMap<String, Instant>,
+    reported_online: BTreeSet<String>,
 }
 
 pub struct PairingCore {
@@ -232,7 +234,39 @@ impl PairingCore {
     }
 
     pub fn snapshot(&self) -> PairingSnapshot {
-        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let online = state
+            .records
+            .keys()
+            .filter(|id| {
+                state
+                    .last_authenticated
+                    .get(*id)
+                    .is_some_and(|time| time.elapsed() < PRESENCE_TTL)
+            })
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        for peer in online.difference(&state.reported_online) {
+            diag::record(
+                L::Information,
+                E::PeerOnline,
+                R::None,
+                Some(peer),
+                None,
+                false,
+            );
+        }
+        for peer in state.reported_online.difference(&online) {
+            diag::record(
+                L::Warning,
+                E::PeerOffline,
+                R::AuthNotFresh,
+                Some(peer),
+                None,
+                false,
+            );
+        }
+        state.reported_online = online.clone();
         PairingSnapshot {
             error: state.error.clone(),
             pending: state.pending.values().cloned().collect(),
@@ -241,17 +275,7 @@ impl PairingCore {
             notices: state.notices.clone(),
             batteries: state.batteries.values().cloned().collect(),
             revocations: state.tombstones.values().cloned().collect(),
-            online: state
-                .records
-                .keys()
-                .filter(|id| {
-                    state
-                        .last_authenticated
-                        .get(*id)
-                        .is_some_and(|time| time.elapsed() < PRESENCE_TTL)
-                })
-                .cloned()
-                .collect(),
+            online: online.into_iter().collect(),
         }
     }
 
@@ -265,6 +289,14 @@ impl PairingCore {
     }
 
     pub fn acknowledge_notice(&self, notice_id: &str) {
+        diag::record(
+            L::Information,
+            E::NoticeConsumed,
+            R::None,
+            None,
+            Some(notice_id),
+            true,
+        );
         self.state
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -278,12 +310,28 @@ impl PairingCore {
         message_id: Option<&str>,
         notification: ForwardedNotification,
     ) -> Result<(), String> {
+        diag::record(
+            L::Information,
+            E::NotificationReceived,
+            R::None,
+            Some(peer_id),
+            message_id,
+            false,
+        );
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if !state
             .records
             .get(peer_id)
             .is_some_and(can_accept_notification)
         {
+            diag::record(
+                L::Warning,
+                E::NotificationSkipped,
+                R::PermissionRevoked,
+                Some(peer_id),
+                message_id,
+                false,
+            );
             return Err("非亲密安卓设备不得发送通知。".to_string());
         }
         if let Some(id) = message_id {
@@ -296,6 +344,14 @@ impl PairingCore {
             let key = (peer_id.to_owned(), id.to_owned());
             // An ACK may be lost; return success without a second popup.
             if state.notification_receipts.contains_key(&key) {
+                diag::record(
+                    L::Information,
+                    E::NotificationSkipped,
+                    R::Duplicate,
+                    Some(peer_id),
+                    message_id,
+                    false,
+                );
                 return Ok(());
             }
             if state.notification_receipts.len() >= 256 {
@@ -314,6 +370,14 @@ impl PairingCore {
             state.notification_queue.pop_front();
         }
         state.notification_queue.push_back(notification);
+        diag::record(
+            L::Information,
+            E::NotificationQueued,
+            R::None,
+            Some(peer_id),
+            message_id,
+            false,
+        );
         Ok(())
     }
 
@@ -503,17 +567,29 @@ impl PairingCore {
                 return;
             };
             let key = record.id.clone();
-            if state.active >= MAX_SESSIONS
-                || state.ping_inflight.contains_key(&key)
-                || state.last_ping.get(&key).is_some_and(|time| {
-                    time.elapsed()
-                        < if recovered {
-                            Duration::from_secs(2)
-                        } else {
-                            PRESENCE_INTERVAL
-                        }
-                })
-            {
+            if state.active >= MAX_SESSIONS || state.ping_inflight.contains_key(&key) {
+                diag::record(
+                    L::Warning,
+                    E::HeartbeatSkipped,
+                    if state.active >= MAX_SESSIONS {
+                        R::ChannelBusy
+                    } else {
+                        R::AlreadyInFlight
+                    },
+                    Some(&key),
+                    None,
+                    true,
+                );
+                return;
+            }
+            if state.last_ping.get(&key).is_some_and(|time| {
+                time.elapsed()
+                    < if recovered {
+                        Duration::from_secs(2)
+                    } else {
+                        PRESENCE_INTERVAL
+                    }
+            }) {
                 return;
             }
             state.active += 1;
@@ -522,8 +598,36 @@ impl PairingCore {
             key
         };
         let core = Arc::clone(self);
+        diag::record(
+            L::Information,
+            E::HandshakeStarted,
+            R::None,
+            Some(&key),
+            None,
+            false,
+        );
         thread::spawn(move || {
             let result = core.connect_and_manage(peer, &key, DeviceAction::Ping, Arc::clone(&stop));
+            if !stop.load(Ordering::Acquire) {
+                match &result {
+                    Ok(_) => diag::record(
+                        L::Information,
+                        E::HandshakeSucceeded,
+                        R::None,
+                        Some(&key),
+                        None,
+                        false,
+                    ),
+                    Err(error) => diag::record(
+                        L::Warning,
+                        E::HandshakeFailed,
+                        diag::failure_reason(error),
+                        Some(&key),
+                        None,
+                        false,
+                    ),
+                }
+            }
             if !stop.load(Ordering::Acquire) {
                 let mut state = core.state.lock().unwrap_or_else(|error| error.into_inner());
                 if state.ping_inflight.get(&key) == Some(&attempt) {
@@ -810,6 +914,14 @@ impl PairingCore {
                     .duration_since(UNIX_EPOCH)
                     .map_err(|e| e.to_string())?
                     .as_millis() as u64;
+                diag::record(
+                    L::Information,
+                    E::BatteryReceived,
+                    R::None,
+                    Some(&key),
+                    None,
+                    true,
+                );
                 self.state
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -835,6 +947,14 @@ impl PairingCore {
                     .get(&key)
                     .is_some_and(can_accept_notification);
                 if !trusted {
+                    diag::record(
+                        L::Warning,
+                        E::NotificationSkipped,
+                        R::PermissionRevoked,
+                        Some(&key),
+                        request.message_id.as_deref(),
+                        false,
+                    );
                     return Err("非亲密安卓设备不得发送通知。".to_string());
                 }
                 let app_name = bounded_notification_field(request.app_name, 80, false)?;

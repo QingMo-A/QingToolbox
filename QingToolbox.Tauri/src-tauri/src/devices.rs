@@ -14,6 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::device_diagnostics::{self as diag, Event as E, Level as L, Reason as R};
 #[cfg(test)]
 use crate::device_pairing::Relationship;
 use crate::device_pairing::{
@@ -206,6 +207,14 @@ impl DeviceManager {
             .find(|peer| peer.id == peer_id)
             .ok_or("设备未配对。")?;
         if !pairing.online.iter().any(|id| id == peer_id) {
+            diag::record(
+                L::Warning,
+                E::TransferFailed,
+                R::AuthNotFresh,
+                Some(peer_id),
+                None,
+                true,
+            );
             return Err("设备当前不在线。".to_string());
         }
         let shared = self
@@ -218,7 +227,17 @@ impl DeviceManager {
             .find(|candidate| {
                 candidate.id == peer.discovery_id && candidate.platform == peer.platform
             })
-            .ok_or("设备传输端点暂不可用。")?;
+            .ok_or_else(|| {
+                diag::record(
+                    L::Warning,
+                    E::TransferFailed,
+                    R::NoEndpoint,
+                    Some(peer_id),
+                    None,
+                    true,
+                );
+                "设备传输端点暂不可用。"
+            })?;
         Ok(TransferTarget {
             device_id: peer.discovery_id.clone(),
             platform: peer.platform.clone(),
@@ -391,12 +410,28 @@ impl DeviceManager {
         let result = self.start_inner();
         match result {
             Ok(active) => {
+                diag::record(
+                    L::Information,
+                    E::DiscoveryStarted,
+                    R::None,
+                    None,
+                    None,
+                    false,
+                );
                 *runtime = Some(active);
                 let mut shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
                 shared.enabled = true;
                 shared.error = None;
             }
             Err(error) => {
+                diag::record(
+                    L::Warning,
+                    E::DiscoveryStopped,
+                    diag::failure_reason(&error),
+                    None,
+                    None,
+                    false,
+                );
                 let mut shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
                 shared.enabled = false;
                 shared.error = Some(error);
@@ -464,6 +499,14 @@ impl DeviceManager {
     pub fn stop(&self) {
         let mut runtime = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(mut active) = runtime.take() {
+            diag::record(
+                L::Information,
+                E::DiscoveryStopped,
+                R::None,
+                None,
+                None,
+                false,
+            );
             active.stop.store(true, Ordering::Release);
             if let Ok(core) = &self.pairing {
                 core.cancel_pending();
@@ -611,6 +654,14 @@ fn browse_loop(
         match receiver.recv_timeout(Duration::from_millis(300)) {
             Ok(ServiceEvent::ServiceResolved(info)) => {
                 if let Some(mut candidate) = parse_candidate(&info, &own_id) {
+                    diag::record(
+                        L::Information,
+                        E::EndpointResolved,
+                        R::None,
+                        Some(&candidate.id),
+                        None,
+                        true,
+                    );
                     let success = probe(&candidate).is_some();
                     candidate.record_probe(success);
                     let stored = {
@@ -639,11 +690,21 @@ fn browse_loop(
                 }
             }
             Ok(ServiceEvent::ServiceRemoved(_, fullname)) => {
-                shared
+                if let Some(candidate) = shared
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .candidates
-                    .remove(&fullname.to_ascii_lowercase());
+                    .remove(&fullname.to_ascii_lowercase())
+                {
+                    diag::record(
+                        L::Information,
+                        E::EndpointLost,
+                        R::None,
+                        Some(&candidate.id),
+                        None,
+                        false,
+                    );
+                }
             }
             Err(mdns_sd::RecvTimeoutError::Timeout) => {}
             Err(_) => break,
@@ -664,6 +725,16 @@ fn browse_loop(
                     break;
                 }
                 let success = probe(&candidate).is_some();
+                if !success {
+                    diag::record(
+                        L::Warning,
+                        E::ProbeFailed,
+                        R::Network,
+                        Some(&candidate.id),
+                        None,
+                        true,
+                    );
+                }
                 let recovered = {
                     let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
                     state

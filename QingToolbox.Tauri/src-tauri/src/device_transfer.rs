@@ -18,6 +18,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use crate::device_diagnostics::{self as diag, Event as E, Level as L, Reason as R};
 use mdns_sd::{ResolvedService, ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -81,6 +82,13 @@ struct TransferProgress {
     completed: u64,
     total: u64,
     receiving: bool,
+    phase: TransferPhase,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+enum TransferPhase {
+    WaitingAcceptance,
+    Transferring,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -457,6 +465,14 @@ impl TransferEngine {
     }
 
     fn set_error(&self, message: String) {
+        diag::record(
+            L::Warning,
+            E::TransferFailed,
+            diag::failure_reason(&message),
+            None,
+            None,
+            true,
+        );
         lock_recover(&self.state).last_error = Some(message);
     }
 
@@ -489,6 +505,7 @@ impl TransferEngine {
                 "completed": value.completed,
                 "total": value.total,
                 "receiving": value.receiving,
+                "phase": value.phase,
             })),
             "lastCompleted": state.last_completed,
             "lastError": state.last_error,
@@ -683,6 +700,14 @@ impl TransferEngine {
             state.last_error = None;
             (peer, cancel)
         };
+        diag::record(
+            L::Information,
+            E::TransferConnect,
+            R::None,
+            peer.device_id.as_deref(),
+            None,
+            false,
+        );
         let app = Arc::clone(self);
         thread::spawn(move || connect_worker(app, peer, cancel));
         Ok(())
@@ -715,8 +740,10 @@ impl TransferEngine {
                 completed: 0,
                 total: metadata.len(),
                 receiving: false,
+                phase: TransferPhase::WaitingAcceptance,
             });
             state.last_completed = None;
+            state.last_error = None;
             session
         };
         let app = Arc::clone(self);
@@ -796,6 +823,14 @@ impl TransferEngine {
         state.connect_cancel = Some(Arc::clone(&session.cancelled));
         state.active_peer = Some(session.peer.clone());
         state.session_state = SessionState::Connected;
+        diag::record(
+            L::Information,
+            E::TransferConnected,
+            R::None,
+            session.peer.device_id.as_deref(),
+            None,
+            false,
+        );
         state.incoming_connection = None;
         state.last_error = None;
         true
@@ -810,6 +845,17 @@ impl TransferEngine {
         {
             return;
         }
+        diag::record(
+            L::Warning,
+            E::TransferFailed,
+            diag::failure_reason(&message),
+            state
+                .active_peer
+                .as_ref()
+                .and_then(|peer| peer.device_id.as_deref()),
+            None,
+            false,
+        );
         state.connect_cancel = None;
         state.session = None;
         state.session_state = SessionState::Idle;
@@ -846,6 +892,7 @@ impl TransferEngine {
                 completed,
                 total,
                 receiving,
+                phase: TransferPhase::Transferring,
             });
         }
     }
@@ -853,12 +900,42 @@ impl TransferEngine {
     fn clear_transfer(&self, error: Option<String>) {
         let mut state = lock_recover(&self.state);
         let finished = state.transfer.take();
+        if finished.is_some() {
+            diag::record(
+                if error.is_none() {
+                    L::Information
+                } else {
+                    L::Warning
+                },
+                if error.is_none() {
+                    E::TransferCompleted
+                } else {
+                    E::TransferFailed
+                },
+                error
+                    .as_deref()
+                    .map(diag::failure_reason)
+                    .unwrap_or(R::None),
+                state
+                    .active_peer
+                    .as_ref()
+                    .and_then(|peer| peer.device_id.as_deref()),
+                None,
+                false,
+            );
+        }
         if error.is_none() {
             state.last_completed = finished.map(|value| value.name);
         }
         state.incoming_file = None;
         if let Some(error) = error {
             state.last_error = Some(error);
+        }
+    }
+
+    fn mark_transferring(&self) {
+        if let Some(transfer) = lock_recover(&self.state).transfer.as_mut() {
+            transfer.phase = TransferPhase::Transferring;
         }
     }
 }
@@ -1231,6 +1308,14 @@ fn receive_offer(
     reader: &mut TcpStream,
     offer: FileOfferWire,
 ) {
+    diag::record(
+        L::Information,
+        E::TransferOfferReceived,
+        R::None,
+        session.peer.device_id.as_deref(),
+        None,
+        false,
+    );
     if !is_safe_file_name(&offer.name) || offer.size > MAX_FILE_BYTES {
         let _ = send_wire(session, &WireMessage::FileReject);
         return;
@@ -1252,8 +1337,10 @@ fn receive_offer(
             completed: 0,
             total: offer.size,
             receiving: true,
+            phase: TransferPhase::WaitingAcceptance,
         });
         state.last_completed = None;
+        state.last_error = None;
     }
     let automatic = {
         let state = lock_recover(&app.state);
@@ -1263,10 +1350,26 @@ fn receive_offer(
         .map(FileDecision::Accept)
         .or_else(|| wait_decision(&session.file_decision, &session.cancelled, DECISION_TIMEOUT));
     let Some(FileDecision::Accept(destination)) = decision else {
+        diag::record(
+            L::Information,
+            E::TransferRejected,
+            R::None,
+            session.peer.device_id.as_deref(),
+            None,
+            false,
+        );
         let _ = send_wire(session, &WireMessage::FileReject);
         app.clear_transfer(Some("已拒绝接收文件或接收确认已超时。".to_string()));
         return;
     };
+    diag::record(
+        L::Information,
+        E::TransferAccepted,
+        R::None,
+        session.peer.device_id.as_deref(),
+        None,
+        false,
+    );
     {
         let mut state = lock_recover(&app.state);
         state.incoming_file = None;
@@ -1275,6 +1378,7 @@ fn receive_offer(
         app.clear_transfer(Some("无法确认接收文件。".to_string()));
         return;
     }
+    app.mark_transferring();
     let result = receive_bytes(app, session, reader, &offer, &destination);
     let ok = result.is_ok();
     let _ = send_wire(session, &WireMessage::FileResult(ok));
@@ -1375,6 +1479,14 @@ fn send_file_worker(app: Arc<TransferEngine>, session: Arc<Session>, path: PathB
         app.clear_transfer(Some("无法发送文件请求。".to_string()));
         return;
     }
+    diag::record(
+        L::Information,
+        E::TransferOfferSent,
+        R::None,
+        session.peer.device_id.as_deref(),
+        None,
+        false,
+    );
     let accepted = wait_decision(
         &session.offer_response,
         &session.cancelled,
@@ -1382,9 +1494,26 @@ fn send_file_worker(app: Arc<TransferEngine>, session: Arc<Session>, path: PathB
     )
     .unwrap_or(false);
     if !accepted {
+        diag::record(
+            L::Information,
+            E::TransferRejected,
+            R::None,
+            session.peer.device_id.as_deref(),
+            None,
+            false,
+        );
         app.clear_transfer(Some("对方拒绝了文件。".to_string()));
         return;
     }
+    diag::record(
+        L::Information,
+        E::TransferAccepted,
+        R::None,
+        session.peer.device_id.as_deref(),
+        None,
+        false,
+    );
+    app.mark_transferring();
     let result = (|| -> Result<(), TransferError> {
         let mut input = File::open(&path)
             .map_err(|error| io_error("file_unavailable", "无法打开要发送的文件", error))?;
@@ -1629,7 +1758,13 @@ fn validate_existing_file(raw: &str) -> Result<PathBuf, TransferError> {
         fs::canonicalize(raw).map_err(|error| io_error("file_unavailable", "文件不可用", error))?;
     let metadata =
         fs::metadata(&path).map_err(|error| io_error("file_unavailable", "文件不可用", error))?;
-    if !metadata.is_file() || metadata.len() > MAX_FILE_BYTES {
+    if !metadata.is_file() {
+        return Err(TransferError::new(
+            "file_invalid",
+            "请选择一个文件，暂不支持发送文件夹。",
+        ));
+    }
+    if metadata.len() > MAX_FILE_BYTES {
         return Err(TransferError::new("file_invalid", "文件大小超出支持范围。"));
     }
     let name = path
@@ -1962,6 +2097,11 @@ mod tests {
             .invoke("sendFile", &json!({"path": outgoing.to_string_lossy()}))
             .unwrap();
         until(|| phone.app.snapshot()["incomingFile"]["name"] == "pc-file.bin");
+        assert_eq!(pc.app.snapshot()["transfer"]["phase"], "WaitingAcceptance");
+        assert_eq!(
+            phone.app.snapshot()["transfer"]["phase"],
+            "WaitingAcceptance"
+        );
         assert!(
             !phone.directory.join("pc-file.bin").exists(),
             "must wait for receiver approval"
