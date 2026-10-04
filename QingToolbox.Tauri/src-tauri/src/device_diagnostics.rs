@@ -28,6 +28,12 @@ pub(crate) enum Event {
     DiscoveryStopped,
     EndpointResolved,
     EndpointLost,
+    DiscoveryRefresh,
+    EndpointConnectStarted,
+    EndpointConnectFailed,
+    HandshakeTransportFailed,
+    ManagementAckFailed,
+    IncomingManagementFailed,
     ProbeFailed,
     HandshakeStarted,
     HandshakeSucceeded,
@@ -68,6 +74,7 @@ pub(crate) enum Reason {
     NoEndpoint,
     SessionInactive,
     Unexpected,
+    EndpointExpired,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -159,7 +166,10 @@ struct Buffer {
 impl Buffer {
     fn add(&mut self, entry: Entry, throttle: bool) -> bool {
         if throttle {
-            let key = format!("{:?}:{:?}:{}", entry.event, entry.reason, entry.peer);
+            let key = format!(
+                "{:?}:{:?}:{}:{}",
+                entry.event, entry.reason, entry.peer, entry.request
+            );
             if self
                 .repeated
                 .get(&key)
@@ -409,6 +419,30 @@ mod tests {
         );
         assert!(buffer.add(entry.clone(), true));
         assert!(!buffer.add(entry, true));
+    }
+    #[test]
+    fn endpoint_attempts_are_distinct_but_raw_addresses_are_not_retained() {
+        let mut buffer = Buffer::default();
+        let first = Entry::new(
+            Level::Warning,
+            Event::EndpointConnectFailed,
+            Reason::Network,
+            Some("paired-key"),
+            Some("192.168.1.3:42577"),
+        );
+        let second = Entry::new(
+            Level::Warning,
+            Event::EndpointConnectFailed,
+            Reason::Network,
+            Some("paired-key"),
+            Some("[fe80::1234]:42577"),
+        );
+        assert!(buffer.add(first.clone(), true));
+        assert!(!buffer.add(first, true));
+        assert!(buffer.add(second.clone(), true));
+        let line = serde_json::to_string(&second).unwrap();
+        assert!(serde_json::from_str::<Entry>(&line).unwrap().valid());
+        assert!(!line.contains("fe80") && !line.contains("paired-key"));
     }
     #[test]
     fn journal_rotates_and_reloads_only_approved_metadata() {

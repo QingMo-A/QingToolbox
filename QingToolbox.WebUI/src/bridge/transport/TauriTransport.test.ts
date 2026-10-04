@@ -18,6 +18,12 @@ const invokeMock = vi.hoisted(() => vi.fn(async (command: string) => {
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: openMock }))
 describe('Tauri module action states', () => {
+  it('preserves native structured module failures instead of stringifying them', async () => {
+    invokeMock.mockRejectedValueOnce({ code: 'hotkeyUnavailable', message: 'Unable to register shortcut (1409).' })
+    const response = await new TauriTransport().request({ protocolVersion: 4, requestId: 'enable', command: 'modules.activate', payload: { moduleId: module.id } })
+    expect(response.success).toBe(false)
+    expect(response.error).toEqual({ code: 'hotkeyUnavailable', message: 'Unable to register shortcut (1409).' })
+  })
   it('routes native checks, per-module preferences, and verified auto-install downloads', async () => {
     for (const [command, native, payload] of [
       ['modules.checkUpdate', 'check_module_update', { moduleId: module.id }],

@@ -522,6 +522,16 @@ describe('ModulesPage lifecycle controls', () => {
     expect(client[operation as keyof typeof client]).toHaveBeenCalledTimes(1)
   })
 
+  it('shows a localized known activation reason without exposing raw backend details', async () => {
+    const module = item({ runtimeState: 'Deactivated', canLoad: false, canActivate: true })
+    const { wrapper } = page(module, { activate: vi.fn().mockRejectedValue(new Error('hotkeyUnavailable: C:/private details 1409')) }, { language: 'zh-CN', effectiveLanguage: 'zh-CN' })
+    await wrapper.findAll('.module-card-actions .q-button').find(button => button.text() === '启用')!.trigger('click')
+    await flushPromises()
+    expect(useToastStore().message).toContain('快捷键注册失败')
+    expect(useToastStore().message).toContain('模块日志')
+    expect(useToastStore().message).not.toContain('C:/private')
+  })
+
   it('uses a safe startup authorization failure and preserves the snapshot', async () => {
     const module = item()
     const getSnapshot = vi.fn().mockRejectedValue(new Error('resync secret'))

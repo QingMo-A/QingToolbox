@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, VecDeque},
+    collections::BTreeSet,
     fs,
     path::PathBuf,
     process::Command,
@@ -26,10 +26,12 @@ mod devices;
 mod fonts;
 mod host_update;
 mod importer;
+mod info_popup;
 mod launcher_keyboard;
 mod launcher_outside_click;
 mod launcher_overlay;
 mod module_api;
+mod module_diagnostics;
 mod module_repository;
 mod module_updates;
 mod modules;
@@ -44,6 +46,7 @@ use importer::{
     import_qmod_confirmed, preview_qmod, update_qmod_confirmed, ModuleImportResult,
     ModulePackagePreview,
 };
+use info_popup::{present as present_info_popup, InfoPopupQueue};
 use modules::{discover_modules, ModuleListPayload};
 use paths::{resolve_module_roots, user_modules_root, ModuleRoot, ModuleSource};
 use protocol::ProtocolEnvelope;
@@ -61,28 +64,6 @@ const MODULE_STATE_CHANGED_EVENT: &str = "qmod:module-state-changed";
 const DEFAULT_LAUNCHER_HOTKEY: &str = "Ctrl+Alt+L";
 const FLOATING_BADGE_WINDOW_LABEL: &str = "floating-badge";
 const INFO_POPUP_WINDOW_LABEL: &str = "info-popup";
-
-#[derive(Default)]
-struct InfoPopupQueue {
-    current: Option<device_pairing::ForwardedNotification>,
-    pending: VecDeque<device_pairing::ForwardedNotification>,
-    exiting: bool,
-    exit_x: Option<i32>,
-}
-
-impl InfoPopupQueue {
-    fn enqueue(&mut self, item: device_pairing::ForwardedNotification) -> bool {
-        if self.pending.len() >= 16 {
-            self.pending.pop_front();
-        }
-        self.pending.push_back(item);
-        if self.current.is_none() && !self.exiting {
-            self.current = self.pending.pop_front();
-            return self.current.is_some();
-        }
-        false
-    }
-}
 
 /// Process-wide state owned by the Rust host. Paths and module records stay on
 /// this side of the IPC boundary; the Vue layer only receives stable ids and
@@ -106,9 +87,11 @@ pub struct HostState {
     module_hotkeys: Mutex<std::collections::BTreeMap<String, String>>,
     screenpin_windows: Mutex<std::collections::BTreeMap<String, ScreenPinWindowRecord>>,
     session_logs: Mutex<Vec<SessionLogEntry>>,
+    module_logs: Arc<module_diagnostics::Diagnostics>,
     close_prompt_active: AtomicBool,
     floating_badge_move_generation: AtomicU64,
     info_popup_move_generation: AtomicU64,
+    info_popup_layout_gate: Mutex<()>,
     info_popup_preview_sequence: AtomicU64,
     info_popup: Mutex<InfoPopupQueue>,
     launcher_drop_protection: Mutex<launcher_overlay::DropProtection>,
@@ -120,10 +103,11 @@ pub struct HostState {
 
 impl HostState {
     pub fn new() -> Self {
-        let runtime = ModuleRuntimeManager::new();
+        let profile = paths::user_data_root();
+        let module_logs = Arc::new(module_diagnostics::Diagnostics::new(profile.as_deref()));
+        let runtime = ModuleRuntimeManager::with_diagnostics(Arc::clone(&module_logs));
         let module_activity = Arc::clone(&runtime.active_modules);
         let generated_at = now_rfc3339();
-        let profile = paths::user_data_root();
         device_diagnostics::initialize(profile.as_deref());
         let devices = devices::DeviceManager::new(profile.as_deref());
         let (name, identity) = devices.transfer_identity();
@@ -162,9 +146,11 @@ impl HostState {
             module_hotkeys: Mutex::new(std::collections::BTreeMap::new()),
             screenpin_windows: Mutex::new(std::collections::BTreeMap::new()),
             session_logs: Mutex::new(Vec::new()),
+            module_logs,
             close_prompt_active: AtomicBool::new(false),
             floating_badge_move_generation: AtomicU64::new(0),
             info_popup_move_generation: AtomicU64::new(0),
+            info_popup_layout_gate: Mutex::new(()),
             info_popup_preview_sequence: AtomicU64::new(0),
             info_popup: Mutex::new(InfoPopupQueue::default()),
             launcher_drop_protection: Mutex::new(launcher_overlay::DropProtection::default()),
@@ -236,6 +222,30 @@ fn record_log(state: &HostState, level: &str, category: &str, message: impl Into
     if excess > 0 {
         entries.drain(..excess);
     }
+}
+
+fn log_module_failure<T>(
+    state: &HostState,
+    module_id: &str,
+    operation: &str,
+    result: Result<T, CommandError>,
+) -> Result<T, CommandError> {
+    if let Err(error) = &result {
+        let generation = state
+            .runtime
+            .try_lock()
+            .ok()
+            .and_then(|runtime| runtime.generation(module_id));
+        state.module_logs.record(
+            module_diagnostics::Level::Error,
+            module_id,
+            generation,
+            operation,
+            Some(error.code),
+            &error.message,
+        );
+    }
+    result
 }
 
 /// Keep the log contract independent from a third-party time crate. This is
@@ -844,6 +854,7 @@ fn get_session_logs(
     })?;
     let mut combined = entries.clone();
     combined.extend(device_diagnostics::snapshot());
+    combined.extend(state.module_logs.snapshot());
     combined.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
     Ok(SessionLogSnapshot {
         generated_at: now_rfc3339(),
@@ -2097,45 +2108,48 @@ fn start_module(
     module_id: String,
 ) -> Result<ModuleRuntimeSnapshot, CommandError> {
     ensure_main_window(&window)?;
-    let _install_guard = state
-        .module_install_gate
-        .try_lock()
-        .map_err(|_| repository_error("Busy"))?;
-    if !valid_module_id(&module_id) {
-        return Err(CommandError {
-            code: "moduleIdInvalid",
-            message: "模块 id 无效。".to_string(),
-        });
-    }
-    let record = state
-        .module_index
-        .lock()
-        .map_err(|_| CommandError {
-            code: "stateUnavailable",
-            message: "模块索引状态不可用。".to_string(),
-        })?
-        .get(&module_id)
-        .cloned()
-        .ok_or_else(|| CommandError {
-            code: "moduleNotFound",
-            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
-        })?;
+    let result = (|| {
+        let _install_guard = state
+            .module_install_gate
+            .try_lock()
+            .map_err(|_| repository_error("Busy"))?;
+        if !valid_module_id(&module_id) {
+            return Err(CommandError {
+                code: "moduleIdInvalid",
+                message: "模块 id 无效。".to_string(),
+            });
+        }
+        let record = state
+            .module_index
+            .lock()
+            .map_err(|_| CommandError {
+                code: "stateUnavailable",
+                message: "模块索引状态不可用。".to_string(),
+            })?
+            .get(&module_id)
+            .cloned()
+            .ok_or_else(|| CommandError {
+                code: "moduleNotFound",
+                message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
+            })?;
 
-    let mut runtime = state.runtime.lock().map_err(|_| CommandError {
-        code: "stateUnavailable",
-        message: "模块运行状态不可用。".to_string(),
-    })?;
-    let snapshot = runtime
-        .start(&module_id, &record)
-        .map_err(CommandError::from)?;
-    drop(runtime);
-    record_log(
-        &state,
-        "Information",
-        "Runtime",
-        format!("Started module {module_id}."),
-    );
-    Ok(snapshot)
+        let mut runtime = state.runtime.lock().map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块运行状态不可用。".to_string(),
+        })?;
+        let snapshot = runtime
+            .start(&module_id, &record)
+            .map_err(CommandError::from)?;
+        drop(runtime);
+        record_log(
+            &state,
+            "Information",
+            "Runtime",
+            format!("Started module {module_id}."),
+        );
+        Ok(snapshot)
+    })();
+    log_module_failure(&state, &module_id, "host/load", result)
 }
 
 fn module_is_active(state: &HostState, module_id: &str) -> bool {
@@ -2154,60 +2168,111 @@ async fn set_module_active(
 ) -> Result<ModuleRuntimeSnapshot, CommandError> {
     ensure_main_window(&window)?;
     let app = window.app_handle().clone();
+    let diagnostics = Arc::clone(&app.state::<HostState>().module_logs);
+    let requested_module = module_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<HostState>();
-        let _install_guard = state
-            .module_install_gate
-            .try_lock()
-            .map_err(|_| repository_error("Busy"))?;
-        let snapshot = state
-            .runtime
-            .lock()
-            .map_err(|_| CommandError {
-                code: "stateUnavailable",
-                message: "模块运行状态不可用。".to_string(),
-            })?
-            .set_active(&module_id, active)
-            .map_err(CommandError::from)?;
-        if active && module_id == launcher_overlay::MODULE_ID {
-            let record = state
-                .module_index
+        let result = (|| {
+            let _install_guard = state
+                .module_install_gate
+                .try_lock()
+                .map_err(|_| repository_error("Busy"))?;
+            let snapshot = state
+                .runtime
                 .lock()
-                .ok()
-                .and_then(|index| index.get(&module_id).cloned());
-            if let Some(record) = record {
-                let requested = launcher_hotkey_from_state(&state, &module_id, &record)
-                    .unwrap_or_else(|| DEFAULT_LAUNCHER_HOTKEY.to_string());
-                if let Err(error) =
-                    register_module_hotkey_binding(&app, &state, &module_id, &requested)
-                {
-                    if let Ok(mut runtime) = state.runtime.lock() {
-                        let _ = runtime.set_active(&module_id, false);
+                .map_err(|_| CommandError {
+                    code: "stateUnavailable",
+                    message: "模块运行状态不可用。".to_string(),
+                })?
+                .set_active(&module_id, active)
+                .map_err(CommandError::from)?;
+            if active && module_id == launcher_overlay::MODULE_ID {
+                let record = state
+                    .module_index
+                    .lock()
+                    .ok()
+                    .and_then(|index| index.get(&module_id).cloned());
+                if let Some(record) = record {
+                    let requested = launcher_hotkey_from_state(&state, &module_id, &record)
+                        .unwrap_or_else(|| DEFAULT_LAUNCHER_HOTKEY.to_string());
+                    state.module_logs.record(
+                        module_diagnostics::Level::Information,
+                        &module_id,
+                        Some(snapshot.generation),
+                        "hotkey/register",
+                        None,
+                        &format!("Registering saved shortcut {requested}."),
+                    );
+                    if let Err(error) =
+                        register_module_hotkey_binding(&app, &state, &module_id, &requested)
+                    {
+                        state.module_logs.record(
+                            module_diagnostics::Level::Error,
+                            &module_id,
+                            Some(snapshot.generation),
+                            "hotkey/register",
+                            Some(error.code),
+                            &format!(
+                            "Failed to register shortcut {requested}: {}. Rolling back activation.",
+                            error.message
+                        ),
+                        );
+                        if let Ok(mut runtime) = state.runtime.lock() {
+                            let _ = runtime.set_active(&module_id, false);
+                        }
+                        return Err(error);
                     }
-                    return Err(error);
                 }
+            } else if !active {
+                if module_id == launcher_overlay::MODULE_ID {
+                    let _ = launcher_keyboard::stop(&app);
+                }
+                clear_module_hotkey_binding(&app, &state, &module_id)?;
             }
-        } else if !active {
-            if module_id == launcher_overlay::MODULE_ID {
-                let _ = launcher_keyboard::stop(&app);
-            }
-            clear_module_hotkey_binding(&app, &state, &module_id)?;
-        }
-        record_log(
+            record_log(
+                &state,
+                "Information",
+                "Runtime",
+                format!(
+                    "{} module {module_id}.",
+                    if active { "Activated" } else { "Deactivated" }
+                ),
+            );
+            state.module_logs.record(
+                module_diagnostics::Level::Information,
+                &module_id,
+                Some(snapshot.generation),
+                if active { "activate" } else { "deactivate" },
+                None,
+                "Host lifecycle operation completed.",
+            );
+            Ok(snapshot)
+        })();
+        log_module_failure(
             &state,
-            "Information",
-            "Runtime",
-            format!(
-                "{} module {module_id}.",
-                if active { "Activated" } else { "Deactivated" }
-            ),
-        );
-        Ok(snapshot)
+            &module_id,
+            if active {
+                "host/activate"
+            } else {
+                "host/deactivate"
+            },
+            result,
+        )
     })
     .await
-    .map_err(|error| CommandError {
-        code: "moduleLifecycleFailed",
-        message: error.to_string(),
+    .map_err(|error| {
+        diagnostics.record(
+            module_diagnostics::Level::Error,
+            &requested_module,
+            None,
+            "lifecycleWorker",
+            Some("moduleLifecycleFailed"),
+            &error.to_string(),
+        );
+        CommandError {
+            code: "moduleLifecycleFailed",
+            message: error.to_string(),
+        }
     })?
 }
 
@@ -2221,65 +2286,68 @@ async fn open_module(
     module_id: String,
 ) -> Result<(), CommandError> {
     ensure_main_window(&window)?;
-    let _install_guard = state
-        .module_install_gate
-        .try_lock()
-        .map_err(|_| repository_error("Busy"))?;
-    if !valid_module_id(&module_id) {
-        return Err(CommandError {
-            code: "moduleIdInvalid",
-            message: "模块 id 无效。".to_string(),
-        });
-    }
-    let record = state
-        .module_index
-        .lock()
-        .map_err(|_| CommandError {
-            code: "stateUnavailable",
-            message: "模块索引状态不可用。".to_string(),
-        })?
-        .get(&module_id)
-        .cloned()
-        .ok_or_else(|| CommandError {
-            code: "moduleNotFound",
-            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
-        })?;
-    if record.web_entry.is_none() {
-        return Err(CommandError {
-            code: "moduleUiUnavailable",
-            message: "该模块没有 Web 界面。".to_string(),
-        });
-    }
-    {
-        let mut runtime = state.runtime.lock().map_err(|_| CommandError {
-            code: "stateUnavailable",
-            message: "模块运行状态不可用。".to_string(),
-        })?;
-        if !matches!(
-            runtime.snapshot(&module_id).state,
-            ModuleRuntimeState::Loaded
-                | ModuleRuntimeState::Running
-                | ModuleRuntimeState::Deactivated
-        ) {
+    let result = (|| {
+        let _install_guard = state
+            .module_install_gate
+            .try_lock()
+            .map_err(|_| repository_error("Busy"))?;
+        if !valid_module_id(&module_id) {
             return Err(CommandError {
-                code: "moduleNotLoaded",
-                message: "请先加载模块。".to_string(),
+                code: "moduleIdInvalid",
+                message: "模块 id 无效。".to_string(),
             });
         }
-    }
-    if let Err(message) = open_module_window(&app, &state, &module_id) {
-        return Err(CommandError {
-            code: "moduleWindowUnavailable",
-            message,
-        });
-    }
-    record_log(
-        &state,
-        "Information",
-        "Runtime",
-        format!("Opened module {module_id}."),
-    );
-    Ok(())
+        let record = state
+            .module_index
+            .lock()
+            .map_err(|_| CommandError {
+                code: "stateUnavailable",
+                message: "模块索引状态不可用。".to_string(),
+            })?
+            .get(&module_id)
+            .cloned()
+            .ok_or_else(|| CommandError {
+                code: "moduleNotFound",
+                message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
+            })?;
+        if record.web_entry.is_none() {
+            return Err(CommandError {
+                code: "moduleUiUnavailable",
+                message: "该模块没有 Web 界面。".to_string(),
+            });
+        }
+        {
+            let mut runtime = state.runtime.lock().map_err(|_| CommandError {
+                code: "stateUnavailable",
+                message: "模块运行状态不可用。".to_string(),
+            })?;
+            if !matches!(
+                runtime.snapshot(&module_id).state,
+                ModuleRuntimeState::Loaded
+                    | ModuleRuntimeState::Running
+                    | ModuleRuntimeState::Deactivated
+            ) {
+                return Err(CommandError {
+                    code: "moduleNotLoaded",
+                    message: "请先加载模块。".to_string(),
+                });
+            }
+        }
+        if let Err(message) = open_module_window(&app, &state, &module_id) {
+            return Err(CommandError {
+                code: "moduleWindowUnavailable",
+                message,
+            });
+        }
+        record_log(
+            &state,
+            "Information",
+            "Runtime",
+            format!("Opened module {module_id}."),
+        );
+        Ok(())
+    })();
+    log_module_failure(&state, &module_id, "host/open", result)
 }
 
 #[tauri::command]
@@ -2305,42 +2373,45 @@ fn stop_module_blocking(
     module_id: String,
 ) -> Result<ModuleRuntimeSnapshot, CommandError> {
     ensure_main_window(&window)?;
-    let _install_guard = state
-        .module_install_gate
-        .try_lock()
-        .map_err(|_| repository_error("Busy"))?;
-    if !valid_module_id(&module_id) {
-        return Err(CommandError {
-            code: "moduleIdInvalid",
-            message: "模块 id 无效。".to_string(),
-        });
-    }
-    let mut runtime = state.runtime.lock().map_err(|_| CommandError {
-        code: "stateUnavailable",
-        message: "模块运行状态不可用。".to_string(),
-    })?;
-    let snapshot = runtime.stop(&module_id);
-    drop(runtime);
-    if module_id == launcher_overlay::MODULE_ID {
-        let _ = launcher_keyboard::stop(window.app_handle());
-    }
-    if let Some(surface) = window
-        .app_handle()
-        .get_webview_window(&module_window_label(&module_id))
-    {
-        let _ = surface.destroy();
-    }
-    let _ = clear_module_hotkey_binding(window.app_handle(), &state, &module_id);
-    if module_id == "qing.screenpin" {
-        close_screenpin_windows(window.app_handle(), &state);
-    }
-    record_log(
-        &state,
-        "Information",
-        "Runtime",
-        format!("Stopped module {module_id}."),
-    );
-    Ok(snapshot)
+    let result = (|| {
+        let _install_guard = state
+            .module_install_gate
+            .try_lock()
+            .map_err(|_| repository_error("Busy"))?;
+        if !valid_module_id(&module_id) {
+            return Err(CommandError {
+                code: "moduleIdInvalid",
+                message: "模块 id 无效。".to_string(),
+            });
+        }
+        let mut runtime = state.runtime.lock().map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块运行状态不可用。".to_string(),
+        })?;
+        let snapshot = runtime.stop(&module_id);
+        drop(runtime);
+        if module_id == launcher_overlay::MODULE_ID {
+            let _ = launcher_keyboard::stop(window.app_handle());
+        }
+        if let Some(surface) = window
+            .app_handle()
+            .get_webview_window(&module_window_label(&module_id))
+        {
+            let _ = surface.destroy();
+        }
+        let _ = clear_module_hotkey_binding(window.app_handle(), &state, &module_id);
+        if module_id == "qing.screenpin" {
+            close_screenpin_windows(window.app_handle(), &state);
+        }
+        record_log(
+            &state,
+            "Information",
+            "Runtime",
+            format!("Stopped module {module_id}."),
+        );
+        Ok(snapshot)
+    })();
+    log_module_failure(&state, &module_id, "host/unload", result)
 }
 
 /// Forward a module-specific operation only when the module declared it in
@@ -2356,62 +2427,65 @@ fn invoke_module(
     payload: Value,
 ) -> Result<Value, CommandError> {
     ensure_main_window(&window)?;
-    if !valid_module_id(&module_id) {
-        return Err(CommandError {
-            code: "moduleIdInvalid",
-            message: "模块 id 无效。".to_string(),
-        });
-    }
-    if !valid_operation_name(&method) {
-        return Err(CommandError {
-            code: "operationInvalid",
-            message: "模块操作名无效。".to_string(),
-        });
-    }
-    let record = state
-        .module_index
-        .lock()
-        .map_err(|_| CommandError {
-            code: "stateUnavailable",
-            message: "模块索引状态不可用。".to_string(),
-        })?
-        .get(&module_id)
-        .cloned()
-        .ok_or_else(|| CommandError {
-            code: "moduleNotFound",
-            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
-        })?;
-    if !record.operations.contains(&method) {
-        return Err(CommandError {
-            code: "operationNotDeclared",
-            message: "该模块未声明此操作。".to_string(),
-        });
-    }
-    let removed_pin = (module_id == "qing.screenpin" && method == "removePin")
-        .then(|| {
-            payload
-                .get("pinId")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-        .flatten();
-    let clear_pins = module_id == "qing.screenpin" && method == "clearPins";
-    let mut runtime = state.runtime.lock().map_err(|_| CommandError {
-        code: "stateUnavailable",
-        message: "模块运行状态不可用。".to_string(),
-    })?;
-    let result = runtime
-        .invoke(&module_id, &record, &method, payload)
-        .map_err(CommandError::from);
-    drop(runtime);
-    if result.is_ok() {
-        if clear_pins {
-            close_screenpin_windows(window.app_handle(), &state);
-        } else if let Some(pin_id) = removed_pin {
-            close_screenpin_pin_window(window.app_handle(), &state, &pin_id);
+    let result = (|| {
+        if !valid_module_id(&module_id) {
+            return Err(CommandError {
+                code: "moduleIdInvalid",
+                message: "模块 id 无效。".to_string(),
+            });
         }
-    }
-    result
+        if !valid_operation_name(&method) {
+            return Err(CommandError {
+                code: "operationInvalid",
+                message: "模块操作名无效。".to_string(),
+            });
+        }
+        let record = state
+            .module_index
+            .lock()
+            .map_err(|_| CommandError {
+                code: "stateUnavailable",
+                message: "模块索引状态不可用。".to_string(),
+            })?
+            .get(&module_id)
+            .cloned()
+            .ok_or_else(|| CommandError {
+                code: "moduleNotFound",
+                message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
+            })?;
+        if !record.operations.contains(&method) {
+            return Err(CommandError {
+                code: "operationNotDeclared",
+                message: "该模块未声明此操作。".to_string(),
+            });
+        }
+        let removed_pin = (module_id == "qing.screenpin" && method == "removePin")
+            .then(|| {
+                payload
+                    .get("pinId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .flatten();
+        let clear_pins = module_id == "qing.screenpin" && method == "clearPins";
+        let mut runtime = state.runtime.lock().map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块运行状态不可用。".to_string(),
+        })?;
+        let result = runtime
+            .invoke(&module_id, &record, &method, payload)
+            .map_err(CommandError::from);
+        drop(runtime);
+        if result.is_ok() {
+            if clear_pins {
+                close_screenpin_windows(window.app_handle(), &state);
+            } else if let Some(pin_id) = removed_pin {
+                close_screenpin_pin_window(window.app_handle(), &state, &pin_id);
+            }
+        }
+        result
+    })();
+    log_module_failure(&state, &module_id, &format!("host/invoke/{method}"), result)
 }
 
 /// Invoke an operation from a module-owned Web window. The module id is
@@ -2447,56 +2521,59 @@ fn invoke_module_window_blocking(
         code: "moduleWindowUnauthorized",
         message: "只有模块窗口可以调用模块操作。".to_string(),
     })?;
-    if !valid_operation_name(&method) {
-        return Err(CommandError {
-            code: "operationInvalid",
-            message: "模块操作名无效。".to_string(),
-        });
-    }
-    let record = state
-        .module_index
-        .lock()
-        .map_err(|_| CommandError {
-            code: "stateUnavailable",
-            message: "模块索引状态不可用。".to_string(),
-        })?
-        .get(&module_id)
-        .cloned()
-        .ok_or_else(|| CommandError {
-            code: "moduleNotFound",
-            message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
-        })?;
-    if !record.operations.contains(&method) {
-        return Err(CommandError {
-            code: "operationNotDeclared",
-            message: "该模块未声明此操作。".to_string(),
-        });
-    }
-    let removed_pin = (module_id == "qing.screenpin" && method == "removePin")
-        .then(|| {
-            payload
-                .get("pinId")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-        .flatten();
-    let clear_pins = module_id == "qing.screenpin" && method == "clearPins";
-    let mut runtime = state.runtime.lock().map_err(|_| CommandError {
-        code: "stateUnavailable",
-        message: "模块运行状态不可用。".to_string(),
-    })?;
-    let result = runtime
-        .invoke(&module_id, &record, &method, payload)
-        .map_err(CommandError::from);
-    drop(runtime);
-    if result.is_ok() {
-        if clear_pins {
-            close_screenpin_windows(window.app_handle(), &state);
-        } else if let Some(pin_id) = removed_pin {
-            close_screenpin_pin_window(window.app_handle(), &state, &pin_id);
+    let result = (|| {
+        if !valid_operation_name(&method) {
+            return Err(CommandError {
+                code: "operationInvalid",
+                message: "模块操作名无效。".to_string(),
+            });
         }
-    }
-    result
+        let record = state
+            .module_index
+            .lock()
+            .map_err(|_| CommandError {
+                code: "stateUnavailable",
+                message: "模块索引状态不可用。".to_string(),
+            })?
+            .get(&module_id)
+            .cloned()
+            .ok_or_else(|| CommandError {
+                code: "moduleNotFound",
+                message: "模块尚未发现或清单无效，请先刷新模块。".to_string(),
+            })?;
+        if !record.operations.contains(&method) {
+            return Err(CommandError {
+                code: "operationNotDeclared",
+                message: "该模块未声明此操作。".to_string(),
+            });
+        }
+        let removed_pin = (module_id == "qing.screenpin" && method == "removePin")
+            .then(|| {
+                payload
+                    .get("pinId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .flatten();
+        let clear_pins = module_id == "qing.screenpin" && method == "clearPins";
+        let mut runtime = state.runtime.lock().map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "模块运行状态不可用。".to_string(),
+        })?;
+        let result = runtime
+            .invoke(&module_id, &record, &method, payload)
+            .map_err(CommandError::from);
+        drop(runtime);
+        if result.is_ok() {
+            if clear_pins {
+                close_screenpin_windows(window.app_handle(), &state);
+            } else if let Some(pin_id) = removed_pin {
+                close_screenpin_pin_window(window.app_handle(), &state, &pin_id);
+            }
+        }
+        result
+    })();
+    log_module_failure(&state, &module_id, &format!("host/invoke/{method}"), result)
 }
 
 /// Return the narrow context a module Web surface needs to initialize its
@@ -2644,47 +2721,50 @@ fn set_module_hotkey(
         code: "moduleWindowUnauthorized",
         message: "只有模块窗口可以设置模块快捷键。".to_string(),
     })?;
-    if hotkey.chars().count() > 64 {
-        return Err(CommandError {
-            code: "hotkeyInvalid",
-            message: "快捷键长度超过限制。".to_string(),
-        });
-    }
-    let declared = state
-        .module_index
-        .lock()
-        .map_err(|_| CommandError {
-            code: "stateUnavailable",
-            message: "模块索引状态不可用。".to_string(),
-        })?
-        .get(&module_id)
-        .is_some_and(|record| record.operations.contains("setHotkey"));
-    if !declared {
-        return Err(CommandError {
-            code: "operationNotDeclared",
-            message: "该模块未声明快捷键设置能力。".to_string(),
-        });
-    }
+    let result = (|| {
+        if hotkey.chars().count() > 64 {
+            return Err(CommandError {
+                code: "hotkeyInvalid",
+                message: "快捷键长度超过限制。".to_string(),
+            });
+        }
+        let declared = state
+            .module_index
+            .lock()
+            .map_err(|_| CommandError {
+                code: "stateUnavailable",
+                message: "模块索引状态不可用。".to_string(),
+            })?
+            .get(&module_id)
+            .is_some_and(|record| record.operations.contains("setHotkey"));
+        if !declared {
+            return Err(CommandError {
+                code: "operationNotDeclared",
+                message: "该模块未声明快捷键设置能力。".to_string(),
+            });
+        }
 
-    let requested = hotkey.trim().to_string();
-    if requested.is_empty() {
-        clear_module_hotkey_binding(&app, &state, &module_id)?;
-        return Ok(ModuleHotkeySnapshot {
-            module_id,
-            hotkey: None,
-            status: "inactive",
-        });
-    }
-    register_module_hotkey_binding(&app, &state, &module_id, &requested)?;
-    Ok(ModuleHotkeySnapshot {
-        module_id: module_id.clone(),
-        hotkey: Some(requested),
-        status: if module_is_active(&state, &module_id) {
-            "registered"
-        } else {
-            "inactive"
-        },
-    })
+        let requested = hotkey.trim().to_string();
+        if requested.is_empty() {
+            clear_module_hotkey_binding(&app, &state, &module_id)?;
+            return Ok(ModuleHotkeySnapshot {
+                module_id: module_id.clone(),
+                hotkey: None,
+                status: "inactive",
+            });
+        }
+        register_module_hotkey_binding(&app, &state, &module_id, &requested)?;
+        Ok(ModuleHotkeySnapshot {
+            module_id: module_id.clone(),
+            hotkey: Some(requested),
+            status: if module_is_active(&state, &module_id) {
+                "registered"
+            } else {
+                "inactive"
+            },
+        })
+    })();
+    log_module_failure(&state, &module_id, "hotkey/set", result)
 }
 
 #[tauri::command]
@@ -2716,12 +2796,15 @@ fn clear_module_hotkey(
         code: "moduleWindowUnauthorized",
         message: "只有模块窗口可以清理模块快捷键。".to_string(),
     })?;
-    clear_module_hotkey_binding(&app, &state, &module_id)?;
-    Ok(ModuleHotkeySnapshot {
-        module_id,
-        hotkey: None,
-        status: "inactive",
-    })
+    let result = (|| {
+        clear_module_hotkey_binding(&app, &state, &module_id)?;
+        Ok(ModuleHotkeySnapshot {
+            module_id: module_id.clone(),
+            hotkey: None,
+            status: "inactive",
+        })
+    })();
+    log_module_failure(&state, &module_id, "hotkey/clear", result)
 }
 
 #[derive(Debug, Serialize)]
@@ -3570,7 +3653,7 @@ fn get_devices_snapshot(
 }
 
 fn ensure_info_popup_window(window: &WebviewWindow) -> Result<(), CommandError> {
-    if window.label() == INFO_POPUP_WINDOW_LABEL {
+    if info_popup::is_popup_label(window.label()) {
         Ok(())
     } else {
         Err(CommandError {
@@ -3593,8 +3676,7 @@ fn get_info_popup_item(
             code: "stateUnavailable",
             message: "信息弹窗状态不可用。".to_string(),
         })?
-        .current
-        .clone())
+        .item(window.label()))
 }
 
 #[tauri::command]
@@ -3683,81 +3765,39 @@ fn dismiss_info_popup_item(
     id: String,
 ) -> Result<(), CommandError> {
     ensure_info_popup_window(&window)?;
-    let exit_x = {
-        let mut queue = state.info_popup.lock().map_err(|_| CommandError {
+    let started = state
+        .info_popup
+        .lock()
+        .map_err(|_| CommandError {
             code: "stateUnavailable",
             message: "信息弹窗状态不可用。".to_string(),
-        })?;
-        if queue.exiting
-            || !queue
-                .current
-                .as_ref()
-                .is_some_and(|current| current.id == id)
-        {
-            return Ok(());
-        }
-        queue.exiting = true;
-        queue.exit_x
-    };
-    state
-        .info_popup_move_generation
-        .fetch_add(1, Ordering::AcqRel);
-    let app = window.app_handle().clone();
-    thread::spawn(move || {
-        let config = app
-            .state::<HostState>()
-            .settings
-            .lock()
-            .ok()
-            .map(|store| store.snapshot());
-        if let Some(window) = app.get_webview_window(INFO_POPUP_WINDOW_LABEL) {
-            if let Some(config) = config {
-                if config.info_popup_animation {
-                    if let (Some(exit_x), Ok(position)) = (exit_x, window.outer_position()) {
-                        let duration =
-                            Duration::from_millis(u64::from(config.info_popup_duration_ms));
-                        let started = std::time::Instant::now();
-                        loop {
-                            let progress =
-                                (started.elapsed().as_secs_f64() / duration.as_secs_f64()).min(1.0);
-                            // The reverse path accelerates out through the same screen edge.
-                            let eased = progress.powi(3);
-                            let x = position.x as f64 + (exit_x - position.x) as f64 * eased;
-                            let _ = window.set_position(tauri::PhysicalPosition::new(
-                                x.round() as i32,
-                                position.y,
-                            ));
-                            if progress >= 1.0 {
-                                break;
-                            }
-                            thread::sleep(Duration::from_millis(16));
-                        }
-                    }
-                }
-            }
-            let _ = window.hide();
-        }
-        let has_next = {
-            let state = app.state::<HostState>();
-            let Ok(mut queue) = state.info_popup.lock() else {
-                return;
-            };
-            if !queue
-                .current
-                .as_ref()
-                .is_some_and(|current| current.id == id)
-            {
-                return;
-            }
-            queue.current = queue.pending.pop_front();
-            queue.exiting = false;
-            queue.exit_x = None;
-            queue.current.is_some()
-        };
-        if has_next {
-            present_info_popup(app);
-        }
-    });
+        })?
+        .begin_dismiss(window.label(), &id);
+    if started {
+        info_popup::dismiss(window, id);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_info_popup_hover(
+    window: WebviewWindow,
+    state: State<'_, HostState>,
+    id: String,
+    hovered: bool,
+) -> Result<(), CommandError> {
+    ensure_info_popup_window(&window)?;
+    let changed = state
+        .info_popup
+        .lock()
+        .map_err(|_| CommandError {
+            code: "stateUnavailable",
+            message: "信息弹窗状态不可用。".to_string(),
+        })?
+        .set_hovered(window.label(), &id, hovered);
+    if changed {
+        info_popup::refresh_z_order(window.app_handle());
+    }
     Ok(())
 }
 
@@ -3909,120 +3949,6 @@ fn start_device_transfer_pump(app: tauri::AppHandle) {
                 );
                 announced = true;
                 last_announcement = Some(std::time::Instant::now());
-            }
-        }
-    });
-}
-
-fn present_info_popup(app: tauri::AppHandle) {
-    use device_diagnostics::{self as diag, Event as E, Level as L, Reason as R};
-    let generation = app
-        .state::<HostState>()
-        .info_popup_move_generation
-        .fetch_add(1, Ordering::AcqRel)
-        + 1;
-    thread::spawn(move || {
-        let Some(window) = app.get_webview_window(INFO_POPUP_WINDOW_LABEL) else {
-            diag::record(
-                L::Error,
-                E::NotificationPopupFailed,
-                R::NoEndpoint,
-                None,
-                None,
-                true,
-            );
-            return;
-        };
-        let Some(monitor) = window
-            .current_monitor()
-            .ok()
-            .flatten()
-            .or_else(|| window.primary_monitor().ok().flatten())
-        else {
-            return;
-        };
-        let Ok(size) = window.outer_size() else {
-            return;
-        };
-        let config = match app.state::<HostState>().settings.lock() {
-            Ok(settings) => settings.snapshot(),
-            Err(_) => return,
-        };
-        let left = config.info_popup_corner.starts_with("left");
-        let bottom = config.info_popup_corner.ends_with("Bottom");
-        let origin = monitor.position();
-        let screen = monitor.size();
-        let end_x = if left {
-            origin.x + 24
-        } else {
-            origin.x + screen.width as i32 - size.width as i32 - 24
-        };
-        let end_y = if bottom {
-            origin.y + screen.height as i32 - size.height as i32 - 80
-        } else {
-            origin.y + 24
-        };
-        let start_x = if left {
-            origin.x - size.width as i32
-        } else {
-            origin.x + screen.width as i32
-        };
-        if let Ok(mut queue) = app.state::<HostState>().info_popup.lock() {
-            queue.exit_x = Some(start_x);
-        }
-        let target = tauri::PhysicalPosition::new(end_x, end_y);
-        let shown = if !config.info_popup_animation {
-            let _ = window.set_position(target);
-            window.show()
-        } else {
-            let _ = window.set_position(tauri::PhysicalPosition::new(start_x, end_y));
-            window.show()
-        };
-        diag::record(
-            if shown.is_ok() {
-                L::Information
-            } else {
-                L::Error
-            },
-            if shown.is_ok() {
-                E::NotificationPopupShown
-            } else {
-                E::NotificationPopupFailed
-            },
-            if shown.is_ok() {
-                R::None
-            } else {
-                R::Unexpected
-            },
-            None,
-            None,
-            false,
-        );
-        let _ = app.emit_to(
-            EventTarget::webview_window(INFO_POPUP_WINDOW_LABEL),
-            "qing:info-popup-changed",
-            (),
-        );
-        if config.info_popup_animation {
-            let duration = Duration::from_millis(u64::from(config.info_popup_duration_ms));
-            let started = std::time::Instant::now();
-            loop {
-                if app
-                    .state::<HostState>()
-                    .info_popup_move_generation
-                    .load(Ordering::Acquire)
-                    != generation
-                {
-                    return;
-                }
-                let progress = (started.elapsed().as_secs_f64() / duration.as_secs_f64()).min(1.0);
-                let eased = 1.0 - (1.0 - progress).powi(3);
-                let x = start_x as f64 + (end_x - start_x) as f64 * eased;
-                let _ = window.set_position(tauri::PhysicalPosition::new(x.round() as i32, end_y));
-                if progress >= 1.0 {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(16));
             }
         }
     });
@@ -4392,6 +4318,7 @@ pub fn run() {
             get_info_popup_dismiss_seconds,
             show_info_popup_preview,
             dismiss_info_popup_item,
+            set_info_popup_hover,
             set_devices_discovery_enabled,
             request_device_pairing,
             decide_device_pairing,
@@ -5024,6 +4951,7 @@ fn stop_all_modules<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         if let Ok(mut runtime) = state.runtime.lock() {
             runtime.stop_all();
         }
+        state.module_logs.flush();
     }
 }
 
@@ -5257,6 +5185,26 @@ mod tests {
     };
 
     #[test]
+    fn module_command_errors_are_retained_with_their_original_code() {
+        let state = HostState::new();
+        let result = super::log_module_failure::<()>(
+            &state,
+            "qing.launcher",
+            "host/activate",
+            Err(super::CommandError {
+                code: "hotkeyUnavailable",
+                message: "Shortcut registration failed (1409).".into(),
+            }),
+        );
+        assert_eq!(result.unwrap_err().code, "hotkeyUnavailable");
+        let entries = state.module_logs.snapshot();
+        assert!(entries
+            .iter()
+            .any(|entry| entry.category == "Module/qing.launcher"
+                && entry.message.contains("host/activate (hotkeyUnavailable)")));
+    }
+
+    #[test]
     fn module_window_label_is_the_only_authorized_shape() {
         let label = module_window_label("qing.launcher");
         assert_eq!(label, "module-71696e672e6c61756e63686572");
@@ -5286,9 +5234,9 @@ mod tests {
             body: "示例".to_string(),
         };
         assert!(queue.enqueue(make("preview-1")));
+        assert!(queue.enqueue(make("device-1")));
+        assert!(!queue.enqueue(make("preview-1")));
         assert!(!queue.enqueue(make("device-1")));
-        assert_eq!(queue.current.as_ref().unwrap().id, "preview-1");
-        assert_eq!(queue.pending.front().unwrap().id, "device-1");
     }
 
     #[test]

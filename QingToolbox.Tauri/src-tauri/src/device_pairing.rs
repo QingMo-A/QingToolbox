@@ -443,6 +443,16 @@ impl PairingCore {
         let core = Arc::clone(self);
         thread::spawn(move || {
             let result = core.run_management(stream, false, None, None, stop);
+            if let Err(error) = &result {
+                diag::record(
+                    L::Warning,
+                    E::IncomingManagementFailed,
+                    diag::failure_reason(error),
+                    None,
+                    None,
+                    true,
+                );
+            }
             core.finish_session(result, None);
         });
     }
@@ -740,30 +750,70 @@ impl PairingCore {
         action: DeviceAction,
         stop: Arc<AtomicBool>,
     ) -> Result<(), String> {
+        let mut last_error = None;
         for address in peer.addresses {
             if stop.load(Ordering::Acquire) {
                 return Err("设备发现已关闭。".to_string());
             }
+            let endpoint = address.to_string();
+            diag::record(
+                L::Information,
+                E::EndpointConnectStarted,
+                R::None,
+                Some(expected_key),
+                Some(&endpoint),
+                true,
+            );
             if let Ok(mut stream) = TcpStream::connect_timeout(&address, HANDSHAKE_TIMEOUT) {
-                stream
-                    .set_write_timeout(Some(HANDSHAKE_TIMEOUT))
-                    .map_err(|e| e.to_string())?;
-                stream
-                    .write_all(b"QDM1")
-                    .map_err(|_| "无法启动设备操作。".to_string())?;
-                return self.run_management(
-                    stream,
+                let result = (|| {
+                    stream
+                        .set_write_timeout(Some(HANDSHAKE_TIMEOUT))
+                        .map_err(|_| "设备连接超时设置失败。".to_string())?;
+                    stream
+                        .write_all(b"QDM1")
+                        .map_err(|_| "设备连接发送失败。".to_string())?;
+                    self.run_management(
+                        stream,
+                        true,
+                        Some((&peer.discovery_id, expected_key)),
+                        Some(action),
+                        Arc::clone(&stop),
+                    )
+                })();
+                match result {
+                    Err(error)
+                        if action == DeviceAction::Ping
+                            && matches!(diag::failure_reason(&error), R::Network) =>
+                    {
+                        // Only replay an idempotent ping. Never retry user approvals or an
+                        // identity/protocol failure against another address.
+                        diag::record(
+                            L::Warning,
+                            E::EndpointConnectFailed,
+                            R::Network,
+                            Some(expected_key),
+                            Some(&endpoint),
+                            true,
+                        );
+                        last_error = Some(error);
+                    }
+                    result => return result,
+                }
+            } else {
+                diag::record(
+                    L::Warning,
+                    E::EndpointConnectFailed,
+                    R::Network,
+                    Some(expected_key),
+                    Some(&endpoint),
                     true,
-                    Some((&peer.discovery_id, expected_key)),
-                    Some(action),
-                    stop,
                 );
             }
         }
         if action == DeviceAction::Disconnect {
             return self.revoke_offline(expected_key);
         }
-        Err("无法连接到已配对设备。".to_string())
+        Err(last_error.unwrap_or_else(|| "无法连接到已配对设备。".to_string()))
     }
 
     fn run_management(
@@ -780,6 +830,7 @@ impl PairingCore {
         stream
             .set_write_timeout(Some(HANDSHAKE_TIMEOUT))
             .map_err(|e| e.to_string())?;
+        let endpoint = stream.peer_addr().ok().map(|address| address.to_string());
         let (handshake, remote) = handshake(
             &mut stream,
             &self.identity.private,
@@ -787,7 +838,18 @@ impl PairingCore {
             &self.name,
             initiator,
             MANAGEMENT_PROLOGUE,
-        )?;
+        )
+        .map_err(|error| {
+            diag::record(
+                L::Warning,
+                E::HandshakeTransportFailed,
+                diag::failure_reason(&error),
+                expected.map(|(_, key)| key),
+                endpoint.as_deref(),
+                true,
+            );
+            error
+        })?;
         let key = hex(handshake.get_remote_static().ok_or("对端身份验证失败。")?);
         let record = {
             let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
@@ -804,220 +866,238 @@ impl PairingCore {
         {
             return Err("对端配对身份不匹配。".to_string());
         }
-        {
-            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            if state.records.contains_key(&key) {
-                state.last_authenticated.insert(key.clone(), Instant::now());
-            }
-        }
         let mut transport = handshake
             .into_transport_mode()
             .map_err(|_| "加密设备会话无法启动。".to_string())?;
-        if initiator {
-            let action = action.ok_or("设备操作无效。")?;
-            let request = serde_json::to_vec(&ManagementRequest {
-                version: 1,
-                action: action.wire_name().to_string(),
-                percent: None,
-                charging: None,
-                app_name: None,
-                title: None,
-                body: None,
-                message_id: None,
-            })
-            .map_err(|e| e.to_string())?;
-            write_encrypted(&mut stream, &mut transport, &request)?;
-            let answer = read_encrypted_timeout(
-                &mut stream,
-                &mut transport,
+        let result = (|| {
+            if initiator {
+                let action = action.ok_or("设备操作无效。")?;
+                let request = serde_json::to_vec(&ManagementRequest {
+                    version: 1,
+                    action: action.wire_name().to_string(),
+                    percent: None,
+                    charging: None,
+                    app_name: None,
+                    title: None,
+                    body: None,
+                    message_id: None,
+                })
+                .map_err(|e| e.to_string())?;
+                write_encrypted(&mut stream, &mut transport, &request)?;
+                let answer = read_encrypted_timeout(
+                    &mut stream,
+                    &mut transport,
+                    if matches!(action, DeviceAction::DisconnectNotice | DeviceAction::Ping) {
+                        HANDSHAKE_TIMEOUT
+                    } else {
+                        PAIR_TIMEOUT
+                    },
+                )
+                .map_err(|error| {
+                    diag::record(
+                        L::Warning,
+                        E::ManagementAckFailed,
+                        diag::failure_reason(&error),
+                        Some(&key),
+                        endpoint.as_deref(),
+                        true,
+                    );
+                    error
+                })?;
                 if matches!(action, DeviceAction::DisconnectNotice | DeviceAction::Ping) {
-                    HANDSHAKE_TIMEOUT
-                } else {
-                    PAIR_TIMEOUT
-                },
-            )?;
-            if matches!(action, DeviceAction::DisconnectNotice | DeviceAction::Ping) {
-                if answer != b"D" {
-                    return Err("设备在线验证失败。".to_string());
+                    if answer != b"D" {
+                        return Err("设备在线验证失败。".to_string());
+                    }
+                    if action == DeviceAction::DisconnectNotice {
+                        self.clear_tombstone(&key)?;
+                    }
+                    return Ok(());
                 }
-                if action == DeviceAction::DisconnectNotice {
-                    self.clear_tombstone(&key)?;
+                if answer == b"R" {
+                    return Err("对方拒绝了设备操作。".to_string());
                 }
-                return Ok(());
-            }
-            if answer == b"R" {
-                return Err("对方拒绝了设备操作。".to_string());
-            }
-            if answer != b"A" {
-                return Err("设备操作确认无效。".to_string());
-            }
-            if stop.load(Ordering::Acquire) {
-                return Err("设备发现已关闭。".to_string());
-            }
-            write_encrypted(&mut stream, &mut transport, b"C")?;
-            if read_encrypted_timeout(&mut stream, &mut transport, HANDSHAKE_TIMEOUT)? != b"D" {
-                return Err("设备操作完成确认无效。".to_string());
-            }
-            self.apply_action(&key, action, &record.name)?;
-        } else {
-            let request = read_encrypted_timeout(&mut stream, &mut transport, HANDSHAKE_TIMEOUT)?;
-            let request: ManagementRequest =
-                serde_json::from_slice(&request).map_err(|_| "设备操作消息无效。".to_string())?;
-            if request.version != 1 {
-                return Err("设备操作版本不兼容。".to_string());
-            }
-            if request.action == "disconnectNotice" {
-                self.apply_disconnect_notice(&key, &record.name)?;
-                write_encrypted(&mut stream, &mut transport, b"D")?;
-                return Ok(());
-            }
-            let already_revoked = !self
-                .state
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .records
-                .contains_key(&key);
-            if already_revoked && request.action == "disconnect" {
-                // We already committed this user's approval, but the completion
-                // frame may have been lost. Let the initiator finish idempotently.
-                write_encrypted(&mut stream, &mut transport, b"A")?;
-                if read_encrypted_timeout(&mut stream, &mut transport, HANDSHAKE_TIMEOUT)? != b"C" {
-                    return Err("设备操作提交无效。".to_string());
+                if answer != b"A" {
+                    return Err("设备操作确认无效。".to_string());
                 }
-                write_encrypted(&mut stream, &mut transport, b"D")?;
-                return Ok(());
-            }
-            if already_revoked {
-                return Err("设备已断开。".to_string());
-            }
-            if request.action == "ping" {
-                write_encrypted(&mut stream, &mut transport, b"D")?;
-                return Ok(());
-            }
-            if request.action == "battery" {
-                let trusted = self
+                if stop.load(Ordering::Acquire) {
+                    return Err("设备发现已关闭。".to_string());
+                }
+                write_encrypted(&mut stream, &mut transport, b"C")?;
+                if read_encrypted_timeout(&mut stream, &mut transport, HANDSHAKE_TIMEOUT)? != b"D" {
+                    return Err("设备操作完成确认无效。".to_string());
+                }
+                self.apply_action(&key, action, &record.name)?;
+            } else {
+                let request =
+                    read_encrypted_timeout(&mut stream, &mut transport, HANDSHAKE_TIMEOUT)?;
+                let request: ManagementRequest = serde_json::from_slice(&request)
+                    .map_err(|_| "设备操作消息无效。".to_string())?;
+                if request.version != 1 {
+                    return Err("设备操作版本不兼容。".to_string());
+                }
+                if request.action == "disconnectNotice" {
+                    self.apply_disconnect_notice(&key, &record.name)?;
+                    write_encrypted(&mut stream, &mut transport, b"D")?;
+                    return Ok(());
+                }
+                let already_revoked = !self
                     .state
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .records
-                    .get(&key)
-                    .is_some_and(|peer| peer.relationship == Relationship::Intimate);
-                if !trusted {
-                    return Err("非亲密设备不得发送电量。".to_string());
+                    .contains_key(&key);
+                if already_revoked && request.action == "disconnect" {
+                    // We already committed this user's approval, but the completion
+                    // frame may have been lost. Let the initiator finish idempotently.
+                    write_encrypted(&mut stream, &mut transport, b"A")?;
+                    if read_encrypted_timeout(&mut stream, &mut transport, HANDSHAKE_TIMEOUT)?
+                        != b"C"
+                    {
+                        return Err("设备操作提交无效。".to_string());
+                    }
+                    write_encrypted(&mut stream, &mut transport, b"D")?;
+                    return Ok(());
                 }
-                let percent = request
-                    .percent
-                    .filter(|value| *value <= 100)
-                    .ok_or("电量数据无效。")?;
-                let charging = request.charging.ok_or("充电状态无效。")?;
-                let received_at_ms = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(|e| e.to_string())?
-                    .as_millis() as u64;
-                diag::record(
-                    L::Information,
-                    E::BatteryReceived,
-                    R::None,
-                    Some(&key),
-                    None,
-                    true,
-                );
+                if already_revoked {
+                    return Err("设备已断开。".to_string());
+                }
+                if request.action == "ping" {
+                    write_encrypted(&mut stream, &mut transport, b"D")?;
+                    return Ok(());
+                }
+                if request.action == "battery" {
+                    let trusted = self
+                        .state
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .records
+                        .get(&key)
+                        .is_some_and(|peer| peer.relationship == Relationship::Intimate);
+                    if !trusted {
+                        return Err("非亲密设备不得发送电量。".to_string());
+                    }
+                    let percent = request
+                        .percent
+                        .filter(|value| *value <= 100)
+                        .ok_or("电量数据无效。")?;
+                    let charging = request.charging.ok_or("充电状态无效。")?;
+                    let received_at_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map_err(|e| e.to_string())?
+                        .as_millis() as u64;
+                    diag::record(
+                        L::Information,
+                        E::BatteryReceived,
+                        R::None,
+                        Some(&key),
+                        None,
+                        true,
+                    );
+                    self.state
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .batteries
+                        .insert(
+                            key.clone(),
+                            DeviceBattery {
+                                peer_id: key.clone(),
+                                percent,
+                                charging,
+                                received_at_ms,
+                            },
+                        );
+                    write_encrypted(&mut stream, &mut transport, b"D")?;
+                    return Ok(());
+                }
+                if request.action == "notification" {
+                    let trusted = self
+                        .state
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .records
+                        .get(&key)
+                        .is_some_and(can_accept_notification);
+                    if !trusted {
+                        diag::record(
+                            L::Warning,
+                            E::NotificationSkipped,
+                            R::PermissionRevoked,
+                            Some(&key),
+                            request.message_id.as_deref(),
+                            false,
+                        );
+                        return Err("非亲密安卓设备不得发送通知。".to_string());
+                    }
+                    let app_name = bounded_notification_field(request.app_name, 80, false)?;
+                    let title = bounded_notification_field(request.title, 160, false)?;
+                    let body = bounded_notification_field(request.body, 700, true)?;
+                    if title.is_empty() && body.is_empty() {
+                        return Err("通知内容为空。".to_string());
+                    }
+                    self.enqueue_notification(
+                        &key,
+                        request.message_id.as_deref(),
+                        ForwardedNotification {
+                            id: random_id()?,
+                            device_name: record.name,
+                            app_name,
+                            title,
+                            body,
+                        },
+                    )?;
+                    write_encrypted(&mut stream, &mut transport, b"D")?;
+                    return Ok(());
+                }
+                let action =
+                    DeviceAction::from_wire(&request.action).ok_or("设备操作消息无效。")?;
+                // A repeated upgrade/demotion is allowed: if the final completion
+                // frame was lost, the user can explicitly approve the retry.
+                let session_id = random_id()?;
+                {
+                    let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+                    if state.actions.values().any(|pending| pending.peer_id == key) {
+                        return Err("该设备已有待处理操作。".to_string());
+                    }
+                    state.actions.insert(
+                        session_id.clone(),
+                        PendingDeviceAction {
+                            session_id: session_id.clone(),
+                            peer_id: key.clone(),
+                            name: record.name.clone(),
+                            action,
+                            local_approved: false,
+                            decision: None,
+                        },
+                    );
+                }
+                let answer = self.await_action_decision(&session_id, &stop);
                 self.state
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .batteries
-                    .insert(
-                        key.clone(),
-                        DeviceBattery {
-                            peer_id: key,
-                            percent,
-                            charging,
-                            received_at_ms,
-                        },
-                    );
+                    .actions
+                    .remove(&session_id);
+                match answer? {
+                    false => {
+                        write_encrypted(&mut stream, &mut transport, b"R")?;
+                        return Ok(());
+                    }
+                    true => write_encrypted(&mut stream, &mut transport, b"A")?,
+                }
+                if read_encrypted_timeout(&mut stream, &mut transport, HANDSHAKE_TIMEOUT)? != b"C" {
+                    return Err("设备操作提交无效。".to_string());
+                }
+                self.apply_action(&key, action, &record.name)?;
                 write_encrypted(&mut stream, &mut transport, b"D")?;
-                return Ok(());
             }
-            if request.action == "notification" {
-                let trusted = self
-                    .state
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .records
-                    .get(&key)
-                    .is_some_and(can_accept_notification);
-                if !trusted {
-                    diag::record(
-                        L::Warning,
-                        E::NotificationSkipped,
-                        R::PermissionRevoked,
-                        Some(&key),
-                        request.message_id.as_deref(),
-                        false,
-                    );
-                    return Err("非亲密安卓设备不得发送通知。".to_string());
-                }
-                let app_name = bounded_notification_field(request.app_name, 80, false)?;
-                let title = bounded_notification_field(request.title, 160, false)?;
-                let body = bounded_notification_field(request.body, 700, true)?;
-                if title.is_empty() && body.is_empty() {
-                    return Err("通知内容为空。".to_string());
-                }
-                self.enqueue_notification(
-                    &key,
-                    request.message_id.as_deref(),
-                    ForwardedNotification {
-                        id: random_id()?,
-                        device_name: record.name,
-                        app_name,
-                        title,
-                        body,
-                    },
-                )?;
-                write_encrypted(&mut stream, &mut transport, b"D")?;
-                return Ok(());
+            Ok(())
+        })();
+        if result.is_ok() && !stop.load(Ordering::Acquire) {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            if state.records.contains_key(&key) {
+                state.last_authenticated.insert(key, Instant::now());
             }
-            let action = DeviceAction::from_wire(&request.action).ok_or("设备操作消息无效。")?;
-            // A repeated upgrade/demotion is allowed: if the final completion
-            // frame was lost, the user can explicitly approve the retry.
-            let session_id = random_id()?;
-            {
-                let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-                if state.actions.values().any(|pending| pending.peer_id == key) {
-                    return Err("该设备已有待处理操作。".to_string());
-                }
-                state.actions.insert(
-                    session_id.clone(),
-                    PendingDeviceAction {
-                        session_id: session_id.clone(),
-                        peer_id: key.clone(),
-                        name: record.name.clone(),
-                        action,
-                        local_approved: false,
-                        decision: None,
-                    },
-                );
-            }
-            let answer = self.await_action_decision(&session_id, &stop);
-            self.state
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .actions
-                .remove(&session_id);
-            match answer? {
-                false => {
-                    write_encrypted(&mut stream, &mut transport, b"R")?;
-                    return Ok(());
-                }
-                true => write_encrypted(&mut stream, &mut transport, b"A")?,
-            }
-            if read_encrypted_timeout(&mut stream, &mut transport, HANDSHAKE_TIMEOUT)? != b"C" {
-                return Err("设备操作提交无效。".to_string());
-            }
-            self.apply_action(&key, action, &record.name)?;
-            write_encrypted(&mut stream, &mut transport, b"D")?;
         }
-        Ok(())
+        result
     }
 
     fn await_action_decision(&self, session_id: &str, stop: &AtomicBool) -> Result<bool, String> {
@@ -1500,7 +1580,7 @@ fn write_frame(stream: &mut TcpStream, message: &[u8]) -> Result<(), String> {
     stream
         .write_all(&(message.len() as u16).to_be_bytes())
         .and_then(|_| stream.write_all(message))
-        .map_err(|_| "无法发送配对消息。".to_string())
+        .map_err(|_| "配对连接发送失败。".to_string())
 }
 
 fn write_encrypted(
@@ -1814,6 +1894,144 @@ mod tests {
             thread::sleep(Duration::from_millis(25));
         }
         panic!("pairing did not reach the expected state");
+    }
+
+    fn recovery_pair() -> (Arc<PairingCore>, Arc<PairingCore>, String) {
+        let mut first = PairingCore::ephemeral("0123456789abcdef0123456789abcdef", "First");
+        let mut second = PairingCore::ephemeral("fedcba9876543210fedcba9876543210", "Second");
+        let parameters = NOISE_PATTERN.parse().unwrap();
+        let first_key = Builder::new(parameters).generate_keypair().unwrap();
+        let second_key = Builder::new(NOISE_PATTERN.parse().unwrap())
+            .generate_keypair()
+            .unwrap();
+        let first_id = hex(&first_key.public);
+        let second_id = hex(&second_key.public);
+        Arc::get_mut(&mut first).unwrap().identity.private = first_key.private;
+        Arc::get_mut(&mut second).unwrap().identity.private = second_key.private;
+        for (core, remote, id) in [(&first, &second, &second_id), (&second, &first, &first_id)] {
+            core.state.lock().unwrap().records.insert(
+                id.clone(),
+                PairedDevice {
+                    id: id.clone(),
+                    discovery_id: remote.discovery_id.clone(),
+                    name: remote.name.clone(),
+                    remark: None,
+                    platform: "windows".into(),
+                    relationship: Relationship::Connected,
+                },
+            );
+        }
+        (first, second, second_id)
+    }
+
+    #[test]
+    fn ping_retries_transport_failure_but_does_not_mark_online_before_ack() {
+        let (first, second, key) = recovery_pair();
+        let silent = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let silent_address = silent.local_addr().unwrap();
+        let peer = Arc::clone(&second);
+        let blackhole = thread::spawn(move || {
+            let (mut stream, _) = silent.accept().unwrap();
+            let mut marker = [0; 4];
+            stream.read_exact(&mut marker).unwrap();
+            let (state, _) = handshake(
+                &mut stream,
+                &peer.identity.private,
+                &peer.discovery_id,
+                &peer.name,
+                false,
+                MANAGEMENT_PROLOGUE,
+            )
+            .unwrap();
+            let mut transport = state.into_transport_mode().unwrap();
+            let _ = read_encrypted(&mut stream, &mut transport).unwrap();
+            // An authenticated Noise exchange without the ping ACK is not online.
+        });
+        let stopped = Arc::new(AtomicBool::new(false));
+        assert!(first
+            .connect_and_manage(
+                OutboundPeer {
+                    discovery_id: second.discovery_id.clone(),
+                    addresses: vec![silent_address],
+                },
+                &key,
+                DeviceAction::Ping,
+                Arc::clone(&stopped)
+            )
+            .is_err());
+        blackhole.join().unwrap();
+        assert!(first.snapshot().online.is_empty());
+
+        let broken = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let broken_address = broken.local_addr().unwrap();
+        let bad = thread::spawn(move || {
+            let (stream, _) = broken.accept().unwrap();
+            drop(stream);
+        });
+        let healthy = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let healthy_address = healthy.local_addr().unwrap();
+        let responder = Arc::clone(&second);
+        let stop = Arc::clone(&stopped);
+        let good = thread::spawn(move || {
+            let (mut stream, _) = healthy.accept().unwrap();
+            let mut marker = [0; 4];
+            stream.read_exact(&mut marker).unwrap();
+            responder.accept_action(stream, stop);
+        });
+        first
+            .connect_and_manage(
+                OutboundPeer {
+                    discovery_id: second.discovery_id.clone(),
+                    addresses: vec![broken_address, healthy_address],
+                },
+                &key,
+                DeviceAction::Ping,
+                stopped,
+            )
+            .unwrap();
+        bad.join().unwrap();
+        good.join().unwrap();
+        assert_eq!(first.snapshot().online, vec![key]);
+    }
+
+    #[test]
+    fn identity_failure_never_falls_through_to_another_address() {
+        let (first, second, _) = recovery_pair();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let spare = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        spare.set_nonblocking(true).unwrap();
+        let spare_address = spare.local_addr().unwrap();
+        let responder = Arc::clone(&second);
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut marker = [0; 4];
+            stream.read_exact(&mut marker).unwrap();
+            handshake(
+                &mut stream,
+                &responder.identity.private,
+                &responder.discovery_id,
+                &responder.name,
+                false,
+                MANAGEMENT_PROLOGUE,
+            )
+            .unwrap();
+        });
+        let error = first
+            .connect_and_manage(
+                OutboundPeer {
+                    discovery_id: second.discovery_id.clone(),
+                    addresses: vec![address, spare_address],
+                },
+                "wrong-key",
+                DeviceAction::Ping,
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap_err();
+        worker.join().unwrap();
+        assert!(error.contains("身份"));
+        assert!(spare.accept().is_err());
+        assert!(first.snapshot().online.is_empty());
     }
 
     #[test]

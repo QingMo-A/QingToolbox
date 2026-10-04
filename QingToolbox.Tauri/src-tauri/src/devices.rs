@@ -28,6 +28,8 @@ const PROTOCOL_VERSION: &str = "1";
 const PROBE_TIMEOUT: Duration = Duration::from_millis(400);
 const RECHECK_INTERVAL: Duration = Duration::from_secs(4);
 const MAX_CANDIDATES: usize = 64;
+const REDISCOVER_INTERVAL: Duration = Duration::from_secs(30);
+const LOST_ENDPOINT_GRACE: Duration = Duration::from_secs(120);
 
 #[derive(Clone)]
 struct Candidate {
@@ -38,9 +40,16 @@ struct Candidate {
     addresses: Vec<SocketAddr>,
     reachable: bool,
     failed_probes: u8,
+    lost_at: Option<Instant>,
 }
 
 impl Candidate {
+    fn prefer(&mut self, address: SocketAddr) {
+        if let Some(index) = self.addresses.iter().position(|value| *value == address) {
+            self.addresses.swap(0, index);
+        }
+    }
+
     // A failed liveness probe must not destroy the endpoint needed to retry.
     fn record_probe(&mut self, success: bool) -> bool {
         let recovered = success && !self.reachable;
@@ -274,6 +283,24 @@ impl DeviceManager {
             })
             .collect::<Vec<_>>();
         if matches.len() != 1 {
+            if !platform.is_empty() {
+                let known = pairing.paired.iter().find(|peer| {
+                    peer.platform == platform
+                        && device_id.is_some_and(|id| id.eq_ignore_ascii_case(&peer.discovery_id))
+                });
+                diag::record(
+                    L::Warning,
+                    E::TransferRejected,
+                    if known.is_some_and(|peer| !pairing.online.contains(&peer.id)) {
+                        R::AuthNotFresh
+                    } else {
+                        R::IdentityMismatch
+                    },
+                    known.map(|peer| peer.id.as_str()),
+                    None,
+                    true,
+                );
+            }
             return None;
         }
         Some((matches[0].id.clone(), matches[0].name.clone()))
@@ -485,8 +512,16 @@ impl DeviceManager {
         let shared = Arc::clone(&self.shared);
         let own_id = id.clone();
         let browse_pairing = self.pairing.as_ref().ok().cloned();
+        let browse_daemon = daemon.clone();
         let browse = thread::spawn(move || {
-            browse_loop(receiver, browse_stop, shared, own_id, browse_pairing)
+            browse_loop(
+                receiver,
+                browse_stop,
+                shared,
+                own_id,
+                browse_pairing,
+                browse_daemon,
+            )
         });
         Ok(Runtime {
             daemon,
@@ -639,17 +674,20 @@ fn parse_candidate(info: &ResolvedService, own_id: &str) -> Option<Candidate> {
         addresses,
         reachable: false,
         failed_probes: 0,
+        lost_at: None,
     })
 }
 
 fn browse_loop(
-    receiver: mdns_sd::Receiver<ServiceEvent>,
+    mut receiver: mdns_sd::Receiver<ServiceEvent>,
     stop: Arc<AtomicBool>,
     shared: Arc<Mutex<Shared>>,
     own_id: String,
     pairing: Option<Arc<PairingCore>>,
+    daemon: ServiceDaemon,
 ) {
     let mut last_recheck = Instant::now();
+    let mut last_rediscover = Instant::now();
     while !stop.load(Ordering::Acquire) {
         match receiver.recv_timeout(Duration::from_millis(300)) {
             Ok(ServiceEvent::ServiceResolved(info)) => {
@@ -662,7 +700,11 @@ fn browse_loop(
                         None,
                         true,
                     );
-                    let success = probe(&candidate).is_some();
+                    let confirmed = probe(&candidate);
+                    let success = confirmed.is_some();
+                    if let Some(address) = confirmed {
+                        candidate.prefer(address);
+                    }
                     candidate.record_probe(success);
                     let stored = {
                         let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
@@ -690,12 +732,13 @@ fn browse_loop(
                 }
             }
             Ok(ServiceEvent::ServiceRemoved(_, fullname)) => {
-                if let Some(candidate) = shared
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .candidates
-                    .remove(&fullname.to_ascii_lowercase())
-                {
+                let trusted = pairing
+                    .as_ref()
+                    .map(|core| core.snapshot().paired)
+                    .unwrap_or_default();
+                let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+                let key = fullname.to_ascii_lowercase();
+                if let Some(candidate) = state.candidates.get_mut(&key) {
                     diag::record(
                         L::Information,
                         E::EndpointLost,
@@ -704,13 +747,85 @@ fn browse_loop(
                         None,
                         false,
                     );
+                    if trusted.iter().any(|peer| peer.discovery_id == candidate.id) {
+                        // A DNS goodbye/cache expiry is not an authenticated disconnect.
+                        // Keep only paired endpoints briefly so probes can recover them.
+                        candidate.reachable = false;
+                        candidate.lost_at.get_or_insert_with(Instant::now);
+                    } else {
+                        state.candidates.remove(&key);
+                    }
                 }
             }
             Err(mdns_sd::RecvTimeoutError::Timeout) => {}
-            Err(_) => break,
+            Err(_) => {
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
             _ => {}
         }
+        if last_rediscover.elapsed() >= REDISCOVER_INTERVAL {
+            let snapshot = pairing.as_ref().map(|core| core.snapshot());
+            let missing = snapshot.as_ref().is_some_and(|snapshot| {
+                let state = shared.lock().unwrap_or_else(|e| e.into_inner());
+                snapshot.paired.iter().any(|peer| {
+                    !snapshot.online.contains(&peer.id)
+                        || !state
+                            .candidates
+                            .values()
+                            .any(|candidate| candidate.id == peer.discovery_id)
+                })
+            });
+            if missing {
+                // Refresh only the DNS browse subscription, never trust, listeners or transfers.
+                let _ = daemon.stop_browse(SERVICE_TYPE);
+                match daemon.browse(SERVICE_TYPE) {
+                    Ok(next) => {
+                        receiver = next;
+                        diag::record(
+                            L::Information,
+                            E::DiscoveryRefresh,
+                            R::NoEndpoint,
+                            None,
+                            None,
+                            true,
+                        );
+                    }
+                    Err(_) => diag::record(
+                        L::Warning,
+                        E::DiscoveryRefresh,
+                        R::Network,
+                        None,
+                        None,
+                        true,
+                    ),
+                }
+            }
+            last_rediscover = Instant::now();
+        }
         if last_recheck.elapsed() >= RECHECK_INTERVAL {
+            shared
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .candidates
+                .retain(|_, candidate| {
+                    let keep = candidate
+                        .lost_at
+                        .map_or(true, |time| time.elapsed() < LOST_ENDPOINT_GRACE);
+                    if !keep {
+                        diag::record(
+                            L::Information,
+                            E::EndpointLost,
+                            R::EndpointExpired,
+                            Some(&candidate.id),
+                            None,
+                            true,
+                        );
+                    }
+                    keep
+                });
             // Re-probe because mDNS goodbye/removal events are not guaranteed.
             // Never hold the state lock during network I/O.
             let candidates = shared
@@ -724,7 +839,8 @@ fn browse_loop(
                 if stop.load(Ordering::Acquire) {
                     break;
                 }
-                let success = probe(&candidate).is_some();
+                let confirmed = probe(&candidate);
+                let success = confirmed.is_some();
                 if !success {
                     diag::record(
                         L::Warning,
@@ -740,7 +856,20 @@ fn browse_loop(
                     state
                         .candidates
                         .get_mut(&candidate.service_name)
-                        .is_some_and(|cached| cached.record_probe(success))
+                        .and_then(|cached| {
+                            if cached.addresses != candidate.addresses
+                                || cached.lost_at != candidate.lost_at
+                            {
+                                return None;
+                            }
+                            if let Some(address) = confirmed {
+                                cached.prefer(address);
+                            }
+                            Some(cached.record_probe(success))
+                        })
+                };
+                let Some(recovered) = recovered else {
+                    continue; // A newer resolution superseded this probe.
                 };
                 if let Some(core) = &pairing {
                     core.retry_tombstone(
@@ -750,9 +879,15 @@ fn browse_loop(
                         },
                         Arc::clone(&stop),
                     );
+                    let mut addresses = candidate.addresses.clone();
+                    if let Some(address) = confirmed {
+                        if let Some(index) = addresses.iter().position(|value| *value == address) {
+                            addresses.swap(0, index);
+                        }
+                    }
                     let peer = OutboundPeer {
                         discovery_id: candidate.id.clone(),
-                        addresses: candidate.addresses.clone(),
+                        addresses,
                     };
                     if recovered {
                         core.refresh_online(peer, Arc::clone(&stop), true);
@@ -877,6 +1012,7 @@ mod tests {
             addresses: vec![SocketAddr::new("127.0.0.1".parse().unwrap(), port)],
             reachable: false,
             failed_probes: 0,
+            lost_at: None,
         };
         assert_ne!(first_id, candidate.id);
         assert!(probe(&candidate).is_some());
@@ -913,6 +1049,7 @@ mod tests {
             addresses: vec!["127.0.0.1:54321".parse().unwrap()],
             reachable: false,
             failed_probes: 0,
+            lost_at: None,
         };
         assert!(candidate.record_probe(true));
         assert!(!candidate.record_probe(false));
@@ -926,6 +1063,16 @@ mod tests {
         assert!(candidate.record_probe(true));
         assert!(candidate.reachable);
         assert_eq!(candidate.failed_probes, 0);
+        let preferred: SocketAddr = "127.0.0.1:54322".parse().unwrap();
+        candidate.addresses.push(preferred);
+        candidate.prefer(preferred);
+        assert_eq!(candidate.addresses[0], preferred);
+        candidate.lost_at = Some(Instant::now());
+        candidate.reachable = false;
+        assert!(
+            candidate.record_probe(true),
+            "paired endpoint can recover after DNS loss"
+        );
     }
 
     #[test]

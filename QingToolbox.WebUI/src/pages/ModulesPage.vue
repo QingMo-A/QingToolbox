@@ -25,6 +25,7 @@ import type { TranslationKey } from '../localization/messages/en-US'
 import {
   moduleFilterLabelKey,
   moduleOperationFailureKey,
+  moduleOperationErrorKey,
   moduleOperationLabelKey,
   moduleOperationSuccessKey,
   moduleRuntimeStateKey,
@@ -171,8 +172,10 @@ async function operate(module: ModuleSnapshotItem, operation: LifecycleModuleOpe
     store.complete(snapshot)
     if (operation === 'load' || operation === 'unload') showLifecycleSuccess(module.id, operation)
     toast.show(t(moduleOperationSuccessKey(operation), { name: module.displayName }), 'success')
-  } catch {
-    toast.show(t(moduleOperationFailureKey(operation), { name: module.displayName }), 'error')
+  } catch (error) {
+    const reason = moduleOperationErrorKey(error)
+    const summary = t(moduleOperationFailureKey(operation), { name: module.displayName })
+    toast.show(reason ? `${summary} ${t(reason)}` : summary, 'error')
     await resyncAfterOperationFailure()
   } finally {
     store.endOperation(module.id)

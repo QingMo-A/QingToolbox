@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
-import type { BridgeEvent, BridgeRequest, BridgeResponse } from '../../contracts/app'
+import { isRecord, type BridgeEvent, type BridgeRequest, type BridgeResponse } from '../../contracts/app'
 import type { Transport } from './Transport'
 import type { FontOption, HostUpdateSnapshot as TauriHostUpdateSnapshot, ModuleListPayload, ModuleRuntimeSnapshot, ModuleSummary, SessionLogSnapshot, SettingsSnapshot as TauriSettingsSnapshot, StartupRegistrationSnapshot } from './tauriTypes'
 
@@ -227,6 +227,9 @@ export class TauriTransport implements Transport {
   private async updateSettings(update: Record<string, unknown>) { return this.withStartupStatus(invoke<TauriSettingsSnapshot>('update_settings', { update })) }
   private ok(message: BridgeRequest, payload: unknown): BridgeResponse { return { protocolVersion: message.protocolVersion, requestId: message.requestId, success: true, payload, error: null } }
   private fail(message: BridgeRequest, error: unknown): BridgeResponse {
+    if (isRecord(error) && typeof error.code === 'string' && typeof error.message === 'string') {
+      return { protocolVersion: message.protocolVersion, requestId: message.requestId, success: false, payload: null, error: { code: error.code, message: error.message } }
+    }
     const text = error instanceof Error ? error.message : String(error); const separator = text.indexOf(':')
     return { protocolVersion: message.protocolVersion, requestId: message.requestId, success: false, payload: null, error: { code: separator > 0 ? text.slice(0, separator) : 'TauriCommandFailed', message: separator > 0 ? text.slice(separator + 1).trim() : text } }
   }

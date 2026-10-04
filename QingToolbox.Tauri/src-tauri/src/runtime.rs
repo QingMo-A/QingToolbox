@@ -15,6 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::{
+    module_diagnostics::{capture_stderr, Diagnostics, Level},
     modules::ModuleRecord,
     paths::module_data_directory,
     protocol::{decode_line, ProtocolEnvelope, MAX_FRAME_BYTES},
@@ -81,6 +82,7 @@ enum RuntimeMessage {
 /// Owns only processes explicitly started by this host. Module paths come
 /// from the backend discovery index; callers never provide an executable path.
 pub struct ModuleRuntimeManager {
+    diagnostics: Arc<Diagnostics>,
     // A read-only projection for native input callbacks: never hold the IPC
     // mutex on the UI thread just to check whether a hotkey is still enabled.
     pub active_modules: Arc<Mutex<BTreeSet<String>>>,
@@ -91,8 +93,14 @@ pub struct ModuleRuntimeManager {
 }
 
 impl ModuleRuntimeManager {
+    #[cfg(test)]
     pub fn new() -> Self {
+        Self::with_diagnostics(Arc::new(Diagnostics::new(None)))
+    }
+
+    pub(crate) fn with_diagnostics(diagnostics: Arc<Diagnostics>) -> Self {
         Self {
+            diagnostics,
             active_modules: Arc::new(Mutex::new(BTreeSet::new())),
             running: BTreeMap::new(),
             snapshots: BTreeMap::new(),
@@ -102,6 +110,16 @@ impl ModuleRuntimeManager {
     }
 
     pub fn start(
+        &mut self,
+        module_id: &str,
+        record: &ModuleRecord,
+    ) -> Result<ModuleRuntimeSnapshot, RuntimeError> {
+        let result = self.start_inner(module_id, record);
+        self.log_failure(module_id, "load", &result);
+        result
+    }
+
+    fn start_inner(
         &mut self,
         module_id: &str,
         record: &ModuleRecord,
@@ -172,6 +190,12 @@ impl ModuleRuntimeManager {
             }
         };
         let stderr = child.stderr.take();
+        capture_stderr(
+            stderr,
+            Arc::clone(&self.diagnostics),
+            module_id.to_string(),
+            generation,
+        );
         let messages = match child.stdout.take() {
             Some(stdout) => spawn_stdout_reader(stdout),
             None => {
@@ -198,7 +222,18 @@ impl ModuleRuntimeManager {
             let _ = child.wait();
             return Err(error);
         }
-        drain_stderr(stderr);
+        self.diagnostics.record(
+            Level::Information,
+            module_id,
+            Some(generation),
+            "load",
+            None,
+            &format!(
+                "Started module process PID {} (version {}). Waiting for hello acknowledgement.",
+                child.id(),
+                record.version
+            ),
+        );
 
         self.running.insert(
             module_id.to_string(),
@@ -231,6 +266,18 @@ impl ModuleRuntimeManager {
     /// waiting, so the supervisor cannot consume the response out from under
     /// the request. Vue never gets access to the process pipe itself.
     pub fn invoke(
+        &mut self,
+        module_id: &str,
+        record: &ModuleRecord,
+        method: &str,
+        payload: Value,
+    ) -> Result<Value, RuntimeError> {
+        let result = self.invoke_inner(module_id, record, method, payload);
+        self.log_failure(module_id, &format!("invoke/{method}"), &result);
+        result
+    }
+
+    fn invoke_inner(
         &mut self,
         module_id: &str,
         record: &ModuleRecord,
@@ -273,6 +320,20 @@ impl ModuleRuntimeManager {
         module_id: &str,
         active: bool,
     ) -> Result<ModuleRuntimeSnapshot, RuntimeError> {
+        let result = self.set_active_inner(module_id, active);
+        self.log_failure(
+            module_id,
+            if active { "activate" } else { "deactivate" },
+            &result,
+        );
+        result
+    }
+
+    fn set_active_inner(
+        &mut self,
+        module_id: &str,
+        active: bool,
+    ) -> Result<ModuleRuntimeSnapshot, RuntimeError> {
         let initial = self.snapshot(module_id);
         self.wait_until_running(module_id, initial.state)?;
         if self
@@ -287,6 +348,17 @@ impl ModuleRuntimeManager {
             "module.lifecycle.request",
             format!("lifecycle-{}-{}", initial.generation, self.next_request_id),
             serde_json::json!({ "active": active }),
+        );
+        self.diagnostics.record(
+            Level::Information,
+            module_id,
+            Some(initial.generation),
+            if active { "activate" } else { "deactivate" },
+            None,
+            &format!(
+                "Sending lifecycle request {} (active={active}).",
+                request.request_id
+            ),
         );
         let response = self.exchange(
             module_id,
@@ -438,6 +510,18 @@ impl ModuleRuntimeManager {
     /// the event so callers can safely invalidate a Web surface only after the
     /// module has applied its state change.
     pub fn send_event(
+        &mut self,
+        module_id: &str,
+        record: &ModuleRecord,
+        event_type: &str,
+        payload: Value,
+    ) -> Result<(), RuntimeError> {
+        let result = self.send_event_inner(module_id, record, event_type, payload);
+        self.log_failure(module_id, &format!("event/{event_type}"), &result);
+        result
+    }
+
+    fn send_event_inner(
         &mut self,
         module_id: &str,
         record: &ModuleRecord,
@@ -674,6 +758,7 @@ impl ModuleRuntimeManager {
                         thread::sleep(Duration::from_millis(15));
                     }
                     _ => {
+                        self.diagnostics.record(Level::Warning, module_id, Some(running.generation), "unload", Some("forcedTermination"), "Module did not exit within the shutdown grace period; its owned process was terminated.");
                         let _ = running.child.kill();
                         let _ = running.child.wait();
                         break;
@@ -690,7 +775,34 @@ impl ModuleRuntimeManager {
         };
         self.snapshots
             .insert(module_id.to_string(), snapshot.clone());
+        self.diagnostics.record(
+            Level::Information,
+            module_id,
+            Some(snapshot.generation),
+            "unload",
+            None,
+            "Module unloaded.",
+        );
         snapshot
+    }
+
+    pub(crate) fn generation(&self, module_id: &str) -> Option<u64> {
+        self.snapshots
+            .get(module_id)
+            .map(|snapshot| snapshot.generation)
+    }
+
+    fn log_failure<T>(&self, module_id: &str, operation: &str, result: &Result<T, RuntimeError>) {
+        if let Err(error) = result {
+            self.diagnostics.record(
+                Level::Error,
+                module_id,
+                self.generation(module_id),
+                operation,
+                Some(error.code),
+                &error.message,
+            );
+        }
     }
 
     pub fn snapshot(&mut self, module_id: &str) -> ModuleRuntimeSnapshot {
@@ -872,12 +984,47 @@ impl ModuleRuntimeManager {
                 active.remove(module_id);
             }
         }
+        let changed = self.snapshots.get(module_id).map_or(true, |previous| {
+            previous.state != snapshot.state
+                || previous.generation != snapshot.generation
+                || previous.last_error != snapshot.last_error
+        });
+        if changed {
+            self.diagnostics.record(
+                if snapshot.state == ModuleRuntimeState::Failed {
+                    Level::Error
+                } else {
+                    Level::Information
+                },
+                module_id,
+                Some(snapshot.generation),
+                "state",
+                None,
+                &format!(
+                    "State changed to {:?}{}.",
+                    snapshot.state,
+                    snapshot
+                        .last_error
+                        .as_ref()
+                        .map(|error| format!(": {error}"))
+                        .unwrap_or_default()
+                ),
+            );
+        }
         self.snapshots
             .insert(module_id.to_string(), snapshot.clone());
         Some(snapshot)
     }
 
     fn fail_running(&mut self, module_id: &str, error: String) {
+        self.diagnostics.record(
+            Level::Error,
+            module_id,
+            self.generation(module_id),
+            "runtime",
+            Some("runtimeFailed"),
+            &error,
+        );
         if let Ok(mut active) = self.active_modules.lock() {
             active.remove(module_id);
         }
@@ -1049,21 +1196,6 @@ fn spawn_stdout_reader(stdout: ChildStdout) -> Receiver<RuntimeMessage> {
     receiver
 }
 
-fn drain_stderr(pipe: Option<impl std::io::Read + Send + 'static>) {
-    if let Some(pipe) = pipe {
-        thread::spawn(move || {
-            let mut reader = BufReader::new(pipe);
-            let mut line = String::new();
-            while reader.read_line(&mut line).is_ok() {
-                if line.is_empty() {
-                    break;
-                }
-                line.clear();
-            }
-        });
-    }
-}
-
 #[cfg(windows)]
 fn apply_hidden_process_flags(command: &mut Command) {
     use std::os::windows::process::CommandExt;
@@ -1095,6 +1227,19 @@ mod tests {
     use std::{collections::BTreeSet, env, path::PathBuf};
 
     #[test]
+    fn reactivation_failures_are_logged_without_changing_residency() {
+        let mut manager = ModuleRuntimeManager::new();
+        let error = manager.set_active("qing.launcher", true).unwrap_err();
+        assert_eq!(error.code, "moduleNotRunning");
+        let entries = manager.diagnostics.snapshot();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].category, "Module/qing.launcher");
+        assert_eq!(entries[0].level, "Error");
+        assert!(entries[0].message.contains("activate (moduleNotRunning)"));
+        assert!(manager.running.is_empty());
+    }
+
+    #[test]
     fn unsupported_entries_are_rejected_before_spawn() {
         let path = std::path::Path::new("module.dll");
         assert!(!is_supported_entry(path));
@@ -1115,10 +1260,21 @@ mod tests {
             events: BTreeSet::new(),
             source: ModuleSource::Bundled,
         };
-        let error = ModuleRuntimeManager::new()
-            .invoke("demo.operation", &record, "notAllowed", Value::Null)
+        let mut manager = ModuleRuntimeManager::new();
+        let error = manager
+            .invoke(
+                "demo.operation",
+                &record,
+                "notAllowed",
+                serde_json::json!({"secret": "PRIVATE-BUSINESS-PAYLOAD"}),
+            )
             .expect_err("undeclared operation must fail before spawn");
         assert_eq!(error.code, "operationNotDeclared");
+        let entries = manager.diagnostics.snapshot();
+        assert!(entries[0].message.contains("operationNotDeclared"));
+        assert!(!entries
+            .iter()
+            .any(|entry| entry.message.contains("PRIVATE-BUSINESS-PAYLOAD")));
     }
 
     #[test]

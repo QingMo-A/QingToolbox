@@ -1,7 +1,7 @@
 {
   "name": "qingtoolbox-tauri",
   "private": true,
-  "version": "0.3.3-alpha",
+  "version": "0.3.4-alpha",
   "type": "module",
   "description": "QingToolbox's lightweight Rust/Tauri host with Vue surfaces.",
   "scripts": {

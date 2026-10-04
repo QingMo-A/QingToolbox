@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import QButton from './QButton.vue'
-defineProps<{ deviceName: string; appName: string; title: string; label: string; buttonLabel: string }>()
+defineProps<{ deviceName: string; appName: string; title: string; label: string; buttonLabel: string; buttonDisabled?: boolean }>()
 defineEmits<{ action: [] }>()
 </script>
 
@@ -14,7 +14,7 @@ defineEmits<{ action: [] }>()
       </div>
       <h2 class="q-info-popup-title">{{ title }}</h2>
       <p class="q-info-popup-label">{{ label }}</p>
-      <div class="q-info-popup-actions"><QButton @click="$emit('action')">{{ buttonLabel }}</QButton></div>
+      <div class="q-info-popup-actions"><QButton :disabled="buttonDisabled" @click="$emit('action')">{{ buttonLabel }}</QButton></div>
     </div>
   </section>
 </template>

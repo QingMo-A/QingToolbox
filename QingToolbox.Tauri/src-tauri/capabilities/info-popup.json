@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "info-popup-capability",
   "description": "Restricted IPC for the transient device information popup.",
-  "windows": ["info-popup"],
+  "windows": ["info-popup", "info-popup-*"],
   "permissions": ["core:event:default", "core:window:default"]
 }

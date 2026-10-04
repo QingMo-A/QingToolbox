@@ -20,6 +20,27 @@ const operationFailureKeys: Record<LifecycleModuleOperation, TranslationKey> = {
   load: 'modules.toast.loadFailed', activate: 'modules.toast.activateFailed', open: 'modules.toast.openFailed',
   deactivate: 'modules.toast.deactivateFailed', unload: 'modules.toast.unloadFailed',
 }
+const operationErrorKeys: Record<string, TranslationKey> = {
+  hotkeyUnavailable: 'modules.error.hotkeyUnavailable',
+  hotkeyConflict: 'modules.error.hotkeyConflict',
+  hotkeyInvalid: 'modules.error.hotkeyInvalid',
+  moduleInvokeTimeout: 'modules.error.timeout',
+  moduleHandshakeTimeout: 'modules.error.timeout',
+  moduleHandshakeFailed: 'modules.error.handshake',
+  moduleProtocolFailed: 'modules.error.protocol',
+  moduleLifecycleInvalid: 'modules.error.lifecycle',
+  moduleNotRunning: 'modules.error.notLoaded',
+  moduleNotLoaded: 'modules.error.notLoaded',
+  moduleExited: 'modules.error.exited',
+  runtimeStartFailed: 'modules.error.startFailed',
+  moduleInvokeFailed: 'modules.error.rejected',
+  Busy: 'modules.error.busy',
+}
+export function moduleOperationErrorKey(error: unknown): TranslationKey | null {
+  const text = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+  const code = text.match(/^([A-Za-z][A-Za-z0-9]*):/)?.[1]
+  return code ? operationErrorKeys[code] ?? null : null
+}
 const runtimeKeys: Record<string, TranslationKey> = {
   NotLoaded: 'moduleState.notLoaded', Loaded: 'moduleState.loaded', Running: 'moduleState.running',
   Deactivated: 'moduleState.deactivated', Unloaded: 'moduleState.unloaded', Failed: 'moduleState.failed',

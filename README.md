@@ -8,8 +8,8 @@
 
 宿主保持最小，工具按需以独立进程模块交付。
 
-[![Host](https://img.shields.io/badge/host-0.3.1--alpha-blue?style=flat-square)](#版本状态)
-[![Release](https://img.shields.io/badge/release-v0.3.0--alpha-blue?style=flat-square)](https://github.com/QingMo-A/QingToolbox/releases)
+[![Host](https://img.shields.io/badge/host-0.3.4--alpha-blue?style=flat-square)](#版本状态)
+[![Release](https://img.shields.io/badge/release-v0.3.4--alpha-blue?style=flat-square)](https://github.com/QingMo-A/QingToolbox/releases)
 [![License](https://img.shields.io/github/license/QingMo-A/QingToolbox?style=flat-square&color=green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?style=flat-square&logo=windows11&logoColor=white)](#项目简介)
 
@@ -239,7 +239,7 @@ QingToolbox/
 
 | 发行线 | 当前版本 | 状态 |
 | --- | --- | --- |
-| Tauri 宿主（主线） | `0.3.3-alpha` | 最新已发布 `v0.3.3-alpha`（2026-10-03） |
+| Tauri 宿主（主线） | `0.3.4-alpha` | 最新已发布 `v0.3.4-alpha`（2026-10-04） |
 | WPF 宿主（历史） | `0.2.9-alpha` | 已冻结，仅维护历史安装链 |
 
 `0.3.0-alpha` 是首个 Rust/Tauri 2/Vue 3 宿主预览，沿用原有 QingToolbox 产品 AppId，因此可以就地覆盖既有的 WPF 或 Tauri 安装，不会产生第二条卸载记录。
@@ -349,6 +349,7 @@ QingToolbox/
 
 | 版本 | 发行线 | 日期 |
 | --- | --- | --- |
+| [`0.3.4-alpha`](docs/releases/0.3.4-alpha.md) | Tauri 宿主 | 2026-10-04 |
 | [`0.3.3-alpha`](docs/releases/0.3.3-alpha.md) | Tauri 宿主 | 2026-10-03 |
 | [`0.3.2-alpha`](docs/releases/0.3.2-alpha.md) | Tauri 宿主 | 2026-09-29 |
 | [`0.3.0-alpha`](docs/releases/0.3.0-alpha.md) | Tauri 宿主 | 2026-09-25 |
