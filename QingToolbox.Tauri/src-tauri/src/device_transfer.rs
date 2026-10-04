@@ -4,7 +4,7 @@
 //! identity matching is not a replacement for the planned QDS authenticated session.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     env,
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
@@ -89,6 +89,15 @@ struct TransferProgress {
 enum TransferPhase {
     WaitingAcceptance,
     Transferring,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ReceiveOutcome {
+    pub id: String,
+    pub peer_name: String,
+    pub file_name: String,
+    pub size: u64,
+    pub succeeded: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -242,6 +251,7 @@ struct SharedState {
     transfer: Option<TransferProgress>,
     last_completed: Option<String>,
     last_error: Option<String>,
+    receive_outcomes: VecDeque<ReceiveOutcome>,
 }
 
 struct DiscoveryRuntime {
@@ -263,6 +273,38 @@ pub(crate) struct TransferEngine {
 }
 
 impl TransferEngine {
+    /// A process-wide, single-consumer result queue; UI navigation cannot replay a receipt.
+    pub(crate) fn take_receive_outcomes(&self) -> Vec<ReceiveOutcome> {
+        lock_recover(&self.state)
+            .receive_outcomes
+            .drain(..)
+            .collect()
+    }
+
+    fn finish_receive(
+        &self,
+        session: &Session,
+        offer: &FileOfferWire,
+        notify: bool,
+        error: Option<String>,
+    ) {
+        let succeeded = error.is_none();
+        self.clear_transfer(error);
+        if notify {
+            let mut state = lock_recover(&self.state);
+            if state.receive_outcomes.len() >= 32 {
+                state.receive_outcomes.pop_front();
+            }
+            state.receive_outcomes.push_back(ReceiveOutcome {
+                id: unique_id(),
+                peer_name: session.peer.display_name.clone(),
+                file_name: offer.name.clone(),
+                size: offer.size,
+                succeeded,
+            });
+        }
+    }
+
     pub(crate) fn new(
         data_directory: PathBuf,
         legacy_directory: Option<&Path>,
@@ -1320,7 +1362,7 @@ fn receive_offer(
         let _ = send_wire(session, &WireMessage::FileReject);
         return;
     }
-    {
+    let (automatic, notify_result) = {
         let mut state = lock_recover(&app.state);
         if state.transfer.is_some() {
             drop(state);
@@ -1328,10 +1370,15 @@ fn receive_offer(
             return;
         }
         session.file_decision.clear();
-        state.incoming_file = Some(IncomingFile {
-            name: offer.name.clone(),
-            size: offer.size,
-        });
+        let automatic = default_destination(&state.receive, &offer.name, true);
+        state.incoming_file = if automatic.is_some() {
+            None
+        } else {
+            Some(IncomingFile {
+                name: offer.name.clone(),
+                size: offer.size,
+            })
+        };
         state.transfer = Some(TransferProgress {
             name: offer.name.clone(),
             completed: 0,
@@ -1341,10 +1388,7 @@ fn receive_offer(
         });
         state.last_completed = None;
         state.last_error = None;
-    }
-    let automatic = {
-        let state = lock_recover(&app.state);
-        default_destination(&state.receive, &offer.name, true)
+        (automatic, state.receive.auto_accept)
     };
     let decision = automatic
         .map(FileDecision::Accept)
@@ -1359,7 +1403,12 @@ fn receive_offer(
             false,
         );
         let _ = send_wire(session, &WireMessage::FileReject);
-        app.clear_transfer(Some("已拒绝接收文件或接收确认已超时。".to_string()));
+        app.finish_receive(
+            session,
+            &offer,
+            notify_result,
+            Some("已拒绝接收文件或接收确认已超时。".to_string()),
+        );
         return;
     };
     diag::record(
@@ -1375,7 +1424,12 @@ fn receive_offer(
         state.incoming_file = None;
     }
     if send_wire(session, &WireMessage::FileAccept).is_err() {
-        app.clear_transfer(Some("无法确认接收文件。".to_string()));
+        app.finish_receive(
+            session,
+            &offer,
+            notify_result,
+            Some("无法确认接收文件。".to_string()),
+        );
         return;
     }
     app.mark_transferring();
@@ -1383,9 +1437,30 @@ fn receive_offer(
     let ok = result.is_ok();
     let _ = send_wire(session, &WireMessage::FileResult(ok));
     match result {
-        Ok(()) => app.clear_transfer(None),
-        Err(error) => app.clear_transfer(Some(error.message)),
+        Ok(()) => app.finish_receive(session, &offer, notify_result, None),
+        Err(error) => app.finish_receive(session, &offer, notify_result, Some(error.message)),
     }
+}
+
+pub(crate) fn format_file_size(bytes: u64) -> String {
+    let units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1024.0 && unit < units.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+    size = (size * 100.0).round() / 100.0;
+    if size >= 1024.0 && unit < units.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+    let number = format!("{size:.2}");
+    format!(
+        "{} {}",
+        number.trim_end_matches('0').trim_end_matches('.'),
+        units[unit]
+    )
 }
 
 fn receive_bytes(
@@ -2135,6 +2210,18 @@ mod tests {
             fs::read(pc.directory.join("android-file.bin")).unwrap(),
             b"Android to PC"
         );
+        let results = pc.app.take_receive_outcomes();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].succeeded);
+        assert_eq!(results[0].file_name, "android-file.bin");
+        assert!(
+            pc.app.take_receive_outcomes().is_empty(),
+            "a receipt must not replay after navigation"
+        );
+        assert!(
+            phone.app.take_receive_outcomes().is_empty(),
+            "manual receive and outgoing send do not notify"
+        );
         pc.app.set_enabled(false);
         assert_eq!(pc.app.snapshot()["session"]["state"], "Idle");
         assert!(!pc.app.snapshot()["discovery"]["running"].as_bool().unwrap());
@@ -2225,5 +2312,106 @@ mod tests {
         assert!(default_destination(&settings, "a.txt", false).is_some());
         assert!(default_destination(&settings, "a.txt", true).is_none());
         let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn automatic_receive_checksum_failure_is_reported_once_and_discards_partial_file() {
+        let receiver = TestEngine::new("PC", "11111111111111111111111111111111");
+        fs::create_dir_all(&receiver.directory).unwrap();
+        lock_recover(&receiver.app.state).receive = ReceiveSettings {
+            default_directory: Some(receiver.directory.to_string_lossy().to_string()),
+            use_default_directory: true,
+            auto_accept: true,
+        };
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let mut remote = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        remote
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        let session = Session::new(
+            stream,
+            peer("22222222222222222222222222222222", "android", 12345),
+        );
+        let app = Arc::clone(&receiver.app);
+        let receive = thread::spawn(move || {
+            let mut reader = session.stream.lock().unwrap().try_clone().unwrap();
+            receive_offer(
+                &app,
+                &session,
+                &mut reader,
+                FileOfferWire {
+                    name: "corrupt.bin".to_string(),
+                    size: 1,
+                },
+            );
+        });
+        assert!(matches!(
+            read_wire(&mut remote).unwrap(),
+            WireMessage::FileAccept
+        ));
+        assert!(
+            receiver.app.snapshot()["incomingFile"].is_null(),
+            "automatic receive never asks for approval"
+        );
+        remote.write_all(b"x").unwrap();
+        write_wire(&mut remote, &WireMessage::FileEnd("0".repeat(64))).unwrap();
+        assert!(matches!(
+            read_wire(&mut remote).unwrap(),
+            WireMessage::FileResult(false)
+        ));
+        receive.join().unwrap();
+        let results = receiver.app.take_receive_outcomes();
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].succeeded);
+        assert_eq!(results[0].file_name, "corrupt.bin");
+        assert!(!receiver.directory.join("corrupt.bin").exists());
+        assert!(receiver.app.take_receive_outcomes().is_empty());
+    }
+
+    #[test]
+    fn receive_result_queue_is_bounded_and_keeps_distinct_file_attempts() {
+        let receiver = TestEngine::new("PC", "11111111111111111111111111111111");
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let _remote = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        let session = Session::new(
+            stream,
+            peer("22222222222222222222222222222222", "android", 12345),
+        );
+        let offer = FileOfferWire {
+            name: "same-file.bin".to_string(),
+            size: 0,
+        };
+        receiver.app.finish_receive(&session, &offer, false, None);
+        assert!(receiver.app.take_receive_outcomes().is_empty());
+        for _ in 0..40 {
+            receiver.app.finish_receive(&session, &offer, true, None);
+        }
+        let results = receiver.app.take_receive_outcomes();
+        assert_eq!(results.len(), 32);
+        assert_eq!(
+            results
+                .iter()
+                .map(|item| &item.id)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            32
+        );
+    }
+
+    #[test]
+    fn result_file_sizes_match_the_shell_formatter() {
+        for (bytes, expected) in [
+            (0, "0 B"),
+            (1023, "1023 B"),
+            (1024, "1 KB"),
+            (1536, "1.5 KB"),
+            (1048575, "1 MB"),
+            (1234567, "1.18 MB"),
+            (8589934592, "8 GB"),
+        ] {
+            assert_eq!(format_file_size(bytes), expected);
+        }
     }
 }

@@ -3764,7 +3764,18 @@ fn dismiss_info_popup_item(
 fn start_info_popup_pump(app: tauri::AppHandle) {
     thread::spawn(move || loop {
         let state = app.state::<HostState>();
-        let incoming = state.devices.take_notifications();
+        let mut incoming = state.devices.take_notifications();
+        let english = state
+            .settings
+            .lock()
+            .is_ok_and(|settings| settings.snapshot().language == "en-US");
+        incoming.extend(
+            state
+                .device_transfer
+                .take_receive_outcomes()
+                .into_iter()
+                .map(|result| receive_outcome_popup(result, english)),
+        );
         if !incoming.is_empty() {
             let mut show = false;
             if let Ok(mut queue) = state.info_popup.lock() {
@@ -3778,6 +3789,42 @@ fn start_info_popup_pump(app: tauri::AppHandle) {
         }
         thread::sleep(Duration::from_millis(250));
     });
+}
+
+fn receive_outcome_popup(
+    result: device_transfer::ReceiveOutcome,
+    english: bool,
+) -> device_pairing::ForwardedNotification {
+    let title = match (english, result.succeeded) {
+        (true, true) => "File received",
+        (true, false) => "Auto-receive failed",
+        (false, true) => "文件接收成功",
+        (false, false) => "自动接收失败",
+    };
+    let mut body = format!(
+        "{} ({})",
+        result.file_name,
+        device_transfer::format_file_size(result.size)
+    );
+    if !result.succeeded {
+        body.push_str(if english {
+            "\nCheck the receive folder permissions and device connection."
+        } else {
+            "\n请检查接收目录的权限和设备连接。"
+        });
+    }
+    device_pairing::ForwardedNotification {
+        id: format!("receive-{}", result.id),
+        device_name: result.peer_name,
+        app_name: if english {
+            "File transfer"
+        } else {
+            "文件传输"
+        }
+        .to_string(),
+        title: title.to_string(),
+        body,
+    }
 }
 
 fn start_device_transfer_pump(app: tauri::AppHandle) {
@@ -5242,6 +5289,32 @@ mod tests {
         assert!(!queue.enqueue(make("device-1")));
         assert_eq!(queue.current.as_ref().unwrap().id, "preview-1");
         assert_eq!(queue.pending.front().unwrap().id, "device-1");
+    }
+
+    #[test]
+    fn automatic_receive_results_use_the_message_popup_without_raw_errors_or_paths() {
+        for (english, succeeded, title) in [
+            (true, true, "File received"),
+            (true, false, "Auto-receive failed"),
+            (false, true, "文件接收成功"),
+            (false, false, "自动接收失败"),
+        ] {
+            let item = super::receive_outcome_popup(
+                crate::device_transfer::ReceiveOutcome {
+                    id: "attempt-1".to_string(),
+                    peer_name: "Phone".to_string(),
+                    file_name: "中文.pdf".to_string(),
+                    size: 1536,
+                    succeeded,
+                },
+                english,
+            );
+            assert_eq!(item.id, "receive-attempt-1");
+            assert_eq!(item.device_name, "Phone");
+            assert_eq!(item.title, title);
+            assert!(item.body.contains("中文.pdf (1.5 KB)"));
+            assert_eq!(item.body.contains('\n'), !succeeded);
+        }
     }
 
     #[test]
