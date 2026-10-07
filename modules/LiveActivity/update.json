@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.3",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-07T15:47:45Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.3-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/e03d6c5dfb4c7788043f697ffb9833178ea35ab9/modules/LiveActivity/packages/qing.liveactivity-0.1.3-tauri.qmod",
+        "size": 395392,
+        "sha256": "aba6306a5cc48e60b86bf055f040064883cc7ee0b1a831cf4e56892eacd3775d"
+      },
+      "releaseNotes": {
+        "zh-CN": "新增常驻、悬停、展开三个独立文本页签，悬停与展开支持同一套时间、计时器、倒计时及 Codex 数据占位符和无数据替代文本。展开支持换行及 Ctrl+Enter 保存，切换页签联动预览，刷新不覆盖未保存草稿。留空恢复默认内容；真实任务列表保留，展开自定义文本有独立区域。兼容旧配置，Codex 数据采集边界不变。",
+        "en-US": "Add independent compact, hover and expanded text editors using the same clock, stopwatch, countdown and Codex placeholders with missing-data fallbacks. Expanded text supports line breaks and Ctrl+Enter to save. Tabs select the matching preview; polling preserves unsaved drafts. Blank templates restore defaults, and real task rows remain intact with a separate expanded text slot. Existing profiles remain compatible; Codex observation boundaries are unchanged."
+      }
+    },
+    {
       "version": "0.1.2",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
