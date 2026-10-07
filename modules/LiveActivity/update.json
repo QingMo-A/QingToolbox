@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.2",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-07T15:13:04Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.2-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/960c13077a1eb7638ac8a1aea823aa6ffdc403b5/modules/LiveActivity/packages/qing.liveactivity-0.1.2-tauri.qmod",
+        "size": 391739,
+        "sha256": "267889293c730fdc8b6476b1a8c712e5dd60127f6fdbd87b93faa825459cac89"
+      },
+      "releaseNotes": {
+        "zh-CN": "新增计时器与倒计时，支持开始、暂停、继续、重置及文本占位符；关闭设置页后继续运行，停用模块时暂停。新增鼠标穿透和隐藏 30 秒/恢复，解决悬浮层遮挡操作。Codex 优先连接官方共享控制端点，失败则仅采集额度，并明确区分工作/等待状态与未接入桌面任务；不会启动或修改外部服务。本机或其他实例未开放共享端点时，仍不能读取其桌面对话。",
+        "en-US": "Add stopwatch and countdown timers with start/pause/resume/reset and text placeholders; keep timing after closing the settings page and pause on module deactivation. Add click-through and a 30-second hide/restore action. Prefer the official Codex shared control endpoint, fall back to account-only quotas, and distinguish observed working/waiting threads from unconnected desktop tasks. Never start or modify external services; instances without an exposed shared endpoint remain unobservable."
+      }
+    },
+    {
       "version": "0.1.1",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
