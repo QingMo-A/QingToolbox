@@ -1,0 +1,40 @@
+{
+  "id": "qing.liveactivity",
+  "name": "Qing Island",
+  "description": "A customizable Windows island with a local clock, text, frosted materials and optional Codex account quotas.",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "author": "QingMo-A",
+  "minimumHostVersion": "0.3.4-alpha",
+  "entry": "bin/qing-liveactivity-module.exe",
+  "runtimeType": "Process",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
+  "loadMode": "Startup",
+  "permissions": [
+    "ProcessStart",
+    "WindowControl"
+  ],
+  "icon": "icon.svg",
+  "defaultLanguage": "zh-CN",
+  "localization": {
+    "basePath": "i18n",
+    "resources": {
+      "en-US": "i18n/en-US.json",
+      "zh-CN": "i18n/zh-CN.json"
+    }
+  },
+  "operations": [
+    "getState",
+    "setSettings",
+    "previewIsland",
+    "dismissPreview",
+    "emitMockActivity",
+    "clearActivities",
+    "readDiagnostics",
+    "clearDiagnostics",
+    "setCodexEnabled",
+    "refreshProviders"
+  ]
+}

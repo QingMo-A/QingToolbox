@@ -8,7 +8,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Module catalog validation failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Module catalog tests failed.' }
 if ($MetadataOnly) { return }
 $env:Path = (Join-Path $HOME '.cargo/bin') + [IO.Path]::PathSeparator + $env:Path
-$mapping = [ordered]@{canary='Canary'; launcher='Launcher'; pdf='QingPdf'; powerguard='PowerGuard'; screenpin='ScreenPin'; texttools='TextTools'; windowtopmost='WindowTopmost'}
+$mapping = [ordered]@{canary='Canary'; launcher='Launcher'; liveactivity='LiveActivity'; pdf='QingPdf'; powerguard='PowerGuard'; screenpin='ScreenPin'; texttools='TextTools'; windowtopmost='WindowTopmost'}
 foreach ($scope in $mapping.Keys) {
     if ($Build) { & (Join-Path $PSScriptRoot 'build-module.ps1') -Module $scope -QingToolboxHostRoot $QingToolboxHostRoot }
     $manifest = Join-Path $root "modules/$($mapping[$scope])/Cargo.toml"
