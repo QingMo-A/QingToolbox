@@ -103,6 +103,8 @@ export type Settings = {
   showSeconds: boolean
   clock24Hour: boolean
   customText: string
+  peekText: string
+  expandedText: string
   placeholderFallback: string
   surfaceStyle: SurfaceStyle
   backgroundOpacity: number
@@ -125,7 +127,7 @@ export type IslandView = {
   overflow: number
   account: string | null
   accountHeader: string | null
-  ambient: { clock: string | null; date: string; text: string } | null
+  ambient: { clock: string | null; date: string; text: string; peekText: string | null; expandedText: string | null } | null
 }
 
 export type DiagnosticsEntry = {

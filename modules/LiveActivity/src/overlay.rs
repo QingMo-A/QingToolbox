@@ -289,6 +289,13 @@ impl IslandModel {
 
     /// The one extra row shown while hovering.
     pub fn peek_detail(&self) -> Option<String> {
+        if let Some(text) = self
+            .ambient
+            .as_ref()
+            .and_then(|content| content.peek_text.as_ref())
+        {
+            return Some(text.clone());
+        }
         let Some(focus) = self.focus.as_ref() else {
             return self
                 .ambient
@@ -314,6 +321,24 @@ impl IslandModel {
             }
         }
         self.account.clone().or_else(|| focus.subtitle.clone())
+    }
+
+    pub fn expanded_text(&self) -> Option<&str> {
+        self.ambient
+            .as_ref()
+            .and_then(|content| content.expanded_text.as_deref())
+    }
+
+    /// Keep real task rows intact; custom text receives a separate bounded slot.
+    pub fn expanded_text_extra_height(&self) -> f64 {
+        if self.state == IslandState::Expanded
+            && !self.stack.is_empty()
+            && self.expanded_text().is_some()
+        {
+            64.0
+        } else {
+            0.0
+        }
     }
 }
 
@@ -490,10 +515,15 @@ pub fn model_bounds(
     margin_logical: f64,
 ) -> Bounds {
     let mut bounds = configured_bounds(model.state(), monitor, settings, margin_logical);
-    if model.account_header().is_some()
+    let extra_height = if model.account_header().is_some()
         && matches!(model.state(), IslandState::Compact | IslandState::Peek)
     {
-        let height = model.state().logical_size().1 + 24.0;
+        24.0
+    } else {
+        model.expanded_text_extra_height()
+    };
+    if extra_height > 0.0 {
+        let height = model.state().logical_size().1 + extra_height;
         let margin = monitor.to_physical(margin_logical).max(0);
         bounds.height = monitor
             .to_physical(height * settings.scale.clamp(0.75, 1.5))
@@ -761,6 +791,7 @@ mod tests {
             clock: Some("12:34".into()),
             date: "2026-10-07".into(),
             text: String::new(),
+            ..Default::default()
         }));
         for dpi in [1.0, 1.5, 2.0] {
             for scale in [0.75, 1.0, 1.5] {
@@ -995,6 +1026,46 @@ mod tests {
             detail.contains("75%"),
             "a measurable bar wins: got {detail}"
         );
+    }
+
+    #[test]
+    fn custom_state_text_preserves_tasks_and_reserves_a_docked_expanded_slot() {
+        let mut model = IslandModel::new();
+        let item = activity("a", ActivityState::Running);
+        model.set_ambient(Some(crate::ambient::AmbientContent {
+            peek_text: Some("用户悬停".into()),
+            expanded_text: Some("额外文本\n余量 75%".into()),
+            ..Default::default()
+        }));
+        model.set_content(Some(item.clone()), vec![item], 0, Some("真实额度".into()));
+        model.set_hovered(true);
+        assert_eq!(model.peek_detail().as_deref(), Some("用户悬停"));
+        assert_eq!(model.expanded_text_extra_height(), 0.0);
+        model.toggle_expanded();
+        assert_eq!(model.expanded_text_extra_height(), 64.0);
+        assert_eq!(model.stack().len(), 1);
+        assert_eq!(model.account(), Some("真实额度"));
+        let area = monitor(1920, 1080, 1.0);
+        for anchor in [
+            crate::settings::Anchor::TopRight,
+            crate::settings::Anchor::BottomRight,
+        ] {
+            let settings = crate::settings::Settings {
+                anchor,
+                ..Default::default()
+            };
+            let old = configured_bounds(IslandState::Expanded, &area, &settings, 12.0);
+            let added = model_bounds(&model, &area, &settings, 12.0);
+            assert_eq!(added.height - old.height, area.to_physical(64.0));
+            if anchor.grows_downward() {
+                assert_eq!(added.y, old.y);
+            } else {
+                assert_eq!(added.y + added.height, old.y + old.height);
+            }
+        }
+        model.set_ambient(Some(crate::ambient::AmbientContent::default()));
+        assert_eq!(model.expanded_text_extra_height(), 0.0);
+        assert_ne!(model.peek_detail().as_deref(), Some("用户悬停"));
     }
 
     #[test]

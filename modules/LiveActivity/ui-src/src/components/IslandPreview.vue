@@ -23,13 +23,15 @@ const props = withDefaults(defineProps<{
   clock: string | null
   date?: string | null
   customText: string
+  peekText?: string | null
+  expandedText?: string | null
   compactWidth?: number
   offsetX?: number
   offsetY?: number
   mini?: boolean
   account?: string | null
   accountHeader?: string | null
-}>(), { compactWidth: 232, offsetX: 0, offsetY: 0, mini: false, account: null, accountHeader: null, date: null })
+}>(), { compactWidth: 232, offsetX: 0, offsetY: 0, mini: false, account: null, accountHeader: null, date: null, peekText: null, expandedText: null })
 const stage = ref<HTMLElement | null>(null)
 const stageSize = ref({ width: 360, height: 320 })
 let observer: ResizeObserver | undefined
@@ -95,15 +97,16 @@ const materialStyle = computed(() => {
     <div class="island" :class="`material-${surfaceStyle}`" :style="{ width: `${box.width}px`, height: `${box.height}px`, ...materialStyle, ...placementStyle }">
       <div class="island-bar">
         <i class="dot" />
-        <span class="pill-text">{{ customText || (clock ? date || 'Qing Island' : account || accountHeader ? 'Codex' : '模拟活动 · 运行中') }}</span>
+        <span class="pill-text">{{ customText || (clock ? date || 'Qing Island' : account || accountHeader ? 'Codex' : peekText !== null || expandedText !== null ? 'Qing Island' : '模拟活动 · 运行中') }}</span>
         <span v-if="clock" class="clock">{{ clock }}</span>
       </div>
       <div v-if="accountHeader && !mini" class="island-account-header" :title="accountHeader">{{ accountHeader }}</div>
       <div v-if="state !== 'compact'" class="island-row">
-        <span>{{ customText || (clock ? '本地时间' : account || accountHeader ? '点击查看额度' : '模拟导出 · 60%') }}</span>
+        <span>{{ peekText ?? (customText || (clock ? date || '本地时间' : account || accountHeader ? '点击查看额度' : '模拟导出 · 60%')) }}</span>
       </div>
       <div v-if="state === 'expanded'" class="island-stack">
-        <template v-if="clock || customText">
+        <div v-if="expandedText !== null" class="expanded-caption">{{ expandedText }}</div>
+        <template v-else-if="clock || customText">
           <div v-if="clock" class="large-clock">{{ clock }}</div>
           <div class="custom-caption">{{ customText }}</div>
         </template>
@@ -155,6 +158,7 @@ const materialStyle = computed(() => {
 .island-account-header { flex:none; height:calc(18px * var(--preview-scale)); line-height:calc(18px * var(--preview-scale)); font-size:calc(10px * var(--preview-scale)); color:var(--island-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .large-clock { margin-top:12px; font-size:calc(32px * var(--preview-scale)); font-weight:700; color:var(--island-ink); font-variant-numeric:tabular-nums; }
 .custom-caption { margin-top:12px; font-size:calc(13px * var(--preview-scale)); color:var(--island-muted); overflow-wrap:anywhere; }
+.expanded-caption { margin-top:4px; font-size:calc(16px * var(--preview-scale)); line-height:1.5; color:var(--island-ink); white-space:pre-wrap; overflow-wrap:anywhere; }
 .island-bar {
   display: flex;
   flex: 0 0 auto;
@@ -182,6 +186,9 @@ const materialStyle = computed(() => {
   color: var(--island-muted);
   font-size: calc(11px * var(--preview-scale));
   white-space: nowrap;
+  flex:none;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 .island-stack {
   display: flex;

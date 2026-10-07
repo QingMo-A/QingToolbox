@@ -2,7 +2,7 @@
   "id": "qing.liveactivity",
   "name": "Qing Island",
   "description": "A customizable Windows island with stopwatch/countdown timers, text templates, frosted materials, click-through and automatic Codex data.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "apiVersion": 1,
   "author": "QingMo-A",
   "minimumHostVersion": "0.3.4-alpha",

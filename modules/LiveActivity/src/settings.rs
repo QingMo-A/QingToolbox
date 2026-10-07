@@ -111,6 +111,8 @@ pub struct Settings {
     pub show_seconds: bool,
     pub clock_24_hour: bool,
     pub custom_text: String,
+    pub peek_text: String,
+    pub expanded_text: String,
     pub placeholder_fallback: String,
     pub surface_style: SurfaceStyle,
     pub background_opacity: f64,
@@ -174,6 +176,8 @@ impl Default for Settings {
             show_seconds: false,
             clock_24_hour: true,
             custom_text: String::new(),
+            peek_text: String::new(),
+            expanded_text: String::new(),
             placeholder_fallback: "暂无数据".into(),
             surface_style: SurfaceStyle::Translucent,
             background_opacity: 0.72,
@@ -206,22 +210,9 @@ impl Settings {
         }
         self.background_opacity = self.background_opacity.clamp(0.35, 1.0);
         self.background_color.normalize();
-        self.custom_text = self
-            .custom_text
-            .chars()
-            .filter_map(|c| {
-                if c.is_whitespace() {
-                    Some(' ')
-                } else if c.is_control() {
-                    None
-                } else {
-                    Some(c)
-                }
-            })
-            .take(MAX_CUSTOM_TEXT_CHARS)
-            .collect::<String>()
-            .trim()
-            .to_string();
+        self.custom_text = normalize_text(&self.custom_text, false);
+        self.peek_text = normalize_text(&self.peek_text, false);
+        self.expanded_text = normalize_text(&self.expanded_text, true);
         self.placeholder_fallback = self
             .placeholder_fallback
             .chars()
@@ -276,6 +267,27 @@ impl Settings {
     }
 }
 
+fn normalize_text(text: &str, multiline: bool) -> String {
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .chars()
+        .filter_map(|c| {
+            if multiline && c == '\n' {
+                Some(c)
+            } else if c.is_whitespace() {
+                Some(' ')
+            } else if c.is_control() {
+                None
+            } else {
+                Some(c)
+            }
+        })
+        .take(MAX_CUSTOM_TEXT_CHARS)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 /// Merge a partial patch from the settings UI into current settings.
 ///
 /// `None` fields are left alone, so the UI can send only what changed and a
@@ -300,6 +312,8 @@ pub struct SettingsPatch {
     pub show_seconds: Option<bool>,
     pub clock_24_hour: Option<bool>,
     pub custom_text: Option<String>,
+    pub peek_text: Option<String>,
+    pub expanded_text: Option<String>,
     pub placeholder_fallback: Option<String>,
     pub surface_style: Option<SurfaceStyle>,
     pub background_opacity: Option<f64>,
@@ -363,6 +377,12 @@ impl Settings {
         if let Some(value) = patch.custom_text {
             self.custom_text = value;
         }
+        if let Some(value) = patch.peek_text {
+            self.peek_text = value;
+        }
+        if let Some(value) = patch.expanded_text {
+            self.expanded_text = value;
+        }
         if let Some(value) = patch.placeholder_fallback {
             self.placeholder_fallback = value;
         }
@@ -392,6 +412,39 @@ impl Settings {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn state_text_is_additive_independent_bounded_and_persisted() {
+        let mut settings: Settings =
+            serde_json::from_value(serde_json::json!({"customText":"旧内容"})).unwrap();
+        assert!(settings.peek_text.is_empty() && settings.expanded_text.is_empty());
+        settings.apply(
+            serde_json::from_value(serde_json::json!({
+                "peekText":"  悬停\r\n{time}\u{0000}  ",
+                "expandedText":"  {date}\r\n剩余 {codex.remaining}\n  "
+            }))
+            .unwrap(),
+        );
+        assert_eq!(settings.custom_text, "旧内容");
+        assert_eq!(settings.peek_text, "悬停 {time}");
+        assert_eq!(settings.expanded_text, "{date}\n剩余 {codex.remaining}");
+        let path = temp_path("state-text");
+        settings.save(&path).unwrap();
+        assert_eq!(Settings::load(&path), settings);
+        let _ = std::fs::remove_file(path);
+        settings.apply(
+            serde_json::from_value(
+                serde_json::json!({"peekText":" ", "expandedText":"🌟".repeat(300)}),
+            )
+            .unwrap(),
+        );
+        assert!(settings.peek_text.is_empty());
+        assert_eq!(
+            settings.expanded_text.chars().count(),
+            MAX_CUSTOM_TEXT_CHARS
+        );
+        assert_eq!(settings.custom_text, "旧内容");
+    }
 
     #[test]
     fn additive_clock_and_style_settings_migrate_old_profiles() {

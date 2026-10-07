@@ -20,6 +20,8 @@
   "fields.showSeconds": "显示秒数",
   "fields.clock24Hour": "24 小时制",
   "fields.customText": "自定义文本",
+  "fields.peekText": "悬停文本",
+  "fields.expandedText": "展开文本",
   "fields.showStopwatch": "显示计时器",
   "fields.showCountdown": "显示倒计时",
   "fields.clickThrough": "鼠标穿透",

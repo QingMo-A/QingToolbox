@@ -20,6 +20,7 @@ input:focus-visible {
   outline: 2px solid var(--q-focus);
   outline-offset: 2px;
 }
+textarea:focus-visible { outline:2px solid var(--q-focus); outline-offset:2px; }
 .boot {
   padding: 40px;
   color: var(--q-text-3);
@@ -303,6 +304,7 @@ input[type='range'] {
 .text-input:focus { border-color:var(--q-brand); box-shadow:0 0 0 3px var(--q-brand-soft); }
 .text-input::placeholder { color:var(--q-text-3); }
 .text-input:disabled { opacity:.55; }
+.expanded-text-input { resize:vertical; min-height:82px; max-height:160px; line-height:1.5; font:inherit; }
 .custom-text-field { margin-top:2px; }
 .placeholder-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .placeholder-chips .q-button { font-size:10.5px; padding:4px 8px; }

@@ -447,6 +447,7 @@ pub fn draw(
             _ => 0x00F0B486,
         };
         let ambient = model.ambient();
+        let expanded_extra = model.expanded_text_extra_height();
         let header = model.account_header();
         let header_offset = if header.is_some() { 24.0 } else { 0.0 };
         let clock = ambient.and_then(|content| content.clock.as_deref());
@@ -500,7 +501,19 @@ pub fn draw(
         }
         if model.state() == IslandState::Expanded && model.stack().is_empty() {
             if let Some(content) = ambient {
-                if let Some(clock) = content.clock.as_deref() {
+                if let Some(text) = content.expanded_text.as_deref() {
+                    surface.paragraph(
+                        text,
+                        rect(
+                            22.0,
+                            66.0 + header_offset,
+                            width - 44.0,
+                            140.0 - header_offset,
+                        ),
+                        16.0 * scale,
+                        primary,
+                    );
+                } else if let Some(clock) = content.clock.as_deref() {
                     surface.label(
                         &content.date,
                         rect(22.0, 66.0 + header_offset, width - 44.0, 25.0),
@@ -604,7 +617,14 @@ pub fn draw(
                         "点击收起 · 移开鼠标自动收起".into()
                     }
                 });
-            if model.account().is_none() {
+            if let Some(text) = model.expanded_text() {
+                surface.paragraph(
+                    text,
+                    rect(17.0, 213.0, width - 34.0, expanded_extra),
+                    12.0 * scale,
+                    secondary,
+                );
+            } else if model.account().is_none() {
                 surface.label(
                     &footer,
                     rect(17.0, 229.0, width - 34.0, 23.0),
@@ -620,7 +640,7 @@ pub fn draw(
             if let Some(account) = model.account() {
                 surface.paragraph(
                     account,
-                    rect(17.0, 213.0, width - 34.0, 42.0),
+                    rect(17.0, 213.0 + expanded_extra, width - 34.0, 42.0),
                     10.0 * scale,
                     secondary,
                 );
@@ -827,6 +847,7 @@ mod tests {
                 clock: Some("12:34".into()),
                 date: "2026-10-06".into(),
                 text: "Qing Island".into(),
+                ..Default::default()
             }));
             model.set_hovered(true);
             let settings = Settings {
@@ -910,6 +931,7 @@ mod tests {
                 clock: Some("12:34".into()),
                 date: String::new(),
                 text: String::new(),
+                ..Default::default()
             }));
             model.toggle_expanded();
             assert_eq!(model.state(), IslandState::Expanded);

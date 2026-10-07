@@ -599,6 +599,13 @@ impl Module {
     /// and an idle one sleeps the full cap.
     fn tick_sleep(&self, now: u64) -> Duration {
         let cap_duration = if self.settings.show_clock
+            || [
+                &self.settings.custom_text,
+                &self.settings.peek_text,
+                &self.settings.expanded_text,
+            ]
+            .into_iter()
+            .any(|text| text_template::uses(text, "time"))
             || self.timers.running()
             || self.hidden_until.is_some()
             || self.program.state.running

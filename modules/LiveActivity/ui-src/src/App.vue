@@ -34,7 +34,7 @@ import ProviderCard from './components/ProviderCard.vue'
 import DiagnosticsPanel from './components/DiagnosticsPanel.vue'
 import { RefreshGate } from './refreshGate'
 import MaterialGallery from './components/MaterialGallery.vue'
-import { renderText } from './textTemplate'
+import { renderText, usesPlaceholder } from './textTemplate'
 import TimerControls from './components/TimerControls.vue'
 
 const context = ref<ModuleContext | null>(null)
@@ -46,6 +46,13 @@ const error = ref<string | null>(null)
 /** Set while the settings page is showing its own standalone preview. */
 const previewing = ref(false)
 const customTextDraft = ref('')
+const peekTextDraft = ref('')
+const expandedTextDraft = ref('')
+const textMode = ref<'customText' | 'peekText' | 'expandedText'>('customText')
+const textDrafts = { customText: customTextDraft, peekText: peekTextDraft, expandedText: expandedTextDraft }
+const textLabels = { customText: '常驻', peekText: '悬停', expandedText: '展开' }
+const textInputId = computed(() => ({ customText: 'custom-text', peekText: 'peek-text', expandedText: 'expanded-text' }[textMode.value]))
+const activeTextDraft = computed({ get: () => textDrafts[textMode.value].value, set: value => { textDrafts[textMode.value].value = value } })
 const fallbackDraft = ref('暂无数据')
 const colorDraft = ref<RgbColor>({ r: 21, g: 26, b: 37 })
 const geometryDraft = ref({ compactWidth: 232, offsetX: 0, offsetY: 0, scale: 1 })
@@ -97,6 +104,8 @@ async function run<T>(action: () => Promise<T>, apply: (value: T) => void): Prom
 
 function applyState(next: ModuleState): void {
   if (state.value?.settings.customText !== next.settings.customText) customTextDraft.value = next.settings.customText
+  if (state.value?.settings.peekText !== next.settings.peekText) peekTextDraft.value = next.settings.peekText
+  if (state.value?.settings.expandedText !== next.settings.expandedText) expandedTextDraft.value = next.settings.expandedText
   if (state.value?.settings.placeholderFallback !== next.settings.placeholderFallback) fallbackDraft.value = next.settings.placeholderFallback
   const previous = state.value?.settings.backgroundColor
   if (!previous || ['r', 'g', 'b'].some(key => previous[key as keyof RgbColor] !== next.settings.backgroundColor[key as keyof RgbColor])) {
@@ -174,14 +183,22 @@ async function togglePreview(): Promise<void> {
 
 async function insertPlaceholder(key: string): Promise<void> {
   refreshGate.invalidate()
-  const input = document.getElementById('custom-text') as HTMLInputElement | null
-  const start = input?.selectionStart ?? customTextDraft.value.length
+  const input = document.getElementById(textInputId.value) as HTMLInputElement | HTMLTextAreaElement | null
+  const start = input?.selectionStart ?? activeTextDraft.value.length
   const end = input?.selectionEnd ?? start
   const token = `{${key}}`
-  customTextDraft.value = Array.from(customTextDraft.value.slice(0, start) + token + customTextDraft.value.slice(end)).slice(0, 256).join('')
+  activeTextDraft.value = Array.from(activeTextDraft.value.slice(0, start) + token + activeTextDraft.value.slice(end)).slice(0, 256).join('')
   await nextTick()
   input?.focus()
-  input?.setSelectionRange(Math.min(start + token.length, customTextDraft.value.length), Math.min(start + token.length, customTextDraft.value.length))
+  input?.setSelectionRange(Math.min(start + token.length, activeTextDraft.value.length), Math.min(start + token.length, activeTextDraft.value.length))
+}
+
+function selectTextMode(mode: typeof textMode.value): void {
+  textMode.value = mode
+  previewState.value = mode === 'customText' ? 'compact' : mode === 'peekText' ? 'peek' : 'expanded'
+}
+async function saveText(): Promise<void> {
+  await patch({ [textMode.value]: activeTextDraft.value })
 }
 
 async function loadDiagnostics(): Promise<void> {
@@ -206,12 +223,14 @@ const previewText = computed(() => {
   let text = renderText(customTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value)
   if (state.value) for (const [key, label, show] of [['stopwatch', '计时', state.value.settings.showStopwatch], ['countdown', '倒计时', state.value.settings.showCountdown]] as const) {
     const timer = state.value.timers[key]
-    if (show && timer.started && (timer.finished || !customTextDraft.value.includes(`{${key}`))) {
+    if (show && timer.started && (timer.finished || !usesPlaceholder(customTextDraft.value, key))) {
       text += (text ? ' · ' : '') + (timer.finished ? '倒计时结束' : `${label} ${timer.text}${timer.running ? '' : '（已暂停）'}`)
     }
   }
   return text
 })
+const previewPeekText = computed(() => peekTextDraft.value.trim() ? renderText(peekTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) : null)
+const previewExpandedText = computed(() => expandedTextDraft.value.trim() ? renderText(expandedTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) : null)
 const unsupported = computed(() => state.value?.platform === 'unsupported')
 const canSimulate = computed(() => Boolean(state.value?.active && settings.value?.enabled))
 const previewClock = computed(() => {
@@ -369,10 +388,14 @@ async function close(): Promise<void> {
           <button type="button" :class="{ active: !settings.clock24Hour }" :disabled="busy || !settings.showClock" @click="patch({ clock24Hour: false })">12 小时制</button>
         </div>
         <div class="field custom-text-field">
-          <label class="field-label" for="custom-text">自定义文本</label>
+          <div class="segmented text-modes">
+            <button v-for="(label, mode) in textLabels" :key="mode" type="button" :class="{ active: textMode === mode }" :aria-pressed="textMode === mode" @click="selectTextMode(mode)">{{ label }}</button>
+          </div>
+          <label class="field-label" :for="textInputId">{{ textLabels[textMode] }}文本</label>
           <div class="text-editor">
-            <input id="custom-text" v-model="customTextDraft" class="text-input" type="text" maxlength="256" placeholder="文字或 {codex.remaining}，留空取消" :disabled="busy" @keydown.enter.prevent="patch({ customText: customTextDraft })" />
-            <QButton size="small" :disabled="busy || customTextDraft === settings.customText" @click="patch({ customText: customTextDraft })">保存</QButton>
+            <textarea v-if="textMode === 'expandedText'" :id="textInputId" v-model="activeTextDraft" class="text-input expanded-text-input" rows="3" maxlength="256" placeholder="支持换行与占位符，留空使用默认内容" :disabled="busy" @keydown.ctrl.enter.prevent="saveText" />
+            <input v-else :id="textInputId" v-model="activeTextDraft" class="text-input" type="text" maxlength="256" :placeholder="textMode === 'peekText' ? '留空使用默认悬停内容' : '文字或 {codex.remaining}，留空取消'" :disabled="busy" @keydown.enter.prevent="saveText" />
+            <QButton size="small" :disabled="busy || activeTextDraft === settings[textMode]" @click="saveText">保存</QButton>
           </div>
           <div class="placeholder-chips">
             <QButton v-for="item in state?.placeholders ?? []" :key="item.key" size="small" :disabled="busy" :title="`插入 {${item.key}}`" @click="insertPlaceholder(item.key)">{{ item.label }}</QButton>
@@ -593,6 +616,8 @@ async function close(): Promise<void> {
             :clock="previewClock"
             :date="island?.ambient?.date ?? null"
             :custom-text="previewText"
+            :peek-text="previewPeekText"
+            :expanded-text="previewExpandedText"
             :account="island?.account ?? null"
             :account-header="island?.accountHeader ?? null"
           />

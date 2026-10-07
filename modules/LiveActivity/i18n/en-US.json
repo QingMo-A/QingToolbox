@@ -20,6 +20,8 @@
   "fields.showSeconds": "Show seconds",
   "fields.clock24Hour": "24-hour clock",
   "fields.customText": "Custom text",
+  "fields.peekText": "Hover text",
+  "fields.expandedText": "Expanded text",
   "fields.showStopwatch": "Show stopwatch",
   "fields.showCountdown": "Show countdown",
   "fields.clickThrough": "Click through",

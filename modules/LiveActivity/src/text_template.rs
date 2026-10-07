@@ -155,10 +155,47 @@ pub fn render(template: &str, values: &Values, fallback: &str) -> String {
     output.chars().take(MAX_RENDERED_CHARS).collect()
 }
 
+/// Same finite grammar as rendering: escaped/unknown-prefix tokens are not data.
+pub fn uses(template: &str, key: &str) -> bool {
+    let mut rest = template;
+    while !rest.is_empty() {
+        if rest.starts_with("{{") || rest.starts_with("}}") {
+            rest = &rest[2..];
+            continue;
+        }
+        if rest.starts_with('{') {
+            if let Some(end) = rest.find('}') {
+                let body = &rest[1..end];
+                let name = body
+                    .split_once('|')
+                    .map(|(name, _)| name)
+                    .unwrap_or(body)
+                    .trim();
+                if name == key {
+                    return true;
+                }
+                if PLACEHOLDERS.iter().any(|(known, _)| *known == name) {
+                    rest = &rest[end + 1..];
+                    continue;
+                }
+            }
+        }
+        rest = &rest[rest.chars().next().unwrap().len_utf8()..];
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::providers::codex::protocol::RateLimitWindow;
+    #[test]
+    fn token_presence_matches_rendering_not_raw_prefixes() {
+        assert!(uses("{ time |未知}", "time"));
+        assert!(uses("{date}\n{stopwatch}", "stopwatch"));
+        assert!(!uses("{{time}} {timer} {timeXYZ}", "time"));
+        assert!(!uses("{codex.remaining|{time}}", "time"));
+    }
     #[test]
     fn data_missing_hidden_and_zero_are_distinct() {
         let mut settings = Settings::default();

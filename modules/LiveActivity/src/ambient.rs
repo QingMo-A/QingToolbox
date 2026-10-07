@@ -2,12 +2,14 @@
 use crate::settings::Settings;
 use serde::Serialize;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AmbientContent {
     pub clock: Option<String>,
     pub date: String,
     pub text: String,
+    pub peek_text: Option<String>,
+    pub expanded_text: Option<String>,
 }
 impl AmbientContent {
     pub fn label(&self) -> &str {
@@ -80,7 +82,12 @@ pub fn content_with_runtime(
     account: Option<&crate::providers::codex::worker::AccountSnapshot>,
     timers: Option<&crate::timers::Snapshot>,
 ) -> Option<AmbientContent> {
-    if !settings.show_clock && settings.custom_text.is_empty() && timers.is_none() {
+    if !settings.show_clock
+        && settings.custom_text.is_empty()
+        && settings.peek_text.is_empty()
+        && settings.expanded_text.is_empty()
+        && timers.is_none()
+    {
         return None;
     }
     let clock = time
@@ -102,6 +109,13 @@ pub fn content_with_runtime(
     let mut values =
         crate::text_template::values(settings, time, account, crate::activity::now_millis());
     apply_timer_values(settings, timers, &mut values);
+    let optional_text = |template: &str| {
+        (!template.is_empty()).then(|| {
+            crate::text_template::render(template, &values, &settings.placeholder_fallback)
+        })
+    };
+    let peek_text = optional_text(&settings.peek_text);
+    let expanded_text = optional_text(&settings.expanded_text);
     let mut text = crate::text_template::render(
         &settings.custom_text,
         &values,
@@ -124,7 +138,7 @@ pub fn content_with_runtime(
         ] {
             if show
                 && view.started
-                && (view.finished || !settings.custom_text.contains(&format!("{{{key}")))
+                && (view.finished || !crate::text_template::uses(&settings.custom_text, key))
             {
                 if !text.is_empty() {
                     text.push_str(" · ");
@@ -141,10 +155,16 @@ pub fn content_with_runtime(
             }
         }
     }
-    if clock.is_none() && text.is_empty() {
+    if clock.is_none() && text.is_empty() && peek_text.is_none() && expanded_text.is_none() {
         return None;
     }
-    Some(AmbientContent { clock, date, text })
+    Some(AmbientContent {
+        clock,
+        date,
+        text,
+        peek_text,
+        expanded_text,
+    })
 }
 
 pub fn apply_timer_values(
@@ -230,6 +250,49 @@ mod tests {
         let content = content_at(&settings, None).unwrap();
         assert_eq!(content.label(), "专注当下");
         assert!(content.clock.is_none());
+    }
+    #[test]
+    fn state_templates_use_the_same_real_values_and_visibility_fallbacks() {
+        let mut settings = Settings {
+            show_clock: false,
+            custom_text: "常驻".into(),
+            peek_text: "{time} · {codex.remaining|未接入}".into(),
+            expanded_text: "{date}\n余量 {codex.remaining}".into(),
+            placeholder_fallback: "暂无额度".into(),
+            ..Default::default()
+        };
+        let account = crate::providers::codex::worker::AccountSnapshot {
+            limits: Some(crate::providers::codex::protocol::RateLimits {
+                primary: Some(crate::providers::codex::protocol::RateLimitWindow {
+                    used_fraction: Some(0.25),
+                    ..Default::default()
+                }),
+                secondary: None,
+            }),
+            ..Default::default()
+        };
+        let content = content_with_data(&settings, Some(time(10)), Some(&account)).unwrap();
+        assert_eq!(content.text, "常驻");
+        assert_eq!(content.peek_text.as_deref(), Some("10:05 · 75%"));
+        assert_eq!(
+            content.expanded_text.as_deref(),
+            Some("2026-10-06\n余量 75%")
+        );
+        settings.show_codex_data = false;
+        let hidden = content_with_data(&settings, Some(time(10)), Some(&account)).unwrap();
+        assert_eq!(hidden.peek_text.as_deref(), Some("10:05 · 未接入"));
+        assert_eq!(
+            hidden.expanded_text.as_deref(),
+            Some("2026-10-06\n余量 暂无额度")
+        );
+        settings.custom_text.clear();
+        settings.expanded_text.clear();
+        assert!(
+            content_at(&settings, None).is_some(),
+            "peek-only content needs a compact entry"
+        );
+        settings.peek_text.clear();
+        assert!(content_at(&settings, None).is_none());
     }
     #[test]
     fn minute_clock_does_not_change_on_each_second() {
