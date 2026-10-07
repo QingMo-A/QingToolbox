@@ -2,5 +2,27 @@
   "schemaVersion": 2,
   "moduleId": "qing.liveactivity",
   "publisher": "QingMo-A",
-  "releases": []
+  "releases": [
+    {
+      "version": "0.1.0",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-07T06:51:30Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.0-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/7e435e1ebfffccb9faa6ab5e65b618ce683edb39/modules/LiveActivity/packages/qing.liveactivity-0.1.0-tauri.qmod",
+        "size": 367079,
+        "sha256": "ccf97f79ea183565050bd29c555d715691f458d633e3e89a179b8b7e0c6d2b74"
+      },
+      "releaseNotes": {
+        "zh-CN": "灵动岛首个官方预览版：本地时钟、自定义文本、RGB 颜色、实色/半透明/自绘磨砂，支持停靠、位置与尺寸调节。设置复用工具箱主题与控件，修复刷新打断拖动的问题。可选 Codex 账号剩余额度百分比与重置时间常显于日期/时间区域；不是其他 Codex 窗口的任务监听器，也不提供精确剩余 token 数。",
+        "en-US": "First official Qing Island preview: a local clock, custom text, RGB colors, solid/translucent/self-rendered frosted materials, docking and adjustable geometry. Host-themed controls and refresh gating prevent interrupted edits. Optional real Codex account quota percentages and reset countdowns appear in the clock header; this is not a monitor of other Codex windows or an exact remaining-token counter."
+      }
+    }
+  ]
 }

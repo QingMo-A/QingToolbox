@@ -19,6 +19,14 @@
       "updateManifest": "Launcher/update.json",
       "visibility": "public"
     },
+    "qing.liveactivity": {
+      "name": { "zh-CN": "灵动岛", "en-US": "Qing Island" },
+      "description": { "zh-CN": "桌面时钟、自定义文本、磨砂材质及可选 Codex 账号额度。", "en-US": "A desktop clock, custom text, frosted materials and optional Codex account quotas." },
+      "icon": "LiveActivity/icon.svg",
+      "moduleManifest": "LiveActivity/module.json",
+      "updateManifest": "LiveActivity/update.json",
+      "visibility": "public"
+    },
     "qing.pdf": {
       "name": { "zh-CN": "PDF 工具", "en-US": "Qing PDF" },
       "description": { "zh-CN": "在本地合并、拆分、提取和旋转 PDF。", "en-US": "Merge, split, extract and rotate PDFs locally." },

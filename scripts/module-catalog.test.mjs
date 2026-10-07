@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readFileSync } from 'node:fs'
 import { compareVersions, validateUpdate, validateCatalog } from './module-catalog.mjs'
 
 const release = () => ({
@@ -60,6 +61,10 @@ test('duplicate versions, invalid ranges, dates and incomplete translations are 
 })
 test('repository catalog contains only native modules, with diagnostics hidden from public browsing', () => {
   const result = validateCatalog(fileURLToPath(new URL('../modules', import.meta.url)))
-  assert.equal(result.modules, 7)
-  assert.equal(result.publicModules, 6)
+  const catalog = JSON.parse(readFileSync(new URL('../modules/index.json', import.meta.url), 'utf8'))
+  const entries = Object.values(catalog.modules)
+  assert.equal(result.modules, entries.length)
+  assert.equal(result.publicModules, entries.filter(entry => entry.visibility === 'public').length)
+  assert.equal(catalog.modules['qing.canary'].visibility, 'development')
+  assert.equal(catalog.modules['qing.liveactivity'].visibility, 'public')
 })
