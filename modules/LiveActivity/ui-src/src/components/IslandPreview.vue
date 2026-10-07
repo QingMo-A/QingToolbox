@@ -95,19 +95,19 @@ const materialStyle = computed(() => {
     <div class="island" :class="`material-${surfaceStyle}`" :style="{ width: `${box.width}px`, height: `${box.height}px`, ...materialStyle, ...placementStyle }">
       <div class="island-bar">
         <i class="dot" />
-        <span class="pill-text">{{ customText || (clock ? date || 'Qing Island' : '模拟活动 · 运行中') }}</span>
+        <span class="pill-text">{{ customText || (clock ? date || 'Qing Island' : account || accountHeader ? 'Codex' : '模拟活动 · 运行中') }}</span>
         <span v-if="clock" class="clock">{{ clock }}</span>
       </div>
       <div v-if="accountHeader && !mini" class="island-account-header" :title="accountHeader">{{ accountHeader }}</div>
       <div v-if="state !== 'compact'" class="island-row">
-        <span>{{ customText || (clock ? '本地时间' : '模拟导出 · 60%') }}</span>
+        <span>{{ customText || (clock ? '本地时间' : account || accountHeader ? '点击查看额度' : '模拟导出 · 60%') }}</span>
       </div>
       <div v-if="state === 'expanded'" class="island-stack">
         <template v-if="clock || customText">
           <div v-if="clock" class="large-clock">{{ clock }}</div>
           <div class="custom-caption">{{ customText }}</div>
         </template>
-        <template v-else>
+        <template v-else-if="!account && !accountHeader">
           <div class="item"><i class="dot warn" /><span>模拟导出</span><em>60%</em></div>
           <div class="item"><i class="dot ok" /><span>模拟完成</span><em>完成</em></div>
         </template>

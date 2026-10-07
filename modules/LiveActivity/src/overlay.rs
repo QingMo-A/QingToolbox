@@ -151,6 +151,7 @@ impl IslandModel {
     }
     pub fn set_account_header(&mut self, header: Option<String>) {
         self.account_header = header;
+        self.refresh_state();
     }
     pub fn ambient(&self) -> Option<&crate::ambient::AmbientContent> {
         self.ambient.as_ref()
@@ -167,8 +168,8 @@ impl IslandModel {
     /// Replace the content and recompute the state.
     ///
     /// The state is *derived* here rather than set from outside, so content and
-    /// presentation cannot drift apart: an empty broker always yields
-    /// `Dormant`, no matter what the pointer is doing.
+    /// presentation cannot drift apart: no activities, ambient text or account
+    /// data always yields `Dormant`, no matter what the pointer is doing.
     pub fn set_content(
         &mut self,
         focus: Option<LiveActivity>,
@@ -246,7 +247,11 @@ impl IslandModel {
         // No content, or suppressed by the fullscreen policy, means nothing to
         // draw regardless of where the pointer is.
         if self.suppressed
-            || (self.focus.is_none() && self.stack.is_empty() && self.ambient.is_none())
+            || (self.focus.is_none()
+                && self.stack.is_empty()
+                && self.ambient.is_none()
+                && self.account.is_none()
+                && self.account_header.is_none())
         {
             self.state = IslandState::Dormant;
             return;
@@ -269,7 +274,11 @@ impl IslandModel {
             return self
                 .ambient
                 .as_ref()
-                .map(|content| content.label().to_owned());
+                .map(|content| content.label().to_owned())
+                .or_else(|| {
+                    (self.account.is_some() || self.account_header.is_some())
+                        .then(|| "Codex".to_owned())
+                });
         };
         Some(format!(
             "{} · {}",

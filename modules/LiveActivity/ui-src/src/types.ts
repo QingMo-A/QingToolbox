@@ -78,6 +78,7 @@ export type Anchor = 'topLeft' | 'topCenter' | 'topRight' | 'bottomLeft' | 'bott
 export type MonitorStrategy = 'primary' | 'active'
 export type FullscreenPolicy = 'always' | 'hide' | 'important'
 export type SurfaceStyle = 'solid' | 'translucent' | 'frosted'
+export type DataPosition = 'header' | 'expanded' | 'customText'
 export type RgbColor = { r: number; g: number; b: number }
 
 export type Settings = {
@@ -95,11 +96,12 @@ export type Settings = {
   showSeconds: boolean
   clock24Hour: boolean
   customText: string
+  placeholderFallback: string
   surfaceStyle: SurfaceStyle
   backgroundOpacity: number
   backgroundColor: RgbColor
-  codexEnabled: boolean
-  codexIdleShutdownSeconds: number
+  showCodexData: boolean
+  codexDataPosition: DataPosition
 }
 
 /** A partial update. Only the fields the user touched are sent. */
@@ -137,6 +139,9 @@ export type ModuleState = {
   }
   providers: ProviderStatus[]
   codexAccount: CodexAccount
+  codexProgram: { running: boolean; checkedAtMs: number | null; error: string | null }
+  placeholders: { key: string; label: string }[]
+  templateValues: Record<string, string | null>
   overlay: {
     failure: string | null
     visible: boolean

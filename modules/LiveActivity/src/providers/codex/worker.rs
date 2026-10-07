@@ -68,6 +68,8 @@ pub struct ManagedCodex {
     commands: Option<mpsc::Sender<u64>>,
     stop: Arc<AtomicBool>,
     wake: Arc<Condvar>,
+    #[cfg(test)]
+    simulated: bool,
 }
 impl ManagedCodex {
     pub fn new(wake: Arc<Condvar>) -> Self {
@@ -79,6 +81,8 @@ impl ManagedCodex {
             commands: None,
             stop: Arc::new(AtomicBool::new(false)),
             wake,
+            #[cfg(test)]
+            simulated: false,
         }
     }
     pub fn configure(&mut self, enabled: bool, idle_seconds: u64) {
@@ -106,6 +110,10 @@ impl ManagedCodex {
         }
     }
     fn ensure_worker(&mut self) {
+        #[cfg(test)]
+        if self.simulated {
+            return;
+        }
         if !self.enabled || self.worker.is_some() {
             return;
         }
@@ -205,10 +213,16 @@ impl ManagedCodex {
 
     #[cfg(test)]
     pub fn set_limits_for_test(&mut self, limits: Option<RateLimits>) {
-        self.snapshot
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .limits = limits;
+        self.simulated = true;
+        let mut snapshot = self.snapshot.lock().unwrap_or_else(|p| p.into_inner());
+        snapshot.limits = limits;
+        snapshot.account.limits = limits;
+        snapshot.account.updated_at_ms = limits.map(|_| crate::activity::now_millis());
+    }
+
+    #[cfg(test)]
+    pub fn configured_for_test(&self) -> bool {
+        self.enabled
     }
 }
 impl Drop for ManagedCodex {

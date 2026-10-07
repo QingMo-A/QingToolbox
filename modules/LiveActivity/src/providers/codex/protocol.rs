@@ -303,7 +303,7 @@ impl RateLimitWindow {
         }
     }
 
-    fn reset_in(&self, now: u64) -> Option<String> {
+    pub fn reset_in(&self, now: u64) -> Option<String> {
         let at = self.resets_at?;
         let remaining = at.saturating_sub(now).div_ceil(60);
         Some(if at <= now {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { QButton, QIcon, QIconButton } from '@qingtoolbox/module-ui'
 import {
   clearActivities,
@@ -12,7 +12,6 @@ import {
   previewIsland,
   readDiagnostics,
   refreshProviders,
-  setCodexEnabled,
   setSettings,
 } from './bridge'
 import type {
@@ -32,6 +31,7 @@ import ProviderCard from './components/ProviderCard.vue'
 import DiagnosticsPanel from './components/DiagnosticsPanel.vue'
 import { RefreshGate } from './refreshGate'
 import MaterialGallery from './components/MaterialGallery.vue'
+import { renderText } from './textTemplate'
 
 const context = ref<ModuleContext | null>(null)
 const state = ref<ModuleState | null>(null)
@@ -42,6 +42,7 @@ const error = ref<string | null>(null)
 /** Set while the settings page is showing its own standalone preview. */
 const previewing = ref(false)
 const customTextDraft = ref('')
+const fallbackDraft = ref('暂无数据')
 const colorDraft = ref<RgbColor>({ r: 21, g: 26, b: 37 })
 const geometryDraft = ref({ compactWidth: 232, offsetX: 0, offsetY: 0, scale: 1 })
 const previewState = ref<'compact' | 'peek' | 'expanded'>('compact')
@@ -92,6 +93,7 @@ async function run<T>(action: () => Promise<T>, apply: (value: T) => void): Prom
 
 function applyState(next: ModuleState): void {
   if (state.value?.settings.customText !== next.settings.customText) customTextDraft.value = next.settings.customText
+  if (state.value?.settings.placeholderFallback !== next.settings.placeholderFallback) fallbackDraft.value = next.settings.placeholderFallback
   const previous = state.value?.settings.backgroundColor
   if (!previous || ['r', 'g', 'b'].some(key => previous[key as keyof RgbColor] !== next.settings.backgroundColor[key as keyof RgbColor])) {
     colorDraft.value = { ...next.settings.backgroundColor }
@@ -166,9 +168,16 @@ async function togglePreview(): Promise<void> {
   await run(() => previewIsland('progress'), applyState)
 }
 
-async function toggleCodex(): Promise<void> {
-  const enabled = !state.value?.settings.codexEnabled
-  await run(() => setCodexEnabled(enabled), applyState)
+async function insertPlaceholder(key: string): Promise<void> {
+  refreshGate.invalidate()
+  const input = document.getElementById('custom-text') as HTMLInputElement | null
+  const start = input?.selectionStart ?? customTextDraft.value.length
+  const end = input?.selectionEnd ?? start
+  const token = `{${key}}`
+  customTextDraft.value = Array.from(customTextDraft.value.slice(0, start) + token + customTextDraft.value.slice(end)).slice(0, 256).join('')
+  await nextTick()
+  input?.focus()
+  input?.setSelectionRange(Math.min(start + token.length, customTextDraft.value.length), Math.min(start + token.length, customTextDraft.value.length))
 }
 
 async function loadDiagnostics(): Promise<void> {
@@ -189,6 +198,7 @@ async function showMock(scenario: 'working' | 'waiting' | 'success' | 'failed' |
 
 const settings = computed(() => state.value?.settings ?? null)
 const island = computed(() => state.value?.island ?? null)
+const previewText = computed(() => renderText(customTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value))
 const unsupported = computed(() => state.value?.platform === 'unsupported')
 const canSimulate = computed(() => Boolean(state.value?.active && settings.value?.enabled))
 const previewClock = computed(() => {
@@ -299,7 +309,7 @@ async function close(): Promise<void> {
     <div v-if="settings" class="grid">
       <section class="card card-gallery">
         <h2>材质样式 <span class="sample-label">透明材质为 60% 示例</span></h2>
-        <MaterialGallery :selected="settings.surfaceStyle" :background-color="colorDraft" :custom-text="settings.customText" :disabled="busy" @select="patch({ surfaceStyle: $event })" />
+        <MaterialGallery :selected="settings.surfaceStyle" :background-color="colorDraft" :custom-text="previewText" :disabled="busy" @select="patch({ surfaceStyle: $event })" />
       </section>
       <!-- General ------------------------------------------------------- -->
       <section class="card card-general">
@@ -312,7 +322,7 @@ async function close(): Promise<void> {
             @change="patch({ enabled: ($event.target as HTMLInputElement).checked })"
           />
           <span>
-            <strong>启用实时活动</strong>
+            <strong>启用灵动岛</strong>
           </span>
         </label>
         <label class="switch">
@@ -348,8 +358,19 @@ async function close(): Promise<void> {
         <div class="field custom-text-field">
           <label class="field-label" for="custom-text">自定义文本</label>
           <div class="text-editor">
-            <input id="custom-text" v-model="customTextDraft" class="text-input" type="text" maxlength="96" placeholder="输入文字，留空取消" :disabled="busy" @keydown.enter.prevent="patch({ customText: customTextDraft })" />
+            <input id="custom-text" v-model="customTextDraft" class="text-input" type="text" maxlength="256" placeholder="文字或 {codex.remaining}，留空取消" :disabled="busy" @keydown.enter.prevent="patch({ customText: customTextDraft })" />
             <QButton size="small" :disabled="busy || customTextDraft === settings.customText" @click="patch({ customText: customTextDraft })">保存</QButton>
+          </div>
+          <div class="placeholder-chips">
+            <QButton v-for="item in state?.placeholders ?? []" :key="item.key" size="small" :disabled="busy" :title="`插入 {${item.key}}`" @click="insertPlaceholder(item.key)">{{ item.label }}</QButton>
+          </div>
+          <small class="hint">单独缺省：{codex.remaining|暂无额度}</small>
+        </div>
+        <div class="field">
+          <label class="field-label" for="placeholder-fallback">占位符无数据时显示</label>
+          <div class="text-editor">
+            <input id="placeholder-fallback" v-model="fallbackDraft" class="text-input" type="text" maxlength="48" placeholder="留空则隐藏缺失数据" :disabled="busy" @keydown.enter.prevent="patch({ placeholderFallback: fallbackDraft })" />
+            <QButton size="small" :disabled="busy || fallbackDraft === settings.placeholderFallback" @click="patch({ placeholderFallback: fallbackDraft })">保存</QButton>
           </div>
         </div>
       </section>
@@ -495,33 +516,22 @@ async function close(): Promise<void> {
         <label class="switch">
           <input
             type="checkbox"
-            :checked="settings.codexEnabled"
+            :checked="settings.showCodexData"
             :disabled="busy"
-            @change="toggleCodex()"
+            @change="patch({ showCodexData: ($event.target as HTMLInputElement).checked })"
           />
           <span>
-            <strong>连接 Codex</strong>
-            <small>
-              独立受管会话，不监听其他 Codex 窗口。连接成功不代表能读取其他窗口的任务。
-            </small>
+            <strong>显示 Codex 数据</strong>
+            <small>{{ state?.codexProgram.error ?? (state?.codexProgram.running ? '已检测到 Codex · 自动接入' : '等待 Codex 启动') }}</small>
           </span>
         </label>
-        <div v-if="settings.codexEnabled" class="field">
-          <span class="field-label">空闲关闭 · {{ settings.codexIdleShutdownSeconds }} 秒</span>
-          <input
-            type="range"
-            min="0"
-            max="1800"
-            step="60"
-            :value="settings.codexIdleShutdownSeconds"
-            :disabled="busy"
-            @change="
-              patch({
-                codexIdleShutdownSeconds: Number(($event.target as HTMLInputElement).value),
-              })
-            "
-          />
-          <small class="hint">0 表示只要模块在运行就让子进程常驻。</small>
+        <div class="field">
+          <span class="field-label">Codex 数据位置</span>
+          <div class="segmented data-position">
+            <button type="button" :class="{ active: settings.codexDataPosition === 'header' }" :disabled="busy || !settings.showCodexData" @click="patch({ codexDataPosition: 'header' })">日期/时间区域</button>
+            <button type="button" :class="{ active: settings.codexDataPosition === 'expanded' }" :disabled="busy || !settings.showCodexData" @click="patch({ codexDataPosition: 'expanded' })">展开面板底部</button>
+            <button type="button" :class="{ active: settings.codexDataPosition === 'customText' }" :disabled="busy || !settings.showCodexData" @click="patch({ codexDataPosition: 'customText' })">仅自定义文本</button>
+          </div>
         </div>
       </section>
 
@@ -555,7 +565,7 @@ async function close(): Promise<void> {
             :background-color="colorDraft"
             :clock="previewClock"
             :date="island?.ambient?.date ?? null"
-            :custom-text="settings.customText"
+            :custom-text="previewText"
             :account="island?.account ?? null"
             :account-header="island?.accountHeader ?? null"
           />

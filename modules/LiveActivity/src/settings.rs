@@ -11,8 +11,17 @@ use serde::{Deserialize, Serialize};
 
 /// Current settings schema. Bump when a field's meaning changes, not when a
 /// field is added, so that additive changes stay forward-compatible.
-pub const SETTINGS_VERSION: u32 = 1;
-pub const MAX_CUSTOM_TEXT_CHARS: usize = 96;
+pub const SETTINGS_VERSION: u32 = 2;
+pub const MAX_CUSTOM_TEXT_CHARS: usize = 256;
+pub const MAX_FALLBACK_CHARS: usize = 48;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DataPosition {
+    Header,
+    Expanded,
+    CustomText,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -98,12 +107,15 @@ pub struct Settings {
     pub show_seconds: bool,
     pub clock_24_hour: bool,
     pub custom_text: String,
+    pub placeholder_fallback: String,
     pub surface_style: SurfaceStyle,
     pub background_opacity: f64,
     pub background_color: RgbColor,
-    pub codex_enabled: bool,
-    /// Idle shutdown for the managed Codex app-server, in seconds. `0` keeps it
-    /// resident for as long as the module runs.
+    /// v1's connection switch migrates to visibility, never acquisition policy.
+    #[serde(alias = "codexEnabled")]
+    pub show_codex_data: bool,
+    pub codex_data_position: DataPosition,
+    /// Retained for v1 profile/API compatibility; automatic mode ignores it.
     pub codex_idle_shutdown_seconds: u64,
 }
 
@@ -154,12 +166,12 @@ impl Default for Settings {
             show_seconds: false,
             clock_24_hour: true,
             custom_text: String::new(),
+            placeholder_fallback: "暂无数据".into(),
             surface_style: SurfaceStyle::Translucent,
             background_opacity: 0.72,
             background_color: RgbColor::default(),
-            // Off by default: enabling Codex starts a child process, and that
-            // should be the user's explicit choice.
-            codex_enabled: false,
+            show_codex_data: true,
+            codex_data_position: DataPosition::Header,
             codex_idle_shutdown_seconds: 300,
         }
     }
@@ -199,14 +211,27 @@ impl Settings {
             .collect::<String>()
             .trim()
             .to_string();
+        self.placeholder_fallback = self
+            .placeholder_fallback
+            .chars()
+            .filter_map(|c| {
+                if c.is_whitespace() {
+                    Some(' ')
+                } else if c.is_control() {
+                    None
+                } else {
+                    Some(c)
+                }
+            })
+            .take(MAX_FALLBACK_CHARS)
+            .collect::<String>()
+            .trim()
+            .to_string();
         if self.codex_idle_shutdown_seconds > 3600 {
             self.codex_idle_shutdown_seconds = 3600;
         }
-        if self.version > SETTINGS_VERSION {
-            // A newer host wrote this file. Keep the known fields and reset the
-            // schema marker rather than discarding the user's preferences.
-            self.version = SETTINGS_VERSION;
-        }
+        // Migrate both older and forward-compatible profiles without discarding choices.
+        self.version = SETTINGS_VERSION;
     }
 
     pub fn load(path: &Path) -> Self {
@@ -260,10 +285,13 @@ pub struct SettingsPatch {
     pub show_seconds: Option<bool>,
     pub clock_24_hour: Option<bool>,
     pub custom_text: Option<String>,
+    pub placeholder_fallback: Option<String>,
     pub surface_style: Option<SurfaceStyle>,
     pub background_opacity: Option<f64>,
     pub background_color: Option<RgbColor>,
-    pub codex_enabled: Option<bool>,
+    #[serde(alias = "codexEnabled")]
+    pub show_codex_data: Option<bool>,
+    pub codex_data_position: Option<DataPosition>,
     pub codex_idle_shutdown_seconds: Option<u64>,
 }
 
@@ -308,6 +336,9 @@ impl Settings {
         if let Some(value) = patch.custom_text {
             self.custom_text = value;
         }
+        if let Some(value) = patch.placeholder_fallback {
+            self.placeholder_fallback = value;
+        }
         if let Some(value) = patch.surface_style {
             self.surface_style = value;
         }
@@ -317,8 +348,11 @@ impl Settings {
         if let Some(value) = patch.background_color {
             self.background_color = value;
         }
-        if let Some(value) = patch.codex_enabled {
-            self.codex_enabled = value;
+        if let Some(value) = patch.show_codex_data {
+            self.show_codex_data = value;
+        }
+        if let Some(value) = patch.codex_data_position {
+            self.codex_data_position = value;
         }
         if let Some(value) = patch.codex_idle_shutdown_seconds {
             self.codex_idle_shutdown_seconds = value;
@@ -435,10 +469,33 @@ mod tests {
     fn defaults_are_quiet_and_do_not_start_children() {
         let settings = Settings::default();
         assert!(!settings.enabled, "the island must not paint until asked");
-        assert!(!settings.codex_enabled, "no child process without consent");
+        assert!(settings.show_codex_data);
         assert_eq!(settings.scale, 1.0);
         assert_eq!(settings.anchor, Anchor::TopCenter);
         assert_eq!(settings.fullscreen_policy, FullscreenPolicy::Hide);
+    }
+
+    #[test]
+    fn v1_connection_choice_migrates_to_visibility_without_losing_style() {
+        let mut settings: Settings = serde_json::from_value(serde_json::json!({"version":1,"codexEnabled":false,"surfaceStyle":"frosted","customText":"剩余 {codex.remaining|未知}"})).unwrap();
+        settings.normalize();
+        assert_eq!(settings.version, 2);
+        assert!(!settings.show_codex_data);
+        assert_eq!(settings.surface_style, SurfaceStyle::Frosted);
+        assert_eq!(settings.codex_data_position, DataPosition::Header);
+        assert_eq!(settings.placeholder_fallback, "暂无数据");
+        assert!(serde_json::to_value(&settings)
+            .unwrap()
+            .get("codexEnabled")
+            .is_none());
+        settings.apply(
+            serde_json::from_value(
+                serde_json::json!({"showCodexData":true,"placeholderFallback":"\u{0}\t未知"}),
+            )
+            .unwrap(),
+        );
+        assert!(settings.show_codex_data);
+        assert_eq!(settings.placeholder_fallback, "未知");
     }
 
     #[test]
@@ -523,7 +580,7 @@ mod tests {
         assert_eq!(loaded.anchor, Anchor::BottomCenter);
         assert_eq!(loaded.monitor_strategy, MonitorStrategy::Active);
         assert_eq!(loaded.fullscreen_policy, FullscreenPolicy::Important);
-        assert!(loaded.codex_enabled);
+        assert!(loaded.show_codex_data);
         let _ = std::fs::remove_file(&path);
     }
 
@@ -531,7 +588,7 @@ mod tests {
     fn patch_leaves_unmentioned_fields_alone() {
         let mut settings = Settings {
             anchor: Anchor::BottomCenter,
-            codex_enabled: true,
+            show_codex_data: true,
             ..Settings::default()
         };
 
@@ -545,7 +602,7 @@ mod tests {
             Anchor::BottomCenter,
             "an unrelated field must survive"
         );
-        assert!(settings.codex_enabled);
+        assert!(settings.show_codex_data);
     }
 
     #[test]

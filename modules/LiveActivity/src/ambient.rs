@@ -63,6 +63,14 @@ pub fn clock_label(time: LocalTime, seconds: bool, twenty_four_hour: bool) -> St
 }
 
 pub fn content_at(settings: &Settings, time: Option<LocalTime>) -> Option<AmbientContent> {
+    content_with_data(settings, time, None)
+}
+
+pub fn content_with_data(
+    settings: &Settings,
+    time: Option<LocalTime>,
+    account: Option<&crate::providers::codex::worker::AccountSnapshot>,
+) -> Option<AmbientContent> {
     if !settings.show_clock && settings.custom_text.is_empty() {
         return None;
     }
@@ -82,17 +90,31 @@ pub fn content_at(settings: &Settings, time: Option<LocalTime>) -> Option<Ambien
             )
         })
         .unwrap_or_default();
-    if clock.is_none() && settings.custom_text.is_empty() {
+    let values =
+        crate::text_template::values(settings, time, account, crate::activity::now_millis());
+    let text = crate::text_template::render(
+        &settings.custom_text,
+        &values,
+        &settings.placeholder_fallback,
+    );
+    if clock.is_none() && text.is_empty() {
         return None;
     }
-    Some(AmbientContent {
-        clock,
-        date,
-        text: settings.custom_text.clone(),
-    })
+    Some(AmbientContent { clock, date, text })
 }
 
 pub fn current(settings: &Settings) -> Option<AmbientContent> {
+    content_at(settings, local_time())
+}
+
+pub fn current_with_data(
+    settings: &Settings,
+    account: Option<&crate::providers::codex::worker::AccountSnapshot>,
+) -> Option<AmbientContent> {
+    content_with_data(settings, local_time(), account)
+}
+
+pub fn local_time() -> Option<LocalTime> {
     #[cfg(windows)]
     let time = {
         let mut time = windows_sys::Win32::Foundation::SYSTEMTIME::default();
@@ -111,7 +133,7 @@ pub fn current(settings: &Settings) -> Option<AmbientContent> {
     };
     #[cfg(not(windows))]
     let time = None;
-    content_at(settings, time)
+    time
 }
 
 #[cfg(test)]

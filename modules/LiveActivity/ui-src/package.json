@@ -1,10 +1,10 @@
 {
   "name": "qing-liveactivity-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
-    "test": "node --experimental-strip-types --test src/refreshGate.test.mjs src/quota.test.mjs",
+    "test": "node --experimental-strip-types --test src/refreshGate.test.mjs src/quota.test.mjs src/textTemplate.test.mjs",
     "typecheck": "node ../../../scripts/build-module-ui.mjs --typecheck",
     "build": "node ../../../scripts/build-module-ui.mjs"
   },

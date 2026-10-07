@@ -46,8 +46,10 @@ mod fullscreen;
 mod overlay;
 mod paths;
 mod priority;
+mod programs;
 mod providers;
 mod settings;
+mod text_template;
 
 #[cfg(windows)]
 mod renderer;
@@ -283,6 +285,7 @@ struct Module {
     model: IslandModel,
     mock: MockProvider,
     codex: providers::codex::worker::ManagedCodex,
+    program: programs::ProgramMonitor,
     overlay: OverlayChannel,
     /// Set while a preview is on screen, so a broker update does not stomp it.
     preview_active: bool,
@@ -323,6 +326,7 @@ impl Module {
             model: IslandModel::new(),
             mock,
             codex,
+            program: programs::ProgramMonitor::new(),
             overlay,
             preview_active: false,
             preview_until: None,
@@ -334,7 +338,23 @@ impl Module {
     }
 
     fn provider_statuses(&self) -> Vec<ProviderStatus> {
-        vec![self.mock.status(), self.codex.status()]
+        let mut codex = self.codex.status();
+        if self.active && self.settings.enabled {
+            if !self.program.state.running {
+                codex = providers::disabled_status(
+                    ProviderKind::Codex,
+                    self.program
+                        .state
+                        .error
+                        .as_deref()
+                        .unwrap_or("等待 Codex 程序启动"),
+                );
+            } else if codex.health == providers::ProviderHealth::Disabled {
+                codex.health = providers::ProviderHealth::Disconnected;
+                codex.detail = Some("connecting".into());
+            }
+        }
+        vec![self.mock.status(), codex]
     }
 
     fn set_active(&mut self, active: bool) {
@@ -371,10 +391,14 @@ impl Module {
             self.mock.stop();
             self.broker.clear(None);
         }
-        self.codex.configure(
-            running && self.settings.codex_enabled,
-            self.settings.codex_idle_shutdown_seconds,
-        );
+        if running {
+            self.program.update(false);
+        } else {
+            self.program.clear();
+        }
+        // Visibility and templates do not control the data source lifetime.
+        self.codex
+            .configure(running && self.program.state.running, 0);
     }
 
     fn upsert(&mut self, activity: LiveActivity) -> bool {
@@ -397,18 +421,30 @@ impl Module {
 
     /// The account line the island shows under its stack.
     fn account_line(&self) -> Option<String> {
-        let (threads, usage, limits) = self.codex.cached();
-        if threads.is_empty() && usage.is_none() && limits.is_none() {
+        if !self.settings.show_codex_data
+            || self.settings.codex_data_position != settings::DataPosition::Expanded
+        {
             return None;
         }
-        providers::codex::threads::account_summary(limits.as_ref(), usage.as_ref())
+        self.account_data()?.limits?.remaining_summary()
     }
 
     fn account_header(&self) -> Option<String> {
-        self.codex
-            .cached()
-            .2
-            .and_then(|limits| limits.header_summary())
+        if !self.settings.show_codex_data
+            || self.settings.codex_data_position != settings::DataPosition::Header
+        {
+            return None;
+        }
+        self.account_data()?.limits?.header_summary()
+    }
+
+    fn account_data(&self) -> Option<providers::codex::worker::AccountSnapshot> {
+        (self.active && self.settings.enabled && self.program.state.running)
+            .then(|| self.codex.account_snapshot())
+    }
+
+    fn ambient_content(&self) -> Option<ambient::AmbientContent> {
+        ambient::current_with_data(&self.settings, self.account_data().as_ref())
     }
 
     /// Push current truth to the overlay thread.
@@ -421,7 +457,7 @@ impl Module {
     fn sync_overlay(&mut self, fullscreen: bool) {
         self.last_fullscreen = fullscreen;
         let ambient = if (self.active && self.settings.enabled) || self.preview_active {
-            ambient::current(&self.settings)
+            self.ambient_content()
         } else {
             None
         };
@@ -473,11 +509,9 @@ impl Module {
         if !self.active || !self.settings.enabled {
             return false;
         }
-        let mut changed = false;
-        let ambient = ambient::current(&self.settings);
-        if self.model.ambient() != ambient.as_ref() {
-            self.model.set_ambient(ambient);
-            changed = true;
+        let mut changed = self.program.update(false);
+        if changed {
+            self.codex.configure(self.program.state.running, 0);
         }
 
         // Each provider is polled exactly once per tick. Polling twice would
@@ -488,7 +522,16 @@ impl Module {
             changed |= self.upsert(activity);
         }
 
-        let codex_activities = self.codex.poll();
+        let mut codex_activities = self.codex.poll();
+        if !self.settings.show_codex_data {
+            codex_activities.clear();
+        }
+        // Resolve templates after the latest provider snapshot, not before it.
+        let ambient = self.ambient_content();
+        if self.model.ambient() != ambient.as_ref() {
+            self.model.set_ambient(ambient);
+            changed = true;
+        }
         // Quota can change with no running thread and no clock minute change.
         // Treat it as content, otherwise the native island keeps the old footer.
         changed |= self.model.account() != self.account_line().as_deref();
@@ -533,10 +576,19 @@ impl Module {
     /// interval, so a module holding a `Success` wakes exactly when it lapses
     /// and an idle one sleeps the full cap.
     fn tick_sleep(&self, now: u64) -> Duration {
-        let cap = MAX_TICK_SLEEP.as_millis() as u64;
+        let cap_duration = if self.settings.show_clock
+            || self.program.state.running
+            || self.preview_active
+            || self.settings.fullscreen_policy != settings::FullscreenPolicy::Always
+        {
+            MAX_TICK_SLEEP
+        } else {
+            self.program.until_probe().max(Duration::from_millis(16))
+        };
+        let cap = cap_duration.as_millis() as u64;
         match self.broker.next_expiry() {
             Some(at) => Duration::from_millis(at.saturating_sub(now).min(cap)),
-            None => MAX_TICK_SLEEP,
+            None => cap_duration,
         }
     }
 
@@ -935,13 +987,9 @@ fn spawn_tick_thread(
                 let _ = guard.invoke("dismissPreview", &json!({}));
             }
             let running = guard.active && guard.settings.enabled;
-            let ambient_work = guard.settings.show_clock
-                || (!guard.settings.custom_text.is_empty()
-                    && guard.settings.fullscreen_policy != settings::FullscreenPolicy::Always);
-            let work = running
-                && (guard.settings.codex_enabled
-                    || !guard.broker.activities().is_empty()
-                    || ambient_work);
+            // Active modules continue a low-frequency presence probe even if
+            // the clock/data display are hidden; inactive modules have no timer.
+            let work = running;
             if work {
                 let fullscreen = current_fullscreen();
                 let changed = guard.tick(activity::now_millis());
@@ -1023,6 +1071,10 @@ impl Module {
             }
             "setCodexEnabled" => self.set_codex_enabled(payload),
             "refreshProviders" => {
+                if self.active && self.settings.enabled {
+                    self.program.update(true);
+                    self.reconcile_providers();
+                }
                 self.codex.refresh();
                 let fullscreen = self.last_fullscreen;
                 self.tick(activity::now_millis());
@@ -1069,7 +1121,10 @@ impl Module {
                 "dropped": self.broker.dropped(),
             },
             "providers": self.provider_statuses(),
-            "codexAccount": self.codex.account_snapshot(),
+            "codexAccount": self.account_data().unwrap_or_default(),
+            "codexProgram": self.program.state,
+            "placeholders": text_template::PLACEHOLDERS.iter().map(|(key, label)| json!({"key":key,"label":label})).collect::<Vec<_>>(),
+            "templateValues": text_template::values(&self.settings, ambient::local_time(), self.account_data().as_ref(), activity::now_millis()),
             "overlay": {
                 // A round trip to the overlay thread would let a wedged overlay
                 // hang `getState`. The failure slot is the only piece of overlay
@@ -1144,7 +1199,7 @@ impl Module {
         self.preview_until = Some(Instant::now() + Duration::from_secs(30));
         self.model.set_suppressed(false);
         self.suppressed = false;
-        self.model.set_ambient(ambient::current(&self.settings));
+        self.model.set_ambient(self.ambient_content());
         // Mirror the preview into the reporting model as well, so an active
         // preview is visible through `getState` without waking the overlay.
         self.model
@@ -1153,7 +1208,7 @@ impl Module {
             settings: self.settings.clone(),
             focus: focus.clone(),
             stack: vec![focus],
-            ambient: ambient::current(&self.settings),
+            ambient: self.ambient_content(),
         });
         self.wake.notify_all();
         Ok(self.state_payload())
@@ -1194,7 +1249,8 @@ impl Module {
             .get("enabled")
             .and_then(Value::as_bool)
             .ok_or_else(|| ModuleError::invalid("enabled 必须是布尔值。"))?;
-        self.set_settings(&json!({"codexEnabled": enabled}))
+        // Kept for v1 callers: this operation now changes display only.
+        self.set_settings(&json!({"showCodexData": enabled}))
     }
 }
 
@@ -1561,6 +1617,9 @@ mod tests {
         module.settings.enabled = true;
         module.settings.show_clock = false;
         module.settings.custom_text = "Focus".into();
+        module.program.force_for_test(true);
+        module.reconcile_providers();
+        module.codex.set_limits_for_test(None);
         module.sync_overlay(false);
         assert!(!module.tick(activity::now_millis()));
         module
@@ -1570,7 +1629,7 @@ mod tests {
             )));
         assert!(module.tick(activity::now_millis()));
         module.sync_overlay(false);
-        assert_eq!(module.model.account(), Some("Codex · 额度剩余 75%"));
+        assert_eq!(module.model.account(), None);
         assert_eq!(
             module.model.account_header(),
             Some("额度剩余 75% · 重置时间未知")
@@ -1707,6 +1766,96 @@ mod tests {
             .invoke("setCodexEnabled", &json!({ "enabled": "yes" }))
             .unwrap_err();
         assert_eq!(error.code, "invalid_payload");
+    }
+
+    #[test]
+    fn automatic_acquisition_does_not_depend_on_visibility_and_stops_on_exit() {
+        let mut module = headless_module("codex-auto-presence");
+        module.program.force_for_test(true);
+        module.reconcile_providers();
+        module.codex.set_limits_for_test(None);
+        assert!(module.codex.configured_for_test());
+        module
+            .invoke("setSettings", &json!({"showCodexData":false}))
+            .unwrap();
+        assert!(
+            module.codex.configured_for_test(),
+            "hiding data must not stop acquisition"
+        );
+        module.program.force_for_test(false);
+        module.tick(activity::now_millis());
+        assert!(!module.codex.configured_for_test());
+        assert!(module.account_data().is_none());
+        module.set_active(false);
+        assert!(module.program.state.checked_at_ms.is_none());
+    }
+
+    #[test]
+    fn template_data_updates_live_and_each_position_is_exclusive() {
+        let mut module = headless_module("template-positions");
+        module.settings.custom_text = "额度 {codex.remaining|未连接}".into();
+        module.settings.codex_data_position = settings::DataPosition::CustomText;
+        module.program.force_for_test(true);
+        module.reconcile_providers();
+        module
+            .codex
+            .set_limits_for_test(Some(providers::codex::protocol::RateLimits::parse(
+                &json!({"usedPercent":25}),
+            )));
+        module.tick(activity::now_millis());
+        module.sync_overlay(false);
+        assert_eq!(module.model.ambient().unwrap().text, "额度 75%");
+        assert!(module.model.account().is_none() && module.model.account_header().is_none());
+        module
+            .invoke("setSettings", &json!({"codexDataPosition":"expanded"}))
+            .unwrap();
+        assert_eq!(module.model.account(), Some("Codex · 额度剩余 75%"));
+        assert!(module.model.account_header().is_none());
+        module
+            .invoke("setSettings", &json!({"codexDataPosition":"header"}))
+            .unwrap();
+        assert!(module.model.account().is_none() && module.model.account_header().is_some());
+        module.program.force_for_test(false);
+        module.tick(activity::now_millis());
+        module.sync_overlay(false);
+        assert_eq!(module.model.ambient().unwrap().text, "额度 未连接");
+        assert!(module.model.account_header().is_none());
+    }
+
+    #[test]
+    fn missing_template_with_blank_fallback_does_not_create_an_empty_island() {
+        let mut module = headless_module("template-empty");
+        module.invoke("setSettings", &json!({"customText":"{codex.remaining}","placeholderFallback":"","fullscreenPolicy":"always"})).unwrap();
+        assert!(module.model.ambient().is_none());
+        assert_eq!(module.model.state(), IslandState::Dormant);
+    }
+
+    #[test]
+    fn quota_alone_is_content_without_a_clock_or_custom_text() {
+        let mut module = headless_module("quota-only-content");
+        module.program.force_for_test(true);
+        module.reconcile_providers();
+        module
+            .codex
+            .set_limits_for_test(Some(providers::codex::protocol::RateLimits::parse(
+                &json!({"usedPercent":25}),
+            )));
+        for position in ["header", "expanded"] {
+            module
+                .invoke(
+                    "setSettings",
+                    &json!({"showClock":false,"customText":"","codexDataPosition":position}),
+                )
+                .unwrap();
+            assert!(module.model.ambient().is_none());
+            assert_eq!(module.model.state(), IslandState::Compact);
+            assert_eq!(module.model.compact_label().as_deref(), Some("Codex"));
+        }
+        module
+            .invoke("setSettings", &json!({"showCodexData":false}))
+            .unwrap();
+        assert_eq!(module.model.state(), IslandState::Dormant);
+        assert!(module.codex.configured_for_test());
     }
 
     #[test]

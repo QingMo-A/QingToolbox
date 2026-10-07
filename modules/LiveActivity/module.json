@@ -1,8 +1,8 @@
 {
   "id": "qing.liveactivity",
   "name": "Qing Island",
-  "description": "A customizable Windows island with a local clock, text, frosted materials and optional Codex account quotas.",
-  "version": "0.1.0",
+  "description": "A customizable Windows island with clock/text templates, frosted materials and automatic Codex account quotas.",
+  "version": "0.1.1",
   "apiVersion": 1,
   "author": "QingMo-A",
   "minimumHostVersion": "0.3.4-alpha",

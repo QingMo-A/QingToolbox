@@ -302,6 +302,9 @@ input[type='range'] {
 .text-input::placeholder { color:var(--q-text-3); }
 .text-input:disabled { opacity:.55; }
 .custom-text-field { margin-top:2px; }
+.placeholder-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.placeholder-chips .q-button { font-size:10.5px; padding:4px 8px; }
+.data-position { flex-wrap:wrap; }
 .switch:has(input:disabled) { opacity:.6; cursor:default; }
 
 .providers {
