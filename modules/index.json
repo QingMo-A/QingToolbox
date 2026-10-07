@@ -21,7 +21,7 @@
     },
     "qing.liveactivity": {
       "name": { "zh-CN": "灵动岛", "en-US": "Qing Island" },
-      "description": { "zh-CN": "桌面时钟、自定义文本、磨砂材质及可选 Codex 账号额度。", "en-US": "A desktop clock, custom text, frosted materials and optional Codex account quotas." },
+      "description": { "zh-CN": "桌面时钟、文本占位符、磨砂材质及自动 Codex 账号额度。", "en-US": "A desktop clock, text placeholders, frosted materials and automatic Codex account quotas." },
       "icon": "LiveActivity/icon.svg",
       "moduleManifest": "LiveActivity/module.json",
       "updateManifest": "LiveActivity/update.json",

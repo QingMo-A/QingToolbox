@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.1",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-07T14:07:33Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.1-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/a562905d547814a5141ccf3d68454a1c95bf1182/modules/LiveActivity/packages/qing.liveactivity-0.1.1-tauri.qmod",
+        "size": 381757,
+        "sha256": "4be27396c069a94b5392e221a70f8a54dd03cbf80db19df3ab83ec640d1a6683"
+      },
+      "releaseNotes": {
+        "zh-CN": "Codex 外部程序运行时自动接入，退出后停止采集并清空旧数据；排除灵动岛自身及其他实例的辅助进程树。数据显示独立于采集，支持日期/时间区域、展开面板底部、仅自定义文本三种位置。新增时间、日期、Codex 主/次额度及读取时间占位符，支持全局或单独无数据替代文本；兼容旧配置。额度仍为账号百分比，不是精确 token 或其他窗口任务监控。",
+        "en-US": "Automatically acquire Codex data while an external Codex process is running; stop and clear stale data on exit, excluding helper process trees from all Island instances. Display is independent of acquisition, with clock-header, expanded-footer and template-only positions. Add time/date, primary/secondary quota, reset and refresh-time placeholders with global or per-token fallbacks. Migrate legacy settings. Quotas remain account percentages, not exact tokens or other-window task monitoring."
+      }
+    },
+    {
       "version": "0.1.0",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
