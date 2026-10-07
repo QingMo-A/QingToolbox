@@ -3,7 +3,8 @@
 //! Scope, stated plainly because it is the most easily misunderstood part of
 //! this module:
 //!
-//! * This talks to **our own child process**. It does not read another
+//! * This owns either a proxy to a public control endpoint or an isolated
+//!   quota-reader child process. It does not read another
 //!   application's memory, does not scrape a WebView's DOM, does not read a
 //!   browser profile, and does not inject into a running desktop client.
 //! * If the Codex CLI is not installed, or the app-server does not speak the
@@ -154,6 +155,7 @@ enum Message {
 /// executable path into any log that dumps the provider.
 pub struct AppServer {
     child: Child,
+    shared: bool,
     stdin: ChildStdin,
     messages: Receiver<Message>,
     next_id: u64,
@@ -188,9 +190,43 @@ impl AppServer {
         executable: &std::path::Path,
         cancel: Arc<AtomicBool>,
     ) -> Result<Self, String> {
+        Self::spawn_mode(executable, cancel, false)
+    }
+
+    /// The official proxy connects to an already-running local service. It
+    /// never starts, stops or reconfigures the external daemon.
+    pub fn connect_observer(executable: &Path, cancel: Arc<AtomicBool>) -> Result<Self, String> {
+        match Self::spawn_proxy(executable, Arc::clone(&cancel)) {
+            Ok(server) => Ok(server),
+            Err(_) if cancel.load(Ordering::Relaxed) => Err("Codex connection cancelled".into()),
+            Err(_) => {
+                diagnostics::information(
+                    "codex",
+                    "shared control endpoint unavailable; using account-only connection",
+                );
+                Self::spawn_with_cancel(executable, cancel)
+            }
+        }
+    }
+
+    pub fn spawn_proxy(executable: &Path, cancel: Arc<AtomicBool>) -> Result<Self, String> {
+        Self::spawn_mode(executable, cancel, true)
+    }
+    pub fn shared(&self) -> bool {
+        self.shared
+    }
+
+    fn spawn_mode(
+        executable: &Path,
+        cancel: Arc<AtomicBool>,
+        shared: bool,
+    ) -> Result<Self, String> {
         let mut command = Command::new(executable);
+        command.arg("app-server");
+        if shared {
+            command.arg("proxy");
+        }
         command
-            .arg("app-server")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -228,10 +264,15 @@ impl AppServer {
         let messages = spawn_reader(stdout);
         diagnostics::information(
             "codex",
-            &format!("started managed app-server PID {}", child.id()),
+            if shared {
+                "started managed shared-endpoint proxy"
+            } else {
+                "started account-only app-server"
+            },
         );
         let mut server = Self {
             child,
+            shared,
             stdin,
             messages,
             next_id: 0,
@@ -255,6 +296,9 @@ impl AppServer {
     /// Notifications that arrive while waiting are buffered, so a chatty server
     /// cannot satisfy this request with somebody else's reply.
     pub fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        if !readonly_method(method, &params) {
+            return Err("Observer refuses this operation".into());
+        }
         self.next_id = self.next_id.saturating_add(1);
         let id = self.next_id;
         let frame = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
@@ -274,15 +318,21 @@ impl AppServer {
                 .recv_timeout(remaining.min(Duration::from_millis(100)))
             {
                 Ok(Message::Frame(frame)) => {
+                    // Server requests may reuse our numeric ID. Classify by
+                    // method first; observing must not approve or reject work
+                    // that belongs to another client on the shared service.
+                    if frame.get("method").is_some() && frame.get("id").is_some() {
+                        if !self.shared {
+                            self.write_frame(&json!({"id":frame["id"],"error":{"code":-32601,"message":"Observer does not handle interactive requests"}}))?;
+                        }
+                        continue;
+                    }
                     if frame.get("id").and_then(Value::as_u64) != Some(id) {
                         if frame.get("method").is_some() && frame.get("id").is_none() {
                             if self.pending.len() == 64 {
                                 self.pending.pop_front();
                             }
                             self.pending.push_back(frame);
-                        } else if frame.get("method").is_some() && frame.get("id").is_some() {
-                            // Observation never grants approval or supplies credentials.
-                            self.write_frame(&json!({"id": frame["id"], "error": {"code": -32601, "message": "Observer does not handle interactive requests"}}))?;
                         }
                         continue;
                     }
@@ -354,6 +404,14 @@ impl AppServer {
         self.stdin
             .flush()
             .map_err(|error| format!("could not flush app-server stdin: {error}"))
+    }
+}
+
+fn readonly_method(method: &str, params: &Value) -> bool {
+    match method {
+        "initialize" | "thread/loaded/list" | "account/rateLimits/read" => true,
+        "thread/read" => params["includeTurns"] == false && params["threadId"].is_string(),
+        _ => false,
     }
 }
 
@@ -561,6 +619,29 @@ fn apply_hidden(command: &mut Command) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn observer_cannot_start_resume_turns_or_read_conversation_bodies() {
+        for method in [
+            "thread/start",
+            "thread/resume",
+            "turn/start",
+            "turn/interrupt",
+            "account/login/start",
+            "thread/list",
+        ] {
+            assert!(!readonly_method(method, &json!({})));
+        }
+        assert!(readonly_method(
+            "thread/read",
+            &json!({"threadId":"t","includeTurns":false})
+        ));
+        assert!(!readonly_method(
+            "thread/read",
+            &json!({"threadId":"t","includeTurns":true})
+        ));
+        assert!(!readonly_method("thread/read", &json!({"threadId":"t"})));
+    }
 
     #[test]
     fn framer_splits_complete_lines_and_keeps_partial_ones() {

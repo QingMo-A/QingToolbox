@@ -126,12 +126,14 @@ h1 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
-  grid-template-areas: "gallery gallery" "appearance preview" "position preview" "general content" "display fullscreen" "providers providers" "diagnostics diagnostics";
+  grid-template-areas: "gallery gallery" "appearance preview" "position preview" "general content" "timers obstruction" "display fullscreen" "providers providers" "diagnostics diagnostics";
   align-items:start;
 }
 .card-gallery { grid-area:gallery; }
 .card-general { grid-area:general; }
 .card-content { grid-area:content; }
+.card-timers { grid-area:timers; }
+.card-obstruction { grid-area:obstruction; }
 .card-appearance { grid-area:appearance; }
 .card-position { grid-area:position; }
 .card-display { grid-area:display; }
@@ -305,6 +307,7 @@ input[type='range'] {
 .placeholder-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .placeholder-chips .q-button { font-size:10.5px; padding:4px 8px; }
 .data-position { flex-wrap:wrap; }
+.obstruction-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
 .switch:has(input:disabled) { opacity:.6; cursor:default; }
 
 .providers {
@@ -383,7 +386,7 @@ input[type='range'] {
   }
   .grid {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:"gallery" "appearance" "preview" "position" "content" "general" "display" "fullscreen" "providers" "diagnostics";
+    grid-template-areas:"gallery" "appearance" "preview" "position" "content" "timers" "obstruction" "general" "display" "fullscreen" "providers" "diagnostics";
   }
   .preview-row {
     grid-template-columns: minmax(0, 1fr);

@@ -65,3 +65,9 @@ export function setCodexEnabled(enabled: boolean): Promise<ModuleState> {
 export function refreshProviders(): Promise<ModuleState> {
   return invokeModule<ModuleState>('refreshProviders')
 }
+
+export function timerCommand(kind: 'stopwatch' | 'countdown', action: 'start' | 'pause' | 'reset'): Promise<ModuleState> {
+  return invokeModule<ModuleState>('timerCommand', { kind, action })
+}
+export function hideTemporarily(): Promise<ModuleState> { return invokeModule<ModuleState>('hideTemporarily') }
+export function restoreIsland(): Promise<ModuleState> { return invokeModule<ModuleState>('restoreIsland') }

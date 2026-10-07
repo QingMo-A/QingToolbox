@@ -71,7 +71,16 @@ pub fn content_with_data(
     time: Option<LocalTime>,
     account: Option<&crate::providers::codex::worker::AccountSnapshot>,
 ) -> Option<AmbientContent> {
-    if !settings.show_clock && settings.custom_text.is_empty() {
+    content_with_runtime(settings, time, account, None)
+}
+
+pub fn content_with_runtime(
+    settings: &Settings,
+    time: Option<LocalTime>,
+    account: Option<&crate::providers::codex::worker::AccountSnapshot>,
+    timers: Option<&crate::timers::Snapshot>,
+) -> Option<AmbientContent> {
+    if !settings.show_clock && settings.custom_text.is_empty() && timers.is_none() {
         return None;
     }
     let clock = time
@@ -90,17 +99,70 @@ pub fn content_with_data(
             )
         })
         .unwrap_or_default();
-    let values =
+    let mut values =
         crate::text_template::values(settings, time, account, crate::activity::now_millis());
-    let text = crate::text_template::render(
+    apply_timer_values(settings, timers, &mut values);
+    let mut text = crate::text_template::render(
         &settings.custom_text,
         &values,
         &settings.placeholder_fallback,
     );
+    if let Some(timers) = timers {
+        for (key, label, view, show) in [
+            (
+                "stopwatch",
+                "计时",
+                &timers.stopwatch,
+                settings.show_stopwatch,
+            ),
+            (
+                "countdown",
+                "倒计时",
+                &timers.countdown,
+                settings.show_countdown,
+            ),
+        ] {
+            if show
+                && view.started
+                && (view.finished || !settings.custom_text.contains(&format!("{{{key}")))
+            {
+                if !text.is_empty() {
+                    text.push_str(" · ");
+                }
+                if view.finished {
+                    text.push_str("倒计时结束");
+                } else {
+                    text.push_str(&format!(
+                        "{label} {}{}",
+                        view.text,
+                        if view.running { "" } else { "（已暂停）" }
+                    ));
+                }
+            }
+        }
+    }
     if clock.is_none() && text.is_empty() {
         return None;
     }
     Some(AmbientContent { clock, date, text })
+}
+
+pub fn apply_timer_values(
+    settings: &Settings,
+    timers: Option<&crate::timers::Snapshot>,
+    values: &mut crate::text_template::Values,
+) {
+    if let Some(timers) = timers {
+        for (key, view, show) in [
+            ("stopwatch", &timers.stopwatch, settings.show_stopwatch),
+            ("countdown", &timers.countdown, settings.show_countdown),
+        ] {
+            values.insert(
+                key.into(),
+                (show && view.started).then(|| view.text.clone()),
+            );
+        }
+    }
 }
 
 pub fn current(settings: &Settings) -> Option<AmbientContent> {

@@ -23,6 +23,9 @@ pub struct AccountSnapshot {
     pub attempt_at_ms: Option<u64>,
     pub error: Option<String>,
     pub poll_interval_seconds: u64,
+    pub connection_mode: Option<String>,
+    pub working_threads: usize,
+    pub waiting_threads: usize,
 }
 impl Default for AccountSnapshot {
     fn default() -> Self {
@@ -32,6 +35,9 @@ impl Default for AccountSnapshot {
             attempt_at_ms: None,
             error: None,
             poll_interval_seconds: super::POLL_INTERVAL.as_secs(),
+            connection_mode: None,
+            working_threads: 0,
+            waiting_threads: 0,
         }
     }
 }

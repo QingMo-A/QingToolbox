@@ -395,6 +395,31 @@ impl IslandWindow {
         self.hit_state.set_controls(controls);
     }
 
+    /// Layered WS_EX_TRANSPARENT forwards input to other GUI threads too.
+    pub fn set_click_through(&self, enabled: bool) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, WS_EX_TRANSPARENT};
+        unsafe {
+            let current = GetWindowLongPtrW(self.handle, GWL_EXSTYLE);
+            let next = if enabled {
+                current | WS_EX_TRANSPARENT as isize
+            } else {
+                current & !(WS_EX_TRANSPARENT as isize)
+            };
+            if current != next {
+                SetWindowLongPtrW(self.handle, GWL_EXSTYLE, next);
+            }
+        }
+        if enabled {
+            self.hit_state.hovered.store(0, Ordering::Relaxed);
+            self.hit_state.clicked.store(0, Ordering::Relaxed);
+        }
+    }
+
+    pub fn click_through(&self) -> bool {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, WS_EX_TRANSPARENT};
+        unsafe { GetWindowLongPtrW(self.handle, GWL_EXSTYLE) & WS_EX_TRANSPARENT as isize != 0 }
+    }
+
     pub fn set_visible(&self, visible: bool) {
         if !self.is_alive() {
             return;

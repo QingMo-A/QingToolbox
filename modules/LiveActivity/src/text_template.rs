@@ -10,6 +10,8 @@ pub const MAX_RENDERED_CHARS: usize = 96;
 pub const PLACEHOLDERS: &[(&str, &str)] = &[
     ("time", "时间"),
     ("date", "日期"),
+    ("stopwatch", "计时器"),
+    ("countdown", "倒计时"),
     ("codex.remaining", "Codex 剩余额度"),
     ("codex.reset", "Codex 距重置"),
     ("codex.primary.remaining", "主额度剩余"),

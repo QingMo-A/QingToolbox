@@ -50,6 +50,7 @@ mod programs;
 mod providers;
 mod settings;
 mod text_template;
+mod timers;
 
 #[cfg(windows)]
 mod renderer;
@@ -170,6 +171,7 @@ enum OverlayCommand {
         account: Option<String>,
         account_header: Option<String>,
         ambient: Option<ambient::AmbientContent>,
+        temporarily_hidden: bool,
         /// Set while a fullscreen application owns the foreground.
         fullscreen: bool,
     },
@@ -286,6 +288,8 @@ struct Module {
     mock: MockProvider,
     codex: providers::codex::worker::ManagedCodex,
     program: programs::ProgramMonitor,
+    timers: timers::Timers,
+    hidden_until: Option<Instant>,
     overlay: OverlayChannel,
     /// Set while a preview is on screen, so a broker update does not stomp it.
     preview_active: bool,
@@ -327,6 +331,8 @@ impl Module {
             mock,
             codex,
             program: programs::ProgramMonitor::new(),
+            timers: timers::Timers::default(),
+            hidden_until: None,
             overlay,
             preview_active: false,
             preview_until: None,
@@ -390,6 +396,7 @@ impl Module {
         } else {
             self.mock.stop();
             self.broker.clear(None);
+            self.timers.pause_all();
         }
         if running {
             self.program.update(false);
@@ -444,7 +451,12 @@ impl Module {
     }
 
     fn ambient_content(&self) -> Option<ambient::AmbientContent> {
-        ambient::current_with_data(&self.settings, self.account_data().as_ref())
+        ambient::content_with_runtime(
+            &self.settings,
+            ambient::local_time(),
+            self.account_data().as_ref(),
+            Some(&self.timers.snapshot(self.settings.countdown_seconds)),
+        )
     }
 
     /// Push current truth to the overlay thread.
@@ -476,6 +488,7 @@ impl Module {
         let snapshot = self.broker.snapshot(VISIBLE_LIMIT);
         self.suppressed = !self.active
             || !self.settings.enabled
+            || self.hidden_until.is_some_and(|at| Instant::now() < at)
             || !fullscreen::allows(
                 self.settings.fullscreen_policy,
                 fullscreen,
@@ -497,6 +510,7 @@ impl Module {
             account: self.account_line(),
             account_header: self.account_header(),
             ambient,
+            temporarily_hidden: self.hidden_until.is_some_and(|at| Instant::now() < at),
             fullscreen,
         });
     }
@@ -510,6 +524,14 @@ impl Module {
             return false;
         }
         let mut changed = self.program.update(false);
+        if self.hidden_until.is_some_and(|at| Instant::now() >= at) {
+            self.hidden_until = None;
+            changed = true;
+        }
+        if self.timers.tick(self.settings.countdown_seconds) {
+            diagnostics::information("timer", "countdown finished");
+            changed = true;
+        }
         if changed {
             self.codex.configure(self.program.state.running, 0);
         }
@@ -577,6 +599,8 @@ impl Module {
     /// and an idle one sleeps the full cap.
     fn tick_sleep(&self, now: u64) -> Duration {
         let cap_duration = if self.settings.show_clock
+            || self.timers.running()
+            || self.hidden_until.is_some()
             || self.program.state.running
             || self.preview_active
             || self.settings.fullscreen_policy != settings::FullscreenPolicy::Always
@@ -663,11 +687,13 @@ fn run_overlay_thread_windows(
                     account,
                     account_header,
                     ambient,
+                    temporarily_hidden,
                     fullscreen,
                 } => {
                     state.settings = settings;
                     if state.preview.is_none() {
                         let allowed = state.settings.enabled
+                            && !temporarily_hidden
                             && fullscreen::allows(
                                 state.settings.fullscreen_policy,
                                 fullscreen,
@@ -723,6 +749,7 @@ fn run_overlay_thread_windows(
             "renderCount":state.render_count,
             "material":state.window.as_ref().map(|w|w.material().as_str()),
             "materialFallback":state.window.as_ref().and_then(|w|w.material_fallback()),
+            "clickThrough":state.window.as_ref().is_some_and(|w|w.click_through()),
             "glassSamples":state.renderer.samples,"glassSampleMicros":state.renderer.sample_micros,
         });
         let animating = state.transition.as_ref().is_some_and(|t| t.is_active());
@@ -874,8 +901,17 @@ impl OverlayState {
         self.last_frame = Some(Instant::now());
 
         if let Some(active) = self.window.as_ref() {
-            let controls = interactive_regions(state, drawn, monitor.scale * self.settings.scale);
-            if let Err(error) = active.apply(drawn, true, monitor.scale * self.settings.scale) {
+            let controls = if self.settings.click_through {
+                Vec::new()
+            } else {
+                interactive_regions(state, drawn, monitor.scale * self.settings.scale)
+            };
+            active.set_click_through(self.settings.click_through);
+            if let Err(error) = active.apply(
+                drawn,
+                !self.settings.click_through,
+                monitor.scale * self.settings.scale,
+            ) {
                 diagnostics::warning("overlay", &format!("could not place the island: {error}"));
                 *failure.lock().unwrap_or_else(|p| p.into_inner()) = Some(error);
                 return;
@@ -913,6 +949,10 @@ impl OverlayState {
             return false;
         }
         let previous = self.model.state();
+        if self.settings.click_through {
+            self.model.set_hovered(false);
+            return self.model.state() != previous;
+        }
         if let Some(window) = &self.window {
             if window.take_click() {
                 self.model.toggle_expanded();
@@ -1034,6 +1074,9 @@ const OPERATIONS: &[&str] = &[
     "clearDiagnostics",
     "setCodexEnabled",
     "refreshProviders",
+    "timerCommand",
+    "hideTemporarily",
+    "restoreIsland",
 ];
 
 impl Module {
@@ -1041,6 +1084,35 @@ impl Module {
         match method {
             "getState" => Ok(self.state_payload()),
             "setSettings" => self.set_settings(payload),
+            "timerCommand" => {
+                let command: timers::Command = serde_json::from_value(payload.clone())
+                    .map_err(|_| ModuleError::invalid("计时器操作无效。"))?;
+                if matches!(command.action, timers::Action::Start)
+                    && (!self.active || !self.settings.enabled)
+                {
+                    return Err(ModuleError::new("inactive", "请先启用灵动岛。"));
+                }
+                self.timers.tick(self.settings.countdown_seconds);
+                self.timers.command(command);
+                self.sync_overlay(self.last_fullscreen);
+                self.wake.notify_all();
+                Ok(self.state_payload())
+            }
+            "hideTemporarily" => {
+                self.preview_active = false;
+                self.preview_until = None;
+                self.overlay.send(OverlayCommand::EndPreview);
+                self.hidden_until = Some(Instant::now() + Duration::from_secs(30));
+                self.sync_overlay(self.last_fullscreen);
+                self.wake.notify_all();
+                Ok(self.state_payload())
+            }
+            "restoreIsland" => {
+                self.hidden_until = None;
+                self.sync_overlay(self.last_fullscreen);
+                self.wake.notify_all();
+                Ok(self.state_payload())
+            }
             "previewIsland" => self.preview_island(payload),
             "dismissPreview" => {
                 self.preview_active = false;
@@ -1086,6 +1158,14 @@ impl Module {
     }
 
     fn state_payload(&self) -> Value {
+        let timers = self.timers.snapshot(self.settings.countdown_seconds);
+        let mut template_values = text_template::values(
+            &self.settings,
+            ambient::local_time(),
+            self.account_data().as_ref(),
+            activity::now_millis(),
+        );
+        ambient::apply_timer_values(&self.settings, Some(&timers), &mut template_values);
         let snapshot = self.broker.snapshot(VISIBLE_LIMIT);
         let native = self
             .overlay
@@ -1124,7 +1204,9 @@ impl Module {
             "codexAccount": self.account_data().unwrap_or_default(),
             "codexProgram": self.program.state,
             "placeholders": text_template::PLACEHOLDERS.iter().map(|(key, label)| json!({"key":key,"label":label})).collect::<Vec<_>>(),
-            "templateValues": text_template::values(&self.settings, ambient::local_time(), self.account_data().as_ref(), activity::now_millis()),
+            "templateValues": template_values,
+            "timers": timers,
+            "hiddenSeconds": self.hidden_until.map(|at| at.saturating_duration_since(Instant::now()).as_millis().div_ceil(1000)).unwrap_or(0),
             "overlay": {
                 // A round trip to the overlay thread would let a wedged overlay
                 // hang `getState`. The failure slot is the only piece of overlay
@@ -1137,6 +1219,7 @@ impl Module {
                 "renderCount": native["renderCount"].as_u64().unwrap_or(0),
                 "material":native["material"],
                 "materialFallback":native["materialFallback"],
+                "clickThrough":native["clickThrough"].as_bool().unwrap_or(false),
                 "glassSamples":native["glassSamples"],"glassSampleMicros":native["glassSampleMicros"],
             },
             "uptimeSeconds": self.started.elapsed().as_secs(),
@@ -1157,11 +1240,15 @@ impl Module {
             .map_err(|error| ModuleError::invalid(format!("设置参数无效：{error}")))?;
         let mut next = self.settings.clone();
         next.apply(patch);
+        let patch_duration_changed = next.countdown_seconds != self.settings.countdown_seconds;
         if let Err(error) = next.save(&self.settings_path) {
             diagnostics::warning("settings", &format!("could not persist settings: {error}"));
             return Err(ModuleError::new("persist_failed", error));
         }
         self.settings = next;
+        if patch_duration_changed {
+            self.timers.reset_countdown();
+        }
         self.reconcile_providers();
         self.wake.notify_all();
         // Use the tracked observation rather than probing again: the tick thread
@@ -1856,6 +1943,76 @@ mod tests {
             .unwrap();
         assert_eq!(module.model.state(), IslandState::Dormant);
         assert!(module.codex.configured_for_test());
+    }
+
+    #[test]
+    fn timer_runtime_outlives_ui_pause_and_hidden_island() {
+        let mut module = headless_module("timer-lifecycle");
+        module
+            .invoke(
+                "timerCommand",
+                &json!({"kind":"stopwatch","action":"start"}),
+            )
+            .unwrap();
+        assert!(module.state_payload()["timers"]["stopwatch"]["running"]
+            .as_bool()
+            .unwrap());
+        module.invoke("hideTemporarily", &json!({})).unwrap();
+        assert_eq!(module.model.state(), IslandState::Dormant);
+        assert!(module.timers.running());
+        module.invoke("restoreIsland", &json!({})).unwrap();
+        assert_ne!(module.model.state(), IslandState::Dormant);
+        module.set_active(false);
+        assert!(!module.timers.running());
+        assert!(module.timers.snapshot(300).stopwatch.started);
+        assert!(module
+            .invoke(
+                "timerCommand",
+                &json!({"kind":"stopwatch","action":"start"})
+            )
+            .is_err());
+        module.set_active(true);
+        assert!(
+            !module.timers.running(),
+            "enable must not silently restart a paused timer"
+        );
+        module
+            .invoke(
+                "timerCommand",
+                &json!({"kind":"countdown","action":"start"}),
+            )
+            .unwrap();
+        module
+            .invoke("setSettings", &json!({"countdownSeconds":10}))
+            .unwrap();
+        assert!(!module.timers.snapshot(10).countdown.started);
+        module.hidden_until = Some(Instant::now());
+        assert!(module.tick(activity::now_millis()));
+        assert!(module.hidden_until.is_none());
+    }
+
+    #[test]
+    fn timer_visibility_and_placeholder_fallbacks_are_independent_of_running() {
+        let mut module = headless_module("timer-text");
+        module
+            .invoke(
+                "timerCommand",
+                &json!({"kind":"stopwatch","action":"start"}),
+            )
+            .unwrap();
+        module.invoke("setSettings", &json!({"showClock":false,"customText":"计时 {stopwatch|未开始}","showStopwatch":true})).unwrap();
+        assert_eq!(module.model.ambient().unwrap().text, "计时 00:00:00");
+        module
+            .invoke("setSettings", &json!({"showStopwatch":false}))
+            .unwrap();
+        assert_eq!(module.model.ambient().unwrap().text, "计时 未开始");
+        assert!(module.timers.running());
+        assert!(module
+            .invoke(
+                "timerCommand",
+                &json!({"kind":"countdown","action":"delete"})
+            )
+            .is_err());
     }
 
     #[test]

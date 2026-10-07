@@ -103,6 +103,10 @@ pub struct Settings {
     pub offset_y: i32,
     /// Whether hovering the compact island reveals the peek row.
     pub peek_on_hover: bool,
+    pub click_through: bool,
+    pub show_stopwatch: bool,
+    pub show_countdown: bool,
+    pub countdown_seconds: u64,
     pub show_clock: bool,
     pub show_seconds: bool,
     pub clock_24_hour: bool,
@@ -162,6 +166,10 @@ impl Default for Settings {
             offset_x: 0,
             offset_y: 0,
             peek_on_hover: true,
+            click_through: false,
+            show_stopwatch: true,
+            show_countdown: true,
+            countdown_seconds: 300,
             show_clock: true,
             show_seconds: false,
             clock_24_hour: true,
@@ -188,6 +196,9 @@ impl Settings {
         }
         self.scale = self.scale.clamp(0.75, 1.5);
         self.compact_width = self.compact_width.clamp(200, 480);
+        self.countdown_seconds = self
+            .countdown_seconds
+            .clamp(1, crate::timers::MAX_COUNTDOWN_SECONDS);
         self.offset_x = self.offset_x.clamp(-4096, 4096);
         self.offset_y = self.offset_y.clamp(-4096, 4096);
         if !self.background_opacity.is_finite() {
@@ -281,6 +292,10 @@ pub struct SettingsPatch {
     pub offset_x: Option<i32>,
     pub offset_y: Option<i32>,
     pub peek_on_hover: Option<bool>,
+    pub click_through: Option<bool>,
+    pub show_stopwatch: Option<bool>,
+    pub show_countdown: Option<bool>,
+    pub countdown_seconds: Option<u64>,
     pub show_clock: Option<bool>,
     pub show_seconds: Option<bool>,
     pub clock_24_hour: Option<bool>,
@@ -323,6 +338,18 @@ impl Settings {
         }
         if let Some(value) = patch.peek_on_hover {
             self.peek_on_hover = value;
+        }
+        if let Some(value) = patch.click_through {
+            self.click_through = value;
+        }
+        if let Some(value) = patch.show_stopwatch {
+            self.show_stopwatch = value;
+        }
+        if let Some(value) = patch.show_countdown {
+            self.show_countdown = value;
+        }
+        if let Some(value) = patch.countdown_seconds {
+            self.countdown_seconds = value;
         }
         if let Some(value) = patch.show_clock {
             self.show_clock = value;

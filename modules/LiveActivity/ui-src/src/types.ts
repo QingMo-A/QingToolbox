@@ -72,6 +72,9 @@ export type CodexAccount = {
   attemptAtMs: number | null
   error: string | null
   pollIntervalSeconds: number
+  connectionMode: 'shared' | 'accountOnly' | null
+  workingThreads: number
+  waitingThreads: number
 }
 
 export type Anchor = 'topLeft' | 'topCenter' | 'topRight' | 'bottomLeft' | 'bottomCenter' | 'bottomRight'
@@ -92,6 +95,10 @@ export type Settings = {
   offsetX: number
   offsetY: number
   peekOnHover: boolean
+  clickThrough: boolean
+  showStopwatch: boolean
+  showCountdown: boolean
+  countdownSeconds: number
   showClock: boolean
   showSeconds: boolean
   clock24Hour: boolean
@@ -142,6 +149,8 @@ export type ModuleState = {
   codexProgram: { running: boolean; checkedAtMs: number | null; error: string | null }
   placeholders: { key: string; label: string }[]
   templateValues: Record<string, string | null>
+  timers: { stopwatch: TimerView; countdown: TimerView }
+  hiddenSeconds: number
   overlay: {
     failure: string | null
     visible: boolean
@@ -150,12 +159,15 @@ export type ModuleState = {
     renderCount: number
     material: SurfaceStyle | null
     materialFallback: string | null
+    clickThrough: boolean
     glassSamples: number | null
     glassSampleMicros: number | null
   }
   uptimeSeconds: number
   platform: 'windows' | 'unsupported'
 }
+
+export type TimerView = { running: boolean; started: boolean; finished: boolean; seconds: number; text: string }
 
 export type Diagnostics = {
   entries: DiagnosticsEntry[]

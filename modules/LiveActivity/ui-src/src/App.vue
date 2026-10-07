@@ -13,6 +13,9 @@ import {
   readDiagnostics,
   refreshProviders,
   setSettings,
+  timerCommand,
+  hideTemporarily,
+  restoreIsland,
 } from './bridge'
 import type {
   Anchor,
@@ -32,6 +35,7 @@ import DiagnosticsPanel from './components/DiagnosticsPanel.vue'
 import { RefreshGate } from './refreshGate'
 import MaterialGallery from './components/MaterialGallery.vue'
 import { renderText } from './textTemplate'
+import TimerControls from './components/TimerControls.vue'
 
 const context = ref<ModuleContext | null>(null)
 const state = ref<ModuleState | null>(null)
@@ -198,7 +202,16 @@ async function showMock(scenario: 'working' | 'waiting' | 'success' | 'failed' |
 
 const settings = computed(() => state.value?.settings ?? null)
 const island = computed(() => state.value?.island ?? null)
-const previewText = computed(() => renderText(customTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value))
+const previewText = computed(() => {
+  let text = renderText(customTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value)
+  if (state.value) for (const [key, label, show] of [['stopwatch', '计时', state.value.settings.showStopwatch], ['countdown', '倒计时', state.value.settings.showCountdown]] as const) {
+    const timer = state.value.timers[key]
+    if (show && timer.started && (timer.finished || !customTextDraft.value.includes(`{${key}`))) {
+      text += (text ? ' · ' : '') + (timer.finished ? '倒计时结束' : `${label} ${timer.text}${timer.running ? '' : '（已暂停）'}`)
+    }
+  }
+  return text
+})
 const unsupported = computed(() => state.value?.platform === 'unsupported')
 const canSimulate = computed(() => Boolean(state.value?.active && settings.value?.enabled))
 const previewClock = computed(() => {
@@ -372,6 +385,20 @@ async function close(): Promise<void> {
             <input id="placeholder-fallback" v-model="fallbackDraft" class="text-input" type="text" maxlength="48" placeholder="留空则隐藏缺失数据" :disabled="busy" @keydown.enter.prevent="patch({ placeholderFallback: fallbackDraft })" />
             <QButton size="small" :disabled="busy || fallbackDraft === settings.placeholderFallback" @click="patch({ placeholderFallback: fallbackDraft })">保存</QButton>
           </div>
+        </div>
+      </section>
+
+      <TimerControls v-if="state && settings" :settings="settings" :timers="state.timers" :busy="busy" :can-run="canSimulate" @patch="patch" @command="(kind, action) => run(() => timerCommand(kind, action), applyState)" />
+
+      <section class="card card-obstruction">
+        <h2>遮挡处理</h2>
+        <label class="switch">
+          <input type="checkbox" :checked="settings.clickThrough" :disabled="busy" @change="patch({ clickThrough: ($event.target as HTMLInputElement).checked })" />
+          <span><strong>鼠标穿透</strong><small>点击胶囊位置时操作下方窗口；在这里关闭穿透。</small></span>
+        </label>
+        <div class="obstruction-actions">
+          <QButton size="small" :disabled="busy || !canSimulate" @click="run(hideTemporarily, applyState)">隐藏 30 秒</QButton>
+          <QButton size="small" :disabled="busy || !state?.hiddenSeconds" @click="run(restoreIsland, applyState)">恢复显示{{ state?.hiddenSeconds ? ` · ${state.hiddenSeconds}s` : '' }}</QButton>
         </div>
       </section>
 

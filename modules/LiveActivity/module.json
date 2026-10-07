@@ -1,8 +1,8 @@
 {
   "id": "qing.liveactivity",
   "name": "Qing Island",
-  "description": "A customizable Windows island with clock/text templates, frosted materials and automatic Codex account quotas.",
-  "version": "0.1.1",
+  "description": "A customizable Windows island with stopwatch/countdown timers, text templates, frosted materials, click-through and automatic Codex data.",
+  "version": "0.1.2",
   "apiVersion": 1,
   "author": "QingMo-A",
   "minimumHostVersion": "0.3.4-alpha",
@@ -35,6 +35,9 @@
     "readDiagnostics",
     "clearDiagnostics",
     "setCodexEnabled",
-    "refreshProviders"
+    "refreshProviders",
+    "timerCommand",
+    "hideTemporarily",
+    "restoreIsland"
   ]
 }

@@ -37,7 +37,10 @@ const detail = computed(() => {
     const message = props.status?.detail
     if (message?.includes('CLI was not found')) return '未找到 Codex 程序；请安装 Codex 或配置程序路径'
     if (message === 'connecting') return '正在连接 Codex…'
-    if (props.status?.health === 'connected') return `已连接 · 独立会话中 ${props.status.activityCount} 个任务`
+    if (props.status?.health === 'connected') {
+      if (props.account?.connectionMode === 'shared') return `共享实例 · 工作 ${props.account.workingThreads} · 等待 ${props.account.waitingThreads}`
+      return '仅额度连接 · 桌面任务未接入'
+    }
   }
   return props.status?.detail ?? HEALTH[props.status?.health ?? 'disabled']
 })
@@ -52,7 +55,7 @@ const health = computed<ProviderHealth | 'planned'>(() =>
     <div class="head">
       <i class="dot" />
       <strong>{{ NAME[kind] }}</strong>
-      <span v-if="implemented && status" class="count">
+      <span v-if="implemented && status && (kind !== 'codex' || account?.connectionMode === 'shared')" class="count">
         {{ status.activityCount }}
       </span>
     </div>

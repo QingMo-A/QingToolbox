@@ -3,11 +3,9 @@
 //! Design decisions worth stating, because each one exists to stop a specific
 //! failure mode:
 //!
-//! * **We manage our own app-server.** Reading a *different* Codex process's
-//!   threads would require reading its memory, its socket, or its private
-//!   state, none of which is a supported interface. So this provider starts its
-//!   own child and reports what *that* child reports. The honest consequence is
-//!   that a session the user started elsewhere is invisible here.
+//! * **Read-only supported endpoints only.** Try the official local control
+//!   proxy, then fall back to a clearly marked account-only child. Never read
+//!   private process state or load disk history as if it were a live thread.
 //! * **Polling is a fallback, not the mechanism.** Notifications are consumed
 //!   when present; a low-frequency poll keeps the display correct when they are
 //!   not. The poll interval is stated in one place and is deliberately slow.
@@ -76,6 +74,7 @@ pub struct CodexProvider {
     last_read: Option<std::time::Instant>,
     retry_after: Option<std::time::Instant>,
     cancel: Arc<AtomicBool>,
+    next_shared_probe: Option<std::time::Instant>,
 }
 
 impl Default for CodexProvider {
@@ -96,6 +95,7 @@ impl Default for CodexProvider {
             last_read: None,
             retry_after: None,
             cancel: Arc::new(AtomicBool::new(false)),
+            next_shared_probe: None,
         }
     }
 }
@@ -112,6 +112,9 @@ impl CodexProvider {
     pub fn request_refresh(&mut self) {
         self.since_last_read = POLL_INTERVAL;
         self.retry_after = None;
+        if self.server.as_ref().is_some_and(|s| !s.shared()) {
+            self.next_shared_probe = Some(std::time::Instant::now());
+        }
     }
 
     /// Whether a child process is currently running.
@@ -140,6 +143,23 @@ impl CodexProvider {
             attempt_at_ms: self.limits_attempt_at_ms,
             error: self.limits_error.clone(),
             poll_interval_seconds: POLL_INTERVAL.as_secs(),
+            connection_mode: self.server.as_ref().map(|s| {
+                if s.shared() {
+                    "shared".into()
+                } else {
+                    "accountOnly".into()
+                }
+            }),
+            working_threads: self
+                .cached_threads
+                .iter()
+                .filter(|t| t.status == protocol::ThreadStatus::Active)
+                .count(),
+            waiting_threads: self
+                .cached_threads
+                .iter()
+                .filter(|t| t.status.needs_the_user())
+                .count(),
         }
     }
 
@@ -178,7 +198,11 @@ impl CodexProvider {
 
         // Only this owned app-server's loaded threads have meaningful runtime status.
         // A disk-history thread/list is not a monitor of another Codex desktop.
-        let list = server.request("thread/loaded/list", serde_json::json!({}))?;
+        let list = if server.shared() {
+            server.request("thread/loaded/list", serde_json::json!({}))?
+        } else {
+            serde_json::json!({"data":[]})
+        };
         let mut records = Vec::new();
         for id in list["data"]
             .as_array()
@@ -242,9 +266,11 @@ impl CodexProvider {
                 }
             }
             Discovery::Found(executable) => {
-                match AppServer::spawn_with_cancel(&executable, Arc::clone(&self.cancel)) {
+                match AppServer::connect_observer(&executable, Arc::clone(&self.cancel)) {
                     Ok(server) => {
                         self.server = Some(server);
+                        self.next_shared_probe =
+                            Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
                         self.last_reason = None;
                         diagnostics::information("codex", "app-server connected");
                         if let Err(error) = self.read() {
@@ -291,6 +317,7 @@ impl CodexProvider {
         self.limits_updated_at_ms = None;
         self.limits_attempt_at_ms = None;
         self.limits_error = None;
+        self.next_shared_probe = None;
     }
 }
 
@@ -351,6 +378,30 @@ impl Provider for CodexProvider {
         }
 
         // Consume any notifications first: they are free, and they arrive
+        // A newly opened shared endpoint can replace account-only collection
+        // without restarting or changing the user's Codex instance.
+        if self.server.as_ref().is_some_and(|s| !s.shared())
+            && self
+                .next_shared_probe
+                .is_some_and(|at| std::time::Instant::now() >= at)
+            && !self.cancel.load(Ordering::Relaxed)
+        {
+            self.next_shared_probe =
+                Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
+            if let Discovery::Found(executable) = app_server::discover() {
+                if let Ok(shared) = AppServer::spawn_proxy(&executable, Arc::clone(&self.cancel)) {
+                    self.server = Some(shared);
+                    self.cached_threads.clear();
+                    self.since_last_read = POLL_INTERVAL;
+                    diagnostics::information(
+                        "codex",
+                        "upgraded to supported shared control endpoint",
+                    );
+                }
+            }
+        }
+
+        // Notifications arrive
         // between polls. They are not parsed into state here because a
         // notification carries only a delta; the periodic read is what produces
         // a complete picture. Draining them keeps the channel from filling.
@@ -430,7 +481,11 @@ impl Provider for CodexProvider {
                 kind,
                 health: ProviderHealth::Connected,
                 detail: Some(format!("{} threads observed", self.cached_threads.len())),
-                activity_count: self.cached_threads.len(),
+                activity_count: self
+                    .cached_threads
+                    .iter()
+                    .filter(|t| threads::is_visible(t))
+                    .count(),
             };
         }
         ProviderStatus {
