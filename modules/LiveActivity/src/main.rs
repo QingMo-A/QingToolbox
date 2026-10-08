@@ -168,8 +168,6 @@ enum OverlayCommand {
         focus: Option<LiveActivity>,
         stack: Vec<LiveActivity>,
         overflow: usize,
-        account: Option<String>,
-        account_header: Option<String>,
         ambient: Option<ambient::AmbientContent>,
         temporarily_hidden: bool,
         /// Set while a fullscreen application owns the foreground.
@@ -426,25 +424,6 @@ impl Module {
         changed
     }
 
-    /// The account line the island shows under its stack.
-    fn account_line(&self) -> Option<String> {
-        if !self.settings.show_codex_data
-            || self.settings.codex_data_position != settings::DataPosition::Expanded
-        {
-            return None;
-        }
-        self.account_data()?.limits?.remaining_summary()
-    }
-
-    fn account_header(&self) -> Option<String> {
-        if !self.settings.show_codex_data
-            || self.settings.codex_data_position != settings::DataPosition::Header
-        {
-            return None;
-        }
-        self.account_data()?.limits?.header_summary()
-    }
-
     fn account_data(&self) -> Option<providers::codex::worker::AccountSnapshot> {
         (self.active && self.settings.enabled && self.program.state.running)
             .then(|| self.codex.account_snapshot())
@@ -499,16 +478,13 @@ impl Module {
             snapshot.focus.clone(),
             snapshot.activities.clone(),
             snapshot.overflow,
-            self.account_line(),
+            None,
         );
-        self.model.set_account_header(self.account_header());
         self.overlay.send(OverlayCommand::Sync {
             settings: self.settings.clone(),
             focus: snapshot.focus,
             stack: snapshot.activities,
             overflow: snapshot.overflow,
-            account: self.account_line(),
-            account_header: self.account_header(),
             ambient,
             temporarily_hidden: self.hidden_until.is_some_and(|at| Instant::now() < at),
             fullscreen,
@@ -554,10 +530,6 @@ impl Module {
             self.model.set_ambient(ambient);
             changed = true;
         }
-        // Quota can change with no running thread and no clock minute change.
-        // Treat it as content, otherwise the native island keeps the old footer.
-        changed |= self.model.account() != self.account_line().as_deref();
-        changed |= self.model.account_header() != self.account_header().as_deref();
         let codex_connected = self.codex.is_connected();
         let live_ids: Vec<String> = codex_activities
             .iter()
@@ -691,8 +663,6 @@ fn run_overlay_thread_windows(
                     focus,
                     stack,
                     overflow,
-                    account,
-                    account_header,
                     ambient,
                     temporarily_hidden,
                     fullscreen,
@@ -710,8 +680,7 @@ fn run_overlay_thread_windows(
                         state.model.set_ambient(ambient);
                         // The main thread already applied the same content to its
                         // own reporting model; this copy drives the window.
-                        state.model.set_content(focus, stack, overflow, account);
-                        state.model.set_account_header(account_header);
+                        state.model.set_content(focus, stack, overflow, None);
                     }
                 }
                 OverlayCommand::Preview {
@@ -1198,8 +1167,9 @@ impl Module {
                 "focus": snapshot.focus,
                 "stack": snapshot.activities,
                 "overflow": snapshot.overflow,
-                "account": self.account_line(),
-                "accountHeader": self.model.account_header(),
+                // Retired API 1 wire keys remain null for old clients.
+                "account": null,
+                "accountHeader": null,
                 "ambient": self.model.ambient(),
             },
             "counts": {
@@ -1710,7 +1680,7 @@ mod tests {
         module.active = true;
         module.settings.enabled = true;
         module.settings.show_clock = false;
-        module.settings.custom_text = "Focus".into();
+        module.settings.custom_text = "余量 {codex.remaining|未接入}".into();
         module.program.force_for_test(true);
         module.reconcile_providers();
         module.codex.set_limits_for_test(None);
@@ -1724,21 +1694,20 @@ mod tests {
         assert!(module.tick(activity::now_millis()));
         module.sync_overlay(false);
         assert_eq!(module.model.account(), None);
-        assert_eq!(
-            module.model.account_header(),
-            Some("额度剩余 75% · 重置时间未知")
-        );
+        assert_eq!(module.model.ambient().unwrap().text, "余量 75%");
+        assert!(module.model.account_header().is_none());
         assert!(!module.tick(activity::now_millis()));
         module.codex.set_limits_for_test(None);
         assert!(module.tick(activity::now_millis()));
         module.sync_overlay(false);
         assert!(module.model.account().is_none());
         assert!(module.model.account_header().is_none());
+        assert_eq!(module.model.ambient().unwrap().text, "余量 未接入");
     }
 
     #[cfg(windows)]
     #[test]
-    fn enlarged_quota_header_remains_clickable_at_the_actual_width_and_dpi() {
+    fn resized_capsule_remains_clickable_at_the_actual_width_and_dpi() {
         let bounds = overlay::Bounds {
             x: 0,
             y: 0,
@@ -1885,10 +1854,11 @@ mod tests {
     }
 
     #[test]
-    fn template_data_updates_live_and_each_position_is_exclusive() {
+    fn templates_are_the_only_quota_display_and_legacy_positions_are_ignored() {
         let mut module = headless_module("template-positions");
         module.settings.custom_text = "额度 {codex.remaining|未连接}".into();
-        module.settings.codex_data_position = settings::DataPosition::CustomText;
+        module.settings.peek_text = "悬停 {codex.remaining|未连接}".into();
+        module.settings.expanded_text = "展开 {codex.remaining|未连接}".into();
         module.program.force_for_test(true);
         module.reconcile_providers();
         module
@@ -1899,16 +1869,35 @@ mod tests {
         module.tick(activity::now_millis());
         module.sync_overlay(false);
         assert_eq!(module.model.ambient().unwrap().text, "额度 75%");
+        assert_eq!(module.model.peek_detail().as_deref(), Some("悬停 75%"));
+        assert_eq!(module.model.expanded_text(), Some("展开 75%"));
         assert!(module.model.account().is_none() && module.model.account_header().is_none());
         module
             .invoke("setSettings", &json!({"codexDataPosition":"expanded"}))
             .unwrap();
-        assert_eq!(module.model.account(), Some("Codex · 额度剩余 75%"));
-        assert!(module.model.account_header().is_none());
+        assert!(module.model.account().is_none() && module.model.account_header().is_none());
+        assert_eq!(module.model.ambient().unwrap().text, "额度 75%");
         module
             .invoke("setSettings", &json!({"codexDataPosition":"header"}))
             .unwrap();
-        assert!(module.model.account().is_none() && module.model.account_header().is_some());
+        assert!(module.model.account().is_none() && module.model.account_header().is_none());
+        assert_eq!(module.model.ambient().unwrap().text, "额度 75%");
+        assert!(module.state_payload()["settings"]
+            .get("codexDataPosition")
+            .is_none());
+        module
+            .invoke("setSettings", &json!({"showCodexData":false}))
+            .unwrap();
+        assert_eq!(module.model.ambient().unwrap().text, "额度 未连接");
+        assert_eq!(module.model.peek_detail().as_deref(), Some("悬停 未连接"));
+        assert_eq!(module.model.expanded_text(), Some("展开 未连接"));
+        assert!(
+            module.codex.configured_for_test(),
+            "display must not stop acquisition"
+        );
+        module
+            .invoke("setSettings", &json!({"showCodexData":true}))
+            .unwrap();
         module.program.force_for_test(false);
         module.tick(activity::now_millis());
         module.sync_overlay(false);
@@ -1925,7 +1914,7 @@ mod tests {
     }
 
     #[test]
-    fn quota_alone_is_content_without_a_clock_or_custom_text() {
+    fn quota_without_templates_does_not_create_a_preset_island() {
         let mut module = headless_module("quota-only-content");
         module.program.force_for_test(true);
         module.reconcile_providers();
@@ -1942,8 +1931,9 @@ mod tests {
                 )
                 .unwrap();
             assert!(module.model.ambient().is_none());
-            assert_eq!(module.model.state(), IslandState::Compact);
-            assert_eq!(module.model.compact_label().as_deref(), Some("Codex"));
+            assert_eq!(module.model.state(), IslandState::Dormant);
+            assert_eq!(module.model.compact_label(), None);
+            assert!(module.model.account().is_none() && module.model.account_header().is_none());
         }
         module
             .invoke("setSettings", &json!({"showCodexData":false}))

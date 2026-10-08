@@ -308,7 +308,6 @@ input[type='range'] {
 .custom-text-field { margin-top:2px; }
 .placeholder-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .placeholder-chips .q-button { font-size:10.5px; padding:4px 8px; }
-.data-position { flex-wrap:wrap; }
 .obstruction-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
 .switch:has(input:disabled) { opacity:.6; cursor:default; }
 

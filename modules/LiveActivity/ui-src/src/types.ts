@@ -81,7 +81,6 @@ export type Anchor = 'topLeft' | 'topCenter' | 'topRight' | 'bottomLeft' | 'bott
 export type MonitorStrategy = 'primary' | 'active'
 export type FullscreenPolicy = 'always' | 'hide' | 'important'
 export type SurfaceStyle = 'solid' | 'translucent' | 'frosted'
-export type DataPosition = 'header' | 'expanded' | 'customText'
 export type RgbColor = { r: number; g: number; b: number }
 
 export type Settings = {
@@ -110,7 +109,6 @@ export type Settings = {
   backgroundOpacity: number
   backgroundColor: RgbColor
   showCodexData: boolean
-  codexDataPosition: DataPosition
 }
 
 /** A partial update. Only the fields the user touched are sent. */
@@ -125,8 +123,9 @@ export type IslandView = {
   focus: LiveActivity | null
   stack: LiveActivity[]
   overflow: number
-  account: string | null
-  accountHeader: string | null
+  /** Retired API 1 preset-display keys; external data uses text templates. */
+  account: null
+  accountHeader: null
   ambient: { clock: string | null; date: string; text: string; peekText: string | null; expandedText: string | null } | null
 }
 

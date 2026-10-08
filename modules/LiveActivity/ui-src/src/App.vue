@@ -571,18 +571,10 @@ async function close(): Promise<void> {
             @change="patch({ showCodexData: ($event.target as HTMLInputElement).checked })"
           />
           <span>
-            <strong>显示 Codex 数据</strong>
+            <strong>在文本中显示 Codex 数据</strong>
             <small>{{ state?.codexProgram.error ?? (state?.codexProgram.running ? '已检测到 Codex · 自动接入' : '等待 Codex 启动') }}</small>
           </span>
         </label>
-        <div class="field">
-          <span class="field-label">Codex 数据位置</span>
-          <div class="segmented data-position">
-            <button type="button" :class="{ active: settings.codexDataPosition === 'header' }" :disabled="busy || !settings.showCodexData" @click="patch({ codexDataPosition: 'header' })">日期/时间区域</button>
-            <button type="button" :class="{ active: settings.codexDataPosition === 'expanded' }" :disabled="busy || !settings.showCodexData" @click="patch({ codexDataPosition: 'expanded' })">展开面板底部</button>
-            <button type="button" :class="{ active: settings.codexDataPosition === 'customText' }" :disabled="busy || !settings.showCodexData" @click="patch({ codexDataPosition: 'customText' })">仅自定义文本</button>
-          </div>
-        </div>
       </section>
 
       <!-- Preview ------------------------------------------------------- -->
@@ -618,8 +610,6 @@ async function close(): Promise<void> {
             :custom-text="previewText"
             :peek-text="previewPeekText"
             :expanded-text="previewExpandedText"
-            :account="island?.account ?? null"
-            :account-header="island?.accountHeader ?? null"
           />
           <div class="preview-notes">
             <div class="mock-actions">

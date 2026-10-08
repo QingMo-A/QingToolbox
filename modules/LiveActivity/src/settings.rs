@@ -11,17 +11,9 @@ use serde::{Deserialize, Serialize};
 
 /// Current settings schema. Bump when a field's meaning changes, not when a
 /// field is added, so that additive changes stay forward-compatible.
-pub const SETTINGS_VERSION: u32 = 2;
+pub const SETTINGS_VERSION: u32 = 3;
 pub const MAX_CUSTOM_TEXT_CHARS: usize = 256;
 pub const MAX_FALLBACK_CHARS: usize = 48;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum DataPosition {
-    Header,
-    Expanded,
-    CustomText,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -120,7 +112,6 @@ pub struct Settings {
     /// v1's connection switch migrates to visibility, never acquisition policy.
     #[serde(alias = "codexEnabled")]
     pub show_codex_data: bool,
-    pub codex_data_position: DataPosition,
     /// Retained for v1 profile/API compatibility; automatic mode ignores it.
     pub codex_idle_shutdown_seconds: u64,
 }
@@ -183,7 +174,6 @@ impl Default for Settings {
             background_opacity: 0.72,
             background_color: RgbColor::default(),
             show_codex_data: true,
-            codex_data_position: DataPosition::Header,
             codex_idle_shutdown_seconds: 300,
         }
     }
@@ -320,7 +310,9 @@ pub struct SettingsPatch {
     pub background_color: Option<RgbColor>,
     #[serde(alias = "codexEnabled")]
     pub show_codex_data: Option<bool>,
-    pub codex_data_position: Option<DataPosition>,
+    // API 1 compatibility: accept retired presets but never restore them.
+    #[serde(rename = "codexDataPosition")]
+    pub _legacy_codex_data_position: Option<String>,
     pub codex_idle_shutdown_seconds: Option<u64>,
 }
 
@@ -397,9 +389,6 @@ impl Settings {
         }
         if let Some(value) = patch.show_codex_data {
             self.show_codex_data = value;
-        }
-        if let Some(value) = patch.codex_data_position {
-            self.codex_data_position = value;
         }
         if let Some(value) = patch.codex_idle_shutdown_seconds {
             self.codex_idle_shutdown_seconds = value;
@@ -559,10 +548,13 @@ mod tests {
     fn v1_connection_choice_migrates_to_visibility_without_losing_style() {
         let mut settings: Settings = serde_json::from_value(serde_json::json!({"version":1,"codexEnabled":false,"surfaceStyle":"frosted","customText":"剩余 {codex.remaining|未知}"})).unwrap();
         settings.normalize();
-        assert_eq!(settings.version, 2);
+        assert_eq!(settings.version, SETTINGS_VERSION);
         assert!(!settings.show_codex_data);
         assert_eq!(settings.surface_style, SurfaceStyle::Frosted);
-        assert_eq!(settings.codex_data_position, DataPosition::Header);
+        assert!(serde_json::to_value(&settings)
+            .unwrap()
+            .get("codexDataPosition")
+            .is_none());
         assert_eq!(settings.placeholder_fallback, "暂无数据");
         assert!(serde_json::to_value(&settings)
             .unwrap()
@@ -576,6 +568,41 @@ mod tests {
         );
         assert!(settings.show_codex_data);
         assert_eq!(settings.placeholder_fallback, "未知");
+    }
+
+    #[test]
+    fn retired_quota_presets_are_discarded_without_touching_user_templates() {
+        for old_position in ["header", "expanded", "customText"] {
+            let mut settings: Settings = serde_json::from_value(serde_json::json!({
+                "codexDataPosition":old_position,
+                "customText":"常驻 {codex.remaining|未知}",
+                "peekText":"悬停 {codex.reset}",
+                "expandedText":"展开\n{codex.updated}",
+                "placeholderFallback":"暂无",
+                "backgroundColor":{"r":32,"g":45,"b":61}
+            }))
+            .unwrap();
+            settings.normalize();
+            let before = settings.clone();
+            settings.apply(
+                serde_json::from_value(serde_json::json!({"codexDataPosition":old_position}))
+                    .unwrap(),
+            );
+            assert_eq!(settings, before);
+            assert_eq!(settings.custom_text, "常驻 {codex.remaining|未知}");
+            assert_eq!(settings.expanded_text, "展开\n{codex.updated}");
+            assert!(serde_json::to_value(&settings)
+                .unwrap()
+                .get("codexDataPosition")
+                .is_none());
+            let path = temp_path("retired-preset");
+            settings.save(&path).unwrap();
+            assert_eq!(Settings::load(&path), settings);
+            let saved: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert!(saved.get("codexDataPosition").is_none());
+            let _ = std::fs::remove_file(path);
+        }
     }
 
     #[test]

@@ -29,9 +29,7 @@ const props = withDefaults(defineProps<{
   offsetX?: number
   offsetY?: number
   mini?: boolean
-  account?: string | null
-  accountHeader?: string | null
-}>(), { compactWidth: 232, offsetX: 0, offsetY: 0, mini: false, account: null, accountHeader: null, date: null, peekText: null, expandedText: null })
+}>(), { compactWidth: 232, offsetX: 0, offsetY: 0, mini: false, date: null, peekText: null, expandedText: null })
 const stage = ref<HTMLElement | null>(null)
 const stageSize = ref({ width: 360, height: 320 })
 let observer: ResizeObserver | undefined
@@ -54,7 +52,7 @@ const box = computed(() => {
   const size = SIZES[props.state]
   const scale = Math.min(Math.max(props.scale, 0.75), 1.5)
   const logicalWidth = size.width + props.compactWidth - 232
-  const logicalHeight = size.height + (props.accountHeader && !props.mini && props.state !== 'expanded' ? 24 : 0)
+  const logicalHeight = size.height
   const fitted = Math.max(0.1, Math.min(scale, (stageSize.value.width - 24) / logicalWidth, (stageSize.value.height - 36) / logicalHeight))
   return {
     width: Math.round(logicalWidth * fitted),
@@ -97,12 +95,11 @@ const materialStyle = computed(() => {
     <div class="island" :class="`material-${surfaceStyle}`" :style="{ width: `${box.width}px`, height: `${box.height}px`, ...materialStyle, ...placementStyle }">
       <div class="island-bar">
         <i class="dot" />
-        <span class="pill-text">{{ customText || (clock ? date || 'Qing Island' : account || accountHeader ? 'Codex' : peekText !== null || expandedText !== null ? 'Qing Island' : '模拟活动 · 运行中') }}</span>
+        <span class="pill-text">{{ customText || (clock || peekText !== null || expandedText !== null ? date || 'Qing Island' : '模拟活动 · 运行中') }}</span>
         <span v-if="clock" class="clock">{{ clock }}</span>
       </div>
-      <div v-if="accountHeader && !mini" class="island-account-header" :title="accountHeader">{{ accountHeader }}</div>
       <div v-if="state !== 'compact'" class="island-row">
-        <span>{{ peekText ?? (customText || (clock ? date || '本地时间' : account || accountHeader ? '点击查看额度' : '模拟导出 · 60%')) }}</span>
+        <span>{{ peekText ?? (customText || (clock ? date || '本地时间' : '模拟导出 · 60%')) }}</span>
       </div>
       <div v-if="state === 'expanded'" class="island-stack">
         <div v-if="expandedText !== null" class="expanded-caption">{{ expandedText }}</div>
@@ -110,12 +107,11 @@ const materialStyle = computed(() => {
           <div v-if="clock" class="large-clock">{{ clock }}</div>
           <div class="custom-caption">{{ customText }}</div>
         </template>
-        <template v-else-if="!account && !accountHeader">
+        <template v-else>
           <div class="item"><i class="dot warn" /><span>模拟导出</span><em>60%</em></div>
           <div class="item"><i class="dot ok" /><span>模拟完成</span><em>完成</em></div>
         </template>
       </div>
-      <div v-if="state === 'expanded' && account" class="island-account">{{ account }}</div>
     </div>
     <p v-if="!mini" class="stage-note" title="逻辑像素；位置为示意，实际窗口按显示器工作区和 DPI 布局">
       {{ box.logicalWidth }} × {{ box.logicalHeight }} px
@@ -155,7 +151,6 @@ const materialStyle = computed(() => {
 .island.material-frosted { backdrop-filter:blur(12px); }
 .pill-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .clock { flex:none; font-variant-numeric:tabular-nums; }
-.island-account-header { flex:none; height:calc(18px * var(--preview-scale)); line-height:calc(18px * var(--preview-scale)); font-size:calc(10px * var(--preview-scale)); color:var(--island-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .large-clock { margin-top:12px; font-size:calc(32px * var(--preview-scale)); font-weight:700; color:var(--island-ink); font-variant-numeric:tabular-nums; }
 .custom-caption { margin-top:12px; font-size:calc(13px * var(--preview-scale)); color:var(--island-muted); overflow-wrap:anywhere; }
 .expanded-caption { margin-top:4px; font-size:calc(16px * var(--preview-scale)); line-height:1.5; color:var(--island-ink); white-space:pre-wrap; overflow-wrap:anywhere; }
@@ -200,7 +195,6 @@ const materialStyle = computed(() => {
   padding-top: 4px;
   border-top: 1px solid var(--island-line);
 }
-.island-account { flex:none; white-space:pre-line; font-size:calc(10px * var(--preview-scale)); line-height:1.5; color:var(--island-muted); }
 .item {
   display: flex;
   align-items: center;
