@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.5",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-08T04:55:19Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.5-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/a8037bec36fdb2423ed833e111931b6b88aab30a/modules/LiveActivity/packages/qing.liveactivity-0.1.5-tauri.qmod",
+        "size": 391605,
+        "sha256": "02dbb739abcdaf808f0a7cfd5eaaebfd1a8c818b0732137fdcb8381d0ffcbfda"
+      },
+      "releaseNotes": {
+        "zh-CN": "悬停和展开默认日期/时间改为设置里可见的文本模板，可编辑或清空。清空并保存后不再恢复隐藏的日期、大时钟、常驻文本或操作提示；两个状态分别使用自己的模板，原生窗口与预览一致。旧空模板的一次性迁移保留原时钟/文本内容，已有非空模板及外观位置不改。真实任务列表、状态和进度保留。",
+        "en-US": "Expose hover and expanded date/time defaults as editable text templates. Saving a blank template no longer restores hidden dates, large clocks, compact text or action hints; each state uses its own template in both the native window and preview. One-time migration makes old implicit clock/text content visible while preserving existing nonempty templates and appearance. Keep real task lists, states and progress."
+      }
+    },
+    {
       "version": "0.1.4",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
