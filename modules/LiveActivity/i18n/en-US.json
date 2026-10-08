@@ -40,7 +40,7 @@
   "fields.monitorStrategies.active": "Monitor with the cursor",
   "fields.scale": "Scale",
   "fields.scaleHint": "Multiplied on top of the monitor DPI.",
-  "fields.peekOnHover": "Reveal one row of context on hover",
+  "fields.peekOnHover": "Reveal hover text",
   "fields.fullscreenPolicy": "While an app is fullscreen",
   "fields.fullscreenPolicies.always": "Always show",
   "fields.fullscreenPolicies.hide": "Hide",

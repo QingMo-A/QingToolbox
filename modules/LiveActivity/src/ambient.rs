@@ -21,13 +21,6 @@ impl AmbientContent {
             "Qing Island"
         }
     }
-    pub fn detail(&self) -> &str {
-        if !self.text.is_empty() {
-            &self.text
-        } else {
-            &self.date
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -110,9 +103,11 @@ pub fn content_with_runtime(
         crate::text_template::values(settings, time, account, crate::activity::now_millis());
     apply_timer_values(settings, timers, &mut values);
     let optional_text = |template: &str| {
-        (!template.is_empty()).then(|| {
-            crate::text_template::render(template, &values, &settings.placeholder_fallback)
-        })
+        (!template.is_empty())
+            .then(|| {
+                crate::text_template::render(template, &values, &settings.placeholder_fallback)
+            })
+            .filter(|text| !text.is_empty())
     };
     let peek_text = optional_text(&settings.peek_text);
     let expanded_text = optional_text(&settings.expanded_text);
@@ -243,6 +238,8 @@ mod tests {
     fn blank_content_hides_but_text_does_not_require_a_clock() {
         let mut settings = Settings {
             show_clock: false,
+            peek_text: String::new(),
+            expanded_text: String::new(),
             ..Settings::default()
         };
         assert_eq!(content_at(&settings, Some(time(0))), None);

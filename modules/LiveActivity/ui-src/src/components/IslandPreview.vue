@@ -95,22 +95,14 @@ const materialStyle = computed(() => {
     <div class="island" :class="`material-${surfaceStyle}`" :style="{ width: `${box.width}px`, height: `${box.height}px`, ...materialStyle, ...placementStyle }">
       <div class="island-bar">
         <i class="dot" />
-        <span class="pill-text">{{ customText || (clock || peekText !== null || expandedText !== null ? date || 'Qing Island' : '模拟活动 · 运行中') }}</span>
+        <span class="pill-text">{{ customText || date || 'Qing Island' }}</span>
         <span v-if="clock" class="clock">{{ clock }}</span>
       </div>
-      <div v-if="state !== 'compact'" class="island-row">
-        <span>{{ peekText ?? (customText || (clock ? date || '本地时间' : '模拟导出 · 60%')) }}</span>
+      <div v-if="state === 'peek' && peekText" class="island-row">
+        <span>{{ peekText }}</span>
       </div>
-      <div v-if="state === 'expanded'" class="island-stack">
+      <div v-if="state === 'expanded' && expandedText" class="island-stack">
         <div v-if="expandedText !== null" class="expanded-caption">{{ expandedText }}</div>
-        <template v-else-if="clock || customText">
-          <div v-if="clock" class="large-clock">{{ clock }}</div>
-          <div class="custom-caption">{{ customText }}</div>
-        </template>
-        <template v-else>
-          <div class="item"><i class="dot warn" /><span>模拟导出</span><em>60%</em></div>
-          <div class="item"><i class="dot ok" /><span>模拟完成</span><em>完成</em></div>
-        </template>
       </div>
     </div>
     <p v-if="!mini" class="stage-note" title="逻辑像素；位置为示意，实际窗口按显示器工作区和 DPI 布局">
@@ -151,8 +143,6 @@ const materialStyle = computed(() => {
 .island.material-frosted { backdrop-filter:blur(12px); }
 .pill-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .clock { flex:none; font-variant-numeric:tabular-nums; }
-.large-clock { margin-top:12px; font-size:calc(32px * var(--preview-scale)); font-weight:700; color:var(--island-ink); font-variant-numeric:tabular-nums; }
-.custom-caption { margin-top:12px; font-size:calc(13px * var(--preview-scale)); color:var(--island-muted); overflow-wrap:anywhere; }
 .expanded-caption { margin-top:4px; font-size:calc(16px * var(--preview-scale)); line-height:1.5; color:var(--island-ink); white-space:pre-wrap; overflow-wrap:anywhere; }
 .island-bar {
   display: flex;
@@ -171,12 +161,6 @@ const materialStyle = computed(() => {
   border-radius: 50%;
   background: var(--q-brand, #2e80d6);
 }
-.dot.warn {
-  background: #e2a03f;
-}
-.dot.ok {
-  background: var(--q-success, #2f9e6a);
-}
 .island-row {
   color: var(--island-muted);
   font-size: calc(11px * var(--preview-scale));
@@ -194,22 +178,6 @@ const materialStyle = computed(() => {
   gap: 5px;
   padding-top: 4px;
   border-top: 1px solid var(--island-line);
-}
-.item {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 11px;
-  color: var(--island-ink);
-}
-.item em {
-  margin-left: auto;
-  color: var(--island-muted);
-  font-style: normal;
-}
-.item.more,
-.item.meta {
-  color: var(--island-muted);
 }
 .stage-note {
   position:absolute;

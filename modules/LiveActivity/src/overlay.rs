@@ -287,40 +287,13 @@ impl IslandModel {
         ))
     }
 
-    /// The one extra row shown while hovering.
+    /// Only the editable hover template produces the extra text row.
     pub fn peek_detail(&self) -> Option<String> {
-        if let Some(text) = self
-            .ambient
+        self.ambient
             .as_ref()
             .and_then(|content| content.peek_text.as_ref())
-        {
-            return Some(text.clone());
-        }
-        let Some(focus) = self.focus.as_ref() else {
-            return self
-                .ambient
-                .as_ref()
-                .map(|content| content.detail().to_owned());
-        };
-        // Prefer an explicit progress figure, then a provider-supplied detail,
-        // then the account line. Each is real data; none is invented.
-        if let Some(fraction) = focus
-            .progress
-            .as_ref()
-            .and_then(|progress| progress.fraction())
-        {
-            return Some(format!(
-                "{} {}%",
-                short_state(focus),
-                (fraction * 100.0).round()
-            ));
-        }
-        for key in ["usage", "stage", "limits"] {
-            if let Some(value) = focus.details.get(key) {
-                return Some(value.clone());
-            }
-        }
-        self.account.clone().or_else(|| focus.subtitle.clone())
+            .filter(|text| !text.is_empty())
+            .cloned()
     }
 
     pub fn expanded_text(&self) -> Option<&str> {
@@ -997,7 +970,7 @@ mod tests {
         for leaked in ["abc123", "72", "184M", "0x"] {
             assert!(
                 !label.contains(leaked),
-                "the collapsed pill must not show {leaked}; that belongs in peek"
+                "the collapsed pill must not show {leaked}; details belong in the task list"
             );
         }
     }
@@ -1011,20 +984,20 @@ mod tests {
     }
 
     #[test]
-    fn peek_prefers_real_progress_over_a_generic_line() {
+    fn clearing_hover_text_keeps_task_progress_but_never_adds_an_implicit_row() {
         let mut item = activity("a", ActivityState::Running);
         item.progress = Some(ActivityProgress::determinate(3.0, 4.0));
         let mut model = IslandModel::new();
         model.set_content(
-            Some(item),
-            Vec::new(),
+            Some(item.clone()),
+            vec![item],
             0,
             Some("Weekly usage 76%".to_string()),
         );
-        let detail = model.peek_detail().expect("detail");
-        assert!(
-            detail.contains("75%"),
-            "a measurable bar wins: got {detail}"
+        assert!(model.peek_detail().is_none());
+        assert_eq!(
+            model.stack()[0].progress.as_ref().unwrap().fraction(),
+            Some(0.75)
         );
     }
 
@@ -1069,18 +1042,24 @@ mod tests {
     }
 
     #[test]
-    fn peek_falls_back_to_provider_details_then_the_account_row() {
+    fn blank_hover_never_falls_back_to_task_account_clock_or_compact_text() {
         let mut item = activity("a", ActivityState::Running);
         item.details
             .insert("usage".into(), "Context 72% · 184M".into());
         let mut model = IslandModel::new();
+        model.set_ambient(Some(crate::ambient::AmbientContent {
+            clock: Some("12:34".into()),
+            date: "2026-10-08".into(),
+            text: "常驻内容".into(),
+            ..Default::default()
+        }));
         model.set_content(
             Some(item),
             Vec::new(),
             0,
             Some("Weekly usage 76%".to_string()),
         );
-        assert_eq!(model.peek_detail().as_deref(), Some("Context 72% · 184M"));
+        assert!(model.peek_detail().is_none());
 
         let plain = activity("b", ActivityState::Running);
         model.set_content(
@@ -1089,7 +1068,8 @@ mod tests {
             0,
             Some("Weekly usage 76%".to_string()),
         );
-        assert_eq!(model.peek_detail().as_deref(), Some("Weekly usage 76%"));
+        assert!(model.peek_detail().is_none());
+        assert!(model.expanded_text().is_none());
     }
 
     #[test]

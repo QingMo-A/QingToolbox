@@ -11,9 +11,15 @@ use serde::{Deserialize, Serialize};
 
 /// Current settings schema. Bump when a field's meaning changes, not when a
 /// field is added, so that additive changes stay forward-compatible.
-pub const SETTINGS_VERSION: u32 = 3;
+pub const SETTINGS_VERSION: u32 = 4;
+pub const DEFAULT_PEEK_TEXT: &str = "{date}";
+pub const DEFAULT_EXPANDED_TEXT: &str = "{date}\n{time}";
 pub const MAX_CUSTOM_TEXT_CHARS: usize = 256;
 pub const MAX_FALLBACK_CHARS: usize = 48;
+
+fn legacy_settings_version() -> u32 {
+    1
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -82,6 +88,7 @@ pub enum FullscreenPolicy {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    #[serde(default = "legacy_settings_version")]
     pub version: u32,
     pub enabled: bool,
     /// Screen edge the island docks to.
@@ -103,7 +110,9 @@ pub struct Settings {
     pub show_seconds: bool,
     pub clock_24_hour: bool,
     pub custom_text: String,
+    #[serde(default)]
     pub peek_text: String,
+    #[serde(default)]
     pub expanded_text: String,
     pub placeholder_fallback: String,
     pub surface_style: SurfaceStyle,
@@ -167,8 +176,8 @@ impl Default for Settings {
             show_seconds: false,
             clock_24_hour: true,
             custom_text: String::new(),
-            peek_text: String::new(),
-            expanded_text: String::new(),
+            peek_text: DEFAULT_PEEK_TEXT.into(),
+            expanded_text: DEFAULT_EXPANDED_TEXT.into(),
             placeholder_fallback: "暂无数据".into(),
             surface_style: SurfaceStyle::Translucent,
             background_opacity: 0.72,
@@ -203,6 +212,35 @@ impl Settings {
         self.custom_text = normalize_text(&self.custom_text, false);
         self.peek_text = normalize_text(&self.peek_text, false);
         self.expanded_text = normalize_text(&self.expanded_text, true);
+        // Older blank templates meant implicit clock/custom-text fallbacks.
+        // Materialize those once so they are editable; v4 blanks stay blank.
+        if self.version < SETTINGS_VERSION {
+            if self.peek_text.is_empty() {
+                self.peek_text = if !self.custom_text.is_empty() {
+                    self.custom_text.clone()
+                } else if self.show_clock {
+                    DEFAULT_PEEK_TEXT.into()
+                } else {
+                    String::new()
+                };
+            }
+            if self.expanded_text.is_empty() {
+                self.expanded_text = if self.show_clock {
+                    format!(
+                        "{DEFAULT_EXPANDED_TEXT}{}{}",
+                        if self.custom_text.is_empty() {
+                            ""
+                        } else {
+                            "\n"
+                        },
+                        self.custom_text
+                    )
+                } else {
+                    self.custom_text.clone()
+                };
+                self.expanded_text = normalize_text(&self.expanded_text, true);
+            }
+        }
         self.placeholder_fallback = self
             .placeholder_fallback
             .chars()
@@ -406,7 +444,12 @@ mod tests {
     fn state_text_is_additive_independent_bounded_and_persisted() {
         let mut settings: Settings =
             serde_json::from_value(serde_json::json!({"customText":"旧内容"})).unwrap();
-        assert!(settings.peek_text.is_empty() && settings.expanded_text.is_empty());
+        settings.normalize();
+        assert_eq!(settings.peek_text, "旧内容");
+        assert_eq!(settings.expanded_text, "{date}\n{time}\n旧内容");
+        let defaults = Settings::default();
+        assert_eq!(defaults.peek_text, DEFAULT_PEEK_TEXT);
+        assert_eq!(defaults.expanded_text, DEFAULT_EXPANDED_TEXT);
         settings.apply(
             serde_json::from_value(serde_json::json!({
                 "peekText":"  悬停\r\n{time}\u{0000}  ",
@@ -433,6 +476,67 @@ mod tests {
             MAX_CUSTOM_TEXT_CHARS
         );
         assert_eq!(settings.custom_text, "旧内容");
+    }
+
+    #[test]
+    fn old_implicit_text_becomes_editable_once_and_clearing_survives_reload() {
+        for version in 1..SETTINGS_VERSION {
+            for show_clock in [true, false] {
+                for custom_text in ["", "专注 {time}"] {
+                    let mut settings: Settings = serde_json::from_value(serde_json::json!({
+                        "version":version,
+                        "showClock":show_clock,
+                        "customText":custom_text,
+                        "peekText":"",
+                        "expandedText":""
+                    }))
+                    .unwrap();
+                    settings.normalize();
+                    let peek = if !custom_text.is_empty() {
+                        custom_text
+                    } else if show_clock {
+                        DEFAULT_PEEK_TEXT
+                    } else {
+                        ""
+                    };
+                    let expanded = if show_clock {
+                        format!(
+                            "{DEFAULT_EXPANDED_TEXT}{}{}",
+                            if custom_text.is_empty() { "" } else { "\n" },
+                            custom_text
+                        )
+                    } else {
+                        custom_text.to_owned()
+                    };
+                    assert_eq!(settings.peek_text, peek);
+                    assert_eq!(settings.expanded_text, expanded);
+                    assert_eq!(settings.version, SETTINGS_VERSION);
+                    settings.apply(
+                        serde_json::from_value(
+                            serde_json::json!({"peekText":"", "expandedText":""}),
+                        )
+                        .unwrap(),
+                    );
+                    assert!(settings.peek_text.is_empty() && settings.expanded_text.is_empty());
+                    let path = temp_path("cleared-state-text");
+                    settings.save(&path).unwrap();
+                    let mut restored = Settings::load(&path);
+                    assert_eq!(restored, settings);
+                    restored.apply(
+                        serde_json::from_value(serde_json::json!({"showSeconds":true})).unwrap(),
+                    );
+                    assert!(restored.peek_text.is_empty() && restored.expanded_text.is_empty());
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+        let mut settings: Settings = serde_json::from_value(
+            serde_json::json!({"version":3, "peekText":"自己的悬停", "expandedText":"自己的展开"}),
+        )
+        .unwrap();
+        settings.normalize();
+        assert_eq!(settings.peek_text, "自己的悬停");
+        assert_eq!(settings.expanded_text, "自己的展开");
     }
 
     #[test]

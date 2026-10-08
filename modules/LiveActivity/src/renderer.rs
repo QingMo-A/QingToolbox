@@ -490,14 +490,16 @@ pub fn draw(
                 caption,
             );
         }
-        if model.state() != IslandState::Compact {
-            surface.label(
-                &model.peek_detail().unwrap_or_else(|| "点击查看活动".into()),
-                rect(16.0, 31.0 + header_offset, width - 32.0, 25.0),
-                11.0 * scale,
-                false,
-                secondary,
-            );
+        if model.state() == IslandState::Peek {
+            if let Some(text) = model.peek_detail() {
+                surface.label(
+                    &text,
+                    rect(16.0, 31.0 + header_offset, width - 32.0, 25.0),
+                    11.0 * scale,
+                    false,
+                    secondary,
+                );
+            }
         }
         if model.state() == IslandState::Expanded && model.stack().is_empty() {
             if let Some(content) = ambient {
@@ -513,64 +515,18 @@ pub fn draw(
                         16.0 * scale,
                         primary,
                     );
-                } else if let Some(clock) = content.clock.as_deref() {
-                    surface.label(
-                        &content.date,
-                        rect(22.0, 66.0 + header_offset, width - 44.0, 25.0),
-                        12.0 * scale,
-                        false,
-                        secondary,
-                    );
-                    surface.label(
-                        clock,
-                        rect(
-                            22.0,
-                            99.0 + if header.is_some() { 19.0 } else { 0.0 },
-                            width - 44.0,
-                            52.0,
-                        ),
-                        32.0 * scale,
-                        true,
-                        primary,
-                    );
-                    surface.paragraph(
-                        &content.text,
-                        rect(
-                            22.0,
-                            if header.is_some() { 180.0 } else { 173.0 },
-                            width - 44.0,
-                            if model.account().is_some() {
-                                if header.is_some() {
-                                    26.0
-                                } else {
-                                    33.0
-                                }
-                            } else {
-                                62.0
-                            },
-                        ),
-                        14.0 * scale,
-                        caption,
-                    );
-                } else {
-                    surface.paragraph(
-                        &content.text,
-                        rect(
-                            22.0,
-                            83.0 + header_offset,
-                            width - 44.0,
-                            if model.account().is_some() {
-                                120.0 - header_offset
-                            } else {
-                                138.0
-                            },
-                        ),
-                        19.0 * scale,
-                        primary,
-                    );
                 }
             }
         } else if model.state() == IslandState::Expanded {
+            if model.overflow() > 0 {
+                surface.label(
+                    &format!("+{}", model.overflow()),
+                    rect(width - 48.0, 34.0 + header_offset, 32.0, 22.0),
+                    10.0 * scale,
+                    false,
+                    secondary,
+                );
+            }
             for (index, activity) in model.stack().iter().take(3).enumerate() {
                 let y = if header.is_some() {
                     84.0 + index as f64 * 42.0
@@ -602,34 +558,11 @@ pub fn draw(
                     surface.bar(rect(17.0, y + 40.0, (width - 34.0) * fraction, 2.0), accent);
                 }
             }
-            let footer = model
-                .account()
-                .map(str::to_string)
-                .or_else(|| {
-                    ambient
-                        .filter(|c| !c.text.is_empty())
-                        .map(|c| c.text.clone())
-                })
-                .unwrap_or_else(|| {
-                    if model.overflow() > 0 {
-                        format!("另有 {} 项活动 · 点击收起", model.overflow())
-                    } else {
-                        "点击收起 · 移开鼠标自动收起".into()
-                    }
-                });
             if let Some(text) = model.expanded_text() {
                 surface.paragraph(
                     text,
                     rect(17.0, 213.0, width - 34.0, expanded_extra),
                     12.0 * scale,
-                    secondary,
-                );
-            } else if model.account().is_none() {
-                surface.label(
-                    &footer,
-                    rect(17.0, 229.0, width - 34.0, 23.0),
-                    10.0 * scale,
-                    false,
                     secondary,
                 );
             }

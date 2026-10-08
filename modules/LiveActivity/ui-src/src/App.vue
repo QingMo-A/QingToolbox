@@ -229,8 +229,8 @@ const previewText = computed(() => {
   }
   return text
 })
-const previewPeekText = computed(() => peekTextDraft.value.trim() ? renderText(peekTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) : null)
-const previewExpandedText = computed(() => expandedTextDraft.value.trim() ? renderText(expandedTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) : null)
+const previewPeekText = computed(() => renderText(peekTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) || null)
+const previewExpandedText = computed(() => renderText(expandedTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) || null)
 const unsupported = computed(() => state.value?.platform === 'unsupported')
 const canSimulate = computed(() => Boolean(state.value?.active && settings.value?.enabled))
 const previewClock = computed(() => {
@@ -365,8 +365,7 @@ async function close(): Promise<void> {
             @change="patch({ peekOnHover: ($event.target as HTMLInputElement).checked })"
           />
           <span>
-            <strong>悬停时展开一行上下文</strong>
-            <small>鼠标移到胶囊上时，多显示一行进度或账号信息。</small>
+            <strong>悬停时展开文本</strong>
           </span>
         </label>
       </section>
@@ -393,8 +392,8 @@ async function close(): Promise<void> {
           </div>
           <label class="field-label" :for="textInputId">{{ textLabels[textMode] }}文本</label>
           <div class="text-editor">
-            <textarea v-if="textMode === 'expandedText'" :id="textInputId" v-model="activeTextDraft" class="text-input expanded-text-input" rows="3" maxlength="256" placeholder="支持换行与占位符，留空使用默认内容" :disabled="busy" @keydown.ctrl.enter.prevent="saveText" />
-            <input v-else :id="textInputId" v-model="activeTextDraft" class="text-input" type="text" maxlength="256" :placeholder="textMode === 'peekText' ? '留空使用默认悬停内容' : '文字或 {codex.remaining}，留空取消'" :disabled="busy" @keydown.enter.prevent="saveText" />
+            <textarea v-if="textMode === 'expandedText'" :id="textInputId" v-model="activeTextDraft" class="text-input expanded-text-input" rows="3" maxlength="256" placeholder="支持换行与占位符，留空不显示" :disabled="busy" @keydown.ctrl.enter.prevent="saveText" />
+            <input v-else :id="textInputId" v-model="activeTextDraft" class="text-input" type="text" maxlength="256" :placeholder="textMode === 'peekText' ? '文字或占位符，留空不显示' : '文字或 {codex.remaining}，留空取消'" :disabled="busy" @keydown.enter.prevent="saveText" />
             <QButton size="small" :disabled="busy || activeTextDraft === settings[textMode]" @click="saveText">保存</QButton>
           </div>
           <div class="placeholder-chips">

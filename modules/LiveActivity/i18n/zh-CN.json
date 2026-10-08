@@ -40,7 +40,7 @@
   "fields.monitorStrategies.active": "鼠标所在显示器",
   "fields.scale": "整体缩放",
   "fields.scaleHint": "在系统 DPI 之上再乘以该比例。",
-  "fields.peekOnHover": "悬停时展开一行上下文",
+  "fields.peekOnHover": "悬停时展开文本",
   "fields.fullscreenPolicy": "全屏时的行为",
   "fields.fullscreenPolicies.always": "始终显示",
   "fields.fullscreenPolicies.hide": "全屏时隐藏",

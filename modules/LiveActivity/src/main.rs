@@ -1627,6 +1627,8 @@ mod tests {
         );
         module.settings.enabled = true;
         module.settings.show_clock = false;
+        module.settings.peek_text.clear();
+        module.settings.expanded_text.clear();
         module.set_active(true);
         module
     }
