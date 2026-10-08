@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.4",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-08T04:33:00Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.4-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/e6996cb4c2fcb3ac99e9bf7cd7896b437c47aae3/modules/LiveActivity/packages/qing.liveactivity-0.1.4-tauri.qmod",
+        "size": 392314,
+        "sha256": "3e224bf764659868787188bad444f69f18232ddfc7de5b663f720acb9c36440e"
+      },
+      "releaseNotes": {
+        "zh-CN": "移除 Codex 数据显示位置预设及胶囊内置额度行，外部数据仅通过常驻、悬停、展开自定义文本占位符显示。不引用占位符时不会自动显示额度或撑高胶囊；自动采集、数据显示开关、真实任务列表和计时功能保留。旧配置迁移保留三个文本模板、颜色、尺寸及位置，退休的位置设置被忽略。",
+        "en-US": "Remove Codex position presets and built-in quota rows. External data appears only through compact, hover and expanded text placeholders; without references it does not add quota content or enlarge the capsule. Keep automatic acquisition, the display switch, real task lists and timers. Migrate existing profiles without changing text templates, colors or geometry; ignore retired position settings."
+      }
+    },
+    {
       "version": "0.1.3",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
