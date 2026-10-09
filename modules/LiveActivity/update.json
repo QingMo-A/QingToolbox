@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.9",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-09T22:06:49Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.9-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/18dbac99d7e860da9e8a0a4773488fca37d33eb0/modules/LiveActivity/packages/qing.liveactivity-0.1.9-tauri.qmod",
+        "size": 529780,
+        "sha256": "7cc155a02517bff7dd52c2addd0c0816ce0103c0cead328ba64463196e7551c1"
+      },
+      "releaseNotes": {
+        "zh-CN": "优化玻璃渲染：动画期间复用覆盖起止范围的背景，缓存文字层与未变化帧，大面积合成按行并行，改用性能优化构建。动画等待对齐桌面合成刷新，其他等待使用高精度计时器；背景采样随变化自适应。新增“磨砂模糊”0–40 px 滑块（默认 6 px），拖动时实时预览；磨砂着色可调至不着色，设置预览同步透明度。保留已有配置、五种材质、文本占位符和空模板语义；Codex 采集能力范围不变。",
+        "en-US": "Optimize glass rendering with animation-cover backdrop reuse, cached text layers and unchanged frames, parallel rows for large surfaces and a performance-optimized build. Pace animations with desktop composition and use high-resolution timers for other waits; adapt backdrop sampling to changes. Add live frosted-blur adjustment from 0 to 40 px (default 6 px), allow untinted frost and keep opacity previews in sync. Preserve profiles, five materials, placeholders and blank-template semantics; Codex observation capabilities are unchanged."
+      }
+    },
+    {
       "version": "0.1.8",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
