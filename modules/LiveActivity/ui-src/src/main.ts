@@ -1,7 +1,9 @@
+// The shared design system first, then the page, then the components: each
+// later sheet wins equal-specificity ties against the shared controls.
+import '@qingtoolbox/module-ui/module.css'
+import './styles.css'
 import { createApp } from 'vue'
 import App from './App.vue'
-import './styles.css'
-import '@qingtoolbox/module-ui/module.css'
 import { adoptHostAppearance } from '@qingtoolbox/module-ui'
 import { getContext } from './bridge'
 

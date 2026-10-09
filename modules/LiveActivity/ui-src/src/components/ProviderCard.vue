@@ -53,9 +53,13 @@ const health = computed<ProviderHealth | 'planned'>(() =>
 <template>
   <div class="provider" :class="health">
     <div class="head">
-      <i class="dot" />
+      <span class="glyph" aria-hidden="true">
+        <svg v-if="kind === 'codex'" viewBox="0 0 24 24"><path d="M8.5 8 4.5 12l4 4M15.5 8l4 4-4 4M13.5 6l-3 12" /></svg>
+        <svg v-else viewBox="0 0 24 24"><path d="M9.5 3.5h5M10.5 3.5v6L5 18.5a1.5 1.5 0 0 0 1.3 2.2h11.4a1.5 1.5 0 0 0 1.3-2.2L13.5 9.5v-6M7.5 15h9" /></svg>
+      </span>
       <strong>{{ NAME[kind] }}</strong>
-      <span v-if="implemented && status && (kind !== 'codex' || account?.connectionMode === 'shared')" class="count">
+      <span class="health"><i class="dot" />{{ implemented ? HEALTH[status?.health ?? 'disabled'] : '规划中' }}</span>
+      <span v-if="implemented && status && (kind !== 'codex' || account?.connectionMode === 'shared')" class="count" title="活动数">
         {{ status.activityCount }}
       </span>
     </div>
@@ -69,51 +73,30 @@ const health = computed<ProviderHealth | 'planned'>(() =>
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 5px;
-  padding: 11px 13px;
-  border: 1px solid var(--q-border);
-  border-radius: 12px;
-  background: var(--q-card);
-}
-.head {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  font-size: 12.5px;
-  color: var(--q-text);
-}
-.dot {
-  flex: 0 0 8px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--q-text-3);
-}
-.connected .dot {
-  background: var(--q-success, #2f9e6a);
-}
-.unavailable .dot {
-  background: #e2a03f;
-}
-.planned .dot {
-  background: var(--q-border);
-}
-.count {
-  margin-left: auto;
-  padding: 1px 7px;
-  border-radius: 99px;
-  color: var(--q-text-3);
+  padding: 14px 15px;
+  border: 1px solid var(--q-border);
+  border-radius: 14px;
   background: var(--q-surface-soft);
-  font-size: 11px;
 }
-.detail {
-  margin: 0;
-  overflow: hidden;
-  color: var(--q-text-3);
-  font-size: 11px;
-  text-overflow: ellipsis;
-}
-.provider.planned {
-  opacity: 0.7;
-}
+.head { display: flex; align-items: center; gap: 9px; color: var(--q-text); font-size: 13px; }
+.glyph { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 9px; color: var(--q-brand); background: var(--q-brand-soft); }
+.glyph svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.health { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 2px 9px 2px 7px; border-radius: 99px; color: var(--q-text-3); background: var(--q-card); font-size: 11px; font-weight: 600; }
+.dot { position: relative; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--q-text-3); }
+.connected .health { color: var(--q-success, #2f9e6a); }
+.connected .dot { background: var(--q-success, #2f9e6a); }
+.connected .dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: inherit; animation: beacon 2.4s cubic-bezier(0, 0, .2, 1) infinite; }
+.unavailable .health { color: var(--q-warning, #c27c12); }
+.unavailable .dot { background: var(--q-warning, #e2a03f); }
+.planned .dot { background: var(--q-border); }
+.count { min-width: 22px; padding: 1px 7px; border-radius: 99px; color: var(--q-text-2); background: var(--q-card); font-size: 11px; font-variant-numeric: tabular-nums; text-align: center; }
+.detail { margin: 0; overflow: hidden; color: var(--q-text-3); font-size: 11.5px; text-overflow: ellipsis; }
+.provider.planned { opacity: .7; }
+@keyframes beacon { 70%, to { opacity: 0; transform: scale(2.6); } }
+:root[data-appearance-preset='qing-nova'] .provider { border: 3px solid #111; border-radius: 0; background: #fff; box-shadow: 4px 4px 0 #111; }
+:root[data-appearance-preset='qing-nova'] .glyph { border-radius: 0; }
+:root[data-appearance-preset='neon-circuit'] .provider,
+:root[data-appearance-preset='neon-circuit'] .glyph { border-radius: 3px; }
+@media (prefers-reduced-motion: reduce) { .connected .dot::after { animation: none; } }
 </style>

@@ -635,6 +635,15 @@ impl Transition {
         (width, height)
     }
 
+    /// Eased progress towards the target, 1.0 once settled. The renderer uses
+    /// it to fade in content that only exists in the target state.
+    pub fn progress(&self) -> f64 {
+        if !self.active {
+            return 1.0;
+        }
+        motion::ease_out(self.elapsed.as_secs_f64() / motion::DURATION.as_secs_f64())
+    }
+
     /// Snap to the end, used when a transition is superseded.
     pub fn settle(&mut self) -> (f64, f64) {
         self.active = false;

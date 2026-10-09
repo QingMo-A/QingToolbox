@@ -226,6 +226,7 @@ impl Surface {
             DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
         );
     }
+    #[cfg(test)]
     unsafe fn paragraph(&self, text: &str, rect: RECT, font_size: f64, color: u32) {
         self.text(
             text,
@@ -248,39 +249,12 @@ impl Surface {
         // DrawTextW requires a readable text buffer even for an empty string.
         // An empty Vec's as_ptr() is only a Rust dangling sentinel, not a valid
         // Windows string. Empty/temporarily clipped content needs no GDI call.
-        if text.is_empty()
-            || rect.right <= rect.left
-            || rect.bottom <= rect.top
-            || !font_size.is_finite()
-            || font_size <= 0.0
-        {
+        if text.is_empty() || rect.right <= rect.left || rect.bottom <= rect.top {
             return;
         }
-        let face: Vec<u16> = "Segoe UI\0".encode_utf16().collect();
-        let font = CreateFontW(
-            -(font_size.round() as i32),
-            0,
-            0,
-            0,
-            if bold { 700 } else { 400 },
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET as u32,
-            OUT_DEFAULT_PRECIS as u32,
-            CLIP_DEFAULT_PRECIS as u32,
-            ANTIALIASED_QUALITY as u32,
-            DEFAULT_PITCH as u32,
-            face.as_ptr(),
-        );
-        if font.is_null() {
+        let Some(font) = Font::select(self.dc, font_size, bold) else {
             return;
-        }
-        let old = SelectObject(self.dc, font);
-        if old.is_null() || old as isize == GDI_ERROR as isize {
-            DeleteObject(font);
-            return;
-        }
+        };
         SetBkMode(self.dc, TRANSPARENT as i32);
         SetTextColor(self.dc, color);
         let text = windows_text_buffer(text);
@@ -292,8 +266,40 @@ impl Surface {
             &mut rect,
             flags,
         );
-        SelectObject(self.dc, old);
-        DeleteObject(font);
+        drop(font);
+    }
+    /// The pixel size `text` would occupy, wrapped to `width` when `flags`
+    /// asks for word breaks. Nothing is drawn.
+    unsafe fn measure(
+        &self,
+        text: &str,
+        width: i32,
+        font_size: f64,
+        bold: bool,
+        flags: u32,
+    ) -> (i32, i32) {
+        if text.is_empty() || width <= 0 {
+            return (0, 0);
+        }
+        let Some(font) = Font::select(self.dc, font_size, bold) else {
+            return (0, 0);
+        };
+        let text = windows_text_buffer(text);
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: width,
+            bottom: 0,
+        };
+        DrawTextW(
+            self.dc,
+            text.as_ptr(),
+            (text.len() - 1) as i32,
+            &mut rect,
+            flags | DT_CALCRECT | DT_NOPREFIX,
+        );
+        drop(font);
+        (rect.right - rect.left, rect.bottom - rect.top)
     }
     unsafe fn bar(&self, rect: RECT, color: u32) {
         let brush = CreateSolidBrush(color);
@@ -302,15 +308,82 @@ impl Surface {
     }
 }
 
+/// A GDI font selected into a DC for one call, restored and freed on drop.
+///
+/// Emphasis uses the Semibold face: GDI maps a 600 weight inside "Segoe UI" to
+/// its Bold face, which reads heavy at 12 px on a 32 px capsule.
+struct Font {
+    dc: HDC,
+    font: HFONT,
+    old: HGDIOBJ,
+}
+impl Font {
+    unsafe fn select(dc: HDC, font_size: f64, strong: bool) -> Option<Self> {
+        if !font_size.is_finite() || font_size <= 0.0 {
+            return None;
+        }
+        let face: Vec<u16> = if strong {
+            "Segoe UI Semibold\0"
+        } else {
+            "Segoe UI\0"
+        }
+        .encode_utf16()
+        .collect();
+        let font = CreateFontW(
+            -(font_size.round() as i32),
+            0,
+            0,
+            0,
+            if strong { 600 } else { 400 },
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET as u32,
+            OUT_DEFAULT_PRECIS as u32,
+            CLIP_DEFAULT_PRECIS as u32,
+            ANTIALIASED_QUALITY as u32,
+            DEFAULT_PITCH as u32,
+            face.as_ptr(),
+        );
+        if font.is_null() {
+            return None;
+        }
+        let old = SelectObject(dc, font);
+        if old.is_null() || old as isize == GDI_ERROR as isize {
+            DeleteObject(font);
+            return None;
+        }
+        Some(Self { dc, font, old })
+    }
+}
+impl Drop for Font {
+    fn drop(&mut self) {
+        unsafe {
+            SelectObject(self.dc, self.old);
+            DeleteObject(self.font);
+        }
+    }
+}
+
 fn windows_text_buffer(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// COLORREF is 0x00BBGGRR; the layered DIB uses 0xAARRGGBB.
+fn colorref_to_rgb(color: u32) -> u32 {
+    ((color & 255) << 16) | (color & 0xFF00) | ((color >> 16) & 255)
+}
+
 /// GDI's RGB brightness is not alpha: dark glyphs must be as opaque as white
 /// glyphs. Render coverage separately, then store premultiplied ARGB ink.
+///
+/// `reveal` scales every later stroke's opacity. The capsule's own header is
+/// drawn at full strength; content that only exists in the target state fades
+/// in while the window is still growing towards it.
 struct Foreground {
     surface: Surface,
     coverage: Surface,
+    reveal: std::cell::Cell<f64>,
 }
 impl Foreground {
     unsafe fn new(width: i32, height: i32) -> Result<Self, String> {
@@ -319,6 +392,7 @@ impl Foreground {
         Ok(Self {
             surface,
             coverage: Surface::new(width, height)?,
+            reveal: std::cell::Cell::new(1.0),
         })
     }
     unsafe fn label(&self, text: &str, rect: RECT, font_size: f64, bold: bool, color: u32) {
@@ -326,19 +400,44 @@ impl Foreground {
         self.coverage.label(text, rect, font_size, bold, 0xFFFFFF);
         self.paint(rect, color);
     }
-    unsafe fn paragraph(&self, text: &str, rect: RECT, font_size: f64, color: u32) {
+    unsafe fn label_right(&self, text: &str, rect: RECT, font_size: f64, bold: bool, color: u32) {
         self.coverage.bar(rect, 0);
-        self.coverage.paragraph(text, rect, font_size, 0xFFFFFF);
+        self.coverage.text(
+            text,
+            rect,
+            font_size,
+            bold,
+            0xFFFFFF,
+            DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS | DT_NOPREFIX,
+        );
         self.paint(rect, color);
     }
-    unsafe fn bar(&self, rect: RECT, color: u32) {
-        self.coverage.bar(rect, 0xFFFFFF);
+    unsafe fn paragraph(&self, text: &str, rect: RECT, font_size: f64, bold: bool, color: u32) {
+        self.coverage.bar(rect, 0);
+        self.coverage.text(
+            text,
+            rect,
+            font_size,
+            bold,
+            0xFFFFFF,
+            DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX,
+        );
         self.paint(rect, color);
+    }
+    unsafe fn measure(
+        &self,
+        text: &str,
+        width: i32,
+        font_size: f64,
+        bold: bool,
+        flags: u32,
+    ) -> (i32, i32) {
+        self.coverage.measure(text, width, font_size, bold, flags)
     }
     unsafe fn paint(&self, rect: RECT, color: u32) {
         GdiFlush();
-        // COLORREF is 0x00BBGGRR; the layered DIB uses 0xAARRGGBB.
-        let rgb = ((color & 255) << 16) | (color & 0xFF00) | ((color >> 16) & 255);
+        let rgb = colorref_to_rgb(color);
+        let reveal = self.reveal.get();
         for y in rect.top.max(0)..rect.bottom.min(self.surface.height) {
             for x in rect.left.max(0)..rect.right.min(self.surface.width) {
                 let index = (y * self.surface.width + x) as usize;
@@ -346,10 +445,159 @@ impl Foreground {
                 let alpha = (coverage & 255)
                     .max((coverage >> 8) & 255)
                     .max((coverage >> 16) & 255);
+                let alpha = (alpha as f64 * reveal).round() as u32;
                 let destination = self.surface.pixels.add(index);
                 *destination = ink_over(*destination, rgb, alpha);
             }
         }
+    }
+    /// Blend analytic coverage, sampled at pixel centres inside a pixel box.
+    /// Shapes are resolution independent, so they stay crisp at every DPI.
+    unsafe fn shape(
+        &self,
+        left: f64,
+        top: f64,
+        right: f64,
+        bottom: f64,
+        color: u32,
+        coverage: impl Fn(f64, f64) -> f64,
+    ) {
+        let rgb = colorref_to_rgb(color);
+        let reveal = self.reveal.get();
+        let x0 = (left.floor() as i32).max(0);
+        let y0 = (top.floor() as i32).max(0);
+        let x1 = (right.ceil() as i32).min(self.surface.width);
+        let y1 = (bottom.ceil() as i32).min(self.surface.height);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let amount = coverage(x as f64 + 0.5, y as f64 + 0.5).clamp(0.0, 1.0) * reveal;
+                if amount <= 0.0 {
+                    continue;
+                }
+                let destination = self
+                    .surface
+                    .pixels
+                    .add((y * self.surface.width + x) as usize);
+                *destination = ink_over(*destination, rgb, (amount * 255.0).round() as u32);
+            }
+        }
+    }
+    unsafe fn disc(&self, cx: f64, cy: f64, radius: f64, color: u32, opacity: f64) {
+        let pad = radius + 1.0;
+        self.shape(cx - pad, cy - pad, cx + pad, cy + pad, color, |x, y| {
+            (radius + 0.5 - (x - cx).hypot(y - cy)) * opacity
+        });
+    }
+    /// A soft light pool behind a status dot; quadratic falloff, no hard edge.
+    unsafe fn glow(&self, cx: f64, cy: f64, radius: f64, color: u32, strength: f64) {
+        self.shape(
+            cx - radius,
+            cy - radius,
+            cx + radius,
+            cy + radius,
+            color,
+            |x, y| {
+                let t = (1.0 - (x - cx).hypot(y - cy) / radius).max(0.0);
+                t * t * strength
+            },
+        );
+    }
+    /// A ring swept clockwise from twelve o'clock; `sweep` is 0..=1.
+    unsafe fn ring(
+        &self,
+        center: (f64, f64),
+        radius: f64,
+        thickness: f64,
+        sweep: f64,
+        color: u32,
+        opacity: f64,
+    ) {
+        let (cx, cy) = center;
+        let sweep = sweep.clamp(0.0, 1.0);
+        if sweep <= 0.0 {
+            return;
+        }
+        let pad = radius + thickness + 1.0;
+        let end = sweep * std::f64::consts::TAU;
+        self.shape(cx - pad, cy - pad, cx + pad, cy + pad, color, |x, y| {
+            let (dx, dy) = (x - cx, y - cy);
+            let band = 0.5 - ((dx.hypot(dy) - radius).abs() - thickness / 2.0);
+            if band <= 0.0 {
+                return 0.0;
+            }
+            let along = if sweep >= 1.0 {
+                1.0
+            } else {
+                ((end - dx.atan2(-dy).rem_euclid(std::f64::consts::TAU)) * radius + 0.5)
+                    .clamp(0.0, 1.0)
+            };
+            band.min(1.0) * along * opacity
+        });
+        if sweep < 1.0 && opacity >= 1.0 {
+            // Rounded caps, so a short arc reads as a stroke and not a wedge.
+            let cap = thickness / 2.0;
+            self.disc(cx, cy - radius, cap, color, 1.0);
+            self.disc(
+                cx + radius * end.sin(),
+                cy - radius * end.cos(),
+                cap,
+                color,
+                1.0,
+            );
+        }
+    }
+    unsafe fn segment(&self, from: (f64, f64), to: (f64, f64), thickness: f64, color: u32) {
+        let pad = thickness + 1.0;
+        let (vx, vy) = (to.0 - from.0, to.1 - from.1);
+        let length = (vx * vx + vy * vy).max(f64::EPSILON);
+        self.shape(
+            from.0.min(to.0) - pad,
+            from.1.min(to.1) - pad,
+            from.0.max(to.0) + pad,
+            from.1.max(to.1) + pad,
+            color,
+            |x, y| {
+                let t = (((x - from.0) * vx + (y - from.1) * vy) / length).clamp(0.0, 1.0);
+                let d = (x - from.0 - vx * t).hypot(y - from.1 - vy * t);
+                thickness / 2.0 + 0.5 - d
+            },
+        );
+    }
+    /// A pill: a rounded rectangle whose radius is half its height.
+    unsafe fn capsule(
+        &self,
+        left: f64,
+        top: f64,
+        width: f64,
+        height: f64,
+        color: u32,
+        opacity: f64,
+    ) {
+        if width <= 0.0 || height <= 0.0 {
+            return;
+        }
+        let radius = (height / 2.0).min(width / 2.0);
+        let (cx, cy) = (left + width / 2.0, top + height / 2.0);
+        self.shape(
+            left - 1.0,
+            top - 1.0,
+            left + width + 1.0,
+            top + height + 1.0,
+            color,
+            |x, y| {
+                let dx = (x - cx).abs() - (width / 2.0 - radius);
+                let dy = (y - cy).abs() - (height / 2.0 - radius);
+                let distance = dx.max(0.0).hypot(dy.max(0.0)) + dx.max(dy).min(0.0) - radius;
+                (0.5 - distance) * opacity
+            },
+        );
+    }
+    /// A one-pixel rule that fades out at both ends.
+    unsafe fn hairline(&self, left: f64, right: f64, y: f64, color: u32, opacity: f64) {
+        let fade = ((right - left) / 4.0).clamp(1.0, 28.0);
+        self.shape(left, y.floor(), right, y.floor() + 1.0, color, |x, _| {
+            ((x - left) / fade).min((right - x) / fade).clamp(0.0, 1.0) * opacity
+        });
     }
 }
 
@@ -377,11 +625,23 @@ impl Drop for Surface {
     }
 }
 
-pub fn corner_alpha(x: i32, y: i32, width: i32, height: i32, radius: f64) -> u8 {
+/// Signed distance from a pixel centre to the rounded rectangle's edge,
+/// negative inside.
+fn edge_distance(x: i32, y: i32, width: i32, height: i32, radius: f64) -> f64 {
     let dx = ((x as f64 + 0.5) - width as f64 / 2.0).abs() - (width as f64 / 2.0 - radius);
     let dy = ((y as f64 + 0.5) - height as f64 / 2.0).abs() - (height as f64 / 2.0 - radius);
-    let distance = dx.max(0.0).hypot(dy.max(0.0)) + dx.max(dy).min(0.0) - radius;
-    ((0.5 - distance).clamp(0.0, 1.0) * 255.0).round() as u8
+    dx.max(0.0).hypot(dy.max(0.0)) + dx.max(dy).min(0.0) - radius
+}
+
+pub fn corner_alpha(x: i32, y: i32, width: i32, height: i32, radius: f64) -> u8 {
+    ((0.5 - edge_distance(x, y, width, height, radius)).clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+/// The corner radius for an island `height` pixels tall: a full pill while
+/// compact, a softer card once it grows. Drawing and hit testing share it, so
+/// the clickable shape is exactly the painted one at every animation frame.
+pub fn island_radius(height: i32, scale: f64) -> f64 {
+    (22.0 * scale).min(height as f64 / 2.0)
 }
 
 /// Text is composited independently of background opacity. It remains readable
@@ -403,6 +663,401 @@ pub fn compose_pixel(foreground: u32, background: u32, opacity: f64, mask: u8) -
     result
 }
 
+/// The status colour for an activity state, or the ambient blue without one.
+/// Mirrored by `IslandPreview.vue`; keep the two tables identical.
+fn accent_color(light: bool, state: Option<ActivityState>) -> u32 {
+    match (light, state) {
+        (true, Some(ActivityState::Waiting)) => 0x001E6492,
+        (true, Some(ActivityState::Failed)) => 0x003839BB,
+        (true, Some(ActivityState::Success)) => 0x00426D1C,
+        (true, _) => 0x00A96522,
+        (false, Some(ActivityState::Waiting)) => 0x0089BBF9,
+        (false, Some(ActivityState::Failed)) => 0x008F84F7,
+        (false, Some(ActivityState::Success)) => 0x00ABDD71,
+        _ => 0x00F0B486,
+    }
+}
+
+/// Smoothstep from the transition's eased progress to content opacity: the
+/// body stays out of the way for the first third of the morph, then settles.
+fn content_opacity(progress: f64) -> f64 {
+    let t = ((progress - 0.3) / 0.7).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Paint the island into an off-screen premultiplied surface.
+///
+/// Reads the cached frosted backdrop but never touches a window, so every
+/// state can be rendered and inspected in a test. All coordinates below are
+/// logical pixels, the same ones `IslandPreview.vue` uses for its CSS.
+unsafe fn compose(
+    renderer: &Renderer,
+    material: SurfaceStyle,
+    bounds: Bounds,
+    scale: f64,
+    model: &IslandModel,
+    settings: &Settings,
+    progress: f64,
+) -> Result<Foreground, String> {
+    let surface = Foreground::new(bounds.width, bounds.height)?;
+    let light = settings.background_color.is_light();
+    let primary = if light { 0x00302014 } else { 0x00F5F1EF };
+    let secondary = if light { 0x00665442 } else { 0x00BFB4AA };
+    let caption = if light { secondary } else { 0x00E2D5CC };
+    let unit = |value: f64| (value * scale).round() as i32;
+    let at = |value: f64| value * scale;
+    let rect = |x: f64, y: f64, w: f64, h: f64| RECT {
+        left: unit(x),
+        top: unit(y),
+        right: unit(x + w),
+        bottom: unit(y + h),
+    };
+    let width = bounds.width as f64 / scale;
+    let height = bounds.height as f64 / scale;
+    let single = DT_SINGLELINE;
+    let focus = model.focus();
+    let accent = accent_color(light, focus.map(|a| a.state));
+    let ambient = model.ambient();
+    let expanded_extra = model.expanded_text_extra_height();
+    let header = model.account_header();
+    let header_offset = if header.is_some() { 24.0 } else { 0.0 };
+    let clock = ambient.and_then(|content| content.clock.as_deref());
+    let clock_width = clock
+        .map(|text| {
+            surface
+                .measure(text, unit(width), 12.0 * scale, true, single)
+                .0 as f64
+                / scale
+                + 1.0
+        })
+        .unwrap_or(0.0);
+
+    // Status orb: a live dot with a light pool while something is working or
+    // waiting, a progress ring around it when the task reports one, and a
+    // drawn clock face when the island is only showing the user's own text.
+    let (cx, cy) = (at(21.0), at(16.0));
+    match focus {
+        Some(activity) => {
+            if matches!(
+                activity.state,
+                ActivityState::Running | ActivityState::Waiting
+            ) {
+                surface.glow(cx, cy, at(10.0), accent, 0.34);
+            }
+            match activity.progress.as_ref().and_then(|p| p.fraction()) {
+                Some(fraction) => {
+                    surface.ring((cx, cy), at(6.4), at(1.7), 1.0, accent, 0.26);
+                    surface.ring((cx, cy), at(6.4), at(1.7), fraction, accent, 1.0);
+                    surface.disc(cx, cy, at(2.4), accent, 1.0);
+                }
+                None => surface.disc(cx, cy, at(3.7), accent, 1.0),
+            }
+        }
+        None => {
+            surface.ring((cx, cy), at(5.7), at(1.35), 1.0, accent, 1.0);
+            surface.segment((cx, cy), (cx, cy - at(3.0)), at(1.35), accent);
+            surface.segment((cx, cy), (cx + at(2.2), cy + at(1.1)), at(1.35), accent);
+        }
+    }
+    surface.label(
+        &model.compact_label().unwrap_or_default(),
+        rect(
+            33.0,
+            0.0,
+            width
+                - 47.0
+                - if clock.is_some() {
+                    clock_width + 8.0
+                } else {
+                    0.0
+                },
+            32.0,
+        ),
+        12.0 * scale,
+        true,
+        primary,
+    );
+    if let Some(clock) = clock {
+        surface.label_right(
+            clock,
+            rect(width - 14.0 - clock_width, 0.0, clock_width, 32.0),
+            12.0 * scale,
+            true,
+            primary,
+        );
+    }
+    if let Some(header) = header {
+        surface.label(
+            header,
+            rect(16.0, 32.0, width - 32.0, 22.0),
+            10.0 * scale,
+            false,
+            caption,
+        );
+    }
+
+    // Everything below the header belongs to the target state only.
+    surface.reveal.set(content_opacity(progress));
+    if model.state() == IslandState::Peek {
+        if let Some(text) = model.peek_detail() {
+            surface.label(
+                &text,
+                rect(33.0, 30.0 + header_offset, width - 49.0, 22.0),
+                11.0 * scale,
+                false,
+                secondary,
+            );
+        }
+    }
+    if model.state() == IslandState::Expanded {
+        let overflow = model.overflow();
+        let rule_end = if overflow > 0 {
+            width - 50.0
+        } else {
+            width - 16.0
+        };
+        surface.hairline(
+            at(16.0),
+            at(rule_end),
+            at(40.0 + header_offset),
+            primary,
+            if light { 0.16 } else { 0.14 },
+        );
+        if overflow > 0 {
+            surface.label_right(
+                &format!("+{overflow}"),
+                rect(width - 46.0, 31.0 + header_offset, 30.0, 18.0),
+                10.0 * scale,
+                true,
+                secondary,
+            );
+        }
+        if model.stack().is_empty() {
+            if let Some(text) = ambient.and_then(|content| content.expanded_text.as_deref()) {
+                // The first line is the headline; anything after it is body.
+                // The block is centred in the card's settled height, so it
+                // does not slide while the window is still growing.
+                let (lead, rest) = text.split_once('\n').unwrap_or((text, ""));
+                let column = unit(width - 44.0);
+                let lead_height = (surface
+                    .measure(lead, column, 20.0 * scale, true, DT_WORDBREAK)
+                    .1 as f64
+                    / scale)
+                    .min(56.0);
+                let rest_height = surface
+                    .measure(rest, column, 13.0 * scale, false, DT_WORDBREAK)
+                    .1 as f64
+                    / scale;
+                let block = lead_height
+                    + if rest_height > 0.0 {
+                        6.0 + rest_height
+                    } else {
+                        0.0
+                    };
+                let settled = model.state().logical_size().1 + expanded_extra;
+                let region = 41.0 + header_offset;
+                let top =
+                    (region + (settled - 14.0 - region - block) / 2.0).max(54.0 + header_offset);
+                surface.paragraph(
+                    lead,
+                    rect(22.0, top, width - 44.0, lead_height.max(1.0)),
+                    20.0 * scale,
+                    true,
+                    primary,
+                );
+                let body = top + lead_height + 6.0;
+                surface.paragraph(
+                    rest,
+                    rect(22.0, body, width - 44.0, height.min(settled) - body - 14.0),
+                    13.0 * scale,
+                    false,
+                    secondary,
+                );
+            }
+        } else {
+            let track = if light { 0x00000000 } else { 0x00FFFFFF };
+            for (index, activity) in model.stack().iter().take(3).enumerate() {
+                let y = if header.is_some() {
+                    74.0 + index as f64 * 44.0
+                } else {
+                    50.0 + index as f64 * 50.0
+                };
+                let tone = accent_color(light, Some(activity.state));
+                let fraction = activity.progress.as_ref().and_then(|p| p.fraction());
+                if matches!(
+                    activity.state,
+                    ActivityState::Running | ActivityState::Waiting
+                ) {
+                    surface.glow(at(22.0), at(y + 9.0), at(7.5), tone, 0.3);
+                }
+                surface.disc(at(22.0), at(y + 9.0), at(3.2), tone, 1.0);
+                let percent = fraction.map(|f| format!("{}%", (f * 100.0).round() as i32));
+                let percent_width = percent
+                    .as_deref()
+                    .map(|text| {
+                        surface
+                            .measure(text, unit(width), 10.5 * scale, true, single)
+                            .0 as f64
+                            / scale
+                            + 1.0
+                    })
+                    .unwrap_or(0.0);
+                if let Some(percent) = &percent {
+                    surface.label_right(
+                        percent,
+                        rect(width - 17.0 - percent_width, y, percent_width, 18.0),
+                        10.5 * scale,
+                        true,
+                        tone,
+                    );
+                }
+                surface.label(
+                    &activity.title,
+                    rect(
+                        34.0,
+                        y,
+                        width
+                            - 51.0
+                            - if percent.is_some() {
+                                percent_width + 6.0
+                            } else {
+                                0.0
+                            },
+                        18.0,
+                    ),
+                    12.0 * scale,
+                    true,
+                    primary,
+                );
+                surface.label(
+                    activity
+                        .subtitle
+                        .as_deref()
+                        .unwrap_or(activity.state.as_str()),
+                    rect(34.0, y + 18.0, width - 51.0, 16.0),
+                    10.0 * scale,
+                    false,
+                    secondary,
+                );
+                if let Some(fraction) = fraction {
+                    let full = width - 51.0;
+                    surface.capsule(
+                        at(34.0),
+                        at(y + 38.0),
+                        at(full),
+                        at(3.0),
+                        track,
+                        if light { 0.1 } else { 0.14 },
+                    );
+                    surface.capsule(
+                        at(34.0),
+                        at(y + 38.0),
+                        at(full * fraction.clamp(0.0, 1.0)).max(at(3.0)),
+                        at(3.0),
+                        tone,
+                        1.0,
+                    );
+                }
+            }
+            if let Some(text) = model.expanded_text() {
+                surface.paragraph(
+                    text,
+                    rect(22.0, 213.0, width - 44.0, expanded_extra),
+                    12.0 * scale,
+                    false,
+                    secondary,
+                );
+            }
+        }
+        // Account quota is independent of task activity. A clock-only island
+        // must expose it too; reserve two footer lines for remaining/reset.
+        if let Some(account) = model.account() {
+            surface.paragraph(
+                account,
+                rect(17.0, 213.0 + expanded_extra, width - 34.0, 42.0),
+                10.0 * scale,
+                false,
+                secondary,
+            );
+        }
+    }
+    GdiFlush();
+
+    let pixels = std::slice::from_raw_parts_mut(
+        surface.surface.pixels,
+        (bounds.width * bounds.height) as usize,
+    );
+    let radius = island_radius(bounds.height, scale);
+    let opacity = if material == SurfaceStyle::Solid {
+        1.0
+    } else {
+        settings.background_opacity
+    };
+    // Glass edge: a hairline rim lit from above on dark capsules and a quiet
+    // ink outline on light ones, plus a faint top sheen. Both are ink, so they
+    // stay visible however translucent the tint is.
+    let (rim, rim_top, rim_bottom) = if light {
+        (0x000000, 0.09, 0.15)
+    } else {
+        (0xFFFFFF, 0.24, 0.07)
+    };
+    let sheen_depth = 24.0 * scale;
+    // Only the sampled background is blurred. Foreground text remains
+    // separate; material tint and deterministic grain are applied last.
+    for (index, pixel) in pixels.iter_mut().enumerate() {
+        let x = index as i32 % bounds.width;
+        let y = index as i32 / bounds.width;
+        let distance = edge_distance(x, y, bounds.width, bounds.height, radius);
+        let a = ((0.5 - distance).clamp(0.0, 1.0) * 255.0).round() as u8;
+        if a == 0 {
+            *pixel = 0;
+            continue;
+        }
+        let depth = y as f64 / bounds.height.max(1) as f64;
+        let rim_alpha =
+            (1.8 + distance).clamp(0.0, 1.0) * (rim_top + (rim_bottom - rim_top) * depth);
+        let sheen = if light {
+            0.0
+        } else {
+            0.05 * (1.0 - (y as f64 + 0.5) / sheen_depth).max(0.0)
+        };
+        let mut ink = *pixel;
+        if sheen > 0.0 {
+            ink = ink_over(ink, 0xFFFFFF, (sheen * 255.0).round() as u32);
+        }
+        if rim_alpha > 0.0 {
+            ink = ink_over(ink, rim, (rim_alpha * 255.0).round() as u32);
+        }
+        let grain = if material == SurfaceStyle::Solid {
+            0
+        } else {
+            ((x.wrapping_mul(17) ^ y.wrapping_mul(31)) & 3) - 1
+        };
+        let gradient = (5.0 * (1.0 - y as f64 / bounds.height as f64)).round() as i32 + grain;
+        let r = (settings.background_color.r + gradient).clamp(0, 255) as u32;
+        let g = (settings.background_color.g + gradient).clamp(0, 255) as u32;
+        let b = (settings.background_color.b + gradient).clamp(0, 255) as u32;
+        let tint = r << 16 | g << 8 | b;
+        *pixel = if material == SurfaceStyle::Frosted {
+            compose_pixel(
+                ink,
+                crate::blur::tint(
+                    renderer.pixel(bounds.x + x, bounds.y + y).unwrap_or(tint),
+                    tint,
+                    opacity,
+                ),
+                1.0,
+                a,
+            )
+        } else {
+            compose_pixel(ink, tint, opacity, a)
+        };
+    }
+    Ok(surface)
+}
+
+/// Draw and present one frame. `progress` is the running size transition's
+/// eased progress (1.0 when settled); it fades in the target state's body.
 pub fn draw(
     renderer: &mut Renderer,
     window: &crate::win32::IslandWindow,
@@ -410,6 +1065,7 @@ pub fn draw(
     scale: f64,
     model: &IslandModel,
     settings: &Settings,
+    progress: f64,
 ) -> Result<bool, String> {
     if bounds.is_empty() {
         return Ok(false);
@@ -423,208 +1079,12 @@ pub fn draw(
         } else {
             renderer.backdrop = None;
         }
-        let surface = Foreground::new(bounds.width, bounds.height)?;
-        let light = settings.background_color.is_light();
-        let primary = if light { 0x00302014 } else { 0x00F5F1EF };
-        let secondary = if light { 0x00665442 } else { 0x00BFB4AA };
-        let caption = if light { secondary } else { 0x00E2D5CC };
-        let unit = |value: f64| (value * scale).round() as i32;
-        let rect = |x: f64, y: f64, w: f64, h: f64| RECT {
-            left: unit(x),
-            top: unit(y),
-            right: unit(x + w),
-            bottom: unit(y + h),
-        };
-        let width = bounds.width as f64 / scale;
-        let accent = match (light, model.focus().map(|a| a.state)) {
-            (true, Some(ActivityState::Waiting)) => 0x001E6492,
-            (true, Some(ActivityState::Failed)) => 0x003839BB,
-            (true, Some(ActivityState::Success)) => 0x00426D1C,
-            (true, _) => 0x00A96522,
-            (false, Some(ActivityState::Waiting)) => 0x0089BBF9,
-            (false, Some(ActivityState::Failed)) => 0x008F84F7,
-            (false, Some(ActivityState::Success)) => 0x00ABDD71,
-            _ => 0x00F0B486,
-        };
-        let ambient = model.ambient();
-        let expanded_extra = model.expanded_text_extra_height();
-        let header = model.account_header();
-        let header_offset = if header.is_some() { 24.0 } else { 0.0 };
-        let clock = ambient.and_then(|content| content.clock.as_deref());
-        let clock_width = clock
-            .map(|text| text.len() as f64 * 7.1 + 5.0)
-            .unwrap_or(0.0);
-        surface.label(
-            if model.focus().is_some() {
-                "●"
-            } else {
-                "◷"
-            },
-            rect(13.0, 0.0, 16.0, 32.0),
-            11.0 * scale,
-            false,
-            accent,
-        );
-        surface.label(
-            &model.compact_label().unwrap_or_default(),
-            rect(34.0, 0.0, width - 48.0 - clock_width, 32.0),
-            12.0 * scale,
-            true,
-            primary,
-        );
-        if let Some(clock) = clock {
-            surface.label(
-                clock,
-                rect(width - clock_width - 12.0, 0.0, clock_width, 32.0),
-                12.0 * scale,
-                true,
-                primary,
-            );
-        }
-        if let Some(header) = header {
-            surface.label(
-                header,
-                rect(16.0, 32.0, width - 32.0, 22.0),
-                10.0 * scale,
-                false,
-                caption,
-            );
-        }
-        if model.state() == IslandState::Peek {
-            if let Some(text) = model.peek_detail() {
-                surface.label(
-                    &text,
-                    rect(16.0, 31.0 + header_offset, width - 32.0, 25.0),
-                    11.0 * scale,
-                    false,
-                    secondary,
-                );
-            }
-        }
-        if model.state() == IslandState::Expanded && model.stack().is_empty() {
-            if let Some(content) = ambient {
-                if let Some(text) = content.expanded_text.as_deref() {
-                    surface.paragraph(
-                        text,
-                        rect(
-                            22.0,
-                            66.0 + header_offset,
-                            width - 44.0,
-                            140.0 - header_offset,
-                        ),
-                        16.0 * scale,
-                        primary,
-                    );
-                }
-            }
-        } else if model.state() == IslandState::Expanded {
-            if model.overflow() > 0 {
-                surface.label(
-                    &format!("+{}", model.overflow()),
-                    rect(width - 48.0, 34.0 + header_offset, 32.0, 22.0),
-                    10.0 * scale,
-                    false,
-                    secondary,
-                );
-            }
-            for (index, activity) in model.stack().iter().take(3).enumerate() {
-                let y = if header.is_some() {
-                    84.0 + index as f64 * 42.0
-                } else {
-                    66.0 + index as f64 * 49.0
-                };
-                surface.label(
-                    &activity.title,
-                    rect(17.0, y, width - 34.0, 20.0),
-                    12.0 * scale,
-                    true,
-                    primary,
-                );
-                surface.label(
-                    activity
-                        .subtitle
-                        .as_deref()
-                        .unwrap_or(activity.state.as_str()),
-                    rect(17.0, y + 20.0, width - 34.0, 17.0),
-                    10.0 * scale,
-                    false,
-                    secondary,
-                );
-                if let Some(fraction) = activity.progress.as_ref().and_then(|p| p.fraction()) {
-                    surface.bar(
-                        rect(17.0, y + 40.0, width - 34.0, 2.0),
-                        if light { 0x00CFC3B8 } else { 0x004B4036 },
-                    );
-                    surface.bar(rect(17.0, y + 40.0, (width - 34.0) * fraction, 2.0), accent);
-                }
-            }
-            if let Some(text) = model.expanded_text() {
-                surface.paragraph(
-                    text,
-                    rect(17.0, 213.0, width - 34.0, expanded_extra),
-                    12.0 * scale,
-                    secondary,
-                );
-            }
-        }
-        // Account quota is independent of task activity. A clock-only island
-        // must expose it too; reserve two footer lines for remaining/reset.
-        if model.state() == IslandState::Expanded {
-            if let Some(account) = model.account() {
-                surface.paragraph(
-                    account,
-                    rect(17.0, 213.0 + expanded_extra, width - 34.0, 42.0),
-                    10.0 * scale,
-                    secondary,
-                );
-            }
-        }
-        GdiFlush();
-        let surface = &surface.surface;
+        // Read after sampling: a failed capture has just downgraded it.
+        let material = window.material();
+        let foreground = compose(renderer, material, bounds, scale, model, settings, progress)?;
+        let surface = &foreground.surface;
         let pixels =
-            std::slice::from_raw_parts_mut(surface.pixels, (bounds.width * bounds.height) as usize);
-        let radius = ((if model.state() == IslandState::Compact {
-            16.0
-        } else {
-            18.0
-        }) * scale)
-            .min(bounds.height as f64 / 2.0);
-        let opacity = if window.material() == SurfaceStyle::Solid {
-            1.0
-        } else {
-            settings.background_opacity
-        };
-        // Only the sampled background is blurred. Foreground text remains
-        // separate; material tint and deterministic grain are applied last.
-        for (index, pixel) in pixels.iter_mut().enumerate() {
-            let x = index as i32 % bounds.width;
-            let y = index as i32 / bounds.width;
-            let a = corner_alpha(x, y, bounds.width, bounds.height, radius);
-            let grain = if window.material() == SurfaceStyle::Solid {
-                0
-            } else {
-                ((x.wrapping_mul(17) ^ y.wrapping_mul(31)) & 3) - 1
-            };
-            let gradient = (5.0 * (1.0 - y as f64 / bounds.height as f64)).round() as i32 + grain;
-            let r = (settings.background_color.r + gradient).clamp(0, 255) as u32;
-            let g = (settings.background_color.g + gradient).clamp(0, 255) as u32;
-            let b = (settings.background_color.b + gradient).clamp(0, 255) as u32;
-            let tint = r << 16 | g << 8 | b;
-            *pixel = if window.material() == SurfaceStyle::Frosted {
-                compose_pixel(
-                    *pixel,
-                    crate::blur::tint(
-                        renderer.pixel(bounds.x + x, bounds.y + y).unwrap_or(tint),
-                        tint,
-                        opacity,
-                    ),
-                    1.0,
-                    a,
-                )
-            } else {
-                compose_pixel(*pixel, tint, opacity, a)
-            };
-        }
+            std::slice::from_raw_parts(surface.pixels, (bounds.width * bounds.height) as usize);
         if renderer.last_bounds == Some(bounds) && renderer.last_pixels == pixels {
             return Ok(false);
         }
@@ -791,14 +1251,14 @@ mod tests {
             let mut renderer = Renderer::default();
             window.apply(bounds, true, 1.0).unwrap();
             std::thread::sleep(Duration::from_millis(80));
-            assert!(draw(&mut renderer, &window, bounds, 1.0, &model, &settings).unwrap());
+            assert!(draw(&mut renderer, &window, bounds, 1.0, &model, &settings, 1.0).unwrap());
             window.set_visible(true);
             std::thread::sleep(Duration::from_millis(80));
             renderer.backdrop.as_mut().unwrap().sampled = Instant::now() - BACKGROUND_INTERVAL;
             // A second capture with our card now visible must still see only
             // the stripes; otherwise it recursively blurs its own text.
             assert!(
-                !draw(&mut renderer, &window, bounds, 1.0, &model, &settings).unwrap(),
+                !draw(&mut renderer, &window, bounds, 1.0, &model, &settings, 1.0).unwrap(),
                 "background capture included the island itself or was unstable"
             );
             assert!(renderer.samples >= 2);
@@ -892,7 +1352,8 @@ mod tests {
                             expanded,
                             scale,
                             &model,
-                            &settings
+                            &settings,
+                            1.0
                         )
                         .unwrap());
                     }
@@ -902,6 +1363,217 @@ mod tests {
             eprintln!("Clock-only expanded native drawing verified: 3 materials, 3 scales, 3 resize heights.");
         }
     }
+    fn gallery_model(
+        state: IslandState,
+        focus: Option<crate::activity::LiveActivity>,
+    ) -> IslandModel {
+        use crate::activity::{ActivityProgress, ActivityState, LiveActivity, ProviderKind};
+        let mut model = IslandModel::new();
+        model.set_ambient(Some(crate::ambient::AmbientContent {
+            clock: Some("12:34".into()),
+            date: "2026-10-09 · 周五".into(),
+            text: "专注当下 · Focus".into(),
+            peek_text: Some("2026-10-09 · 周五 · 剩余 68%".into()),
+            expanded_text: Some(
+                "周五 · 专注当下\n2026-10-09 12:34\n剩余额度 68%，2 小时 14 分后重置".into(),
+            ),
+        }));
+        if let Some(focus) = focus {
+            let stack = vec![
+                focus.clone(),
+                LiveActivity::running("w", ProviderKind::Mock, "demo", "Mock approval 2")
+                    .with_subtitle("Waiting for you")
+                    .with_state(ActivityState::Waiting),
+                LiveActivity::running("s", ProviderKind::Mock, "demo", "Mock completion 3")
+                    .with_subtitle("Finished")
+                    .with_state(ActivityState::Success)
+                    .with_progress(ActivityProgress::determinate(20.0, 20.0)),
+            ];
+            model.set_content(Some(focus), stack, 1, None);
+        }
+        match state {
+            IslandState::Peek => model.set_hovered(true),
+            IslandState::Expanded => model.toggle_expanded(),
+            _ => {}
+        }
+        assert_eq!(model.state(), state);
+        model
+    }
+
+    fn compose_pixels(
+        model: &IslandModel,
+        settings: &Settings,
+        material: SurfaceStyle,
+        scale: f64,
+        progress: f64,
+        name: &str,
+    ) -> (Bounds, Vec<u32>) {
+        let (w, h) = model.state().logical_size();
+        let extra = model.expanded_text_extra_height();
+        let bounds = Bounds {
+            x: 0,
+            y: 0,
+            width: (w * scale).round() as i32,
+            height: ((h + extra) * scale).round() as i32,
+        };
+        let renderer = Renderer::default();
+        let pixels = unsafe {
+            let surface = compose(
+                &renderer, material, bounds, scale, model, settings, progress,
+            )
+            .unwrap();
+            std::slice::from_raw_parts(
+                surface.surface.pixels,
+                (bounds.width * bounds.height) as usize,
+            )
+            .to_vec()
+        };
+        if let Some(folder) = std::env::var_os("QING_ISLAND_GALLERY") {
+            // Test-only review images of our own composed card.
+            let path = std::path::Path::new(&folder).join(format!("{name}.bmp"));
+            let bytes = 54 + pixels.len() * 4;
+            let mut bmp = Vec::with_capacity(bytes);
+            bmp.extend_from_slice(b"BM");
+            bmp.extend_from_slice(&(bytes as u32).to_le_bytes());
+            bmp.extend_from_slice(&[0; 4]);
+            bmp.extend_from_slice(&54u32.to_le_bytes());
+            bmp.extend_from_slice(&40u32.to_le_bytes());
+            bmp.extend_from_slice(&bounds.width.to_le_bytes());
+            bmp.extend_from_slice(&(-bounds.height).to_le_bytes());
+            bmp.extend_from_slice(&1u16.to_le_bytes());
+            bmp.extend_from_slice(&32u16.to_le_bytes());
+            bmp.extend_from_slice(&[0; 24]);
+            for pixel in &pixels {
+                bmp.extend_from_slice(&pixel.to_le_bytes());
+            }
+            std::fs::write(path, &bmp).unwrap();
+        }
+        (bounds, pixels)
+    }
+
+    #[test]
+    fn every_state_composes_off_screen_with_orb_rim_and_faded_body() {
+        use crate::activity::{ActivityProgress, LiveActivity, ProviderKind};
+        let dark = Settings::default();
+        let light = Settings {
+            background_color: crate::settings::RgbColor {
+                r: 240,
+                g: 232,
+                b: 215,
+            },
+            ..Settings::default()
+        };
+        let task = LiveActivity::running("p", ProviderKind::Mock, "demo", "Mock export")
+            .with_subtitle("Compressing assets")
+            .with_progress(ActivityProgress::determinate(5.0, 20.0));
+        let channel = |p: u32, shift: u32| (p >> shift) & 255;
+        let lum = |p: u32| channel(p, 16) + channel(p, 8) + channel(p, 0);
+        for (tag, settings) in [("dark", &dark), ("light", &light)] {
+            for (state, focus) in [
+                (IslandState::Compact, None),
+                (IslandState::Compact, Some(task.clone())),
+                (IslandState::Peek, None),
+                (IslandState::Expanded, None),
+                (IslandState::Expanded, Some(task.clone())),
+            ] {
+                let model = gallery_model(state, focus.clone());
+                for scale in [1.0, 1.5] {
+                    let name = format!(
+                        "{tag}-{}-{}-{}",
+                        state.as_str(),
+                        if focus.is_some() { "task" } else { "ambient" },
+                        (scale * 100.0) as i32
+                    );
+                    let (bounds, pixels) =
+                        compose_pixels(&model, settings, SurfaceStyle::Solid, scale, 1.0, &name);
+                    let at = |x: i32, y: i32| pixels[(y * bounds.width + x) as usize];
+                    // Rounded corners are fully transparent; the body is opaque.
+                    assert_eq!(at(0, 0), 0);
+                    assert_eq!(at(bounds.width / 2, bounds.height - 3) >> 24, 255);
+                    // The rim separates the edge from the body.
+                    let edge = at(bounds.width - 1, bounds.height / 2);
+                    let inner = at(bounds.width - 4, bounds.height / 2);
+                    if tag == "dark" {
+                        assert!(lum(edge) > lum(inner) + 20, "{name}: no lit rim");
+                    } else {
+                        assert!(lum(edge) + 20 < lum(inner), "{name}: no ink rim");
+                    }
+                }
+            }
+            // Progress ring: the swept quarter is accent, the rest only a track.
+            let model = gallery_model(IslandState::Compact, Some(task.clone()));
+            let (bounds, pixels) = compose_pixels(
+                &model,
+                settings,
+                SurfaceStyle::Solid,
+                2.0,
+                1.0,
+                &format!("{tag}-ring-200"),
+            );
+            let at = |x: f64, y: f64| {
+                pixels[((y * 2.0) as i32 * bounds.width + (x * 2.0) as i32) as usize]
+            };
+            let swept = at(21.0 + 4.5, 16.0 - 4.5);
+            let unswept = at(21.0 - 4.5, 16.0 + 4.5);
+            let tint = |p: u32| (channel(p, 0) as i32 - channel(p, 16) as i32).abs();
+            assert!(
+                tint(swept) > tint(unswept) + 25,
+                "{tag}: progress ring not swept ({swept:08x} vs {unswept:08x})"
+            );
+        }
+        // The expanded body fades with the morph; the header never does.
+        let model = gallery_model(IslandState::Expanded, None);
+        let (_, start) = compose_pixels(
+            &model,
+            &dark,
+            SurfaceStyle::Solid,
+            1.0,
+            0.0,
+            "dark-morph-start",
+        );
+        let (bounds, end) = compose_pixels(
+            &model,
+            &dark,
+            SurfaceStyle::Solid,
+            1.0,
+            1.0,
+            "dark-morph-end",
+        );
+        let count = |pixels: &[u32], rows: std::ops::Range<i32>, columns: std::ops::Range<i32>| {
+            rows.flat_map(|y| {
+                columns
+                    .clone()
+                    .map(move |x| (y * bounds.width + x) as usize)
+            })
+            .filter(|&i| channel(pixels[i], 8) > 160)
+            .count()
+        };
+        assert_eq!(
+            count(&start, 56..120, 22..300),
+            0,
+            "body visible before the morph"
+        );
+        assert!(
+            count(&end, 56..120, 22..300) > 40,
+            "expanded body text missing"
+        );
+        assert_eq!(
+            count(&start, 6..26, 34..140),
+            count(&end, 6..26, 34..140),
+            "the header must not fade during a morph"
+        );
+        assert!(count(&end, 6..26, 34..140) > 20, "header text missing");
+    }
+
+    #[test]
+    fn hit_testing_and_drawing_share_one_corner_radius() {
+        assert_eq!(island_radius(32, 1.0), 16.0);
+        assert_eq!(island_radius(60, 1.0), 22.0);
+        assert_eq!(island_radius(390, 1.5), 33.0);
+        // Mid-morph heights keep the pill shape until the card radius caps it.
+        assert_eq!(island_radius(40, 1.0), 20.0);
+    }
+
     #[test]
     fn translucent_background_does_not_make_text_equally_transparent() {
         let background = compose_pixel(0, 0x171920, 0.35, 255);

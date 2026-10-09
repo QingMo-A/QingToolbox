@@ -19,13 +19,13 @@ const rows = computed(() => {
 <template>
   <div class="codex-quota">
     <div v-if="rows.length" class="quota-windows">
-      <div v-for="row in rows" :key="row.id" class="quota-window">
+      <div v-for="row in rows" :key="row.id" class="quota-window" :class="{ low: row.remaining !== null && row.remaining <= 10 }">
         <div class="quota-heading">
           <span>{{ row.label }}</span>
           <strong>{{ row.remaining === null ? '未提供' : `剩余 ${Math.round(row.remaining)}%` }}</strong>
         </div>
         <div v-if="row.remaining !== null" class="quota-track" role="progressbar" :aria-label="`${row.label}剩余`" :aria-valuenow="row.remaining" aria-valuemin="0" aria-valuemax="100">
-          <i :style="{ width:`${row.remaining}%` }" :class="{ low:row.remaining <= 10 }" />
+          <i :style="{ transform:`scaleX(${row.remaining / 100})` }" />
         </div>
         <small class="quota-reset">{{ row.reset }}</small>
       </div>
@@ -39,15 +39,21 @@ const rows = computed(() => {
 </template>
 
 <style scoped>
-.codex-quota { border-top:1px solid var(--q-border); margin-top:6px; padding-top:12px; }
-.quota-windows { display:grid; gap:14px; }
-.quota-heading { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px 12px; color:var(--q-text-2); font-size:12px; }
-.quota-heading strong { color:var(--q-text); font-variant-numeric:tabular-nums; }
-.quota-track { margin:8px 0 5px; height:5px; overflow:hidden; border-radius:99px; background:var(--q-surface-soft); }
-.quota-track i { display:block; height:100%; border-radius:inherit; background:var(--q-brand); transition:width 240ms ease-out; }
-.quota-track i.low { background:var(--q-warning, #e2a03f); }
-.quota-reset, .quota-empty { color:var(--q-text-3); font-size:11px; }
-.quota-empty { margin:0 0 10px; }
-.quota-refresh { margin-top:12px; display:flex; flex-wrap:wrap; justify-content:space-between; gap:5px 12px; color:var(--q-text-3); font-size:10.5px; font-variant-numeric:tabular-nums; }
-@media(prefers-reduced-motion:reduce) { .quota-track i { transition:none; } }
+.codex-quota { margin-top: 4px; padding-top: 12px; border-top: 1px dashed var(--q-border); }
+.quota-windows { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 18px; }
+.quota-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; color: var(--q-text-2); font-size: 12px; }
+.quota-heading strong { color: var(--q-text); font-size: 13px; font-variant-numeric: tabular-nums; }
+.quota-track { position: relative; height: 6px; margin: 8px 0 6px; overflow: hidden; border-radius: 99px; background: color-mix(in srgb, var(--q-text-3) 16%, transparent); }
+/* Scaled, not resized: the bar's fill animates on the compositor. */
+.quota-track i { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--q-brand) 70%, #22d3ee), var(--q-brand)); transform-origin: left; transition: transform 420ms cubic-bezier(.2, .8, .2, 1); }
+.low .quota-track i { background: linear-gradient(90deg, #f59e0b, var(--q-warning, #e2a03f)); }
+.low .quota-heading strong { color: var(--q-warning, #c27c12); }
+.quota-reset, .quota-empty { color: var(--q-text-3); font-size: 11px; }
+.quota-empty { margin: 0 0 10px; }
+.quota-refresh { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 12px; margin-top: 12px; color: var(--q-text-3); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+:root[data-appearance-preset='qing-nova'] .quota-track { border: 2px solid #111; border-radius: 0; height: 10px; }
+:root[data-appearance-preset='qing-nova'] .quota-track i { border-radius: 0; background: #2f6bff; }
+:root[data-appearance-preset='neon-circuit'] .quota-track i { background: var(--deco-foil); }
+:root[data-appearance-preset='aurora-flow'] .quota-track i { background: linear-gradient(90deg, #ff2bd6, #00f0ff); box-shadow: 0 0 10px rgb(0 240 255 / .5); }
+@media (prefers-reduced-motion: reduce) { .quota-track i { transition: none; } }
 </style>

@@ -132,7 +132,7 @@ impl HitState {
             y,
             size.0,
             size.1,
-            (18.0 * scale).min(size.1 as f64 / 2.0),
+            crate::renderer::island_radius(size.1, scale),
         ) == 0
         {
             return Hit::PassThrough;

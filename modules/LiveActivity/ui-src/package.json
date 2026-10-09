@@ -1,7 +1,7 @@
 {
   "name": "qing-liveactivity-web",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.1.6",
   "type": "module",
   "scripts": {
     "test": "node --experimental-strip-types --test src/refreshGate.test.mjs src/quota.test.mjs src/textTemplate.test.mjs",

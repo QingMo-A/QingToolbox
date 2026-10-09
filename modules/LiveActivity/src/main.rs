@@ -893,6 +893,10 @@ impl OverlayState {
                 return;
             }
             active.set_controls(controls);
+            let progress = self
+                .transition
+                .as_ref()
+                .map_or(1.0, crate::overlay::Transition::progress);
             let painted = match crate::renderer::draw(
                 &mut self.renderer,
                 active,
@@ -900,6 +904,7 @@ impl OverlayState {
                 monitor.scale * self.settings.scale,
                 &self.model,
                 &self.settings,
+                progress,
             ) {
                 Ok(painted) => painted,
                 Err(error) => {
