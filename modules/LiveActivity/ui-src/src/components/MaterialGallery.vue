@@ -129,8 +129,8 @@ const tint = computed(() => {
 .pill.m-translucent { background: rgb(var(--tile-tint) / .6); }
 /* Frosted: flat, hazy, soft — blur, a little lift, tint, one thin edge. */
 .pill.m-frosted {
-  background: rgb(var(--tile-tint) / .45);
-  backdrop-filter: blur(10px) saturate(1.2) brightness(1.04);
+  background: rgb(var(--tile-tint) / .3);
+  backdrop-filter: blur(5px) saturate(1.2) brightness(1.04);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16), 0 4px 12px rgb(0 0 0 / .2);
 }
 /* Liquid: the lens layer refracts the scene; the pill adds light and depth. */

@@ -521,19 +521,88 @@ pub fn pump_messages() {
         }
     }
 }
+/// A high-resolution waitable timer for this thread. A plain timed wait is
+/// rounded up to the 15.6 ms system tick, which turned a 33 ms glass refresh
+/// into ~47 ms; this timer wakes on time.
+struct FrameTimer(windows_sys::Win32::Foundation::HANDLE);
+impl Drop for FrameTimer {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(self.0);
+            }
+        }
+    }
+}
+thread_local! {
+    static FRAME_TIMER: FrameTimer = unsafe {
+        use windows_sys::Win32::System::Threading::{
+            CreateWaitableTimerExW, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS,
+        };
+        let mut timer = CreateWaitableTimerExW(
+            std::ptr::null(),
+            std::ptr::null(),
+            CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+            TIMER_ALL_ACCESS,
+        );
+        if timer.is_null() {
+            // Windows before 1803: an ordinary timer still beats Sleep-style waits.
+            timer = CreateWaitableTimerExW(std::ptr::null(), std::ptr::null(), 0, TIMER_ALL_ACCESS);
+        }
+        FrameTimer(timer)
+    };
+}
+
 pub fn wait_messages(timeout: Option<std::time::Duration>) {
+    use windows_sys::Win32::System::Threading::{SetWaitableTimer, INFINITE};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         MsgWaitForMultipleObjectsEx, MWMO_INPUTAVAILABLE, QS_ALLINPUT,
     };
     unsafe {
-        MsgWaitForMultipleObjectsEx(
-            0,
-            std::ptr::null(),
-            timeout.map(|v| v.as_millis() as u32).unwrap_or(u32::MAX),
-            QS_ALLINPUT,
-            MWMO_INPUTAVAILABLE,
-        );
+        match timeout {
+            Some(timeout) if timeout.is_zero() => {}
+            Some(timeout) => {
+                let timer = FRAME_TIMER.with(|timer| timer.0);
+                // Relative due time, in 100 ns units, is negative.
+                let due = -((timeout.as_nanos() / 100).clamp(1, i64::MAX as u128) as i64);
+                if !timer.is_null()
+                    && SetWaitableTimer(timer, &due, 0, None, std::ptr::null(), 0) != 0
+                {
+                    MsgWaitForMultipleObjectsEx(
+                        1,
+                        &timer,
+                        INFINITE,
+                        QS_ALLINPUT,
+                        MWMO_INPUTAVAILABLE,
+                    );
+                } else {
+                    MsgWaitForMultipleObjectsEx(
+                        0,
+                        std::ptr::null(),
+                        timeout.as_millis().max(1) as u32,
+                        QS_ALLINPUT,
+                        MWMO_INPUTAVAILABLE,
+                    );
+                }
+            }
+            None => {
+                MsgWaitForMultipleObjectsEx(
+                    0,
+                    std::ptr::null(),
+                    INFINITE,
+                    QS_ALLINPUT,
+                    MWMO_INPUTAVAILABLE,
+                );
+            }
+        }
     }
+}
+
+/// Block until the compositor's next frame, so animation frames land on the
+/// display's own refresh (60, 120, 144 Hz…) instead of a coarse timer.
+/// Returns false when composition is unavailable; the caller then times out.
+pub fn wait_for_vblank() -> bool {
+    unsafe { windows_sys::Win32::Graphics::Dwm::DwmFlush() >= 0 }
 }
 pub fn enable_dpi_awareness() {
     use windows_sys::Win32::UI::HiDpi::{

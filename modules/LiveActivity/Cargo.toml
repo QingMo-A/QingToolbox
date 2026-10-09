@@ -1,6 +1,6 @@
 [package]
 name = "qing-liveactivity-module"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 rust-version = "1.77.2"
 publish = false
@@ -10,6 +10,7 @@ serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.145"
 windows-sys = { version = "=0.61.2", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_System",
     "Win32_System_Diagnostics_ToolHelp",
@@ -27,6 +28,8 @@ windows-sys = { version = "=0.61.2", features = [
 [profile.release]
 codegen-units = 1
 lto = "thin"
-opt-level = "z"
+# The island renders glass per pixel at up to 60 frames a second; size
+# optimisation disables the vectorisation and inlining those loops need.
+opt-level = 3
 panic = "abort"
 strip = true

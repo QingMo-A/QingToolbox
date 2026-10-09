@@ -109,6 +109,8 @@ export type Settings = {
   surfaceStyle: SurfaceStyle
   backgroundOpacity: number
   backgroundColor: RgbColor
+  /** Frosted glass blur radius in logical pixels (0–40). */
+  frostBlur: number
   showCodexData: boolean
 }
 
@@ -116,7 +118,7 @@ export type Settings = {
 export type SettingsPatch = Partial<Omit<Settings, 'version'>>
 
 /** What a held slider may preview without saving. */
-export type VisualPatch = Partial<Pick<Settings, 'scale' | 'compactWidth' | 'offsetX' | 'offsetY' | 'backgroundOpacity' | 'backgroundColor'>>
+export type VisualPatch = Partial<Pick<Settings, 'scale' | 'compactWidth' | 'offsetX' | 'offsetY' | 'backgroundOpacity' | 'backgroundColor' | 'frostBlur'>>
 
 export type IslandStateName = 'dormant' | 'compact' | 'peek' | 'expanded'
 

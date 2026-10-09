@@ -747,7 +747,13 @@ fn run_overlay_thread_windows(
             "glassSamples":state.renderer.samples,"glassSampleMicros":state.renderer.sample_micros,
         });
         let animating = state.transition.as_ref().is_some_and(|t| t.is_active());
-        crate::win32::wait_messages(if animating {
+        // Animation frames are paced by the display itself: wait for the
+        // compositor's next frame, then draw again at once. Only if that is
+        // unavailable fall back to a ~60 Hz timer.
+        let paced = animating && crate::win32::wait_for_vblank();
+        crate::win32::wait_messages(if paced {
+            Some(Duration::ZERO)
+        } else if animating {
             Some(Duration::from_millis(16))
         } else {
             state
@@ -919,11 +925,34 @@ impl OverlayState {
             // Liquid glass takes its light from the pointer and bulges towards
             // it, but only while the pointer is actually over the island.
             self.renderer.pointer = self.liquid_pointer(drawn);
+            // While the shape changes, glass samples everything the island
+            // will pass through (current and target, plus room for overshoot)
+            // once, instead of capturing the desktop on every frame.
+            let cover = if self.transition.as_ref().is_some_and(|t| t.is_active()) {
+                let target = self.target_bounds;
+                let left = drawn.x.min(target.x);
+                let top = drawn.y.min(target.y);
+                let right = (drawn.x + drawn.width).max(target.x + target.width);
+                let bottom = (drawn.y + drawn.height).max(target.y + target.height);
+                let slack_x = target.width / 6;
+                let slack_y = target.height / 6;
+                crate::overlay::Bounds {
+                    x: left - slack_x,
+                    y: top - slack_y,
+                    width: right - left + slack_x * 2,
+                    height: bottom - top + slack_y * 2,
+                }
+            } else {
+                drawn
+            };
             let painted = match crate::renderer::draw(
                 &mut self.renderer,
                 active,
-                drawn,
-                monitor.scale * self.settings.scale,
+                crate::renderer::Placement {
+                    bounds: drawn,
+                    cover,
+                    scale: monitor.scale * self.settings.scale,
+                },
                 &self.model,
                 &self.settings,
                 progress,
@@ -1295,6 +1324,8 @@ impl Module {
         let patch: settings::VisualPatch = serde_json::from_value(payload.clone())
             .map_err(|error| ModuleError::invalid(format!("预览参数无效：{error}")))?;
         self.settings.apply(patch.into());
+        // Same bounds as a saved value, without writing the file.
+        self.settings.normalize();
         let fullscreen = self.last_fullscreen;
         self.sync_overlay(fullscreen);
         Ok(json!({ "previewed": true }))
@@ -2080,6 +2111,12 @@ mod tests {
             .unwrap();
         assert_eq!(saved(&module), 360);
         assert_eq!(Settings::load(&module.settings_path).scale, 1.25);
+        // The frosted blur previews live too, and stays within its range.
+        module
+            .invoke("previewSettings", &json!({"frostBlur":99}))
+            .unwrap();
+        assert_eq!(module.settings.frost_blur, 40);
+        assert_eq!(Settings::default().frost_blur, 6);
     }
 
     #[test]

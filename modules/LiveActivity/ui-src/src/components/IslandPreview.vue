@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Anchor, RgbColor, SurfaceStyle } from '../types'
-import { FLUID, JELLY, isLight, jellyDensity, jellyPalette, liquidTint } from '../material'
+import { FLUID, JELLY, frostedTint, isLight, jellyDensity, jellyPalette, liquidTint } from '../material'
 import LiquidLens from './LiquidLens.vue'
 
 /**
@@ -35,7 +35,9 @@ const props = withDefaults(defineProps<{
   offsetY?: number
   /** The real island is showing a desktop preview right now. */
   live?: boolean
-}>(), { compactWidth: 232, offsetX: 0, offsetY: 0, date: null, peekText: null, expandedText: null, live: false })
+  /** Frosted blur radius in logical pixels. */
+  frostBlur?: number
+}>(), { compactWidth: 232, offsetX: 0, offsetY: 0, date: null, peekText: null, expandedText: null, live: false, frostBlur: 6 })
 
 const stage = ref<HTMLElement | null>(null)
 const stageSize = ref({ width: 640, height: 320 })
@@ -169,7 +171,7 @@ const islandStyle = computed(() => {
   // reads the real desktop; this stage is dusk-dark, so clear glass takes light
   // ink unless a light tint is strong enough to carry dark ink.
   const light = liquid ? isLight(props.backgroundColor) && glassTint >= 0.15 : isLight(props.backgroundColor)
-  const alpha = style === 'solid' ? 1 : liquid ? glassTint : props.opacity
+  const alpha = style === 'solid' ? 1 : liquid ? glassTint : style === 'frosted' ? frostedTint(props.opacity) : props.opacity
   const material: Record<string, string | number> = {}
   if (liquid) {
     Object.assign(material, {
@@ -214,6 +216,7 @@ const islandStyle = computed(() => {
     '--radius': `${box.value.radius}px`,
     // renderer::legible folds the desktop's brightness to the ink's side.
     '--liquid-tone': light ? 'contrast(.86) brightness(1.12)' : 'contrast(.88) brightness(.88)',
+    '--frost-blur': props.frostBlur,
     ...material,
   }
 })
@@ -357,7 +360,7 @@ const expandedParts = computed(() => {
    gradient, no glow. */
 .island.material-frosted {
   background-image: none;
-  backdrop-filter: blur(calc(24px * var(--s))) saturate(1.2) brightness(1.04);
+  backdrop-filter: blur(calc(var(--frost-blur, 6) * 1px * var(--s))) saturate(1.2) brightness(1.04);
   box-shadow: inset 0 0 0 1px var(--island-rim-top), 0 2px 8px rgb(0 0 0 / .14);
 }
 

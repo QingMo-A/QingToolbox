@@ -12,14 +12,15 @@ use windows_sys::Win32::{
     UI::WindowsAndMessaging::{UpdateLayeredWindow, ULW_ALPHA},
 };
 
-/// How long a desktop sample stays fresh. Frosted glass blurs it into colour
-/// fields, so a second of staleness is invisible; liquid glass shows the
-/// desktop sharply and lenses it, so it resamples twice as often.
-fn background_interval(material: SurfaceStyle) -> Duration {
-    if material == SurfaceStyle::Liquid {
-        Duration::from_millis(500)
+/// How long a desktop sample stays fresh. Glass must follow what moves
+/// behind it, so it samples at 30 Hz; after half a second of an unchanged
+/// desktop it relaxes to 10 Hz until something moves again. A sample costs
+/// about half a millisecond of CPU (GDI waits on the compositor otherwise).
+fn background_interval(still: u32) -> Duration {
+    if still >= 15 {
+        Duration::from_millis(100)
     } else {
-        Duration::from_secs(1)
+        Duration::from_millis(33)
     }
 }
 
@@ -28,22 +29,39 @@ pub struct Renderer {
     backdrop: Option<Backdrop>,
     /// The pointer in island-local pixels while it hovers liquid glass.
     pub pointer: Option<(f64, f64)>,
+    /// The text layer of the last frame and what it was drawn from. A frame
+    /// whose words, size and ink did not change reuses it instead of asking
+    /// GDI to lay the text out again.
+    ink: Option<(String, Vec<u32>)>,
+    /// Everything the last presented frame depended on; an identical frame
+    /// is skipped before any pixel is touched.
+    last_frame: Option<String>,
+    /// Bumped whenever the processed backdrop changes.
+    generation: u64,
+    /// Consecutive desktop samples identical to the one before: a still
+    /// desktop is polled less often.
+    still: u32,
     last_pixels: Vec<u32>,
     last_bounds: Option<Bounds>,
     pub samples: u64,
     pub sample_micros: u64,
 }
 struct Backdrop {
-    /// Which glass this sample was processed for.
+    /// Which glass this sample was processed for, and its blur.
     kind: SurfaceStyle,
+    blur: usize,
     region: Bounds,
     output: Bounds,
     width: usize,
     height: usize,
     raw: Vec<u32>,
+    /// The face: the processed sample, possibly at a lower resolution than
+    /// `raw` (liquid glass softens its face at half resolution).
     blurred: Vec<u32>,
-    /// Liquid glass only: the barely softened sample its rim refracts. The
-    /// face reads `blurred`, so busy content never fights the text.
+    face_width: usize,
+    face_height: usize,
+    /// Liquid glass only: the untouched sample its rim refracts, at the
+    /// sample's own resolution. The face reads `blurred`.
     sharp: Vec<u32>,
     /// Mean brightness under the island; liquid glass picks its ink from it.
     mean_luma: f64,
@@ -59,6 +77,9 @@ impl Drop for Backdrop {
 impl Renderer {
     pub fn clear(&mut self) {
         self.backdrop = None;
+        self.ink = None;
+        self.last_frame = None;
+        self.still = 0;
         self.last_pixels.fill(0);
         self.last_pixels.clear();
         self.last_bounds = None;
@@ -66,22 +87,25 @@ impl Renderer {
     pub fn until_refresh(&self) -> Duration {
         self.backdrop
             .as_ref()
-            .map(|b| background_interval(b.kind).saturating_sub(b.sampled.elapsed()))
+            .map(|b| background_interval(self.still).saturating_sub(b.sampled.elapsed()))
             .unwrap_or_default()
     }
+    /// Sample (or keep) the desktop under `cover`: the island's current
+    /// bounds, or, during a change of shape, everything it will pass through,
+    /// so an animation never waits on a capture per frame.
     unsafe fn background(
         &mut self,
-        bounds: Bounds,
+        cover: Bounds,
         scale: f64,
         material: SurfaceStyle,
+        frost_blur: u32,
     ) -> Result<(), String> {
-        if self.backdrop.as_ref().is_some_and(|b| {
-            b.output == bounds
-                && b.kind == material
-                && b.sampled.elapsed() < background_interval(material)
-        }) {
-            return Ok(());
-        }
+        let bounds = cover;
+        let blur = if material == SurfaceStyle::Liquid {
+            liquid_radius(scale)
+        } else {
+            frost_radius(frost_blur, scale)
+        };
         let started = Instant::now();
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
@@ -117,6 +141,18 @@ impl Renderer {
             width: right - x,
             height: bottom - y,
         };
+        let interval = background_interval(self.still);
+        if self.backdrop.as_ref().is_some_and(|b| {
+            b.kind == material
+                && b.blur == blur
+                && b.sampled.elapsed() < interval
+                && b.region.x <= region.x
+                && b.region.y <= region.y
+                && b.region.x + b.region.width >= region.x + region.width
+                && b.region.y + b.region.height >= region.y + region.height
+        }) {
+            return Ok(());
+        }
         if region.is_empty() {
             return Err("玻璃背景不在可采样的屏幕范围内".into());
         }
@@ -157,26 +193,34 @@ impl Renderer {
             .iter()
             .map(|p| p & 0xFFFFFF)
             .collect::<Vec<_>>();
-        let (blurred, sharp) = if let Some(previous) = self
+        if let Some(previous) = self
             .backdrop
-            .as_ref()
-            .filter(|b| b.kind == material && b.region == region && b.raw == raw)
+            .as_mut()
+            .filter(|b| b.kind == material && b.blur == blur && b.region == region && b.raw == raw)
         {
-            (previous.blurred.clone(), previous.sharp.clone())
-        } else {
-            process(&raw, width as usize, height as usize, scale, material)?
-        };
+            // Nothing behind the island moved: keep everything, poll slower.
+            previous.sampled = Instant::now();
+            self.still = self.still.saturating_add(1);
+            self.samples += 1;
+            self.sample_micros = started.elapsed().as_micros() as u64;
+            return Ok(());
+        }
+        self.still = 0;
+        self.generation = self.generation.wrapping_add(1);
+        let processed = process(&raw, width as usize, height as usize, blur, material)?;
         self.samples += 1;
         self.sample_micros = started.elapsed().as_micros() as u64;
-        self.backdrop = Some(Backdrop::new(
+        let mut backdrop = Backdrop::new(
             material,
             region,
             bounds,
             width as usize,
             height as usize,
             raw,
-            (blurred, sharp),
-        ));
+            processed,
+        );
+        backdrop.blur = blur;
+        self.backdrop = Some(backdrop);
         Ok(())
     }
     /// Mean brightness of the sampled desktop under the island, if sampled.
@@ -195,19 +239,19 @@ impl Renderer {
     }
     fn sample_from(&self, sx: f64, sy: f64, sharp: bool) -> Option<u32> {
         let b = self.backdrop.as_ref()?;
-        let source = if sharp && !b.sharp.is_empty() {
-            &b.sharp
+        let (source, width, height) = if sharp && !b.sharp.is_empty() {
+            (&b.sharp, b.width, b.height)
         } else {
-            &b.blurred
+            (&b.blurred, b.face_width, b.face_height)
         };
-        let fx = (sx - b.region.x as f64) * b.width as f64 / b.region.width as f64 - 0.5;
-        let fy = (sy - b.region.y as f64) * b.height as f64 / b.region.height as f64 - 0.5;
-        let fx = fx.clamp(0.0, (b.width - 1) as f64);
-        let fy = fy.clamp(0.0, (b.height - 1) as f64);
+        let fx = (sx - b.region.x as f64) * width as f64 / b.region.width as f64 - 0.5;
+        let fy = (sy - b.region.y as f64) * height as f64 / b.region.height as f64 - 0.5;
+        let fx = fx.clamp(0.0, (width - 1) as f64);
+        let fy = fy.clamp(0.0, (height - 1) as f64);
         let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
-        let (x1, y1) = ((x0 + 1).min(b.width - 1), (y0 + 1).min(b.height - 1));
+        let (x1, y1) = ((x0 + 1).min(width - 1), (y0 + 1).min(height - 1));
         let (tx, ty) = (fx - x0 as f64, fy - y0 as f64);
-        let at = |x: usize, y: usize| source[y * b.width + x];
+        let at = |x: usize, y: usize| source[y * width + x];
         let top = mix(at(x0, y0), at(x1, y0), tx);
         let bottom = mix(at(x0, y1), at(x1, y1), tx);
         Some(mix(top, bottom, ty))
@@ -227,32 +271,42 @@ impl Backdrop {
         width: usize,
         height: usize,
         raw: Vec<u32>,
-        (blurred, sharp): (Vec<u32>, Vec<u32>),
+        processed: Processed,
     ) -> Self {
+        let Processed {
+            face: blurred,
+            face_size: (face_width, face_height),
+            rim: sharp,
+        } = processed;
         // Average over the part of the sample the island actually covers.
         let (mut total, mut count) = (0.0, 0.0);
-        for y in 0..height {
-            for x in 0..width {
-                let sx = region.x as f64 + (x as f64 + 0.5) * region.width as f64 / width as f64;
-                let sy = region.y as f64 + (y as f64 + 0.5) * region.height as f64 / height as f64;
+        for y in 0..face_height {
+            for x in 0..face_width {
+                let sx =
+                    region.x as f64 + (x as f64 + 0.5) * region.width as f64 / face_width as f64;
+                let sy =
+                    region.y as f64 + (y as f64 + 0.5) * region.height as f64 / face_height as f64;
                 if sx >= output.x as f64
                     && sx < (output.x + output.width) as f64
                     && sy >= output.y as f64
                     && sy < (output.y + output.height) as f64
                 {
-                    total += luma(blurred[y * width + x]);
+                    total += luma(blurred[y * face_width + x]);
                     count += 1.0;
                 }
             }
         }
         Self {
             kind,
+            blur: 0,
             region,
             output,
             width,
             height,
             raw,
             blurred,
+            face_width,
+            face_height,
             sharp,
             mean_luma: if count > 0.0 { total / count } else { 128.0 },
             sampled: Instant::now(),
@@ -262,38 +316,95 @@ impl Backdrop {
 
 /// Prepare a desktop sample for its glass, as (face, rim) buffers.
 ///
-/// Frosted: flat, hazy, soft. A ~24 logical px blur (12 px at half
-/// resolution), a little vibrancy (1.2) and a 4% lift: what is behind can be
-/// sensed but not read. No rim buffer, no highlights.
+/// Frosted: flat, hazy, soft. The user's blur (6 logical px by default, so
+/// window titles behind stay recognisable), a little vibrancy (1.2) and a 4%
+/// lift. No rim buffer, no highlights.
 ///
 /// Liquid: like Apple's regular Liquid Glass, the face is only lightly
 /// softened (~3 logical px) so shapes and colours stay legible behind it,
-/// while the rim refracts an almost untouched copy and stays crisp.
+/// while the rim refracts the untouched sample and stays crisp.
+/// A processed sample: the face (at `face_size`) and, for liquid glass, the
+/// rim copy at the sample's own size.
+struct Processed {
+    face: Vec<u32>,
+    face_size: (usize, usize),
+    rim: Vec<u32>,
+}
+
+/// Average 2×2 blocks: half the resolution, a quarter of the pixels.
+fn halve(raw: &[u32], width: usize, height: usize) -> (Vec<u32>, usize, usize) {
+    let (w, h) = (width.div_ceil(2), height.div_ceil(2));
+    let mut out = Vec::with_capacity(w * h);
+    for y in 0..h {
+        for x in 0..w {
+            let mut sum = [0u32; 3];
+            let mut n = 0;
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let (sx, sy) = (x * 2 + dx, y * 2 + dy);
+                if sx < width && sy < height {
+                    let p = raw[sy * width + sx];
+                    sum[0] += p & 255;
+                    sum[1] += (p >> 8) & 255;
+                    sum[2] += (p >> 16) & 255;
+                    n += 1;
+                }
+            }
+            out.push((sum[0] / n) | ((sum[1] / n) << 8) | ((sum[2] / n) << 16));
+        }
+    }
+    (out, w, h)
+}
+
 fn process(
     raw: &[u32],
     width: usize,
     height: usize,
-    scale: f64,
+    radius: usize,
     material: SurfaceStyle,
-) -> Result<(Vec<u32>, Vec<u32>), String> {
+) -> Result<Processed, String> {
     let vivid = |mut pixels: Vec<u32>, amount: f64| {
         for pixel in pixels.iter_mut() {
             *pixel = saturate(*pixel, amount);
         }
         pixels
     };
-    let blur =
-        |radius: usize| crate::blur::gaussian(raw, width, height, radius).map_err(str::to_string);
     if material == SurfaceStyle::Liquid {
-        let face = blur((3.0 * scale).round().clamp(2.0, 8.0) as usize)?;
-        let rim = blur(1)?;
-        return Ok((vivid(face, 1.15), vivid(rim, 1.15)));
+        // `radius` is the face's softening in sample pixels. The face is
+        // about to be softened anyway, so it is blurred at half resolution
+        // (a quarter of the work); the rim keeps the sample as captured.
+        let (half, hw, hh) = halve(raw, width, height);
+        let face = crate::blur::gaussian(&half, hw, hh, radius.div_ceil(2).max(1))
+            .map_err(str::to_string)?;
+        return Ok(Processed {
+            face: vivid(face, 1.15),
+            face_size: (hw, hh),
+            rim: vivid(raw.to_vec(), 1.15),
+        });
     }
-    let mut face = vivid(blur((12.0 * scale).round().clamp(6.0, 32.0) as usize)?, 1.2);
+    let face = if radius == 0 {
+        raw.to_vec()
+    } else {
+        crate::blur::gaussian(raw, width, height, radius).map_err(str::to_string)?
+    };
+    let mut face = vivid(face, 1.2);
     for pixel in face.iter_mut() {
         *pixel = mix(*pixel, 0xFFFFFF, 0.04);
     }
-    Ok((face, Vec::new()))
+    Ok(Processed {
+        face,
+        face_size: (width, height),
+        rim: Vec::new(),
+    })
+}
+
+/// The blur radius in sample pixels: frosted samples at half resolution and
+/// uses the user's radius; liquid samples at full resolution and softens
+/// its face by about 3 logical pixels.
+fn frost_radius(frost_blur: u32, scale: f64) -> usize {
+    (frost_blur as f64 * scale / 2.0).round().clamp(0.0, 32.0) as usize
+}
+fn liquid_radius(scale: f64) -> usize {
+    (3.0 * scale).round().clamp(1.0, 8.0) as usize
 }
 
 /// Compress a colour's brightness to the side its ink needs, keeping hue:
@@ -319,6 +430,12 @@ fn legible(color: u32, light_glass: bool) -> u32 {
         result |= ((channel + shift_by).round().clamp(0.0, 255.0) as u32) << shift;
     }
     result
+}
+
+/// The tint frosted glass lays over its blur: the strength floor (35%) is
+/// untinted frost, so what is behind stays visible; the top a 75% veil.
+fn frosted_tint(opacity: f64) -> f64 {
+    ((opacity - 0.35) / 0.65).clamp(0.0, 1.0) * 0.75
 }
 
 /// The tint liquid glass lays over the desktop, from the shared strength
@@ -827,7 +944,11 @@ fn edge_distance(x: i32, y: i32, width: i32, height: i32, radius: f64) -> f64 {
 fn rounded_distance(dx: f64, dy: f64, hw: f64, hh: f64, radius: f64) -> f64 {
     let qx = dx.abs() - (hw - radius);
     let qy = dy.abs() - (hh - radius);
-    qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - radius
+    if qx > 0.0 && qy > 0.0 {
+        qx.hypot(qy) - radius
+    } else {
+        qx.max(qy) - radius
+    }
 }
 
 pub fn corner_alpha(x: i32, y: i32, width: i32, height: i32, radius: f64) -> u8 {
@@ -929,7 +1050,7 @@ fn content_opacity(progress: f64) -> f64 {
 /// state can be rendered and inspected in a test. All coordinates below are
 /// logical pixels, the same ones `IslandPreview.vue` uses for its CSS.
 unsafe fn compose(
-    renderer: &Renderer,
+    renderer: &mut Renderer,
     material: SurfaceStyle,
     bounds: Bounds,
     scale: f64,
@@ -995,155 +1116,191 @@ unsafe fn compose(
     let header = model.account_header();
     let header_offset = if header.is_some() { 24.0 } else { 0.0 };
     let clock = ambient.and_then(|content| content.clock.as_deref());
-    let clock_width = clock
-        .map(|text| {
-            surface
-                .measure(text, unit(width), 12.0 * scale, true, single)
-                .0 as f64
-                / scale
-                + 1.0
-        })
-        .unwrap_or(0.0);
-
-    // Status orb: a live dot with a light pool while something is working or
-    // waiting, a progress ring around it when the task reports one, and a
-    // drawn clock face when the island is only showing the user's own text.
-    let (cx, cy) = (at(21.0), at(16.0));
-    match focus {
-        Some(activity) => {
-            if matches!(
-                activity.state,
-                ActivityState::Running | ActivityState::Waiting
-            ) {
-                surface.glow(cx, cy, at(10.0), accent, 0.34);
-            }
-            match activity.progress.as_ref().and_then(|p| p.fraction()) {
-                Some(fraction) => {
-                    surface.ring((cx, cy), at(6.4), at(1.7), 1.0, accent, 0.26);
-                    surface.ring((cx, cy), at(6.4), at(1.7), fraction, accent, 1.0);
-                    surface.disc(cx, cy, at(2.4), accent, 1.0);
-                }
-                None => surface.disc(cx, cy, at(3.7), accent, 1.0),
-            }
-        }
-        None => {
-            surface.ring((cx, cy), at(5.7), at(1.35), 1.0, accent, 1.0);
-            surface.segment((cx, cy), (cx, cy - at(3.0)), at(1.35), accent);
-            surface.segment((cx, cy), (cx + at(2.2), cy + at(1.1)), at(1.35), accent);
-        }
-    }
-    surface.label(
-        &model.compact_label().unwrap_or_default(),
-        rect(
-            33.0,
-            0.0,
-            width
-                - 47.0
-                - if clock.is_some() {
-                    clock_width + 8.0
-                } else {
-                    0.0
-                },
-            32.0,
-        ),
-        12.0 * scale,
-        true,
-        primary,
+    let ink_key = format!(
+        "{}x{}@{:.4}|{:.3}|{light}|{vivid}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
+        bounds.width,
+        bounds.height,
+        scale,
+        content_opacity(progress),
+        model.state(),
+        model.compact_label(),
+        clock,
+        header,
+        model.peek_detail(),
+        model.expanded_text(),
+        model.account(),
+        focus.map(|a| a.state),
+        focus
+            .and_then(|a| a.progress.as_ref())
+            .and_then(|p| p.fraction()),
     );
-    if let Some(clock) = clock {
-        surface.label_right(
-            clock,
-            rect(width - 14.0 - clock_width, 0.0, clock_width, 32.0),
+    let reuse = renderer
+        .ink
+        .as_ref()
+        .filter(|(key, pixels)| {
+            *key == ink_key && pixels.len() == (bounds.width * bounds.height) as usize
+        })
+        .map(|(_, pixels)| pixels.clone());
+    if let Some(cached) = reuse {
+        std::slice::from_raw_parts_mut(surface.surface.pixels, cached.len())
+            .copy_from_slice(&cached);
+    } else {
+        let clock_width = clock
+            .map(|text| {
+                surface
+                    .measure(text, unit(width), 12.0 * scale, true, single)
+                    .0 as f64
+                    / scale
+                    + 1.0
+            })
+            .unwrap_or(0.0);
+
+        // Status orb: a live dot with a light pool while something is working or
+        // waiting, a progress ring around it when the task reports one, and a
+        // drawn clock face when the island is only showing the user's own text.
+        let (cx, cy) = (at(21.0), at(16.0));
+        match focus {
+            Some(activity) => {
+                if matches!(
+                    activity.state,
+                    ActivityState::Running | ActivityState::Waiting
+                ) {
+                    surface.glow(cx, cy, at(10.0), accent, 0.34);
+                }
+                match activity.progress.as_ref().and_then(|p| p.fraction()) {
+                    Some(fraction) => {
+                        surface.ring((cx, cy), at(6.4), at(1.7), 1.0, accent, 0.26);
+                        surface.ring((cx, cy), at(6.4), at(1.7), fraction, accent, 1.0);
+                        surface.disc(cx, cy, at(2.4), accent, 1.0);
+                    }
+                    None => surface.disc(cx, cy, at(3.7), accent, 1.0),
+                }
+            }
+            None => {
+                surface.ring((cx, cy), at(5.7), at(1.35), 1.0, accent, 1.0);
+                surface.segment((cx, cy), (cx, cy - at(3.0)), at(1.35), accent);
+                surface.segment((cx, cy), (cx + at(2.2), cy + at(1.1)), at(1.35), accent);
+            }
+        }
+        surface.label(
+            &model.compact_label().unwrap_or_default(),
+            rect(
+                33.0,
+                0.0,
+                width
+                    - 47.0
+                    - if clock.is_some() {
+                        clock_width + 8.0
+                    } else {
+                        0.0
+                    },
+                32.0,
+            ),
             12.0 * scale,
             true,
             primary,
         );
-    }
-    if let Some(header) = header {
-        surface.label(
-            header,
-            rect(16.0, 32.0, width - 32.0, 22.0),
-            10.0 * scale,
-            false,
-            caption,
-        );
-    }
-
-    // Everything below the header belongs to the target state only.
-    surface.reveal.set(content_opacity(progress));
-    if model.state() == IslandState::Peek {
-        if let Some(text) = model.peek_detail() {
-            surface.label(
-                &text,
-                rect(33.0, 30.0 + header_offset, width - 49.0, 22.0),
-                11.0 * scale,
-                false,
-                secondary,
-            );
-        }
-    }
-    if model.state() == IslandState::Expanded {
-        // The card shows only the user's expanded template. Tasks reach it
-        // through placeholders ({task}, {tasks}, ...), never as implicit rows.
-        surface.hairline(
-            at(16.0),
-            at(width - 16.0),
-            at(40.0 + header_offset),
-            primary,
-            if light { 0.16 } else { 0.14 },
-        );
-        if let Some(text) = model.expanded_text() {
-            // The first line is the headline; anything after it is body.
-            // The block is centred in the card's settled height, so it does
-            // not slide while the window is still growing.
-            let (lead, rest) = text.split_once('\n').unwrap_or((text, ""));
-            let column = unit(width - 44.0);
-            let lead_height = (surface
-                .measure(lead, column, 20.0 * scale, true, DT_WORDBREAK)
-                .1 as f64
-                / scale)
-                .min(56.0);
-            let rest_height = surface
-                .measure(rest, column, 13.0 * scale, false, DT_WORDBREAK)
-                .1 as f64
-                / scale;
-            let block = lead_height
-                + if rest_height > 0.0 {
-                    6.0 + rest_height
-                } else {
-                    0.0
-                };
-            let settled = model.state().logical_size().1;
-            let region = 41.0 + header_offset;
-            let top = (region + (settled - 14.0 - region - block) / 2.0).max(54.0 + header_offset);
-            surface.paragraph(
-                lead,
-                rect(22.0, top, width - 44.0, lead_height.max(1.0)),
-                20.0 * scale,
+        if let Some(clock) = clock {
+            surface.label_right(
+                clock,
+                rect(width - 14.0 - clock_width, 0.0, clock_width, 32.0),
+                12.0 * scale,
                 true,
                 primary,
             );
-            let body = top + lead_height + 6.0;
-            surface.paragraph(
-                rest,
-                rect(22.0, body, width - 44.0, height.min(settled) - body - 14.0),
-                13.0 * scale,
-                false,
-                secondary,
-            );
         }
-        // Retired account rows still have a reserved footer for old clients.
-        if let Some(account) = model.account() {
-            surface.paragraph(
-                account,
-                rect(17.0, 213.0, width - 34.0, 42.0),
+        if let Some(header) = header {
+            surface.label(
+                header,
+                rect(16.0, 32.0, width - 32.0, 22.0),
                 10.0 * scale,
                 false,
-                secondary,
+                caption,
             );
         }
+
+        // Everything below the header belongs to the target state only.
+        surface.reveal.set(content_opacity(progress));
+        if model.state() == IslandState::Peek {
+            if let Some(text) = model.peek_detail() {
+                surface.label(
+                    &text,
+                    rect(33.0, 30.0 + header_offset, width - 49.0, 22.0),
+                    11.0 * scale,
+                    false,
+                    secondary,
+                );
+            }
+        }
+        if model.state() == IslandState::Expanded {
+            // The card shows only the user's expanded template. Tasks reach it
+            // through placeholders ({task}, {tasks}, ...), never as implicit rows.
+            surface.hairline(
+                at(16.0),
+                at(width - 16.0),
+                at(40.0 + header_offset),
+                primary,
+                if light { 0.16 } else { 0.14 },
+            );
+            if let Some(text) = model.expanded_text() {
+                // The first line is the headline; anything after it is body.
+                // The block is centred in the card's settled height, so it does
+                // not slide while the window is still growing.
+                let (lead, rest) = text.split_once('\n').unwrap_or((text, ""));
+                let column = unit(width - 44.0);
+                let lead_height = (surface
+                    .measure(lead, column, 20.0 * scale, true, DT_WORDBREAK)
+                    .1 as f64
+                    / scale)
+                    .min(56.0);
+                let rest_height = surface
+                    .measure(rest, column, 13.0 * scale, false, DT_WORDBREAK)
+                    .1 as f64
+                    / scale;
+                let block = lead_height
+                    + if rest_height > 0.0 {
+                        6.0 + rest_height
+                    } else {
+                        0.0
+                    };
+                let settled = model.state().logical_size().1;
+                let region = 41.0 + header_offset;
+                let top =
+                    (region + (settled - 14.0 - region - block) / 2.0).max(54.0 + header_offset);
+                surface.paragraph(
+                    lead,
+                    rect(22.0, top, width - 44.0, lead_height.max(1.0)),
+                    20.0 * scale,
+                    true,
+                    primary,
+                );
+                let body = top + lead_height + 6.0;
+                surface.paragraph(
+                    rest,
+                    rect(22.0, body, width - 44.0, height.min(settled) - body - 14.0),
+                    13.0 * scale,
+                    false,
+                    secondary,
+                );
+            }
+            // Retired account rows still have a reserved footer for old clients.
+            if let Some(account) = model.account() {
+                surface.paragraph(
+                    account,
+                    rect(17.0, 213.0, width - 34.0, 42.0),
+                    10.0 * scale,
+                    false,
+                    secondary,
+                );
+            }
+        }
+        GdiFlush();
+        let drawn = std::slice::from_raw_parts(
+            surface.surface.pixels,
+            (bounds.width * bounds.height) as usize,
+        );
+        renderer.ink = Some((ink_key, drawn.to_vec()));
     }
-    GdiFlush();
 
     let pixels = std::slice::from_raw_parts_mut(
         surface.surface.pixels,
@@ -1202,179 +1359,391 @@ unsafe fn compose(
         Some((x, y)) => (w / 2.0 + (x - w / 2.0) * 0.5, h / 2.0 + (y - h / 2.0) * 0.5),
         None => (w / 2.0, h / 2.0),
     };
-    let (bulge_x, bulge_y) = pointer
-        .map(|(x, y)| (x.clamp(inset, w - inset), y.clamp(inset, h - inset)))
-        .unwrap_or((-1e6, -1e6));
-    let bulge_spread = 2.0 * (16.0 * scale).powi(2);
+    // The bulge and jelly's inner glow are Gaussian, so they factor into a
+    // column term and a row term computed once per frame.
+    let (bulge_columns, bulge_rows) = match pointer {
+        Some((x, y)) => {
+            let (bx, by) = (x.clamp(inset, w - inset), y.clamp(inset, h - inset));
+            let spread = 2.0 * (16.0 * scale).powi(2);
+            (
+                (0..bounds.width)
+                    .map(|c| inset * 0.95 * (-((c as f64 + 0.5 - bx).powi(2)) / spread).exp())
+                    .collect(),
+                (0..bounds.height)
+                    .map(|r| (-((r as f64 + 0.5 - by).powi(2)) / spread).exp())
+                    .collect(),
+            )
+        }
+        None => (Vec::new(), Vec::new()),
+    };
     let veil = if light { 0xFFFFFF } else { 0x000000 };
 
     // Jelly: a vivid inner colour that deepens into a soft, thick rim, an
     // inner glow (light scattered inside the body) and a wide soft highlight.
+    let jelly = material == SurfaceStyle::Jelly;
     let gel_depth = (h.min(w) * 0.5).min(14.0 * scale).max(1.0);
     let gel = saturate(tint, 1.3);
-    let gel_lit = mix(gel, 0xFFFFFF, 0.28);
-    let gel_deep = mix(gel, 0x000000, 0.28);
+    let (glow_columns, glow_rows) = if jelly {
+        (
+            (0..bounds.width)
+                .map(|c| (-((c as f64 + 0.5 - w / 2.0) / (w * 0.42)).powi(2)).exp())
+                .collect(),
+            (0..bounds.height)
+                .map(|r| (-((r as f64 + 0.5 - h * 0.62) / (h * 0.45)).powi(2)).exp())
+                .collect(),
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    // Pixels deeper than this inside the shape have no edge effects at all.
+    let band = match material {
+        SurfaceStyle::Liquid => bezel.max(4.5 * scale) + 1.0,
+        SurfaceStyle::Jelly => gel_depth.max(2.6 * scale) + 1.0,
+        _ => 2.0,
+    };
+    let pass = Pass {
+        renderer,
+        material,
+        width: bounds.width,
+        origin: (bounds.x as f64, bounds.y as f64),
+        w,
+        h,
+        radius,
+        scale,
+        opacity,
+        light,
+        tint,
+        glass_tint,
+        background: settings.background_color,
+        rim,
+        rim_top,
+        rim_bottom,
+        rim_width,
+        sheen_depth,
+        inset,
+        glass_radius,
+        gw,
+        gh,
+        bezel,
+        lens,
+        light_dir: (light_x, light_y),
+        thick: (thick_x, thick_y),
+        veil,
+        bulge_columns,
+        bulge_rows,
+        gel_depth,
+        gel,
+        gel_lit: mix(gel, 0xFFFFFF, 0.28),
+        gel_deep: mix(gel, 0x000000, 0.28),
+        gel_core: 0.55 + 0.4 * ((opacity - 0.35) / 0.65).clamp(0.0, 1.0),
+        glow_columns,
+        glow_rows,
+        band,
+    };
+    pass.run(pixels);
+    Ok(surface)
+}
 
-    for (index, pixel) in pixels.iter_mut().enumerate() {
-        let x = index as i32 % bounds.width;
-        let y = index as i32 / bounds.width;
+/// Everything the per-pixel material pass needs, computed once per frame,
+/// so rows can be shaded independently (and in parallel).
+struct Pass<'a> {
+    renderer: &'a Renderer,
+    material: SurfaceStyle,
+    width: i32,
+    origin: (f64, f64),
+    w: f64,
+    h: f64,
+    radius: f64,
+    scale: f64,
+    opacity: f64,
+    light: bool,
+    tint: u32,
+    glass_tint: f64,
+    background: crate::settings::RgbColor,
+    rim: u32,
+    rim_top: f64,
+    rim_bottom: f64,
+    rim_width: f64,
+    sheen_depth: f64,
+    inset: f64,
+    glass_radius: f64,
+    gw: f64,
+    gh: f64,
+    bezel: f64,
+    lens: f64,
+    light_dir: (f64, f64),
+    thick: (f64, f64),
+    veil: u32,
+    bulge_columns: Vec<f64>,
+    bulge_rows: Vec<f64>,
+    gel_depth: f64,
+    gel: u32,
+    gel_lit: u32,
+    gel_deep: u32,
+    gel_core: f64,
+    glow_columns: Vec<f64>,
+    glow_rows: Vec<f64>,
+    band: f64,
+}
+
+impl Pass<'_> {
+    /// Shade every pixel in place, splitting large frames across threads.
+    fn run(&self, pixels: &mut [u32]) {
+        let width = self.width.max(1) as usize;
+        let rows = pixels.len() / width;
+        let threads = if pixels.len() < 30_000 {
+            1
+        } else {
+            std::thread::available_parallelism()
+                .map_or(1, |n| n.get())
+                .clamp(1, 6)
+                .min(rows.max(1))
+        };
+        if threads <= 1 {
+            for (y, row) in pixels.chunks_mut(width).enumerate() {
+                self.row(y as i32, row);
+            }
+            return;
+        }
+        let per = rows.div_ceil(threads);
+        std::thread::scope(|scope| {
+            for (chunk, block) in pixels.chunks_mut(per * width).enumerate() {
+                scope.spawn(move || {
+                    for (i, row) in block.chunks_mut(width).enumerate() {
+                        self.row((chunk * per + i) as i32, row);
+                    }
+                });
+            }
+        });
+    }
+
+    fn row(&self, y: i32, row: &mut [u32]) {
+        for (x, pixel) in row.iter_mut().enumerate() {
+            *pixel = self.shade(x as i32, y, *pixel);
+        }
+    }
+
+    fn shade(&self, x: i32, y: i32, ink: u32) -> u32 {
+        let liquid = self.material == SurfaceStyle::Liquid;
         let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
         let distance = if liquid {
-            let bulge = inset
-                * 0.95
-                * (-((px - bulge_x).powi(2) + (py - bulge_y).powi(2)) / bulge_spread).exp();
-            rounded_distance(px - w / 2.0, py - h / 2.0, gw / 2.0, gh / 2.0, glass_radius) - bulge
+            let bulge = if self.bulge_columns.is_empty() {
+                0.0
+            } else {
+                self.bulge_columns[x as usize] * self.bulge_rows[y as usize]
+            };
+            rounded_distance(
+                px - self.w / 2.0,
+                py - self.h / 2.0,
+                self.gw / 2.0,
+                self.gh / 2.0,
+                self.glass_radius,
+            ) - bulge
         } else {
-            edge_distance(x, y, bounds.width, bounds.height, radius)
+            rounded_distance(
+                px - self.w / 2.0,
+                py - self.h / 2.0,
+                self.w / 2.0,
+                self.h / 2.0,
+                self.radius,
+            )
         };
         let a = ((0.5 - distance).clamp(0.0, 1.0) * 255.0).round() as u8;
         if a == 0 {
-            *pixel = 0;
-            continue;
+            return 0;
         }
-        let depth = py / h;
-        let mut ink = *pixel;
+        let depth = py / self.h;
         let inside = (-distance).max(0.0);
-        let bevel = (1.0 - inside / bezel).clamp(0.0, 1.0);
-        let normal = if liquid {
-            outward_normal(px - inset, py - inset, gw, gh, glass_radius)
-        } else {
-            (0.0, 0.0)
-        };
-        let facing = normal.0 * light_x + normal.1 * light_y;
-        match material {
-            SurfaceStyle::Liquid => {
+        // Deep inside the shape: no rim, bevel, lip or band to compute.
+        let deep = inside > self.band;
+        let scale = self.scale;
+        let mut ink = ink;
+        let mut normal = (0.0, 0.0);
+        let mut facing = 0.0;
+        let mut bevel = 0.0;
+        if liquid && !deep {
+            bevel = (1.0 - inside / self.bezel).clamp(0.0, 1.0);
+            normal = outward_normal(
+                px - self.inset,
+                py - self.inset,
+                self.gw,
+                self.gh,
+                self.glass_radius,
+            );
+            facing = normal.0 * self.light_dir.0 + normal.1 * self.light_dir.1;
+        }
+        match self.material {
+            SurfaceStyle::Liquid if !deep => {
                 // Thickness: a crisp specular line where the curve faces the
                 // light, a secondary reflection on the far side, a soft band
                 // of light inside the lit edge. Under the text, never over it.
+                let lit = facing.max(0.0);
+                let away = (-facing).max(0.0);
                 let edge = (1.4 + distance).clamp(0.0, 1.0);
-                let specular = edge
-                    * (0.18 + 0.8 * facing.max(0.0).powi(2) + 0.3 * (-facing).max(0.0).powi(4));
-                let band = (1.0 - inside / (4.5 * scale)).max(0.0).powi(2);
-                let glow = band * 0.26 * facing.max(0.0).powi(2);
-                let held = 0.1 * bevel.powi(4) * (0.35 + 0.65 * facing.max(0.0));
+                let specular = edge * (0.18 + 0.8 * lit * lit + 0.3 * away * away * away * away);
+                let band = (1.0 - inside / (4.5 * scale)).max(0.0);
+                let glow = band * band * 0.26 * lit * lit;
+                let b2 = bevel * bevel;
+                let held = 0.1 * b2 * b2 * (0.35 + 0.65 * lit);
                 ink = ink_beneath(ink, 0xFFFFFF, (specular + glow + held).min(0.94));
             }
             SurfaceStyle::Jelly => {
                 // A wide, soft highlight across the upper body.
-                let hx = (px - w / 2.0) / (w * 0.42);
-                let hy = (py - h * 0.24) / (h * 0.2).max(5.0 * scale);
+                let hx = (px - self.w / 2.0) / (self.w * 0.42);
+                let hy = (py - self.h * 0.24) / (self.h * 0.2).max(5.0 * scale);
                 let r = hx * hx + hy * hy;
                 if r < 1.0 {
-                    ink = ink_beneath(ink, 0xFFFFFF, 0.38 * (1.0 - r).powf(1.5));
+                    let fall = 1.0 - r;
+                    ink = ink_beneath(ink, 0xFFFFFF, 0.38 * fall * fall.sqrt());
                 }
-                // A soft, rounded lip of light along the top edge.
-                let lip = (1.0 - inside / (2.6 * scale)).max(0.0).powi(2)
-                    * (0.42 - 0.34 * depth).max(0.0);
-                if lip > 0.0 {
-                    ink = ink_beneath(ink, 0xFFFFFF, lip);
+                if !deep {
+                    // A soft, rounded lip of light along the top edge.
+                    let lip = (1.0 - inside / (2.6 * scale)).max(0.0);
+                    let lip = lip * lip * (0.42 - 0.34 * depth).max(0.0);
+                    if lip > 0.0 {
+                        ink = ink_beneath(ink, 0xFFFFFF, lip);
+                    }
                 }
             }
-            // Frosted glass is flat: no sheen, no glow — only its thin edge.
-            SurfaceStyle::Frosted => {}
-            _ if !light => {
-                let sheen = 0.05 * (1.0 - py / sheen_depth).max(0.0);
+            SurfaceStyle::Liquid | SurfaceStyle::Frosted => {}
+            _ if !self.light => {
+                let sheen = 0.05 * (1.0 - py / self.sheen_depth).max(0.0);
                 if sheen > 0.0 {
                     ink = ink_over(ink, 0xFFFFFF, (sheen * 255.0).round() as u32);
                 }
             }
             _ => {}
         }
-        let rim_alpha =
-            (rim_width + distance).clamp(0.0, 1.0) * (rim_top + (rim_bottom - rim_top) * depth);
-        if rim_alpha > 0.0 {
-            ink = ink_over(ink, rim, (rim_alpha * 255.0).round() as u32);
+        if !deep {
+            let rim_alpha = (self.rim_width + distance).clamp(0.0, 1.0)
+                * (self.rim_top + (self.rim_bottom - self.rim_top) * depth);
+            if rim_alpha > 0.0 {
+                ink = ink_over(ink, self.rim, (rim_alpha * 255.0).round() as u32);
+            }
         }
-        *pixel = match material {
+        let (ox, oy) = self.origin;
+        match self.material {
             SurfaceStyle::Frosted => {
-                let backdrop = renderer
-                    .sample(bounds.x as f64 + px, bounds.y as f64 + py)
-                    .unwrap_or(tint);
-                compose_pixel(ink, crate::blur::tint(backdrop, tint, opacity), 1.0, a)
+                let backdrop = self.renderer.sample(ox + px, oy + py).unwrap_or(self.tint);
+                compose_pixel(
+                    ink,
+                    crate::blur::tint(backdrop, self.tint, frosted_tint(self.opacity)),
+                    1.0,
+                    a,
+                )
             }
             SurfaceStyle::Liquid => {
                 // Where this pixel looks through the glass: magnified about
                 // its thickest point and, inside the bezel, bent outward so
                 // the rim shows what lies just beyond it.
-                let shift = lens * bevel.powf(1.6);
-                let base_x = bounds.x as f64 + thick_x + (px - thick_x) * 0.975;
-                let base_y = bounds.y as f64 + thick_y + (py - thick_y) * 0.975;
-                let look = |amount: f64| {
-                    renderer.sample_sharp(base_x + normal.0 * amount, base_y + normal.1 * amount)
-                };
-                let face = renderer.sample(base_x + normal.0 * shift, base_y + normal.1 * shift);
-                let rim = if shift > 0.05 {
-                    // Dispersion: red bends a touch further than blue.
-                    match (look(shift * 1.12), look(shift), look(shift * 0.88)) {
-                        (Some(r), Some(g), Some(b)) => {
-                            Some((r & 0xFF0000) | (g & 0x00FF00) | (b & 0x0000FF))
-                        }
-                        _ => None,
-                    }
+                let (tx, ty) = self.thick;
+                let base_x = ox + tx + (px - tx) * 0.975;
+                let base_y = oy + ty + (py - ty) * 0.975;
+                let seen = if deep {
+                    self.renderer.sample(base_x, base_y)
                 } else {
-                    look(0.0)
-                };
-                // Crisp, lensed content at the rim; softened content across
-                // the face, so busy windows never fight the text.
-                let seen = match (face, rim) {
-                    (Some(face), Some(rim)) => mix(face, rim, bevel.powf(0.7)),
-                    (face, rim) => face.or(rim).unwrap_or(tint),
-                };
-                let mut glass = mix(seen, tint, glass_tint);
-                glass = mix(glass, veil, 0.06);
-                glass = legible(glass, light);
-                // The side away from the light is in the curve's shade.
-                glass = mix(glass, 0x000000, 0.16 * bevel.powi(2) * (-facing).max(0.0));
+                    let shift = self.lens * bevel * bevel.sqrt();
+                    let look = |amount: f64| {
+                        self.renderer
+                            .sample_sharp(base_x + normal.0 * amount, base_y + normal.1 * amount)
+                    };
+                    let face = self
+                        .renderer
+                        .sample(base_x + normal.0 * shift, base_y + normal.1 * shift);
+                    let rim = if shift > 0.05 {
+                        // Dispersion: red bends a touch further than blue.
+                        match (look(shift * 1.12), look(shift), look(shift * 0.88)) {
+                            (Some(r), Some(g), Some(b)) => {
+                                Some((r & 0xFF0000) | (g & 0x00FF00) | (b & 0x0000FF))
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        look(0.0)
+                    };
+                    // Crisp, lensed content at the rim; softened content
+                    // across the face, so busy windows never fight the text.
+                    match (face, rim) {
+                        (Some(face), Some(rim)) => Some(mix(face, rim, bevel.sqrt())),
+                        (face, rim) => face.or(rim),
+                    }
+                }
+                .unwrap_or(self.tint);
+                let mut glass = mix(seen, self.tint, self.glass_tint);
+                glass = mix(glass, self.veil, 0.06);
+                glass = legible(glass, self.light);
+                if !deep {
+                    // The side away from the light is in the curve's shade.
+                    glass = mix(glass, 0x000000, 0.16 * bevel * bevel * (-facing).max(0.0));
+                }
                 compose_pixel(ink, glass, 1.0, a)
             }
             SurfaceStyle::Jelly => {
-                let edge = (1.0 + distance / gel_depth).clamp(0.0, 1.0);
-                let mut body = mix(gel, gel_deep, edge.powf(1.4));
+                let edge = if deep {
+                    0.0
+                } else {
+                    (1.0 + distance / self.gel_depth).clamp(0.0, 1.0)
+                };
+                let mut body = if edge > 0.0 {
+                    mix(self.gel, self.gel_deep, edge * edge.sqrt())
+                } else {
+                    self.gel
+                };
                 // Light scattered inside the body glows below its centre.
-                let gx = (px - w / 2.0) / (w * 0.42);
-                let gy = (py - h * 0.62) / (h * 0.45);
-                body = mix(body, gel_lit, 0.45 * (-(gx * gx + gy * gy)).exp());
-                // Jelly is a body, not a pane: its colour leads. The shared
-                // strength maps to 55%..95% density at the centre.
-                let core = 0.55 + 0.4 * ((opacity - 0.35) / 0.65).clamp(0.0, 1.0);
-                let density = (core + (0.97 - core).max(0.0) * edge.powf(1.8)).clamp(0.0, 1.0);
+                let glow = self.glow_columns[x as usize] * self.glow_rows[y as usize];
+                body = mix(body, self.gel_lit, 0.45 * glow);
+                let density =
+                    (self.gel_core + (0.97 - self.gel_core).max(0.0) * edge * edge).clamp(0.0, 1.0);
                 compose_pixel(ink, body, density, a)
             }
             _ => {
-                let grain = if material == SurfaceStyle::Solid {
+                let grain = if self.material == SurfaceStyle::Solid {
                     0
                 } else {
                     ((x.wrapping_mul(17) ^ y.wrapping_mul(31)) & 3) - 1
                 };
                 let gradient = (5.0 * (1.0 - depth)).round() as i32 + grain;
-                let r = (settings.background_color.r + gradient).clamp(0, 255) as u32;
-                let g = (settings.background_color.g + gradient).clamp(0, 255) as u32;
-                let b = (settings.background_color.b + gradient).clamp(0, 255) as u32;
-                compose_pixel(ink, r << 16 | g << 8 | b, opacity, a)
+                let r = (self.background.r + gradient).clamp(0, 255) as u32;
+                let g = (self.background.g + gradient).clamp(0, 255) as u32;
+                let b = (self.background.b + gradient).clamp(0, 255) as u32;
+                compose_pixel(ink, r << 16 | g << 8 | b, self.opacity, a)
             }
-        };
+        }
     }
-    Ok(surface)
 }
 
 /// Draw and present one frame. `progress` is the running size transition's
 /// eased progress (1.0 when settled); it fades in the target state's body.
+/// Where a frame goes: its window `bounds`, the desktop area glass must
+/// sample (`cover`: the bounds themselves, or during a change of shape
+/// everything the island will pass through) and the pixel scale.
+#[derive(Debug, Clone, Copy)]
+pub struct Placement {
+    pub bounds: Bounds,
+    pub cover: Bounds,
+    pub scale: f64,
+}
+
 pub fn draw(
     renderer: &mut Renderer,
     window: &crate::win32::IslandWindow,
-    bounds: Bounds,
-    scale: f64,
+    placement: Placement,
     model: &IslandModel,
     settings: &Settings,
     progress: f64,
 ) -> Result<bool, String> {
+    let Placement {
+        bounds,
+        cover,
+        scale,
+    } = placement;
     if bounds.is_empty() {
         return Ok(false);
     }
     unsafe {
         let requested = window.material();
         if requested.samples_backdrop() {
-            if let Err(error) = renderer.background(bounds, scale, requested) {
+            if let Err(error) = renderer.background(cover, scale, requested, settings.frost_blur) {
                 window.fallback_to_translucent(&error);
                 renderer.backdrop = None;
             }
@@ -1383,6 +1752,24 @@ pub fn draw(
         }
         // Read after sampling: a failed capture has just downgraded it.
         let material = window.material();
+        // Skip the frame outright when nothing it depends on changed: the
+        // desktop sample, the shape, the pointer, the words and the tint.
+        let frame = format!(
+            "{bounds:?}|{scale:.4}|{progress:.3}|{material:?}|{}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{}",
+            renderer.generation,
+            renderer.pointer,
+            model.state(),
+            model.compact_label(),
+            model.ambient(),
+            model.focus().map(|a| (a.state, a.progress.as_ref().and_then(|p| p.fraction()))),
+            settings.background_color,
+            settings.background_opacity,
+            model.account(),
+            renderer.backdrop.as_ref().map_or(0, |b| b.region.x ^ b.region.y << 16),
+        );
+        if renderer.last_frame.as_deref() == Some(frame.as_str()) {
+            return Ok(false);
+        }
         let foreground = compose(renderer, material, bounds, scale, model, settings, progress)?;
         let surface = &foreground.surface;
         let pixels =
@@ -1422,6 +1809,7 @@ pub fn draw(
         renderer.last_pixels.fill(0);
         renderer.last_pixels = pixels.to_vec();
         renderer.last_bounds = Some(bounds);
+        renderer.last_frame = Some(frame);
     }
     Ok(true)
 }
@@ -1553,15 +1941,38 @@ mod tests {
             let mut renderer = Renderer::default();
             window.apply(bounds, true, 1.0).unwrap();
             std::thread::sleep(Duration::from_millis(80));
-            assert!(draw(&mut renderer, &window, bounds, 1.0, &model, &settings, 1.0).unwrap());
+            assert!(draw(
+                &mut renderer,
+                &window,
+                Placement {
+                    bounds,
+                    cover: bounds,
+                    scale: 1.0
+                },
+                &model,
+                &settings,
+                1.0
+            )
+            .unwrap());
             window.set_visible(true);
             std::thread::sleep(Duration::from_millis(80));
-            renderer.backdrop.as_mut().unwrap().sampled =
-                Instant::now() - background_interval(SurfaceStyle::Frosted);
+            renderer.backdrop.as_mut().unwrap().sampled = Instant::now() - background_interval(0);
             // A second capture with our card now visible must still see only
             // the stripes; otherwise it recursively blurs its own text.
             assert!(
-                !draw(&mut renderer, &window, bounds, 1.0, &model, &settings, 1.0).unwrap(),
+                !draw(
+                    &mut renderer,
+                    &window,
+                    Placement {
+                        bounds,
+                        cover: bounds,
+                        scale: 1.0
+                    },
+                    &model,
+                    &settings,
+                    1.0
+                )
+                .unwrap(),
                 "background capture included the island itself or was unstable"
             );
             assert!(renderer.samples >= 2);
@@ -1654,8 +2065,11 @@ mod tests {
                         assert!(draw(
                             &mut renderer,
                             &expanded_window,
-                            expanded,
-                            scale,
+                            Placement {
+                                bounds: expanded,
+                                cover: expanded,
+                                scale
+                            },
                             &model,
                             &settings,
                             1.0
@@ -1843,20 +2257,25 @@ mod tests {
                     )
                 })
                 .collect::<Vec<u32>>();
-            let (face, rim) = process(&raw, sw, sh, scale, material).unwrap();
+            let radius = if material == SurfaceStyle::Liquid {
+                liquid_radius(scale)
+            } else {
+                frost_radius(settings.frost_blur, scale)
+            };
+            let processed = process(&raw, sw, sh, radius, material).unwrap();
             renderer.backdrop = Some(Backdrop::new(
-                material,
-                region,
-                bounds,
-                sw,
-                sh,
-                raw,
-                (face, rim),
+                material, region, bounds, sw, sh, raw, processed,
             ));
         }
         let pixels = unsafe {
             let surface = compose(
-                &renderer, material, bounds, scale, model, settings, progress,
+                &mut renderer,
+                material,
+                bounds,
+                scale,
+                model,
+                settings,
+                progress,
             )
             .unwrap();
             std::slice::from_raw_parts(
@@ -2060,6 +2479,7 @@ mod tests {
                 (SurfaceStyle::Solid, 1.0),
                 (SurfaceStyle::Translucent, 0.6),
                 (SurfaceStyle::Frosted, 0.45),
+                (SurfaceStyle::Frosted, 0.72),
                 (SurfaceStyle::Liquid, 0.35),
                 (SurfaceStyle::Liquid, 0.6),
                 (SurfaceStyle::Jelly, 0.6),
@@ -2221,7 +2641,7 @@ mod tests {
             renderer.pointer = pointer;
             unsafe {
                 let surface = compose(
-                    &renderer,
+                    &mut renderer,
                     SurfaceStyle::Liquid,
                     bounds,
                     1.5,
@@ -2350,6 +2770,279 @@ mod tests {
             1.0,
             "jelly-blue-expanded-150",
         );
+    }
+
+    /// Frame budget probe: `cargo test --release frame_budget -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "performance probe; run in release on a desktop"]
+    fn frame_budget() {
+        use windows_sys::Win32::Graphics::Gdi::*;
+        let time = |label: &str, runs: u32, mut work: Box<dyn FnMut()>| {
+            work();
+            let started = Instant::now();
+            for _ in 0..runs {
+                work();
+            }
+            eprintln!(
+                "{label:<44} {:>8.2} ms",
+                started.elapsed().as_secs_f64() * 1000.0 / runs as f64
+            );
+        };
+        for state in [
+            IslandState::Compact,
+            IslandState::Peek,
+            IslandState::Expanded,
+        ] {
+            let model = gallery_model(state, None);
+            for material in [
+                SurfaceStyle::Translucent,
+                SurfaceStyle::Frosted,
+                SurfaceStyle::Liquid,
+                SurfaceStyle::Jelly,
+            ] {
+                let settings = Settings {
+                    surface_style: material,
+                    background_opacity: 0.5,
+                    ..Settings::default()
+                };
+                let (w, h) = state.logical_size();
+                let bounds = Bounds {
+                    x: 0,
+                    y: 0,
+                    width: (w * 1.5) as i32,
+                    height: (h * 1.5) as i32,
+                };
+                // Backdrop prepared once, as a cached sample would be.
+                let mut renderer = Renderer::default();
+                if material.samples_backdrop() {
+                    let pad = 48;
+                    let region = Bounds {
+                        x: -pad,
+                        y: -pad,
+                        width: bounds.width + pad * 2,
+                        height: bounds.height + pad * 2,
+                    };
+                    let factor = if material == SurfaceStyle::Liquid {
+                        1
+                    } else {
+                        2
+                    };
+                    let (sw, sh) = (
+                        ((region.width + factor - 1) / factor) as usize,
+                        ((region.height + factor - 1) / factor) as usize,
+                    );
+                    let raw = (0..sw * sh)
+                        .map(|i| {
+                            wallpaper(
+                                region.x + (i % sw) as i32 * factor,
+                                region.y + (i / sw) as i32 * factor,
+                            )
+                        })
+                        .collect::<Vec<u32>>();
+                    let label = format!("process {:?} {}", material, state.as_str());
+                    let (r2, sw2, sh2) = (raw.clone(), sw, sh);
+                    let radius = if material == SurfaceStyle::Liquid {
+                        liquid_radius(1.5)
+                    } else {
+                        frost_radius(settings.frost_blur, 1.5)
+                    };
+                    time(
+                        &label,
+                        10,
+                        Box::new(move || {
+                            let _ = process(&r2, sw2, sh2, radius, material).unwrap();
+                        }),
+                    );
+                    let processed = process(&raw, sw, sh, radius, material).unwrap();
+                    renderer.backdrop = Some(Backdrop::new(
+                        material, region, bounds, sw, sh, raw, processed,
+                    ));
+                }
+                let label = format!("compose {:?} {}", material, state.as_str());
+                let model = model.clone();
+                time(
+                    &label,
+                    10,
+                    Box::new(move || unsafe {
+                        let _ =
+                            compose(&mut renderer, material, bounds, 1.5, &model, &settings, 1.0)
+                                .unwrap();
+                    }),
+                );
+            }
+        }
+        // CPU time (not wall time) of one capture, via GetThreadTimes.
+        let cpu = || unsafe {
+            use windows_sys::Win32::System::Threading::{GetCurrentThread, GetThreadTimes};
+            let mut times = [windows_sys::Win32::Foundation::FILETIME::default(); 4];
+            let [a, b, c, d] = &mut times;
+            GetThreadTimes(GetCurrentThread(), a, b, c, d);
+            let k = (c.dwHighDateTime as u64) << 32 | c.dwLowDateTime as u64;
+            let u = (d.dwHighDateTime as u64) << 32 | d.dwLowDateTime as u64;
+            (k + u) as f64 / 10_000.0
+        };
+        for flags in [SRCCOPY | CAPTUREBLT, SRCCOPY] {
+            let before = cpu();
+            let started = Instant::now();
+            for _ in 0..60 {
+                unsafe {
+                    let surface = Surface::new(444, 144).unwrap();
+                    let desktop = GetDC(std::ptr::null_mut());
+                    BitBlt(surface.dc, 0, 0, 444, 144, desktop, 100, 100, flags);
+                    ReleaseDC(std::ptr::null_mut(), desktop);
+                    GdiFlush();
+                }
+            }
+            eprintln!(
+                "capture 444x144 captureblt={}: wall {:.2} ms, cpu {:.2} ms per frame",
+                flags & CAPTUREBLT != 0,
+                started.elapsed().as_secs_f64() * 1000.0 / 60.0,
+                (cpu() - before) / 60.0
+            );
+        }
+        // Real screen capture of island-sized regions.
+        for (w, h) in [(348, 48), (450, 90), (510, 390)] {
+            for (label, mode, factor) in
+                [("halftone/2", HALFTONE, 2), ("bitblt/1", COLORONCOLOR, 1)]
+            {
+                let name = format!("capture {label} {w}x{h}+pad");
+                time(
+                    &name,
+                    20,
+                    Box::new(move || unsafe {
+                        let (rw, rh) = (w + 96, h + 96);
+                        let surface = Surface::new(rw / factor, rh / factor).unwrap();
+                        let desktop = GetDC(std::ptr::null_mut());
+                        SetStretchBltMode(surface.dc, mode);
+                        StretchBlt(
+                            surface.dc,
+                            0,
+                            0,
+                            rw / factor,
+                            rh / factor,
+                            desktop,
+                            100,
+                            100,
+                            rw,
+                            rh,
+                            SRCCOPY | CAPTUREBLT,
+                        );
+                        ReleaseDC(std::ptr::null_mut(), desktop);
+                        GdiFlush();
+                    }),
+                );
+            }
+        }
+    }
+
+    /// Real frame times on a real layered window:
+    /// `cargo test --release live_frame_rate -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "requires an unlocked interactive Windows desktop"]
+    fn live_frame_rate() {
+        crate::win32::enable_dpi_awareness();
+        let monitor = crate::win32::primary_monitor().unwrap();
+        let scale = 1.5;
+        for material in [
+            SurfaceStyle::Frosted,
+            SurfaceStyle::Liquid,
+            SurfaceStyle::Jelly,
+        ] {
+            let window = crate::win32::IslandWindow::create(material).unwrap();
+            let settings = Settings {
+                surface_style: material,
+                ..Settings::default()
+            };
+            let mut renderer = Renderer::default();
+            // A morph from compact to expanded, as the overlay drives it.
+            let mut model = gallery_model(IslandState::Compact, None);
+            model.toggle_expanded();
+            let from = (232.0 * scale, 32.0 * scale);
+            let to = (340.0 * scale, 260.0 * scale);
+            let mut transition = crate::overlay::Transition::begin_with(
+                from,
+                to,
+                crate::overlay::Motion::for_material(material),
+            );
+            let target = Bounds {
+                x: monitor.x + 200,
+                y: monitor.y + 120,
+                width: to.0 as i32,
+                height: to.1 as i32,
+            };
+            let cover = Bounds {
+                x: target.x - 60,
+                y: target.y - 60,
+                width: target.width + 120,
+                height: target.height + 120,
+            };
+            let started = Instant::now();
+            let mut frames = 0;
+            let mut worst = Duration::ZERO;
+            while transition.is_active() {
+                let (w, h) = transition.advance(Duration::from_millis(16));
+                let bounds = Bounds {
+                    width: w.round() as i32,
+                    height: h.round() as i32,
+                    ..target
+                };
+                let frame = Instant::now();
+                window.apply(bounds, true, scale).unwrap();
+                draw(
+                    &mut renderer,
+                    &window,
+                    Placement {
+                        bounds,
+                        cover,
+                        scale,
+                    },
+                    &model,
+                    &settings,
+                    transition.progress(),
+                )
+                .unwrap();
+                window.set_visible(true);
+                worst = worst.max(frame.elapsed());
+                frames += 1;
+            }
+            let morph = started.elapsed();
+            // Then a settled island whose background keeps changing: every
+            // frame forces a fresh desktop sample, as a video behind would.
+            let settled = Instant::now();
+            for i in 0..30 {
+                if let Some(b) = renderer.backdrop.as_mut() {
+                    b.sampled = Instant::now() - Duration::from_secs(1);
+                    b.raw[0] ^= 0x10101 * (i + 1);
+                }
+                draw(
+                    &mut renderer,
+                    &window,
+                    Placement {
+                        bounds: target,
+                        cover: target,
+                        scale,
+                    },
+                    &model,
+                    &settings,
+                    1.0,
+                )
+                .unwrap();
+            }
+            let refresh = settled.elapsed() / 30;
+            window.set_visible(false);
+            eprintln!(
+                "{material:?}: morph {frames} frames in {:.0} ms (avg {:.1} ms, worst {:.1} ms); live refresh {:.1} ms/frame ({:.0} fps)",
+                morph.as_secs_f64() * 1000.0,
+                morph.as_secs_f64() * 1000.0 / frames as f64,
+                worst.as_secs_f64() * 1000.0,
+                refresh.as_secs_f64() * 1000.0,
+                1.0 / refresh.as_secs_f64(),
+            );
+            assert!(
+                worst < Duration::from_millis(40),
+                "{material:?} morph frame too slow: {worst:?}"
+            );
+        }
     }
 
     #[test]

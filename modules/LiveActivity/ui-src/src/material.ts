@@ -24,6 +24,11 @@ export function isMuted(color: RgbColor): boolean {
   return Math.max(...c) - Math.min(...c) < 40
 }
 
+/** `renderer::frosted_tint`: the strength floor (35%) is untinted frost. */
+export function frostedTint(opacity: number): number {
+  return Math.max(0, Math.min(1, (opacity - 0.35) / 0.65)) * 0.75
+}
+
 /** `renderer::liquid_tint`: the strength floor (35%) is clear glass. */
 export function liquidTint(opacity: number): number {
   return Math.max(0, Math.min(1, (opacity - 0.35) / 0.65)) * 0.55

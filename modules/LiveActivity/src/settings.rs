@@ -136,6 +136,9 @@ pub struct Settings {
     pub surface_style: SurfaceStyle,
     pub background_opacity: f64,
     pub background_color: RgbColor,
+    /// Frosted glass blur radius in logical pixels (0–40, default 6): small
+    /// enough that window titles and shapes behind the glass stay readable.
+    pub frost_blur: u32,
     /// v1's connection switch migrates to visibility, never acquisition policy.
     #[serde(alias = "codexEnabled")]
     pub show_codex_data: bool,
@@ -200,6 +203,7 @@ impl Default for Settings {
             surface_style: SurfaceStyle::Translucent,
             background_opacity: 0.72,
             background_color: RgbColor::default(),
+            frost_blur: 6,
             show_codex_data: true,
             codex_idle_shutdown_seconds: 300,
         }
@@ -226,6 +230,7 @@ impl Settings {
             self.background_opacity = 0.72;
         }
         self.background_opacity = self.background_opacity.clamp(0.35, 1.0);
+        self.frost_blur = self.frost_blur.min(40);
         self.background_color.normalize();
         self.custom_text = normalize_text(&self.custom_text, false);
         self.peek_text = normalize_text(&self.peek_text, false);
@@ -364,6 +369,7 @@ pub struct SettingsPatch {
     pub surface_style: Option<SurfaceStyle>,
     pub background_opacity: Option<f64>,
     pub background_color: Option<RgbColor>,
+    pub frost_blur: Option<u32>,
     #[serde(alias = "codexEnabled")]
     pub show_codex_data: Option<bool>,
     // API 1 compatibility: accept retired presets but never restore them.
@@ -383,6 +389,7 @@ pub struct VisualPatch {
     pub offset_y: Option<i32>,
     pub background_opacity: Option<f64>,
     pub background_color: Option<RgbColor>,
+    pub frost_blur: Option<u32>,
 }
 
 impl From<VisualPatch> for SettingsPatch {
@@ -394,6 +401,7 @@ impl From<VisualPatch> for SettingsPatch {
             offset_y: patch.offset_y,
             background_opacity: patch.background_opacity,
             background_color: patch.background_color,
+            frost_blur: patch.frost_blur,
             ..Self::default()
         }
     }
@@ -469,6 +477,9 @@ impl Settings {
         }
         if let Some(value) = patch.background_color {
             self.background_color = value;
+        }
+        if let Some(value) = patch.frost_blur {
+            self.frost_blur = value;
         }
         if let Some(value) = patch.show_codex_data {
             self.show_codex_data = value;

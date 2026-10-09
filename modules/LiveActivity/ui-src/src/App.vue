@@ -62,6 +62,8 @@ const colorDraft = ref<RgbColor>({ ...DEFAULT_COLOR })
 const geometryDraft = ref({ compactWidth: 232, offsetX: 0, offsetY: 0, scale: 1 })
 /** Opacity in percent, so the label follows a held slider. */
 const opacityDraft = ref(72)
+/** Frosted blur in logical pixels, live while its slider is held. */
+const frostBlurDraft = ref(6)
 const previewState = ref<'compact' | 'peek' | 'expanded'>('compact')
 const colorHex = computed(() => '#' + ['r', 'g', 'b'].map(key => clampChannel(colorDraft.value[key as keyof RgbColor]).toString(16).padStart(2, '0')).join(''))
 /** One-click tints; the first is the module default. */
@@ -125,6 +127,7 @@ function applyState(next: ModuleState): void {
   if (state.value?.settings.expandedText !== next.settings.expandedText) expandedTextDraft.value = next.settings.expandedText
   if (state.value?.settings.placeholderFallback !== next.settings.placeholderFallback) fallbackDraft.value = next.settings.placeholderFallback
   if (state.value?.settings.backgroundOpacity !== next.settings.backgroundOpacity) opacityDraft.value = Math.round(next.settings.backgroundOpacity * 100)
+  if (state.value?.settings.frostBlur !== next.settings.frostBlur) frostBlurDraft.value = next.settings.frostBlur ?? 6
   const previous = state.value?.settings.backgroundColor
   if (!previous || ['r', 'g', 'b'].some(key => previous[key as keyof RgbColor] !== next.settings.backgroundColor[key as keyof RgbColor])) {
     colorDraft.value = { ...next.settings.backgroundColor }
@@ -331,12 +334,13 @@ const candyPresets: { name: string; color: RgbColor }[] = [
   { name: '葡萄', color: { r: 124, g: 64, b: 220 } },
 ]
 const swatches = computed(() => settings.value?.surfaceStyle === 'jelly' ? candyPresets : colorPresets)
-const opacityLabel = computed(() => ({ solid: '背景不透明度', translucent: '背景不透明度', frosted: '磨砂着色强度', liquid: '玻璃着色', jelly: '果冻浓度' }[settings.value?.surfaceStyle ?? 'translucent']))
+const opacityLabel = computed(() => ({ solid: '背景不透明度', translucent: '背景不透明度', frosted: '磨砂着色', liquid: '玻璃着色', jelly: '果冻浓度' }[settings.value?.surfaceStyle ?? 'translucent']))
 /** Liquid glass maps the shared strength so its floor reads as 0% (clear). */
-/** Liquid glass reads its floor as 0% (clear); jelly as 55%..95% density. */
+/** Liquid and frosted glass read their floor as 0% (untinted); jelly as 55%..95% density. */
 const opacityValue = computed(() => {
   const step = (opacityDraft.value - 35) / 65
-  return settings.value?.surfaceStyle === 'liquid' ? Math.round(step * 100) : settings.value?.surfaceStyle === 'jelly' ? Math.round(55 + 40 * step) : opacityDraft.value
+  const style = settings.value?.surfaceStyle
+  return style === 'liquid' || style === 'frosted' ? Math.round(step * 100) : style === 'jelly' ? Math.round(55 + 40 * step) : opacityDraft.value
 })
 const recommendedOpacity = computed(() => settings.value?.surfaceStyle === 'liquid' ? 0.48 : 0.6)
 const unsupported = computed(() => state.value?.platform === 'unsupported')
@@ -513,8 +517,9 @@ async function close(): Promise<void> {
             :offset-y="geometryDraft.offsetY"
             :state="previewState"
             :surface-style="state?.overlay.materialFallback && settings.surfaceStyle === 'frosted' ? 'translucent' : settings.surfaceStyle"
-            :opacity="settings.backgroundOpacity"
+            :opacity="opacityDraft / 100"
             :background-color="colorDraft"
+            :frost-blur="frostBlurDraft"
             :clock="previewClock"
             :date="island?.ambient?.date ?? null"
             :custom-text="previewText"
@@ -584,6 +589,24 @@ async function close(): Promise<void> {
             :disabled="busy || settings.surfaceStyle === 'solid'"
             @input="preview({ backgroundOpacity: opacityDraft / 100 })"
             @change="patch({ backgroundOpacity: opacityDraft / 100 })"
+          />
+        </div>
+        <div v-if="settings.surfaceStyle === 'frosted'" class="field">
+          <div class="field-heading">
+            <label class="field-label" for="frost-blur">磨砂模糊<b class="value-chip">{{ frostBlurDraft }} px</b><small>越小越能看清背后的窗口标题</small></label>
+          </div>
+          <input
+            id="frost-blur"
+            v-model.number="frostBlurDraft"
+            class="range"
+            type="range"
+            min="0"
+            max="40"
+            step="1"
+            :style="{ '--fill': fill(frostBlurDraft, 0, 40) }"
+            :disabled="busy"
+            @input="preview({ frostBlur: frostBlurDraft })"
+            @change="patch({ frostBlur: frostBlurDraft })"
           />
         </div>
         <div class="field">
