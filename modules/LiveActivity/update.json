@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.7",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-09T13:52:57Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.7-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/e64d7f1980e534e63f070f0bf245846d1460fcf5/modules/LiveActivity/packages/qing.liveactivity-0.1.7-tauri.qmod",
+        "size": 416172,
+        "sha256": "a884a9eb532ee11042167343ed8557e0284fc2cbed53495f900ae1be5fca06f9"
+      },
+      "releaseNotes": {
+        "zh-CN": "新增果冻材质、糖果配色与回弹形变，强化自绘磨砂的背景模糊、色彩、颗粒和高光。拖动尺寸、透明度及系统取色器时桌面胶囊实时跟随，松手保存。任务与计时信息仅通过自定义文本占位符显示，不自动覆盖或附加正文；加入任务/计时状态占位符、分组插入及引用提示。保留已有配置和空模板语义；Codex 采集能力范围不变。",
+        "en-US": "Add jelly material, candy colors and spring morphs; enhance native frosted blur, vibrancy, grain and highlights. Geometry, opacity and color-picker changes preview live on the desktop capsule and save on release. Task and timer data appear only through custom-text placeholders, without replacing or appending body text. Add task/timer-state placeholders, grouped insertion and usage hints. Preserve profiles and blank-template semantics; Codex observation capabilities are unchanged."
+      }
+    },
+    {
       "version": "0.1.6",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
