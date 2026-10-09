@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.6",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-09T05:23:53Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.6-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/4e209629dbe0bc5b4bd85fad18a97455430d7e66/modules/LiveActivity/packages/qing.liveactivity-0.1.6-tauri.qmod",
+        "size": 407397,
+        "sha256": "0160819f1fe05bc01b6cc3229977b52ccb5e8935e20c9bf0bc6bfb793efa05b6"
+      },
+      "releaseNotes": {
+        "zh-CN": "更新设置页与原生胶囊样式：示意桌面实时预览、八种常用底色、显示器式停靠选择、文本即时效果及计时表盘。胶囊加入状态光晕、进度环、时钟表盘、玻璃边缘高光、展开首行标题排版及尺寸动画中的正文淡入，圆角命中范围与绘制同步。保留已有配置、空模板语义、任务列表及外部数据占位符规则；Codex 采集能力范围不变。",
+        "en-US": "Refresh settings and native capsule styling with a miniature desktop preview, eight color swatches, monitor-style docking, live text results and timer dials. Add state glows, progress rings, a clock face, glass edge highlights, first-line expanded headlines and content fade-in during resizing; align rounded hit testing with rendering. Preserve profiles, blank-template behavior, task lists and external-data placeholders. Codex observation capabilities are unchanged."
+      }
+    },
+    {
       "version": "0.1.5",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
