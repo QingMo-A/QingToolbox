@@ -21,7 +21,7 @@
     },
     "qing.liveactivity": {
       "name": { "zh-CN": "灵动岛", "en-US": "Qing Island" },
-      "description": { "zh-CN": "桌面时钟、计时/倒计时、分状态文本模板及磨砂/果冻材质；任务与外部数据通过占位符显示，支持实时尺寸预览、鼠标穿透和临时隐藏。", "en-US": "A desktop clock, timers, state-specific text templates and frosted/jelly materials; task and external data use placeholders, with live geometry previews, click-through and temporary hiding." },
+      "description": { "zh-CN": "桌面时钟、计时/倒计时、分状态文本模板及磨砂/液态玻璃/果冻材质；任务与外部数据通过占位符显示，支持实时预览、鼠标穿透和临时隐藏。", "en-US": "A desktop clock, timers, state-specific text templates and frosted/liquid glass/jelly materials; task and external data use placeholders, with live previews, click-through and temporary hiding." },
       "icon": "LiveActivity/icon.svg",
       "moduleManifest": "LiveActivity/module.json",
       "updateManifest": "LiveActivity/update.json",

@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.8",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-09T15:19:19Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.8-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/cddec2b4250b58c9dfd40a8ad953c2a0a42f177e/modules/LiveActivity/packages/qing.liveactivity-0.1.8-tauri.qmod",
+        "size": 422829,
+        "sha256": "2cc63ba73c455798ca029c6b11a5bfceb0f9c769aa37d8812a73dca81493229e"
+      },
+      "releaseNotes": {
+        "zh-CN": "新增液态玻璃材质：本机背景折射、轻度柔化、边缘高光与轻微色散，悬停时高光随指针变化，形变采用流体曲线。设置预览加入折射示意并区分五种材质；液态玻璃着色可调至通透。调整果冻的主体色、内光与挤压回弹动画。玻璃背景仅在本机内存使用，隐藏时停止采样，不支持时回退半透明。保留已有配置、文本占位符和空模板语义；Codex 采集能力范围不变。",
+        "en-US": "Add liquid glass with local backdrop refraction, subtle softening, edge highlights and chromatic dispersion, pointer-following light and fluid morphs. Add refractive settings previews and distinguish five materials, with adjustable liquid-glass tint down to clear. Refine jelly body colors, inner glow and squash-and-stretch motion. Backdrop pixels remain in local memory; sampling stops when hidden, with translucent fallback when unsupported. Preserve profiles, placeholders and blank-template semantics; Codex observation capabilities are unchanged."
+      }
+    },
+    {
       "version": "0.1.7",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
