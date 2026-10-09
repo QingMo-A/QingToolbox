@@ -105,7 +105,7 @@ dependencies = [
 
 [[package]]
 name = "qing-screenpin-module"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "png",
  "serde",
