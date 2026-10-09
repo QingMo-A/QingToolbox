@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.2.1",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.0-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-09T04:33:29Z",
+      "package": {
+        "fileName": "qing.screenpin-0.2.1-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/e83e5d8ca8ad72d2ae170977240bb4c4c0a118ea/modules/ScreenPin/packages/qing.screenpin-0.2.1-tauri.qmod",
+        "size": 278585,
+        "sha256": "d0b5045c1c31ac67c4ef7cd09d8d67fad2bb4686be5864c364fc335f6355106c"
+      },
+      "releaseNotes": {
+        "zh-CN": "更新截图钉前端：重新布局截图卡片与操作区，优化工具箱主题适配，加入轻动画、加载占位、复制完成反馈和截图比例标识。清空操作需在三秒内再次点击确认；框选后钉到桌面、双击打开贴图及现有贴图操作保留。安装包改由 modules 分支直接提供，无需模块 Release。",
+        "en-US": "Refresh the Screen Pin board layout and host-themed styling with subtle motion, loading placeholders, copy feedback and aspect-ratio labels. Clearing all pins requires a second click within three seconds. Preserve capture-to-pin, double-click floating windows and existing pin controls. Serve the package directly from the modules branch without a module Release."
+      }
+    },
+    {
       "version": "0.2.0",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
