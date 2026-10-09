@@ -333,14 +333,16 @@ impl IslandWindow {
             SetWindowLongPtrW(handle, GWLP_USERDATA, Arc::as_ptr(&hit_state) as isize);
             let mut material = requested_style;
             let mut material_fallback = None;
-            if requested_style == SurfaceStyle::Frosted {
+            // Glass materials sample the desktop under the island, so the
+            // island must be invisible to that capture or it would sample itself.
+            if requested_style.samples_backdrop() {
                 use windows_sys::Win32::UI::WindowsAndMessaging::{
                     SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
                 };
                 if !supports_capture_exclusion() {
                     material = SurfaceStyle::Translucent;
                     material_fallback =
-                        Some("自绘磨砂需要 Windows 10 2004 或更新版本，已回退半透明".into());
+                        Some("自绘玻璃材质需要 Windows 10 2004 或更新版本，已回退半透明".into());
                 } else if SetWindowDisplayAffinity(handle, WDA_EXCLUDEFROMCAPTURE) == 0 {
                     material = SurfaceStyle::Translucent;
                     material_fallback =

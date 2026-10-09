@@ -538,22 +538,50 @@ pub mod motion {
         elapsed >= DURATION
     }
 
-    /// The jelly material's morph: long enough for one visible wobble.
-    pub const SPRING_DURATION: Duration = Duration::from_millis(560);
+    /// Liquid glass flows: a slower, smooth settle with a barely visible
+    /// 4% overshoot, like a drop finding its shape.
+    pub const FLUID_DURATION: Duration = Duration::from_millis(420);
+    pub const FLUID_DECAY: f64 = 8.0;
+    pub const FLUID_FREQUENCY: f64 = 7.0;
 
-    /// A damped spring from 0 to 1. It overshoots on purpose — that is the
-    /// jelly — but decays fast enough to settle inside `SPRING_DURATION`.
-    /// Width and height use different frequencies, so the capsule squashes and
-    /// stretches instead of scaling uniformly.
-    pub fn spring(progress: f64, frequency: f64) -> f64 {
+    /// Jelly has mass: about 114% → 98% → 100%, and the other axis squashes
+    /// against it, so the body stretches one way while it shrinks the other.
+    pub const JELLY_DURATION: Duration = Duration::from_millis(640);
+    pub const JELLY_DECAY: f64 = 8.1;
+    pub const JELLY_FREQUENCY: f64 = 13.0;
+    /// How strongly the secondary axis answers the primary's overshoot.
+    pub const JELLY_SQUASH: f64 = 0.6;
+
+    /// A damped oscillation from 0 to 1 over `progress` 0..=1.
+    pub fn spring(progress: f64, decay: f64, frequency: f64) -> f64 {
         let t = progress.clamp(0.0, 1.0);
         if t >= 1.0 {
             return 1.0;
         }
-        1.0 - (-9.5 * t).exp() * (frequency * t).cos()
+        1.0 - (-decay * t).exp() * (frequency * t).cos()
     }
-    pub const SPRING_WIDTH: f64 = 10.5;
-    pub const SPRING_HEIGHT: f64 = 12.0;
+
+    /// Jelly's two axes for one primary and one secondary length.
+    ///
+    /// The primary axis (the one changing most) springs; the secondary
+    /// follows the smooth ease, scaled against the primary's overshoot so
+    /// the area stays roughly constant: stretch one way, squash the other.
+    pub fn jelly(progress: f64, primary: (f64, f64), secondary: (f64, f64)) -> (f64, f64) {
+        let smooth = ease_out(progress);
+        let primary_smooth = primary.0 + (primary.1 - primary.0) * smooth;
+        let primary_now =
+            primary.0 + (primary.1 - primary.0) * spring(progress, JELLY_DECAY, JELLY_FREQUENCY);
+        let stretch = if primary_smooth.abs() > f64::EPSILON {
+            primary_now / primary_smooth - 1.0
+        } else {
+            0.0
+        };
+        let secondary_smooth = secondary.0 + (secondary.1 - secondary.0) * smooth;
+        (
+            primary_now,
+            secondary_smooth * (1.0 - JELLY_SQUASH * stretch),
+        )
+    }
 }
 
 /// A running animation, so the frame loop can stop when nothing is moving.
@@ -568,19 +596,44 @@ pub struct Transition {
     to_height: f64,
     elapsed: Duration,
     active: bool,
-    /// Jelly morphs on a spring; every other material eases out.
-    spring: bool,
+    motion: Motion,
+}
+
+/// How a material changes shape. Glass and flat materials ease; liquid
+/// glass flows; jelly overshoots with squash and stretch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Motion {
+    Ease,
+    Fluid,
+    Jelly,
+}
+
+impl Motion {
+    pub fn for_material(style: crate::settings::SurfaceStyle) -> Self {
+        match style {
+            crate::settings::SurfaceStyle::Liquid => Self::Fluid,
+            crate::settings::SurfaceStyle::Jelly => Self::Jelly,
+            _ => Self::Ease,
+        }
+    }
+    fn duration(self) -> Duration {
+        match self {
+            Self::Ease => motion::DURATION,
+            Self::Fluid => motion::FLUID_DURATION,
+            Self::Jelly => motion::JELLY_DURATION,
+        }
+    }
 }
 
 impl Transition {
     /// Begin a transition. Identical endpoints complete immediately, which is
     /// the common case and must not schedule any frames at all.
     pub fn begin(from: (f64, f64), to: (f64, f64)) -> Self {
-        Self::begin_with(from, to, false)
+        Self::begin_with(from, to, Motion::Ease)
     }
 
-    /// Begin a transition, on a spring when `spring` is set.
-    pub fn begin_with(from: (f64, f64), to: (f64, f64), spring: bool) -> Self {
+    /// Begin a transition with a material's motion.
+    pub fn begin_with(from: (f64, f64), to: (f64, f64), motion: Motion) -> Self {
         let active = (from.0 - to.0).abs() > 0.5 || (from.1 - to.1).abs() > 0.5;
         Self {
             from_width: from.0,
@@ -589,16 +642,12 @@ impl Transition {
             to_height: to.1,
             elapsed: Duration::ZERO,
             active,
-            spring,
+            motion,
         }
     }
 
     fn duration(&self) -> Duration {
-        if self.spring {
-            motion::SPRING_DURATION
-        } else {
-            motion::DURATION
-        }
+        self.motion.duration()
     }
 
     pub fn is_active(&self) -> bool {
@@ -615,14 +664,27 @@ impl Transition {
             self.active = false;
             return (self.to_width, self.to_height);
         }
-        if self.spring {
-            let t = self.elapsed.as_secs_f64() / motion::SPRING_DURATION.as_secs_f64();
-            let width = motion::spring(t, motion::SPRING_WIDTH);
-            let height = motion::spring(t, motion::SPRING_HEIGHT);
-            return (
-                self.from_width + (self.to_width - self.from_width) * width,
-                self.from_height + (self.to_height - self.from_height) * height,
-            );
+        let t = self.elapsed.as_secs_f64() / self.duration().as_secs_f64();
+        match self.motion {
+            Motion::Fluid => {
+                let k = motion::spring(t, motion::FLUID_DECAY, motion::FLUID_FREQUENCY);
+                return (
+                    self.from_width + (self.to_width - self.from_width) * k,
+                    self.from_height + (self.to_height - self.from_height) * k,
+                );
+            }
+            Motion::Jelly => {
+                let relative = |from: f64, to: f64| (to - from).abs() / from.max(to).max(1.0);
+                let width = (self.from_width, self.to_width);
+                let height = (self.from_height, self.to_height);
+                return if relative(width.0, width.1) >= relative(height.0, height.1) {
+                    motion::jelly(t, width, height)
+                } else {
+                    let (h, w) = motion::jelly(t, height, width);
+                    (w, h)
+                };
+            }
+            Motion::Ease => {}
         }
         (
             motion::lerp(self.from_width, self.to_width, self.elapsed),
@@ -669,30 +731,62 @@ mod tests {
     use super::*;
     use crate::activity::{ActivityProgress, ActivityState, ProviderKind};
 
-    #[test]
-    fn the_jelly_spring_wobbles_then_lands_exactly_on_target() {
-        let mut transition = Transition::begin_with((232.0, 32.0), (340.0, 260.0), true);
-        let mut widest: f64 = 0.0;
-        let mut tallest: f64 = 0.0;
-        let mut frames = 0;
+    fn run(mut transition: Transition) -> (Vec<(f64, f64)>, usize) {
+        let mut frames = Vec::new();
         while transition.is_active() {
-            let (width, height) = transition.advance(Duration::from_millis(8));
-            widest = widest.max(width);
-            tallest = tallest.max(height);
-            frames += 1;
-            assert!(frames < 200, "a spring must settle");
+            frames.push(transition.advance(Duration::from_millis(8)));
+            assert!(frames.len() < 200, "a transition must settle");
         }
-        assert_eq!(transition.advance(Duration::from_millis(8)), (340.0, 260.0));
-        let over_width = (widest - 340.0) / (340.0 - 232.0);
-        let over_height = (tallest - 260.0) / (260.0 - 32.0);
-        assert!(over_width > 0.03 && over_width < 0.15, "{over_width}");
-        assert!(over_height > 0.03 && over_height < 0.15, "{over_height}");
-        assert!(frames * 8 >= 540 && frames * 8 <= 600, "{frames}");
-        assert_eq!(motion::spring(0.0, motion::SPRING_WIDTH), 0.0);
-        assert_eq!(motion::spring(1.0, motion::SPRING_WIDTH), 1.0);
-        // Every other material keeps the quick, overshoot-free ease.
-        let plain = Transition::begin((232.0, 32.0), (340.0, 260.0));
-        assert!(!plain.spring);
+        let count = frames.len();
+        frames.push(transition.advance(Duration::from_millis(8)));
+        (frames, count)
+    }
+
+    #[test]
+    fn jelly_overshoots_and_squashes_the_other_axis() {
+        // Compact to peek: height changes most (32 -> 60), so it leads.
+        let (frames, count) = run(Transition::begin_with(
+            (232.0, 32.0),
+            (300.0, 60.0),
+            Motion::Jelly,
+        ));
+        assert_eq!(*frames.last().unwrap(), (300.0, 60.0), "lands exactly");
+        assert!(count * 8 >= 620 && count * 8 <= 660, "{count}");
+        let tallest = frames.iter().map(|f| f.1).fold(0.0, f64::max);
+        let overshoot = (tallest - 60.0) / (60.0 - 32.0);
+        assert!(overshoot > 0.1 && overshoot < 0.2, "{overshoot}");
+        // While it is taller than its eased path, it is narrower than its own.
+        let peak = frames.iter().position(|f| f.1 == tallest).unwrap();
+        let t = (peak + 1) as f64 * 8.0 / 640.0;
+        let eased_width = 232.0 + (300.0 - 232.0) * motion::ease_out(t);
+        assert!(frames[peak].0 < eased_width, "stretch tall, squash narrow");
+        assert_eq!(
+            motion::spring(1.0, motion::JELLY_DECAY, motion::JELLY_FREQUENCY),
+            1.0
+        );
+    }
+
+    #[test]
+    fn liquid_glass_flows_with_only_a_trace_of_overshoot() {
+        let (frames, count) = run(Transition::begin_with(
+            (232.0, 32.0),
+            (340.0, 260.0),
+            Motion::Fluid,
+        ));
+        assert_eq!(*frames.last().unwrap(), (340.0, 260.0));
+        assert!(count * 8 >= 400 && count * 8 <= 440, "{count}");
+        let widest = frames.iter().map(|f| f.0).fold(0.0, f64::max);
+        let overshoot = (widest - 340.0) / (340.0 - 232.0);
+        assert!(overshoot > 0.0 && overshoot < 0.06, "{overshoot}");
+        // Flat and frosted materials keep the quick, overshoot-free ease.
+        assert_eq!(
+            Motion::for_material(crate::settings::SurfaceStyle::Frosted),
+            Motion::Ease
+        );
+        assert_eq!(
+            Motion::for_material(crate::settings::SurfaceStyle::Jelly),
+            Motion::Jelly
+        );
     }
 
     fn monitor(width: u32, height: u32, scale: f64) -> MonitorMetrics {

@@ -75,17 +75,7 @@ const colorPresets: { name: string; color: RgbColor }[] = [
   { name: '宣纸', color: { r: 240, g: 232, b: 215 } },
   { name: '雾白', color: { r: 244, g: 246, b: 250 } },
 ]
-/** Jelly wants colour: candy tints replace the neutral row while it is chosen. */
-const candyPresets: { name: string; color: RgbColor }[] = [
-  { name: '樱桃', color: { r: 220, g: 38, b: 82 } },
-  { name: '蜜桃', color: { r: 255, g: 120, b: 150 } },
-  { name: '蜜橙', color: { r: 245, g: 130, b: 32 } },
-  { name: '柠檬', color: { r: 236, g: 200, b: 40 } },
-  { name: '青柠', color: { r: 120, g: 200, b: 60 } },
-  { name: '薄荷', color: { r: 40, g: 196, b: 160 } },
-  { name: '蓝莓', color: { r: 56, g: 110, b: 230 } },
-  { name: '葡萄', color: { r: 124, g: 64, b: 220 } },
-]
+
 
 /** Polling is only used while the page is open; the module itself is event-driven. */
 let poller: number | undefined
@@ -329,8 +319,26 @@ const timerUsage = computed(() => {
     .map(mode => textLabels[mode])
   return { stopwatch: usedBy('stopwatch'), countdown: usedBy('countdown') }
 })
+/** Jelly is a coloured body: candy tints replace the neutral row while it is chosen. */
+const candyPresets: { name: string; color: RgbColor }[] = [
+  { name: '蓝莓', color: { r: 40, g: 120, b: 240 } },
+  { name: '樱桃', color: { r: 220, g: 38, b: 82 } },
+  { name: '蜜桃', color: { r: 255, g: 120, b: 150 } },
+  { name: '蜜橙', color: { r: 245, g: 130, b: 32 } },
+  { name: '柠檬', color: { r: 236, g: 200, b: 40 } },
+  { name: '青柠', color: { r: 120, g: 200, b: 60 } },
+  { name: '薄荷', color: { r: 40, g: 196, b: 160 } },
+  { name: '葡萄', color: { r: 124, g: 64, b: 220 } },
+]
 const swatches = computed(() => settings.value?.surfaceStyle === 'jelly' ? candyPresets : colorPresets)
-const opacityLabel = computed(() => ({ solid: '背景不透明度', translucent: '背景不透明度', frosted: '磨砂着色强度', jelly: '果冻浓度' }[settings.value?.surfaceStyle ?? 'translucent']))
+const opacityLabel = computed(() => ({ solid: '背景不透明度', translucent: '背景不透明度', frosted: '磨砂着色强度', liquid: '玻璃着色', jelly: '果冻浓度' }[settings.value?.surfaceStyle ?? 'translucent']))
+/** Liquid glass maps the shared strength so its floor reads as 0% (clear). */
+/** Liquid glass reads its floor as 0% (clear); jelly as 55%..95% density. */
+const opacityValue = computed(() => {
+  const step = (opacityDraft.value - 35) / 65
+  return settings.value?.surfaceStyle === 'liquid' ? Math.round(step * 100) : settings.value?.surfaceStyle === 'jelly' ? Math.round(55 + 40 * step) : opacityDraft.value
+})
+const recommendedOpacity = computed(() => settings.value?.surfaceStyle === 'liquid' ? 0.48 : 0.6)
 const unsupported = computed(() => state.value?.platform === 'unsupported')
 const canSimulate = computed(() => Boolean(state.value?.active && settings.value?.enabled))
 const previewClock = computed(() => {
@@ -561,8 +569,8 @@ async function close(): Promise<void> {
         <small v-if="state?.overlay.materialFallback" class="hint">{{ state.overlay.materialFallback }}</small>
         <div class="field">
           <div class="field-heading">
-            <label class="field-label" for="background-opacity">{{ opacityLabel }}<b class="value-chip">{{ settings.surfaceStyle === 'solid' ? 100 : opacityDraft }}%</b></label>
-            <QButton v-if="settings.surfaceStyle !== 'solid'" size="small" :disabled="busy" title="设为 60%，让背景效果更明显" @click="patch({ backgroundOpacity: 0.6 })">推荐强度</QButton>
+            <label class="field-label" for="background-opacity">{{ opacityLabel }}<b class="value-chip">{{ settings.surfaceStyle === 'solid' ? 100 : opacityValue }}%</b></label>
+            <QButton v-if="settings.surfaceStyle !== 'solid'" size="small" :disabled="busy" :title="settings.surfaceStyle === 'liquid' ? '设为约 20% 的轻微着色，保持通透' : '设为 60%，让背景效果更明显'" @click="patch({ backgroundOpacity: recommendedOpacity })">推荐强度</QButton>
           </div>
           <input
             id="background-opacity"
@@ -580,7 +588,7 @@ async function close(): Promise<void> {
         </div>
         <div class="field">
           <div class="field-heading">
-            <span class="field-label">{{ settings.surfaceStyle === 'jelly' ? '果冻颜色' : '背景颜色' }}<small v-if="settings.surfaceStyle === 'jelly'">糖果色更出效果</small></span>
+            <span class="field-label">{{ { liquid: '玻璃色调', jelly: '果冻颜色' }[settings.surfaceStyle as string] ?? '背景颜色' }}<small v-if="settings.surfaceStyle === 'liquid'">液态玻璃会按背景自动切换深浅，色调只是轻微染色</small><small v-else-if="settings.surfaceStyle === 'jelly'">果冻的颜色就是它的主体</small></span>
             <QButton size="small" :disabled="busy" @click="applyColor(DEFAULT_COLOR)">恢复默认</QButton>
           </div>
           <div class="swatches" role="group" aria-label="常用背景色">

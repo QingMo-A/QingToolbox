@@ -721,6 +721,7 @@ fn run_overlay_thread_windows(
             }
         }
         dirty |= state.poll_pointer();
+        dirty |= state.pointer_moved();
         dirty |= state
             .window
             .as_ref()
@@ -728,7 +729,7 @@ fn run_overlay_thread_windows(
         let glass_active = state
             .window
             .as_ref()
-            .is_some_and(|w| w.is_visible() && w.material() == settings::SurfaceStyle::Frosted);
+            .is_some_and(|w| w.is_visible() && w.material().samples_backdrop());
         if dirty
             || state.transition.as_ref().is_some_and(|t| t.is_active())
             || glass_active && state.renderer.until_refresh().is_zero()
@@ -752,7 +753,7 @@ fn run_overlay_thread_windows(
             state
                 .window
                 .as_ref()
-                .filter(|w| w.is_visible() && w.material() == settings::SurfaceStyle::Frosted)
+                .filter(|w| w.is_visible() && w.material().samples_backdrop())
                 .map(|_| state.renderer.until_refresh())
         });
     }
@@ -874,7 +875,7 @@ impl OverlayState {
             self.transition = Some(crate::overlay::Transition::begin_with(
                 from,
                 (bounds.width as f64, bounds.height as f64),
-                self.settings.surface_style == settings::SurfaceStyle::Jelly,
+                crate::overlay::Motion::for_material(self.settings.surface_style),
             ));
             self.target_bounds = bounds;
             self.last_frame = Some(Instant::now());
@@ -915,6 +916,9 @@ impl OverlayState {
                 .transition
                 .as_ref()
                 .map_or(1.0, crate::overlay::Transition::progress);
+            // Liquid glass takes its light from the pointer and bulges towards
+            // it, but only while the pointer is actually over the island.
+            self.renderer.pointer = self.liquid_pointer(drawn);
             let painted = match crate::renderer::draw(
                 &mut self.renderer,
                 active,
@@ -940,6 +944,27 @@ impl OverlayState {
         self.anchor_bounds = drawn;
         self.monitor = Some(monitor);
         self.current = Some(state);
+    }
+
+    /// The pointer in island-local pixels while it hovers liquid glass.
+    fn liquid_pointer(&self, drawn: crate::overlay::Bounds) -> Option<(f64, f64)> {
+        let window = self.window.as_ref()?;
+        if self.settings.surface_style != settings::SurfaceStyle::Liquid
+            || self.settings.click_through
+            || !window.hovered()
+        {
+            return None;
+        }
+        crate::win32::IslandWindow::cursor_position()
+            .map(|(x, y)| ((x - drawn.x) as f64 + 0.5, (y - drawn.y) as f64 + 0.5))
+    }
+
+    /// Whether the pointer moved over liquid glass since the last frame; its
+    /// light and bulge follow it, so that alone is worth a redraw.
+    fn pointer_moved(&mut self) -> bool {
+        let now = self.liquid_pointer(self.anchor_bounds);
+        let moved = now != self.renderer.pointer;
+        moved && (now.is_some() || self.renderer.pointer.is_some())
     }
 
     /// Consume flags set by native mouse messages, without a pointer timer.

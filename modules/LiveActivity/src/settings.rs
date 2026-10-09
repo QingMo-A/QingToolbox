@@ -54,8 +54,14 @@ pub enum SurfaceStyle {
     Solid,
     Translucent,
     Frosted,
-    /// A glossy, volumetric gel: thicker and more opaque at its rim, with a
-    /// specular highlight and a springy morph. Translucent, never sampled.
+    /// Liquid glass: clear, curved glass with thickness. The desktop is
+    /// refracted outward at the rim, the edge is lit from the light (the
+    /// pointer while it hovers) and the glass bulges gently towards it.
+    /// Samples the desktop like frosted glass.
+    Liquid,
+    /// Jelly: not glass at all — a translucent, soft, elastic body with a
+    /// visible inner colour, a wide soft highlight, an inner glow and
+    /// squash-and-stretch motion. Never samples the desktop.
     Jelly,
 }
 impl SurfaceStyle {
@@ -64,8 +70,13 @@ impl SurfaceStyle {
             Self::Solid => "solid",
             Self::Translucent => "translucent",
             Self::Frosted => "frosted",
+            Self::Liquid => "liquid",
             Self::Jelly => "jelly",
         }
+    }
+    /// Whether this material is drawn from a live sample of the desktop.
+    pub fn samples_backdrop(self) -> bool {
+        matches!(self, Self::Frosted | Self::Liquid)
     }
 }
 

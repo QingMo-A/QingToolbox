@@ -1,6 +1,6 @@
 {
   "module.name": "Qing Island",
-  "module.description": "A local clock and text placeholders; timers, tasks and Codex data appear only through placeholders. Frosted and jelly materials with live geometry adjustment.",
+  "module.description": "A local clock and text placeholders; timers, tasks and Codex data appear only through placeholders. Frosted glass, liquid glass and jelly materials with live geometry adjustment.",
   "view.title": "Qing Island",
   "view.subtitle": "Customize a desktop island for time, text and optional account quotas.",
   "sections.general": "General",
@@ -31,6 +31,7 @@
   "fields.surfaceStyles.solid": "Solid",
   "fields.surfaceStyles.translucent": "Translucent",
   "fields.surfaceStyles.frosted": "Frosted glass",
+  "fields.surfaceStyles.liquid": "Liquid glass",
   "fields.surfaceStyles.jelly": "Jelly",
   "fields.backgroundOpacity": "Background opacity",
   "fields.anchor": "Screen edge",

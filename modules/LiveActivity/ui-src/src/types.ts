@@ -80,7 +80,7 @@ export type CodexAccount = {
 export type Anchor = 'topLeft' | 'topCenter' | 'topRight' | 'bottomLeft' | 'bottomCenter' | 'bottomRight'
 export type MonitorStrategy = 'primary' | 'active'
 export type FullscreenPolicy = 'always' | 'hide' | 'important'
-export type SurfaceStyle = 'solid' | 'translucent' | 'frosted' | 'jelly'
+export type SurfaceStyle = 'solid' | 'translucent' | 'frosted' | 'liquid' | 'jelly'
 export type RgbColor = { r: number; g: number; b: number }
 
 export type Settings = {

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Anchor, RgbColor, SurfaceStyle } from '../types'
-import { FROST_GRAIN, gelPalette, SPRING_HEIGHT, SPRING_MS, SPRING_WIDTH, springEasing } from '../material'
+import { FLUID, JELLY, isLight, jellyDensity, jellyPalette, liquidTint } from '../material'
+import LiquidLens from './LiquidLens.vue'
 
 /**
  * A pure-geometry rendering of the island on a miniature desktop.
@@ -15,7 +16,7 @@ import { FROST_GRAIN, gelPalette, SPRING_HEIGHT, SPRING_MS, SPRING_WIDTH, spring
  * running task and a running task cannot make the preview jump.
  *
  * The capsule mirrors `renderer::compose` in the module: same logical layout,
- * same ink colours, same rim. Keep the two in step.
+ * same ink colours, same materials and motion. Keep the two in step.
  */
 const props = withDefaults(defineProps<{
   anchor: Anchor
@@ -66,6 +67,8 @@ const SIZES: Record<typeof props.state, { width: number; height: number }> = {
 /** The miniature taskbar; the island docks to the work area above it. */
 const TASKBAR = 34
 const MARGIN = 14
+/** The page lens is exactly the glass (see liquidMap for why). */
+const LENS_MARGIN = 0
 
 const box = computed(() => {
   const size = SIZES[props.state]
@@ -102,41 +105,104 @@ const placement = computed(() => {
   }
 })
 
-/** Computed once: the native jelly spring as CSS easing curves. */
-const springWidth = springEasing(SPRING_WIDTH)
-const springHeight = springEasing(SPRING_HEIGHT)
+/*
+ * Jelly: the axis that changes most leads and overshoots, the other squashes
+ * against it (overlay::motion::jelly). Decided per change of shape.
+ */
+const jellyLead = ref<'width' | 'height'>('height')
+watch(() => [box.value.width, box.value.height] as const, (next, previous) => {
+  if (!previous) return
+  const relative = (from: number, to: number) => Math.abs(to - from) / Math.max(from, to, 1)
+  jellyLead.value = relative(previous[0], next[0]) >= relative(previous[1], next[1]) ? 'width' : 'height'
+})
+
+/*
+ * Liquid glass takes its light from the pointer while it hovers the capsule
+ * and bulges a little towards it, as the native window does.
+ */
+const pointer = ref<{ x: number; y: number } | null>(null)
+function pointerMoved(event: PointerEvent): void {
+  if (props.surfaceStyle !== 'liquid') return
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  pointer.value = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+}
+function pointerLeft(): void { pointer.value = null }
+const lensId = `liquid-lens-${Math.random().toString(36).slice(2, 9)}`
+
+const liquidLight = computed(() => {
+  const { width, height } = box.value
+  let [lx, ly] = [-0.55, -0.835]
+  if (pointer.value) {
+    const dx = pointer.value.x - width / 2
+    const dy = pointer.value.y - height / 2
+    const length = Math.hypot(dx, dy) || 1
+    lx = 0.35 * lx + 0.65 * dx / length
+    ly = 0.35 * ly + 0.65 * dy / length
+    const norm = Math.hypot(lx, ly) || 1
+    lx /= norm
+    ly /= norm
+  }
+  // The rim gradient runs away from the light; CSS angles start at "up".
+  const angle = Math.atan2(-lx, ly) * 180 / Math.PI
+  const bulge = pointer.value
+    ? { x: (pointer.value.x - width / 2) / (width / 2), y: (pointer.value.y - height / 2) / (height / 2) }
+    : { x: 0, y: 0 }
+  return { angle, bulge }
+})
+
+const islandTransform = computed(() => {
+  const { x, y } = placement.value
+  if (props.surfaceStyle !== 'liquid' || !pointer.value) return `translate3d(${x}px, ${y}px, 0)`
+  // A gentle swell towards the pointer, not a uniform zoom.
+  const { bulge } = liquidLight.value
+  return `translate3d(${x + bulge.x * 1.2}px, ${y + bulge.y * 1.2}px, 0) scale(${1 + 0.012 * Math.abs(bulge.x)}, ${1 + 0.03 * Math.abs(bulge.y)})`
+})
 
 const islandStyle = computed(() => {
   const clamp = (value: number) => Math.round(Math.max(0, Math.min(255, Number(value) || 0)))
   const { r, g, b } = props.backgroundColor
-  // Same luminance split and ink as the native renderer.
-  const light = r * 0.2126 + g * 0.7152 + b * 0.0722 > 150
-  const jelly = props.surfaceStyle === 'jelly'
-  const gel = gelPalette(props.backgroundColor)
-  const material = jelly
-    ? {
-        '--gel': gel.gel,
-        '--gel-lit': gel.lit,
-        '--gel-deep': gel.deep,
-        '--gel-glow': gel.glow,
-        '--gel-density': props.opacity,
-        '--island-muted': light ? '#26384a' : '#dadee4',
-        '--island-accent': light ? '#142030' : '#eff1f5',
-        '--spring-w': springWidth,
-        '--spring-h': springHeight,
-        '--spring-ms': `${SPRING_MS}ms`,
-      }
-    : props.surfaceStyle === 'frosted'
-      // renderer::toward_luma pulls the blurred desktop 30% towards the tint's
-      // brightness so text keeps its contrast; brightness() approximates it.
-      ? { '--frost-grain': FROST_GRAIN, '--frost-brightness': ((160 * 0.7 + (r * 0.2126 + g * 0.7152 + b * 0.0722) * 0.3) / 160).toFixed(3) }
-      : {}
+  const style = props.surfaceStyle
+  const liquid = style === 'liquid'
+  const jelly = style === 'jelly'
+  const glassTint = liquidTint(props.opacity)
+  // Same luminance split and ink as the native renderer. Native liquid glass
+  // reads the real desktop; this stage is dusk-dark, so clear glass takes light
+  // ink unless a light tint is strong enough to carry dark ink.
+  const light = liquid ? isLight(props.backgroundColor) && glassTint >= 0.15 : isLight(props.backgroundColor)
+  const alpha = style === 'solid' ? 1 : liquid ? glassTint : props.opacity
+  const material: Record<string, string | number> = {}
+  if (liquid) {
+    Object.assign(material, {
+      '--light-angle': `${liquidLight.value.angle.toFixed(1)}deg`,
+      '--motion-ms': `${FLUID.ms}ms`,
+      '--motion-w': FLUID.easing,
+      '--motion-h': FLUID.easing,
+    })
+  }
+  if (jelly) {
+    const palette = jellyPalette(props.backgroundColor)
+    Object.assign(material, {
+      '--gel': palette.gel,
+      '--gel-lit': palette.lit,
+      '--gel-deep': palette.deep,
+      '--gel-density': jellyDensity(props.opacity),
+      '--motion-ms': `${JELLY.ms}ms`,
+      '--motion-w': jellyLead.value === 'width' ? JELLY.primary : JELLY.secondary,
+      '--motion-h': jellyLead.value === 'height' ? JELLY.primary : JELLY.secondary,
+    })
+  }
+  if (liquid || jelly) {
+    Object.assign(material, {
+      '--island-muted': light ? '#26384a' : '#dadee4',
+      '--island-accent': light ? '#142030' : '#eff1f5',
+    })
+  }
   return {
     width: `${box.value.width}px`,
     height: `${box.value.height}px`,
     borderRadius: `${box.value.radius}px`,
-    transform: `translate3d(${placement.value.x}px, ${placement.value.y}px, 0)`,
-    backgroundColor: `rgb(${clamp(r)} ${clamp(g)} ${clamp(b)} / ${props.surfaceStyle === 'solid' ? 1 : props.opacity})`,
+    transform: islandTransform.value,
+    backgroundColor: jelly ? 'transparent' : `rgb(${clamp(r)} ${clamp(g)} ${clamp(b)} / ${alpha})`,
     '--s': box.value.scale,
     '--island-ink': light ? '#142030' : '#eff1f5',
     '--island-muted': light ? '#425466' : '#aab4bf',
@@ -146,9 +212,26 @@ const islandStyle = computed(() => {
     '--island-rim-top': light ? 'rgb(0 0 0 / .09)' : 'rgb(255 255 255 / .24)',
     '--island-sheen': light ? 'none' : 'linear-gradient(rgb(255 255 255 / .05), transparent calc(24px * var(--s)))',
     '--radius': `${box.value.radius}px`,
+    // renderer::legible folds the desktop's brightness to the ink's side.
+    '--liquid-tone': light ? 'contrast(.86) brightness(1.12)' : 'contrast(.88) brightness(.88)',
     ...material,
   }
 })
+
+/*
+ * The liquid lens: a layer exactly the glass's shape that follows the
+ * capsule and carries the backdrop filter. Its own border-radius is the only
+ * clip a browser applies to a filtered backdrop.
+ */
+const lensClipStyle = computed(() => ({
+  width: `${box.value.width}px`,
+  height: `${box.value.height}px`,
+  borderRadius: `${box.value.radius}px`,
+  transform: islandTransform.value,
+  backdropFilter: `url(#${lensId}) saturate(1.15) ${islandStyle.value['--liquid-tone']}`,
+  '--fluid-ms': `${FLUID.ms}ms`,
+  '--fluid-ease': FLUID.easing,
+}))
 
 /** The native expanded card sets its first line as the headline. */
 const expandedParts = computed(() => {
@@ -165,7 +248,11 @@ const expandedParts = computed(() => {
       <div class="app app-a"><b /><i /><i /><i /><i /></div>
       <div class="app app-b"><b /><i /><i /><i /></div>
     </div>
-    <div class="island" :class="[`material-${surfaceStyle}`, `is-${state}`]" :style="islandStyle">
+    <template v-if="surfaceStyle === 'liquid'">
+      <LiquidLens :id="lensId" :width="box.width" :height="box.height" :radius="box.radius" :scale="box.scale" :margin="LENS_MARGIN" />
+      <i class="lens-clip" :style="lensClipStyle" aria-hidden="true" />
+    </template>
+    <div class="island" :class="[`material-${surfaceStyle}`, `is-${state}`, { touched: pointer }]" :style="islandStyle" @pointermove="pointerMoved" @pointerleave="pointerLeft">
       <div class="island-bar">
         <svg class="orb" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.7" /><path d="M7 7V4M7 7l2.2 1.1" /></svg>
         <span class="pill-text">{{ customText || date || 'Qing Island' }}</span>
@@ -262,56 +349,104 @@ const expandedParts = computed(() => {
     border-radius 240ms cubic-bezier(.2, .8, .2, 1),
     background-color 200ms;
 }
-/* Frosted (renderer: frost + toward_luma + grain + sweep): heavy blur with
-   vibrancy, fine grain, a diagonal specular sweep and light in the edge. */
+.island > * { position: relative; z-index: 1; }
+.island > .island-rule, .island > .island-stack { position: absolute; }
+
+/* Frosted (renderer::process): flat, hazy, soft. A ~24px blur with a little
+   vibrancy and lift, the tint layer and one thin, even edge. No sheen, no
+   gradient, no glow. */
 .island.material-frosted {
-  background-image:
-    linear-gradient(125deg, rgb(255 255 255 / .14), transparent 46%),
-    var(--frost-grain);
-  backdrop-filter: blur(calc(18px * var(--s))) saturate(1.65) brightness(var(--frost-brightness, 1));
-  box-shadow:
-    inset 0 1px 0 var(--island-rim-top),
-    inset 0 0 0 1px var(--island-rim),
-    inset 0 0 calc(5px * var(--s)) rgb(255 255 255 / .1),
-    0 2px 6px rgb(0 0 0 / .14);
+  background-image: none;
+  backdrop-filter: blur(calc(24px * var(--s))) saturate(1.2) brightness(1.04);
+  box-shadow: inset 0 0 0 1px var(--island-rim-top), 0 2px 8px rgb(0 0 0 / .14);
 }
-/* Jelly (renderer: gel_* and the glossy cap): translucent at its lit centre,
-   dense and deep at the rim, light pooling near the bottom, a glossy cap,
-   and the same damped spring as the native window when it changes shape. */
-.island.material-jelly {
-  background-color: transparent !important;
-  background-image:
-    radial-gradient(70% 34% at 50% 100%, rgb(var(--gel-glow) / .42), transparent 72%),
-    linear-gradient(rgb(var(--gel-lit) / var(--gel-density)), rgb(var(--gel-lit) / var(--gel-density)));
+
+/* Liquid glass (renderer::compose, Liquid): clear, curved glass. The lens
+   layer behind refracts the stage outward at the rim (LiquidLens); here the
+   capsule adds a whisper of tint, the specular rim facing the light (the
+   pointer while it hovers), a soft band inside the lit edge, shade on the far
+   side, and the fluid motion. */
+.lens-clip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  pointer-events: none;
+  transition:
+    transform 260ms cubic-bezier(.2, .8, .2, 1),
+    width var(--fluid-ms, 420ms) var(--fluid-ease, ease),
+    height var(--fluid-ms, 420ms) var(--fluid-ease, ease),
+    border-radius var(--fluid-ms, 420ms) var(--fluid-ease, ease);
+}
+
+.island.material-liquid {
+  background-image: none;
   box-shadow:
-    inset 0 1.5px 0 rgb(255 255 255 / .62),
-    inset 0 0 0 1px rgb(255 255 255 / .14),
-    inset 0 0 calc(14px * var(--s)) calc(2px * var(--s)) rgb(var(--gel-deep) / .92),
-    0 calc(8px * var(--s)) calc(22px * var(--s)) calc(-8px * var(--s)) rgb(var(--gel) / .7);
-  text-shadow: 0 1px 0 rgb(0 0 0 / .3);
+    inset calc(2px * var(--s)) calc(2px * var(--s)) calc(6px * var(--s)) calc(-2px * var(--s)) rgb(255 255 255 / .3),
+    inset calc(-3px * var(--s)) calc(-3px * var(--s)) calc(8px * var(--s)) calc(-3px * var(--s)) rgb(0 0 0 / .22),
+    0 calc(6px * var(--s)) calc(18px * var(--s)) calc(-6px * var(--s)) rgb(0 0 0 / .32);
+  text-shadow: 0 1px 1px rgb(0 0 0 / .28);
+  transition:
+    transform 260ms cubic-bezier(.2, .8, .2, 1),
+    width var(--motion-ms) var(--motion-w),
+    height var(--motion-ms) var(--motion-h),
+    border-radius var(--motion-ms) var(--motion-h),
+    background-color 200ms;
+}
+.island.material-liquid::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 1.4px;
+  border-radius: inherit;
+  background: linear-gradient(var(--light-angle, 146deg), rgb(255 255 255 / .95), rgb(255 255 255 / .3) 24%, rgb(255 255 255 / .06) 55%, rgb(255 255 255 / .42) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+
+/* Jelly (renderer::compose, Jelly): a soft coloured body, not glass. Its own
+   colour leads, deepening into a thick, soft rim; light scattered inside
+   glows below the centre; a wide soft highlight sits on the upper body; and
+   it moves with mass — overshoot, settle, squash and stretch. */
+.island.material-jelly {
+  background-image:
+    radial-gradient(42% 45% at 50% 62%, rgb(var(--gel-lit) / .55), transparent 100%),
+    linear-gradient(rgb(var(--gel) / var(--gel-density)), rgb(var(--gel) / var(--gel-density)));
+  box-shadow:
+    inset 0 0 calc(12px * var(--s)) calc(2px * var(--s)) rgb(var(--gel-deep) / .9),
+    inset 0 calc(2px * var(--s)) calc(3px * var(--s)) rgb(255 255 255 / .35),
+    0 calc(8px * var(--s)) calc(20px * var(--s)) calc(-8px * var(--s)) rgb(var(--gel-deep) / .7);
+  text-shadow: 0 1px 1px rgb(0 0 0 / .28);
   transition:
     transform 300ms cubic-bezier(.2, .8, .2, 1),
-    width var(--spring-ms) var(--spring-w),
-    height var(--spring-ms) var(--spring-h),
-    border-radius var(--spring-ms) var(--spring-h),
-    background-color 200ms;
+    width var(--motion-ms) var(--motion-w),
+    height var(--motion-ms) var(--motion-h),
+    border-radius var(--motion-ms) var(--motion-h);
 }
 .island.material-jelly::before {
   content: "";
   position: absolute;
-  top: calc(2px * var(--s));
-  left: calc(var(--radius) * .55 + 2px * var(--s));
-  right: calc(var(--radius) * .55 + 2px * var(--s));
-  height: min(36%, calc(12px * var(--s)));
-  border-radius: 999px;
-  background: linear-gradient(rgb(255 255 255 / .5), rgb(255 255 255 / 0) 90%);
+  left: 8%;
+  right: 8%;
+  top: 4%;
+  height: 40%;
+  z-index: 0;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(255 255 255 / .42), rgb(255 255 255 / .12) 70%, transparent);
   pointer-events: none;
 }
-.island.material-jelly > * { position: relative; z-index: 1; }
-.island.material-jelly > .island-rule,
-.island.material-jelly > .island-stack { position: absolute; }
-.stage:hover .island.material-jelly .island-bar { animation: squish 560ms var(--spring-h); }
-@keyframes squish { 0% { transform: scale(1); } 25% { transform: scale(1.03, .94); } 100% { transform: scale(1); } }
+.stage:hover .island.material-jelly { animation: jelly-squish 640ms; }
+@keyframes jelly-squish {
+  0% { scale: 1 1; }
+  18% { scale: 1.07 .9; }
+  40% { scale: .97 1.05; }
+  62% { scale: 1.02 .98; }
+  100% { scale: 1 1; }
+}
+
 .island-bar {
   display: flex;
   align-items: center;
@@ -446,6 +581,7 @@ const expandedParts = computed(() => {
 @media (max-width: 640px) { .stage { height: 260px; } }
 @media (prefers-reduced-motion: reduce) {
   .wall, .live-badge i::after { animation: none; }
-  .island, .island.material-jelly, .island-row, .island-rule, .island-stack, .stage:hover .island.material-jelly .island-bar { transition: none; animation: none; }
+  .island, .island.material-liquid, .island.material-jelly, .lens-clip, .island-row, .island-rule, .island-stack { transition: none; animation: none; }
+  .stage:hover .island.material-jelly { animation: none; }
 }
 </style>

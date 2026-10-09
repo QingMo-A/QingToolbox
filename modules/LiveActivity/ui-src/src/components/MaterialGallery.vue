@@ -1,44 +1,51 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { RgbColor, SurfaceStyle } from '../types'
-import { FROST_GRAIN, gelPalette, isLight, isMuted } from '../material'
+import { isLight, isMuted, jellyPalette } from '../material'
+import LiquidLens from './LiquidLens.vue'
 
 const props = defineProps<{ selected: SurfaceStyle; backgroundColor: RgbColor; disabled: boolean }>()
 defineEmits<{ select: [style: SurfaceStyle] }>()
 
 /**
- * The four materials as swatches over the same busy scene. The tiles carry no
- * text inside the sample, so each button's accessible text is just its name;
- * translucent samples always use 60% so the difference is visible even when
- * the user's own strength is close to opaque, and a grey colour is shown as
- * cherry on the jelly tile, because a grey gel sells nothing.
+ * The five materials as swatches over the same busy scene. The tiles carry no
+ * text inside the sample, so each button's accessible text is just its name.
+ * Frosted scatters, liquid glass refracts, jelly is a soft coloured body:
+ * three different things, shown side by side.
  */
 const styles: { value: SurfaceStyle; name: string; note: string; title: string }[] = [
   { value: 'solid', name: '实色', note: '100%', title: '完全遮住背景' },
   { value: 'translucent', name: '半透明', note: '示例 60%', title: '透出清晰的背景' },
-  { value: 'frosted', name: '磨砂玻璃', note: '示例 60%', title: '重度模糊并增强色彩的毛玻璃，带颗粒与高光；此模式下灵动岛不进入系统截屏' },
-  { value: 'jelly', name: '果冻', note: '示例 60%', title: '通透饱满的果冻胶体：边缘更浓、顶部高光、形变带回弹' },
+  { value: 'frosted', name: '磨砂玻璃', note: '平·雾·柔', title: '平整的毛玻璃板：背景被模糊散射，能感知但看不清；细而均匀的边缘，无高光、无形变。此模式下灵动岛不进入系统截屏' },
+  { value: 'liquid', name: '液态玻璃', note: '透·折·厚·流', title: '曲面透明玻璃：边缘折射背后的内容，左上亮、右下暗，高光跟随指针，悬停时向指针方向微微鼓起，形变如液体流动。此模式下灵动岛不进入系统截屏' },
+  { value: 'jelly', name: '果冻', note: '软·弹', title: '半透明的软胶实体：内部颜色明显、边缘圆润肥厚、高光宽而柔和；形变带惯性回弹与挤压拉伸' },
 ]
+/** The sample pill's fixed size, so its lens map is computed once. */
+const PILL = { width: 132, height: 28, radius: 14 }
+const LENS_MARGIN = 0
+const lensId = `tile-lens-${Math.random().toString(36).slice(2, 9)}`
 const tint = computed(() => {
   const clamp = (value: number) => Math.round(Math.max(0, Math.min(255, Number(value) || 0)))
   const { r, g, b } = props.backgroundColor
-  const candy = isMuted(props.backgroundColor) ? { r: 220, g: 38, b: 82 } : props.backgroundColor
-  const gel = gelPalette(candy)
+  // A grey gel sells nothing: the jelly sample falls back to a candy colour.
+  const candy = isMuted(props.backgroundColor) ? { r: 40, g: 120, b: 240 } : props.backgroundColor
+  const gel = jellyPalette(candy)
   return {
     '--tile-tint': `${clamp(r)} ${clamp(g)} ${clamp(b)}`,
     '--tile-ink': isLight(props.backgroundColor) ? '#142030' : '#eff1f5',
     '--tile-gel': gel.gel,
-    '--tile-lit': gel.lit,
-    '--tile-deep': gel.deep,
-    '--tile-glow': gel.glow,
+    '--tile-gel-lit': gel.lit,
+    '--tile-gel-deep': gel.deep,
     '--tile-gel-ink': isLight(candy) ? '#142030' : '#ffffff',
-    '--tile-grain': FROST_GRAIN,
+    '--tile-lens': `url(#${lensId})`,
+    '--lens-margin': `${LENS_MARGIN}px`,
   }
 })
 </script>
 
 <template>
   <div class="segmented material-gallery" role="group" aria-label="面板材质" :style="tint">
+    <LiquidLens :id="lensId" :width="PILL.width" :height="PILL.height" :radius="PILL.radius" :scale="1" :margin="LENS_MARGIN" />
     <button
       v-for="item in styles"
       :key="item.value"
@@ -53,6 +60,7 @@ const tint = computed(() => {
     >
       <span class="material-swatch" aria-hidden="true">
         <i class="scene" />
+        <i v-if="item.value === 'liquid'" class="lens-clip" />
         <i class="pill" :class="`m-${item.value}`"><i class="pill-dot" /><i class="pill-line" /><i class="pill-time" /></i>
         <svg class="check" viewBox="0 0 16 16"><path d="M4 8.4l2.6 2.6L12 5.4" /></svg>
       </span>
@@ -64,7 +72,7 @@ const tint = computed(() => {
 <style scoped>
 .segmented.material-gallery {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
   gap: 10px;
   padding: 0;
   border: 0;
@@ -91,9 +99,9 @@ const tint = computed(() => {
 .segmented .material-tile.selected { color: var(--q-text); border-color: var(--q-brand); background: var(--q-surface-soft); box-shadow: 0 0 0 3px var(--q-brand-soft); font-weight: inherit; }
 .segmented .material-tile:disabled { opacity: .6; cursor: default; }
 .material-tile strong { padding: 9px 6px 3px; font-size: 12.5px; font-weight: 650; }
-.material-tile::after { content: attr(data-note); position: absolute; right: 12px; bottom: 8px; color: var(--q-text-3); font: 600 10.5px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.material-tile::after { content: attr(data-note); position: absolute; right: 12px; bottom: 8px; color: var(--q-text-3); font-size: 10.5px; font-weight: 600; letter-spacing: .04em; }
 
-.material-swatch { position: relative; display: grid; place-items: center; height: 74px; overflow: hidden; border-radius: 10px; isolation: isolate; }
+.material-swatch { position: relative; display: grid; place-items: center; height: 72px; overflow: hidden; border-radius: 10px; isolation: isolate; }
 .scene {
   position: absolute;
   inset: 0;
@@ -109,40 +117,69 @@ const tint = computed(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 78%;
-  height: 26px;
+  width: 132px;
+  max-width: calc(100% - 12px);
+  height: 28px;
   padding: 0 10px;
   overflow: hidden;
-  border-radius: 13px;
+  border-radius: 14px;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .22), inset 0 0 0 1px rgb(255 255 255 / .08), 0 4px 12px rgb(0 0 0 / .25);
 }
 .pill.m-solid { background: rgb(var(--tile-tint)); }
 .pill.m-translucent { background: rgb(var(--tile-tint) / .6); }
-/* Frosted: heavy blur with vibrancy, a diagonal specular sweep and grain. */
+/* Frosted: flat, hazy, soft — blur, a little lift, tint, one thin edge. */
 .pill.m-frosted {
-  background:
-    linear-gradient(125deg, rgb(255 255 255 / .2), transparent 48%),
-    var(--tile-grain),
-    rgb(var(--tile-tint) / .55);
-  backdrop-filter: blur(9px) saturate(1.65);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / .3), inset 0 0 0 1px rgb(255 255 255 / .12), inset 0 0 6px rgb(255 255 255 / .14), 0 4px 12px rgb(0 0 0 / .25);
+  background: rgb(var(--tile-tint) / .45);
+  backdrop-filter: blur(10px) saturate(1.2) brightness(1.04);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16), 0 4px 12px rgb(0 0 0 / .2);
 }
-/* Jelly: a lit centre deepening to a dense rim, a glossy cap, pooled light. */
+/* Liquid: the lens layer refracts the scene; the pill adds light and depth. */
+/* The lens is exactly the pill: its own radius clips the filtered backdrop. */
+.lens-clip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 132px;
+  height: 28px;
+  border-radius: 14px;
+  transform: translate(-50%, -50%);
+  backdrop-filter: var(--tile-lens) saturate(1.15) contrast(.85) brightness(.85);
+}
+.pill.m-liquid {
+  background: transparent;
+  box-shadow: inset 2px 2px 5px -2px rgb(255 255 255 / .4), inset -2px -2px 6px -3px rgb(0 0 0 / .3), 0 5px 14px -4px rgb(0 0 0 / .4);
+}
+.pill.m-liquid::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1.3px;
+  border-radius: inherit;
+  background: linear-gradient(146deg, rgb(255 255 255 / .95), rgb(255 255 255 / .28) 26%, rgb(255 255 255 / .06) 55%, rgb(255 255 255 / .42));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+/* Jelly: a soft coloured body with a wide soft highlight and inner glow. */
 .pill.m-jelly {
   background:
-    radial-gradient(90% 60% at 50% 105%, rgb(var(--tile-glow) / .5), transparent 70%),
-    radial-gradient(120% 140% at 50% 35%, rgb(var(--tile-lit) / .62) 30%, rgb(var(--tile-deep) / .96) 100%);
-  box-shadow: inset 0 1.5px 0 rgb(255 255 255 / .62), inset 0 0 0 1px rgb(255 255 255 / .16), inset 0 0 9px rgb(var(--tile-deep) / .9), 0 6px 14px -4px rgb(var(--tile-gel) / .7);
+    radial-gradient(45% 50% at 50% 70%, rgb(var(--tile-gel-lit) / .55), transparent),
+    rgb(var(--tile-gel) / .8);
+  box-shadow: inset 0 0 9px 1px rgb(var(--tile-gel-deep) / .9), inset 0 2px 3px rgb(255 255 255 / .35), 0 6px 14px -4px rgb(var(--tile-gel-deep) / .8);
 }
-.pill.m-jelly::before { content: ""; position: absolute; top: 2px; left: 9px; right: 9px; height: 8px; border-radius: 99px; background: linear-gradient(rgb(255 255 255 / .6), rgb(255 255 255 / 0) 90%); }
+.pill.m-jelly::before { content: ""; position: absolute; left: 8%; right: 8%; top: 2px; height: 46%; border-radius: 50%; background: radial-gradient(closest-side, rgb(255 255 255 / .5), rgb(255 255 255 / .12) 70%, transparent); }
 .pill i { position: relative; display: block; flex: none; height: 4px; border-radius: 2px; background: var(--tile-ink); }
+.pill.m-liquid i { background: #f4f6fa; box-shadow: 0 1px 1px rgb(0 0 0 / .3); }
 .pill.m-jelly i { background: var(--tile-gel-ink); }
 .pill .pill-dot { width: 7px; height: 7px; border-radius: 50%; background: #86b4f0; }
-.pill.m-jelly .pill-dot { background: var(--tile-gel-ink); }
+.pill.m-liquid .pill-dot, .pill.m-jelly .pill-dot { background: currentColor; color: #f4f6fa; }
 .pill .pill-line { flex: 1; opacity: .9; }
 .pill .pill-time { width: 18%; opacity: .75; }
-.material-tile:hover:not(:disabled) .pill.m-jelly { animation: wobble 620ms cubic-bezier(.3, 1.5, .5, 1); }
-@keyframes wobble { 30% { transform: scale(1.06, .9); } 60% { transform: scale(.97, 1.04); } }
+/* Each material moves as itself: jelly squashes and rebounds; liquid swells. */
+.material-tile:hover:not(:disabled) .pill.m-jelly { animation: jelly-squish 640ms; }
+.material-tile:hover:not(:disabled) .pill.m-liquid { scale: 1.02 1.06; transition: scale 420ms cubic-bezier(.3, 1.2, .4, 1); }
+.pill.m-liquid { transition: scale 420ms cubic-bezier(.3, 1.2, .4, 1); }
+@keyframes jelly-squish { 18% { scale: 1.07 .88; } 40% { scale: .96 1.06; } 62% { scale: 1.02 .98; } }
 .check {
   position: absolute;
   top: 6px;
@@ -171,10 +208,9 @@ const tint = computed(() => {
 :root[data-appearance-preset='aurora-flow'] .segmented .material-tile { border-radius: 4px; }
 :root[data-appearance-preset='aurora-flow'] .segmented .material-tile.selected { box-shadow: 0 0 0 1px #00f0ff, 0 0 18px rgb(0 240 255 / .3); }
 
-@media (max-width: 560px) { .material-swatch { height: 60px; } }
-@media (max-width: 380px) { .segmented.material-gallery { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) { .material-swatch { height: 60px; } .segmented.material-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (prefers-reduced-motion: reduce) {
-  .segmented .material-tile, .check { transition: none; }
+  .segmented .material-tile, .check, .pill.m-liquid { transition: none; }
   .material-tile:hover:not(:disabled) .pill.m-jelly { animation: none; }
 }
 </style>
