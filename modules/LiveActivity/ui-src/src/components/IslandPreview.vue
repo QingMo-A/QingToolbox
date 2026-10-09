@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Anchor, RgbColor, SurfaceStyle } from '../types'
+import { FROST_GRAIN, gelPalette, SPRING_HEIGHT, SPRING_MS, SPRING_WIDTH, springEasing } from '../material'
 
 /**
  * A pure-geometry rendering of the island on a miniature desktop.
@@ -101,11 +102,35 @@ const placement = computed(() => {
   }
 })
 
+/** Computed once: the native jelly spring as CSS easing curves. */
+const springWidth = springEasing(SPRING_WIDTH)
+const springHeight = springEasing(SPRING_HEIGHT)
+
 const islandStyle = computed(() => {
   const clamp = (value: number) => Math.round(Math.max(0, Math.min(255, Number(value) || 0)))
   const { r, g, b } = props.backgroundColor
   // Same luminance split and ink as the native renderer.
   const light = r * 0.2126 + g * 0.7152 + b * 0.0722 > 150
+  const jelly = props.surfaceStyle === 'jelly'
+  const gel = gelPalette(props.backgroundColor)
+  const material = jelly
+    ? {
+        '--gel': gel.gel,
+        '--gel-lit': gel.lit,
+        '--gel-deep': gel.deep,
+        '--gel-glow': gel.glow,
+        '--gel-density': props.opacity,
+        '--island-muted': light ? '#26384a' : '#dadee4',
+        '--island-accent': light ? '#142030' : '#eff1f5',
+        '--spring-w': springWidth,
+        '--spring-h': springHeight,
+        '--spring-ms': `${SPRING_MS}ms`,
+      }
+    : props.surfaceStyle === 'frosted'
+      // renderer::toward_luma pulls the blurred desktop 30% towards the tint's
+      // brightness so text keeps its contrast; brightness() approximates it.
+      ? { '--frost-grain': FROST_GRAIN, '--frost-brightness': ((160 * 0.7 + (r * 0.2126 + g * 0.7152 + b * 0.0722) * 0.3) / 160).toFixed(3) }
+      : {}
   return {
     width: `${box.value.width}px`,
     height: `${box.value.height}px`,
@@ -120,6 +145,8 @@ const islandStyle = computed(() => {
     '--island-rim': light ? 'rgb(0 0 0 / .13)' : 'rgb(255 255 255 / .08)',
     '--island-rim-top': light ? 'rgb(0 0 0 / .09)' : 'rgb(255 255 255 / .24)',
     '--island-sheen': light ? 'none' : 'linear-gradient(rgb(255 255 255 / .05), transparent calc(24px * var(--s)))',
+    '--radius': `${box.value.radius}px`,
+    ...material,
   }
 })
 
@@ -235,7 +262,56 @@ const expandedParts = computed(() => {
     border-radius 240ms cubic-bezier(.2, .8, .2, 1),
     background-color 200ms;
 }
-.island.material-frosted { backdrop-filter: blur(14px) saturate(1.45); }
+/* Frosted (renderer: frost + toward_luma + grain + sweep): heavy blur with
+   vibrancy, fine grain, a diagonal specular sweep and light in the edge. */
+.island.material-frosted {
+  background-image:
+    linear-gradient(125deg, rgb(255 255 255 / .14), transparent 46%),
+    var(--frost-grain);
+  backdrop-filter: blur(calc(18px * var(--s))) saturate(1.65) brightness(var(--frost-brightness, 1));
+  box-shadow:
+    inset 0 1px 0 var(--island-rim-top),
+    inset 0 0 0 1px var(--island-rim),
+    inset 0 0 calc(5px * var(--s)) rgb(255 255 255 / .1),
+    0 2px 6px rgb(0 0 0 / .14);
+}
+/* Jelly (renderer: gel_* and the glossy cap): translucent at its lit centre,
+   dense and deep at the rim, light pooling near the bottom, a glossy cap,
+   and the same damped spring as the native window when it changes shape. */
+.island.material-jelly {
+  background-color: transparent !important;
+  background-image:
+    radial-gradient(70% 34% at 50% 100%, rgb(var(--gel-glow) / .42), transparent 72%),
+    linear-gradient(rgb(var(--gel-lit) / var(--gel-density)), rgb(var(--gel-lit) / var(--gel-density)));
+  box-shadow:
+    inset 0 1.5px 0 rgb(255 255 255 / .62),
+    inset 0 0 0 1px rgb(255 255 255 / .14),
+    inset 0 0 calc(14px * var(--s)) calc(2px * var(--s)) rgb(var(--gel-deep) / .92),
+    0 calc(8px * var(--s)) calc(22px * var(--s)) calc(-8px * var(--s)) rgb(var(--gel) / .7);
+  text-shadow: 0 1px 0 rgb(0 0 0 / .3);
+  transition:
+    transform 300ms cubic-bezier(.2, .8, .2, 1),
+    width var(--spring-ms) var(--spring-w),
+    height var(--spring-ms) var(--spring-h),
+    border-radius var(--spring-ms) var(--spring-h),
+    background-color 200ms;
+}
+.island.material-jelly::before {
+  content: "";
+  position: absolute;
+  top: calc(2px * var(--s));
+  left: calc(var(--radius) * .55 + 2px * var(--s));
+  right: calc(var(--radius) * .55 + 2px * var(--s));
+  height: min(36%, calc(12px * var(--s)));
+  border-radius: 999px;
+  background: linear-gradient(rgb(255 255 255 / .5), rgb(255 255 255 / 0) 90%);
+  pointer-events: none;
+}
+.island.material-jelly > * { position: relative; z-index: 1; }
+.island.material-jelly > .island-rule,
+.island.material-jelly > .island-stack { position: absolute; }
+.stage:hover .island.material-jelly .island-bar { animation: squish 560ms var(--spring-h); }
+@keyframes squish { 0% { transform: scale(1); } 25% { transform: scale(1.03, .94); } 100% { transform: scale(1); } }
 .island-bar {
   display: flex;
   align-items: center;
@@ -370,6 +446,6 @@ const expandedParts = computed(() => {
 @media (max-width: 640px) { .stage { height: 260px; } }
 @media (prefers-reduced-motion: reduce) {
   .wall, .live-badge i::after { animation: none; }
-  .island, .island-row, .island-rule, .island-stack { transition: none; animation: none; }
+  .island, .island.material-jelly, .island-row, .island-rule, .island-stack, .stage:hover .island.material-jelly .island-bar { transition: none; animation: none; }
 }
 </style>

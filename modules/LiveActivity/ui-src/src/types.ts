@@ -80,7 +80,7 @@ export type CodexAccount = {
 export type Anchor = 'topLeft' | 'topCenter' | 'topRight' | 'bottomLeft' | 'bottomCenter' | 'bottomRight'
 export type MonitorStrategy = 'primary' | 'active'
 export type FullscreenPolicy = 'always' | 'hide' | 'important'
-export type SurfaceStyle = 'solid' | 'translucent' | 'frosted'
+export type SurfaceStyle = 'solid' | 'translucent' | 'frosted' | 'jelly'
 export type RgbColor = { r: number; g: number; b: number }
 
 export type Settings = {
@@ -95,6 +95,7 @@ export type Settings = {
   offsetY: number
   peekOnHover: boolean
   clickThrough: boolean
+  /** Retired: timers only fill `{stopwatch}`/`{countdown}` placeholders now. */
   showStopwatch: boolean
   showCountdown: boolean
   countdownSeconds: number
@@ -113,6 +114,9 @@ export type Settings = {
 
 /** A partial update. Only the fields the user touched are sent. */
 export type SettingsPatch = Partial<Omit<Settings, 'version'>>
+
+/** What a held slider may preview without saving. */
+export type VisualPatch = Partial<Pick<Settings, 'scale' | 'compactWidth' | 'offsetX' | 'offsetY' | 'backgroundOpacity' | 'backgroundColor'>>
 
 export type IslandStateName = 'dormant' | 'compact' | 'peek' | 'expanded'
 

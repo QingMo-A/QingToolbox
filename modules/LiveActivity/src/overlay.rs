@@ -265,26 +265,20 @@ impl IslandModel {
         };
     }
 
-    /// The pill's text, kept short enough for a 232 logical-pixel window.
+    /// The pill's text: always the user's own template.
     ///
-    /// Never includes a thread id, a token count or a model name: those belong
-    /// in the peek row, which the user opts into by hovering.
+    /// Data sources never write into the capsule. A task only fills
+    /// placeholders such as `{task}` or `{task.state}` and tints the status
+    /// orb; without any template the capsule just names itself.
     pub fn compact_label(&self) -> Option<String> {
-        let Some(focus) = self.focus.as_ref() else {
-            return self
-                .ambient
-                .as_ref()
-                .map(|content| content.label().to_owned())
-                .or_else(|| {
-                    (self.account.is_some() || self.account_header.is_some())
-                        .then(|| "Codex".to_owned())
-                });
-        };
-        Some(format!(
-            "{} · {}",
-            provider_label(focus),
-            short_state(focus)
-        ))
+        if let Some(content) = self.ambient.as_ref() {
+            return Some(content.label().to_owned());
+        }
+        (self.focus.is_some()
+            || !self.stack.is_empty()
+            || self.account.is_some()
+            || self.account_header.is_some())
+        .then(|| "Qing Island".to_owned())
     }
 
     /// Only the editable hover template produces the extra text row.
@@ -300,50 +294,6 @@ impl IslandModel {
         self.ambient
             .as_ref()
             .and_then(|content| content.expanded_text.as_deref())
-    }
-
-    /// Keep real task rows intact; custom text receives a separate bounded slot.
-    pub fn expanded_text_extra_height(&self) -> f64 {
-        if self.state == IslandState::Expanded
-            && !self.stack.is_empty()
-            && self.expanded_text().is_some()
-        {
-            64.0
-        } else {
-            0.0
-        }
-    }
-}
-
-/// The short provider name shown in the pill.
-///
-/// "Codex" for the Codex provider; the mock is labelled so a developer can see
-/// at a glance that they are looking at synthetic data.
-fn provider_label(activity: &LiveActivity) -> &'static str {
-    use crate::activity::ProviderKind;
-    match activity.provider {
-        ProviderKind::Codex => "Codex",
-        ProviderKind::Mock => "Mock",
-        ProviderKind::Media => "Media",
-        ProviderKind::Transfer => "Files",
-    }
-}
-
-/// A verb, not a noun, so the pill reads as a status rather than a title.
-fn short_state(activity: &LiveActivity) -> String {
-    use crate::activity::ActivityState;
-    match activity.state {
-        ActivityState::Running => activity
-            .subtitle
-            .clone()
-            .unwrap_or_else(|| "Working".to_string()),
-        ActivityState::Waiting => "Needs you".to_string(),
-        ActivityState::Paused => "Paused".to_string(),
-        ActivityState::Success => "Done".to_string(),
-        ActivityState::Failed => "Failed".to_string(),
-        ActivityState::Idle => "Idle".to_string(),
-        ActivityState::Cancelled => "Cancelled".to_string(),
-        ActivityState::Unknown => "Unknown".to_string(),
     }
 }
 
@@ -488,12 +438,14 @@ pub fn model_bounds(
     margin_logical: f64,
 ) -> Bounds {
     let mut bounds = configured_bounds(model.state(), monitor, settings, margin_logical);
+    // Tasks add no rows of their own, so only the retired account header can
+    // still ask for room.
     let extra_height = if model.account_header().is_some()
         && matches!(model.state(), IslandState::Compact | IslandState::Peek)
     {
         24.0
     } else {
-        model.expanded_text_extra_height()
+        0.0
     };
     if extra_height > 0.0 {
         let height = model.state().logical_size().1 + extra_height;
@@ -585,6 +537,23 @@ pub mod motion {
     pub fn finished(elapsed: Duration) -> bool {
         elapsed >= DURATION
     }
+
+    /// The jelly material's morph: long enough for one visible wobble.
+    pub const SPRING_DURATION: Duration = Duration::from_millis(560);
+
+    /// A damped spring from 0 to 1. It overshoots on purpose — that is the
+    /// jelly — but decays fast enough to settle inside `SPRING_DURATION`.
+    /// Width and height use different frequencies, so the capsule squashes and
+    /// stretches instead of scaling uniformly.
+    pub fn spring(progress: f64, frequency: f64) -> f64 {
+        let t = progress.clamp(0.0, 1.0);
+        if t >= 1.0 {
+            return 1.0;
+        }
+        1.0 - (-9.5 * t).exp() * (frequency * t).cos()
+    }
+    pub const SPRING_WIDTH: f64 = 10.5;
+    pub const SPRING_HEIGHT: f64 = 12.0;
 }
 
 /// A running animation, so the frame loop can stop when nothing is moving.
@@ -599,12 +568,19 @@ pub struct Transition {
     to_height: f64,
     elapsed: Duration,
     active: bool,
+    /// Jelly morphs on a spring; every other material eases out.
+    spring: bool,
 }
 
 impl Transition {
     /// Begin a transition. Identical endpoints complete immediately, which is
     /// the common case and must not schedule any frames at all.
     pub fn begin(from: (f64, f64), to: (f64, f64)) -> Self {
+        Self::begin_with(from, to, false)
+    }
+
+    /// Begin a transition, on a spring when `spring` is set.
+    pub fn begin_with(from: (f64, f64), to: (f64, f64), spring: bool) -> Self {
         let active = (from.0 - to.0).abs() > 0.5 || (from.1 - to.1).abs() > 0.5;
         Self {
             from_width: from.0,
@@ -613,6 +589,15 @@ impl Transition {
             to_height: to.1,
             elapsed: Duration::ZERO,
             active,
+            spring,
+        }
+    }
+
+    fn duration(&self) -> Duration {
+        if self.spring {
+            motion::SPRING_DURATION
+        } else {
+            motion::DURATION
         }
     }
 
@@ -626,13 +611,23 @@ impl Transition {
             return (self.to_width, self.to_height);
         }
         self.elapsed = self.elapsed.saturating_add(delta);
-        let width = motion::lerp(self.from_width, self.to_width, self.elapsed);
-        let height = motion::lerp(self.from_height, self.to_height, self.elapsed);
-        if motion::finished(self.elapsed) {
+        if self.elapsed >= self.duration() {
             self.active = false;
             return (self.to_width, self.to_height);
         }
-        (width, height)
+        if self.spring {
+            let t = self.elapsed.as_secs_f64() / motion::SPRING_DURATION.as_secs_f64();
+            let width = motion::spring(t, motion::SPRING_WIDTH);
+            let height = motion::spring(t, motion::SPRING_HEIGHT);
+            return (
+                self.from_width + (self.to_width - self.from_width) * width,
+                self.from_height + (self.to_height - self.from_height) * height,
+            );
+        }
+        (
+            motion::lerp(self.from_width, self.to_width, self.elapsed),
+            motion::lerp(self.from_height, self.to_height, self.elapsed),
+        )
     }
 
     /// Eased progress towards the target, 1.0 once settled. The renderer uses
@@ -641,13 +636,13 @@ impl Transition {
         if !self.active {
             return 1.0;
         }
-        motion::ease_out(self.elapsed.as_secs_f64() / motion::DURATION.as_secs_f64())
+        motion::ease_out(self.elapsed.as_secs_f64() / self.duration().as_secs_f64())
     }
 
     /// Snap to the end, used when a transition is superseded.
     pub fn settle(&mut self) -> (f64, f64) {
         self.active = false;
-        self.elapsed = motion::DURATION;
+        self.elapsed = self.duration();
         (self.to_width, self.to_height)
     }
 }
@@ -673,6 +668,32 @@ pub fn needs_resize(current: IslandState, next: IslandState) -> bool {
 mod tests {
     use super::*;
     use crate::activity::{ActivityProgress, ActivityState, ProviderKind};
+
+    #[test]
+    fn the_jelly_spring_wobbles_then_lands_exactly_on_target() {
+        let mut transition = Transition::begin_with((232.0, 32.0), (340.0, 260.0), true);
+        let mut widest: f64 = 0.0;
+        let mut tallest: f64 = 0.0;
+        let mut frames = 0;
+        while transition.is_active() {
+            let (width, height) = transition.advance(Duration::from_millis(8));
+            widest = widest.max(width);
+            tallest = tallest.max(height);
+            frames += 1;
+            assert!(frames < 200, "a spring must settle");
+        }
+        assert_eq!(transition.advance(Duration::from_millis(8)), (340.0, 260.0));
+        let over_width = (widest - 340.0) / (340.0 - 232.0);
+        let over_height = (tallest - 260.0) / (260.0 - 32.0);
+        assert!(over_width > 0.03 && over_width < 0.15, "{over_width}");
+        assert!(over_height > 0.03 && over_height < 0.15, "{over_height}");
+        assert!(frames * 8 >= 540 && frames * 8 <= 600, "{frames}");
+        assert_eq!(motion::spring(0.0, motion::SPRING_WIDTH), 0.0);
+        assert_eq!(motion::spring(1.0, motion::SPRING_WIDTH), 1.0);
+        // Every other material keeps the quick, overshoot-free ease.
+        let plain = Transition::begin((232.0, 32.0), (340.0, 260.0));
+        assert!(!plain.spring);
+    }
 
     fn monitor(width: u32, height: u32, scale: f64) -> MonitorMetrics {
         MonitorMetrics {
@@ -952,14 +973,20 @@ mod tests {
     // ---- content projection ----
 
     #[test]
-    fn the_compact_label_names_the_provider_and_a_verb() {
-        let model = seeded();
-        let label = model.compact_label().expect("label");
-        assert!(label.starts_with("Mock"), "the pill must name the source");
-        assert!(label.contains("Working"));
-        assert!(
-            label.len() <= 40,
-            "the pill has room for a very short string"
+    fn a_task_never_writes_into_the_capsule() {
+        let mut model = seeded();
+        assert_eq!(model.compact_label().as_deref(), Some("Qing Island"));
+        model.set_ambient(Some(crate::ambient::AmbientContent {
+            text: "专注当下".into(),
+            ..Default::default()
+        }));
+        assert_eq!(model.compact_label().as_deref(), Some("专注当下"));
+        let waiting = activity("w", ActivityState::Waiting);
+        model.set_content(Some(waiting.clone()), vec![waiting], 0, None);
+        assert_eq!(
+            model.compact_label().as_deref(),
+            Some("专注当下"),
+            "a task waiting for the user changes the orb, not the words"
         );
     }
 
@@ -979,17 +1006,9 @@ mod tests {
         for leaked in ["abc123", "72", "184M", "0x"] {
             assert!(
                 !label.contains(leaked),
-                "the collapsed pill must not show {leaked}; details belong in the task list"
+                "the collapsed pill must not show {leaked}; details belong in placeholders"
             );
         }
-    }
-
-    #[test]
-    fn waiting_reads_as_a_request_for_the_user() {
-        let mut model = IslandModel::new();
-        let item = activity("a", ActivityState::Waiting);
-        model.set_content(Some(item.clone()), vec![item], 0, None);
-        assert!(model.compact_label().expect("label").contains("Needs you"));
     }
 
     #[test]
@@ -1011,7 +1030,7 @@ mod tests {
     }
 
     #[test]
-    fn custom_state_text_preserves_tasks_and_reserves_a_docked_expanded_slot() {
+    fn tasks_keep_the_expanded_card_its_configured_size() {
         let mut model = IslandModel::new();
         let item = activity("a", ActivityState::Running);
         model.set_ambient(Some(crate::ambient::AmbientContent {
@@ -1022,9 +1041,7 @@ mod tests {
         model.set_content(Some(item.clone()), vec![item], 0, Some("真实额度".into()));
         model.set_hovered(true);
         assert_eq!(model.peek_detail().as_deref(), Some("用户悬停"));
-        assert_eq!(model.expanded_text_extra_height(), 0.0);
         model.toggle_expanded();
-        assert_eq!(model.expanded_text_extra_height(), 64.0);
         assert_eq!(model.stack().len(), 1);
         assert_eq!(model.account(), Some("真实额度"));
         let area = monitor(1920, 1080, 1.0);
@@ -1036,17 +1053,13 @@ mod tests {
                 anchor,
                 ..Default::default()
             };
-            let old = configured_bounds(IslandState::Expanded, &area, &settings, 12.0);
-            let added = model_bounds(&model, &area, &settings, 12.0);
-            assert_eq!(added.height - old.height, area.to_physical(64.0));
-            if anchor.grows_downward() {
-                assert_eq!(added.y, old.y);
-            } else {
-                assert_eq!(added.y + added.height, old.y + old.height);
-            }
+            assert_eq!(
+                model_bounds(&model, &area, &settings, 12.0),
+                configured_bounds(IslandState::Expanded, &area, &settings, 12.0),
+                "a task adds no implicit rows"
+            );
         }
         model.set_ambient(Some(crate::ambient::AmbientContent::default()));
-        assert_eq!(model.expanded_text_extra_height(), 0.0);
         assert_ne!(model.peek_detail().as_deref(), Some("用户悬停"));
     }
 

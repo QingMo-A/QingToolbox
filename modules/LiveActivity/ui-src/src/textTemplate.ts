@@ -28,6 +28,16 @@ export function renderText(template: string, values: Record<string, string | nul
   return Array.from(result).slice(0, 96).join('')
 }
 
+/** Mirrors `text_template::PLACEHOLDERS` in the module. */
+export const KNOWN_KEYS = [
+  'time', 'date',
+  'stopwatch', 'stopwatch.state', 'countdown', 'countdown.state',
+  'task', 'task.state', 'task.detail', 'task.progress', 'task.source', 'tasks', 'tasks.count',
+  'codex.working', 'codex.waiting',
+  'codex.remaining', 'codex.reset', 'codex.primary.remaining', 'codex.primary.reset',
+  'codex.secondary.remaining', 'codex.secondary.reset', 'codex.updated',
+]
+
 export function usesPlaceholder(template: string, key: string): boolean {
   let rest = template
   while (rest.length) {
@@ -38,7 +48,7 @@ export function usesPlaceholder(template: string, key: string): boolean {
         const body = rest.slice(1, end)
         const name = body.split('|', 1)[0].trim()
         if (name === key) return true
-        if (['time', 'date', 'stopwatch', 'countdown', 'codex.remaining', 'codex.reset', 'codex.primary.remaining', 'codex.primary.reset', 'codex.secondary.remaining', 'codex.secondary.reset', 'codex.updated'].includes(name)) {
+        if (KNOWN_KEYS.includes(name)) {
           rest = rest.slice(end + 1)
           continue
         }

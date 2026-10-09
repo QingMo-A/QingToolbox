@@ -18,3 +18,9 @@ test('unknown names, escaped braces and replacement values stay literal', () => 
   assert.equal(renderText('{codex.remaining|{bad}} {bad|{codex.remaining}}', { 'codex.remaining':null }, ''), '{bad} {bad|}')
   assert.equal(Array.from(renderText('🌟'.repeat(256), {}, '')).length, 96)
 })
+test('state words and task keys are their own placeholders, not prefixes of others', () => {
+  assert.equal(usesPlaceholder('{countdown.state}', 'countdown'), false)
+  assert.equal(usesPlaceholder('{countdown.state}', 'countdown.state'), true)
+  assert.equal(usesPlaceholder('{tasks.count|0} {task}', 'task'), true)
+  assert.equal(renderText('{task|空闲} · {tasks.count}', { task: null, 'tasks.count': '0' }, '?'), '空闲 · 0')
+})

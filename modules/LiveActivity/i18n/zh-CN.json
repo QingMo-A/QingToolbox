@@ -1,6 +1,6 @@
 {
   "module.name": "灵动岛",
-  "module.description": "显示本地时间与文本占位符，自动获取运行中 Codex 的账号额度，支持磨砂与位置尺寸调节。",
+  "module.description": "显示本地时间与文本占位符；计时、任务与 Codex 数据都只通过占位符出现。支持磨砂、果冻材质与实时位置尺寸调节。",
   "view.title": "灵动岛",
   "view.subtitle": "自定义桌面胶囊，显示时间、文本和可选账号额度。",
   "sections.general": "常规",
@@ -31,6 +31,7 @@
   "fields.surfaceStyles.solid": "实色",
   "fields.surfaceStyles.translucent": "半透明",
   "fields.surfaceStyles.frosted": "磨砂玻璃",
+  "fields.surfaceStyles.jelly": "果冻",
   "fields.backgroundOpacity": "背景不透明度",
   "fields.anchor": "停靠位置",
   "fields.anchors.topCenter": "顶部居中",

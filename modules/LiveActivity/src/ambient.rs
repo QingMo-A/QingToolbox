@@ -66,20 +66,33 @@ pub fn content_with_data(
     time: Option<LocalTime>,
     account: Option<&crate::providers::codex::worker::AccountSnapshot>,
 ) -> Option<AmbientContent> {
-    content_with_runtime(settings, time, account, None)
+    content_with_runtime(settings, time, account, None, None)
 }
 
+/// The broker's ordered view, as far as templates are concerned.
+pub struct Tasks<'a> {
+    pub focus: Option<&'a crate::activity::LiveActivity>,
+    pub stack: &'a [crate::activity::LiveActivity],
+    /// Visible plus overflow.
+    pub total: usize,
+}
+
+/// Render the user's three templates against every data source.
+///
+/// Sources (clock, timers, tasks, Codex) only fill placeholders. Nothing is
+/// appended on their behalf: a running countdown or a new task never adds
+/// words the user did not write into a template.
 pub fn content_with_runtime(
     settings: &Settings,
     time: Option<LocalTime>,
     account: Option<&crate::providers::codex::worker::AccountSnapshot>,
     timers: Option<&crate::timers::Snapshot>,
+    tasks: Option<&Tasks>,
 ) -> Option<AmbientContent> {
     if !settings.show_clock
         && settings.custom_text.is_empty()
         && settings.peek_text.is_empty()
         && settings.expanded_text.is_empty()
-        && timers.is_none()
     {
         return None;
     }
@@ -101,7 +114,10 @@ pub fn content_with_runtime(
         .unwrap_or_default();
     let mut values =
         crate::text_template::values(settings, time, account, crate::activity::now_millis());
-    apply_timer_values(settings, timers, &mut values);
+    apply_timer_values(timers, &mut values);
+    if let Some(tasks) = tasks {
+        crate::text_template::apply_task_values(&mut values, tasks.focus, tasks.stack, tasks.total);
+    }
     let optional_text = |template: &str| {
         (!template.is_empty())
             .then(|| {
@@ -111,45 +127,11 @@ pub fn content_with_runtime(
     };
     let peek_text = optional_text(&settings.peek_text);
     let expanded_text = optional_text(&settings.expanded_text);
-    let mut text = crate::text_template::render(
+    let text = crate::text_template::render(
         &settings.custom_text,
         &values,
         &settings.placeholder_fallback,
     );
-    if let Some(timers) = timers {
-        for (key, label, view, show) in [
-            (
-                "stopwatch",
-                "计时",
-                &timers.stopwatch,
-                settings.show_stopwatch,
-            ),
-            (
-                "countdown",
-                "倒计时",
-                &timers.countdown,
-                settings.show_countdown,
-            ),
-        ] {
-            if show
-                && view.started
-                && (view.finished || !crate::text_template::uses(&settings.custom_text, key))
-            {
-                if !text.is_empty() {
-                    text.push_str(" · ");
-                }
-                if view.finished {
-                    text.push_str("倒计时结束");
-                } else {
-                    text.push_str(&format!(
-                        "{label} {}{}",
-                        view.text,
-                        if view.running { "" } else { "（已暂停）" }
-                    ));
-                }
-            }
-        }
-    }
     if clock.is_none() && text.is_empty() && peek_text.is_none() && expanded_text.is_none() {
         return None;
     }
@@ -163,19 +145,27 @@ pub fn content_with_runtime(
 }
 
 pub fn apply_timer_values(
-    settings: &Settings,
     timers: Option<&crate::timers::Snapshot>,
     values: &mut crate::text_template::Values,
 ) {
     if let Some(timers) = timers {
-        for (key, view, show) in [
-            ("stopwatch", &timers.stopwatch, settings.show_stopwatch),
-            ("countdown", &timers.countdown, settings.show_countdown),
+        for (key, view) in [
+            ("stopwatch", &timers.stopwatch),
+            ("countdown", &timers.countdown),
         ] {
-            values.insert(
-                key.into(),
-                (show && view.started).then(|| view.text.clone()),
-            );
+            // The reading is always available (a fresh countdown reads as its
+            // configured length); the state word says whether it is moving.
+            values.insert(key.into(), Some(view.text.clone()));
+            let state = if view.finished {
+                "已结束"
+            } else if view.running {
+                "进行中"
+            } else if view.started {
+                "已暂停"
+            } else {
+                "未开始"
+            };
+            values.insert(format!("{key}.state"), Some(state.to_owned()));
         }
     }
 }

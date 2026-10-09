@@ -494,6 +494,9 @@ input.toggle.small:checked::before { transform: translateX(14px); }
 .render-tag { flex: none; padding: 1px 7px; border-radius: 6px; color: var(--q-brand); background: var(--q-brand-soft); font-size: 10.5px; font-weight: 700; }
 .render-line.dirty .render-tag { color: var(--q-warning, #b66a0b); background: color-mix(in srgb, var(--q-warning, #e2a03f) 15%, transparent); }
 .render-text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.placeholder-groups { display: flex; flex-direction: column; gap: 9px; }
+.placeholder-group { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; align-items: start; }
+.group-name { padding-top: 5px; color: var(--q-text-3); font-size: 10.5px; font-weight: 750; letter-spacing: .08em; }
 .placeholder-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .token {
   display: inline-flex;

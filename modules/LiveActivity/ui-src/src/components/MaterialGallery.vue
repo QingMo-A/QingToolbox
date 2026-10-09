@@ -1,27 +1,38 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { RgbColor, SurfaceStyle } from '../types'
+import { FROST_GRAIN, gelPalette, isLight, isMuted } from '../material'
 
 const props = defineProps<{ selected: SurfaceStyle; backgroundColor: RgbColor; disabled: boolean }>()
 defineEmits<{ select: [style: SurfaceStyle] }>()
 
 /**
- * The three materials as swatches over the same busy scene. The tiles carry no
+ * The four materials as swatches over the same busy scene. The tiles carry no
  * text inside the sample, so each button's accessible text is just its name;
  * translucent samples always use 60% so the difference is visible even when
- * the user's own strength is close to opaque.
+ * the user's own strength is close to opaque, and a grey colour is shown as
+ * cherry on the jelly tile, because a grey gel sells nothing.
  */
 const styles: { value: SurfaceStyle; name: string; note: string; title: string }[] = [
   { value: 'solid', name: '实色', note: '100%', title: '完全遮住背景' },
   { value: 'translucent', name: '半透明', note: '示例 60%', title: '透出清晰的背景' },
-  { value: 'frosted', name: '磨砂玻璃', note: '示例 60%', title: '模糊背景后着色；此模式下灵动岛不进入系统截屏' },
+  { value: 'frosted', name: '磨砂玻璃', note: '示例 60%', title: '重度模糊并增强色彩的毛玻璃，带颗粒与高光；此模式下灵动岛不进入系统截屏' },
+  { value: 'jelly', name: '果冻', note: '示例 60%', title: '通透饱满的果冻胶体：边缘更浓、顶部高光、形变带回弹' },
 ]
 const tint = computed(() => {
   const clamp = (value: number) => Math.round(Math.max(0, Math.min(255, Number(value) || 0)))
   const { r, g, b } = props.backgroundColor
+  const candy = isMuted(props.backgroundColor) ? { r: 220, g: 38, b: 82 } : props.backgroundColor
+  const gel = gelPalette(candy)
   return {
     '--tile-tint': `${clamp(r)} ${clamp(g)} ${clamp(b)}`,
-    '--tile-ink': r * 0.2126 + g * 0.7152 + b * 0.0722 > 150 ? '#142030' : '#eff1f5',
+    '--tile-ink': isLight(props.backgroundColor) ? '#142030' : '#eff1f5',
+    '--tile-gel': gel.gel,
+    '--tile-lit': gel.lit,
+    '--tile-deep': gel.deep,
+    '--tile-glow': gel.glow,
+    '--tile-gel-ink': isLight(candy) ? '#142030' : '#ffffff',
+    '--tile-grain': FROST_GRAIN,
   }
 })
 </script>
@@ -53,7 +64,7 @@ const tint = computed(() => {
 <style scoped>
 .segmented.material-gallery {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   padding: 0;
   border: 0;
@@ -82,7 +93,7 @@ const tint = computed(() => {
 .material-tile strong { padding: 9px 6px 3px; font-size: 12.5px; font-weight: 650; }
 .material-tile::after { content: attr(data-note); position: absolute; right: 12px; bottom: 8px; color: var(--q-text-3); font: 600 10.5px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; }
 
-.material-swatch { position: relative; display: grid; place-items: center; height: 78px; overflow: hidden; border-radius: 10px; isolation: isolate; }
+.material-swatch { position: relative; display: grid; place-items: center; height: 74px; overflow: hidden; border-radius: 10px; isolation: isolate; }
 .scene {
   position: absolute;
   inset: 0;
@@ -94,22 +105,44 @@ const tint = computed(() => {
     #1e293b;
 }
 .pill {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
   width: 78%;
   height: 26px;
   padding: 0 10px;
+  overflow: hidden;
   border-radius: 13px;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .22), inset 0 0 0 1px rgb(255 255 255 / .08), 0 4px 12px rgb(0 0 0 / .25);
 }
 .pill.m-solid { background: rgb(var(--tile-tint)); }
 .pill.m-translucent { background: rgb(var(--tile-tint) / .6); }
-.pill.m-frosted { background: rgb(var(--tile-tint) / .6); backdrop-filter: blur(6px) saturate(1.4); }
-.pill i { display: block; flex: none; height: 4px; border-radius: 2px; background: var(--tile-ink); }
+/* Frosted: heavy blur with vibrancy, a diagonal specular sweep and grain. */
+.pill.m-frosted {
+  background:
+    linear-gradient(125deg, rgb(255 255 255 / .2), transparent 48%),
+    var(--tile-grain),
+    rgb(var(--tile-tint) / .55);
+  backdrop-filter: blur(9px) saturate(1.65);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .3), inset 0 0 0 1px rgb(255 255 255 / .12), inset 0 0 6px rgb(255 255 255 / .14), 0 4px 12px rgb(0 0 0 / .25);
+}
+/* Jelly: a lit centre deepening to a dense rim, a glossy cap, pooled light. */
+.pill.m-jelly {
+  background:
+    radial-gradient(90% 60% at 50% 105%, rgb(var(--tile-glow) / .5), transparent 70%),
+    radial-gradient(120% 140% at 50% 35%, rgb(var(--tile-lit) / .62) 30%, rgb(var(--tile-deep) / .96) 100%);
+  box-shadow: inset 0 1.5px 0 rgb(255 255 255 / .62), inset 0 0 0 1px rgb(255 255 255 / .16), inset 0 0 9px rgb(var(--tile-deep) / .9), 0 6px 14px -4px rgb(var(--tile-gel) / .7);
+}
+.pill.m-jelly::before { content: ""; position: absolute; top: 2px; left: 9px; right: 9px; height: 8px; border-radius: 99px; background: linear-gradient(rgb(255 255 255 / .6), rgb(255 255 255 / 0) 90%); }
+.pill i { position: relative; display: block; flex: none; height: 4px; border-radius: 2px; background: var(--tile-ink); }
+.pill.m-jelly i { background: var(--tile-gel-ink); }
 .pill .pill-dot { width: 7px; height: 7px; border-radius: 50%; background: #86b4f0; }
+.pill.m-jelly .pill-dot { background: var(--tile-gel-ink); }
 .pill .pill-line { flex: 1; opacity: .9; }
 .pill .pill-time { width: 18%; opacity: .75; }
+.material-tile:hover:not(:disabled) .pill.m-jelly { animation: wobble 620ms cubic-bezier(.3, 1.5, .5, 1); }
+@keyframes wobble { 30% { transform: scale(1.06, .9); } 60% { transform: scale(.97, 1.04); } }
 .check {
   position: absolute;
   top: 6px;
@@ -138,7 +171,10 @@ const tint = computed(() => {
 :root[data-appearance-preset='aurora-flow'] .segmented .material-tile { border-radius: 4px; }
 :root[data-appearance-preset='aurora-flow'] .segmented .material-tile.selected { box-shadow: 0 0 0 1px #00f0ff, 0 0 18px rgb(0 240 255 / .3); }
 
-@media (max-width: 560px) { .material-swatch { height: 60px; } .material-tile::after { display: none; } }
+@media (max-width: 560px) { .material-swatch { height: 60px; } }
 @media (max-width: 380px) { .segmented.material-gallery { grid-template-columns: minmax(0, 1fr); } }
-@media (prefers-reduced-motion: reduce) { .segmented .material-tile, .check { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .segmented .material-tile, .check { transition: none; }
+  .material-tile:hover:not(:disabled) .pill.m-jelly { animation: none; }
+}
 </style>

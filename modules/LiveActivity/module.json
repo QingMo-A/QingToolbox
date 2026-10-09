@@ -1,8 +1,8 @@
 {
   "id": "qing.liveactivity",
   "name": "Qing Island",
-  "description": "A customizable Windows island with stopwatch/countdown timers, text templates, frosted materials, click-through and automatic Codex data.",
-  "version": "0.1.6",
+  "description": "A customizable Windows island: your own text templates with data placeholders (clock, timers, tasks, Codex), frosted and jelly materials, live geometry and click-through.",
+  "version": "0.1.7",
   "apiVersion": 1,
   "author": "QingMo-A",
   "minimumHostVersion": "0.3.4-alpha",
@@ -28,6 +28,7 @@
   "operations": [
     "getState",
     "setSettings",
+    "previewSettings",
     "previewIsland",
     "dismissPreview",
     "emitMockActivity",

@@ -10,6 +10,7 @@ import {
   getState,
   hideModuleWindow,
   previewIsland,
+  previewSettings,
   readDiagnostics,
   refreshProviders,
   setSettings,
@@ -27,6 +28,7 @@ import type {
   ProviderKind,
   RgbColor,
   SettingsPatch,
+  VisualPatch,
 } from './types'
 import IslandPreview from './components/IslandPreview.vue'
 import ActivityRow from './components/ActivityRow.vue'
@@ -58,6 +60,8 @@ const fallbackDraft = ref('暂无数据')
 const DEFAULT_COLOR: RgbColor = { r: 21, g: 26, b: 37 }
 const colorDraft = ref<RgbColor>({ ...DEFAULT_COLOR })
 const geometryDraft = ref({ compactWidth: 232, offsetX: 0, offsetY: 0, scale: 1 })
+/** Opacity in percent, so the label follows a held slider. */
+const opacityDraft = ref(72)
 const previewState = ref<'compact' | 'peek' | 'expanded'>('compact')
 const colorHex = computed(() => '#' + ['r', 'g', 'b'].map(key => clampChannel(colorDraft.value[key as keyof RgbColor]).toString(16).padStart(2, '0')).join(''))
 /** One-click tints; the first is the module default. */
@@ -70,6 +74,17 @@ const colorPresets: { name: string; color: RgbColor }[] = [
   { name: '赭石', color: { r: 92, g: 44, b: 26 } },
   { name: '宣纸', color: { r: 240, g: 232, b: 215 } },
   { name: '雾白', color: { r: 244, g: 246, b: 250 } },
+]
+/** Jelly wants colour: candy tints replace the neutral row while it is chosen. */
+const candyPresets: { name: string; color: RgbColor }[] = [
+  { name: '樱桃', color: { r: 220, g: 38, b: 82 } },
+  { name: '蜜桃', color: { r: 255, g: 120, b: 150 } },
+  { name: '蜜橙', color: { r: 245, g: 130, b: 32 } },
+  { name: '柠檬', color: { r: 236, g: 200, b: 40 } },
+  { name: '青柠', color: { r: 120, g: 200, b: 60 } },
+  { name: '薄荷', color: { r: 40, g: 196, b: 160 } },
+  { name: '蓝莓', color: { r: 56, g: 110, b: 230 } },
+  { name: '葡萄', color: { r: 124, g: 64, b: 220 } },
 ]
 
 /** Polling is only used while the page is open; the module itself is event-driven. */
@@ -119,6 +134,7 @@ function applyState(next: ModuleState): void {
   if (state.value?.settings.peekText !== next.settings.peekText) peekTextDraft.value = next.settings.peekText
   if (state.value?.settings.expandedText !== next.settings.expandedText) expandedTextDraft.value = next.settings.expandedText
   if (state.value?.settings.placeholderFallback !== next.settings.placeholderFallback) fallbackDraft.value = next.settings.placeholderFallback
+  if (state.value?.settings.backgroundOpacity !== next.settings.backgroundOpacity) opacityDraft.value = Math.round(next.settings.backgroundOpacity * 100)
   const previous = state.value?.settings.backgroundColor
   if (!previous || ['r', 'g', 'b'].some(key => previous[key as keyof RgbColor] !== next.settings.backgroundColor[key as keyof RgbColor])) {
     colorDraft.value = { ...next.settings.backgroundColor }
@@ -157,16 +173,48 @@ async function patch(changes: SettingsPatch): Promise<void> {
   await run(() => setSettings(changes), applyState)
 }
 
-async function saveGeometry(): Promise<void> {
+function boundedGeometry() {
   const value = geometryDraft.value
   const number = (n: number, fallback: number, min: number, max: number) => Number.isFinite(Number(n)) ? Math.max(min, Math.min(max, Number(n))) : fallback
-  geometryDraft.value = {
+  return {
     compactWidth: Math.round(number(value.compactWidth, 232, 200, 480)),
     offsetX: Math.round(number(value.offsetX, 0, -4096, 4096)),
     offsetY: Math.round(number(value.offsetY, 0, -4096, 4096)),
     scale: number(value.scale, 1, 0.75, 1.5),
   }
+}
+async function saveGeometry(): Promise<void> {
+  geometryDraft.value = boundedGeometry()
   await patch({ ...geometryDraft.value })
+}
+
+/*
+ * Held sliders move the real island immediately. Previews are coalesced (one
+ * in flight, the newest waiting), never toggle `busy` — a disabled slider
+ * would drop the drag — and are not saved; the release commits with `patch`.
+ */
+let pendingPreview: VisualPatch | null = null
+let previewInFlight = false
+function preview(changes: VisualPatch): void {
+  refreshGate.invalidate()
+  pendingPreview = { ...pendingPreview, ...changes }
+  if (!previewInFlight) void flushPreview()
+}
+async function flushPreview(): Promise<void> {
+  previewInFlight = true
+  try {
+    while (pendingPreview) {
+      const next = pendingPreview
+      pendingPreview = null
+      // A failed preview is harmless: the release commit reports errors.
+      await previewSettings(next).catch(() => undefined)
+    }
+  } finally {
+    previewInFlight = false
+  }
+}
+function previewGeometry(): void {
+  preview(boundedGeometry())
 }
 
 function clampChannel(value: number): number {
@@ -178,10 +226,18 @@ async function saveColor(): Promise<void> {
   colorDraft.value = { r: clampChannel(color.r), g: clampChannel(color.g), b: clampChannel(color.b) }
   await patch({ backgroundColor: { ...colorDraft.value } })
 }
-async function pickColor(event: Event): Promise<void> {
+function hexColor(event: Event): RgbColor {
   const hex = (event.target as HTMLInputElement).value.slice(1)
-  colorDraft.value = { r: parseInt(hex.slice(0, 2), 16), g: parseInt(hex.slice(2, 4), 16), b: parseInt(hex.slice(4, 6), 16) }
+  return { r: parseInt(hex.slice(0, 2), 16), g: parseInt(hex.slice(2, 4), 16), b: parseInt(hex.slice(4, 6), 16) }
+}
+async function pickColor(event: Event): Promise<void> {
+  colorDraft.value = hexColor(event)
   await saveColor()
+}
+/** The system picker streams colours while it is open; the island follows. */
+function previewColor(event: Event): void {
+  colorDraft.value = hexColor(event)
+  preview({ backgroundColor: { ...colorDraft.value } })
 }
 async function applyColor(color: RgbColor): Promise<void> {
   colorDraft.value = { ...color }
@@ -242,20 +298,39 @@ async function showMock(scenario: 'working' | 'waiting' | 'success' | 'failed' |
 
 const settings = computed(() => state.value?.settings ?? null)
 const island = computed(() => state.value?.island ?? null)
-const previewText = computed(() => {
-  let text = renderText(customTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value)
-  if (state.value) for (const [key, label, show] of [['stopwatch', '计时', state.value.settings.showStopwatch], ['countdown', '倒计时', state.value.settings.showCountdown]] as const) {
-    const timer = state.value.timers[key]
-    if (show && timer.started && (timer.finished || !usesPlaceholder(customTextDraft.value, key))) {
-      text += (text ? ' · ' : '') + (timer.finished ? '倒计时结束' : `${label} ${timer.text}${timer.running ? '' : '（已暂停）'}`)
-    }
-  }
-  return text
-})
+// Data sources only fill placeholders; nothing is appended on their behalf.
+const previewText = computed(() => renderText(customTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value))
 const previewPeekText = computed(() => renderText(peekTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) || null)
 const previewExpandedText = computed(() => renderText(expandedTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) || null)
 /** What the draft in the editor resolves to right now. */
 const renderedDraft = computed(() => textMode.value === 'customText' ? previewText.value : textMode.value === 'peekText' ? previewPeekText.value : previewExpandedText.value)
+/** Placeholder chips, grouped by the data source that fills them. */
+const placeholderGroups = computed(() => {
+  const groups: { name: string; owns: (key: string) => boolean }[] = [
+    { name: '时间', owns: key => key === 'time' || key === 'date' },
+    { name: '计时', owns: key => key.startsWith('stopwatch') || key.startsWith('countdown') },
+    { name: '任务', owns: key => key === 'task' || key.startsWith('task.') || key === 'tasks' || key.startsWith('tasks.') },
+    { name: 'Codex', owns: key => key.startsWith('codex.') },
+  ]
+  const items = state.value?.placeholders ?? []
+  const grouped = groups.map(group => ({ name: group.name, items: items.filter(item => group.owns(item.key)) }))
+  const rest = items.filter(item => !groups.some(group => group.owns(item.key)))
+  return [...grouped, { name: '其他', items: rest }].filter(group => group.items.length)
+})
+function placeholderTitle(key: string): string {
+  const value = state.value?.templateValues[key]
+  return `插入 {${key}} · 当前：${value === null || value === undefined ? '无数据（显示缺省文本）' : value.replace(/\n/g, ' ⏎ ')}`
+}
+/** Which of the three texts already show a timer, for the timer tiles. */
+const timerUsage = computed(() => {
+  const drafts = { customText: customTextDraft.value, peekText: peekTextDraft.value, expandedText: expandedTextDraft.value }
+  const usedBy = (key: string) => (Object.keys(drafts) as (keyof typeof drafts)[])
+    .filter(mode => usesPlaceholder(drafts[mode], key) || usesPlaceholder(drafts[mode], `${key}.state`))
+    .map(mode => textLabels[mode])
+  return { stopwatch: usedBy('stopwatch'), countdown: usedBy('countdown') }
+})
+const swatches = computed(() => settings.value?.surfaceStyle === 'jelly' ? candyPresets : colorPresets)
+const opacityLabel = computed(() => ({ solid: '背景不透明度', translucent: '背景不透明度', frosted: '磨砂着色强度', jelly: '果冻浓度' }[settings.value?.surfaceStyle ?? 'translucent']))
 const unsupported = computed(() => state.value?.platform === 'unsupported')
 const canSimulate = computed(() => Boolean(state.value?.active && settings.value?.enabled))
 const previewClock = computed(() => {
@@ -486,33 +561,34 @@ async function close(): Promise<void> {
         <small v-if="state?.overlay.materialFallback" class="hint">{{ state.overlay.materialFallback }}</small>
         <div class="field">
           <div class="field-heading">
-            <label class="field-label" for="background-opacity">{{ settings.surfaceStyle === 'frosted' ? '磨砂着色强度' : '背景不透明度' }}<b class="value-chip">{{ settings.surfaceStyle === 'solid' ? 100 : Math.round(settings.backgroundOpacity * 100) }}%</b></label>
+            <label class="field-label" for="background-opacity">{{ opacityLabel }}<b class="value-chip">{{ settings.surfaceStyle === 'solid' ? 100 : opacityDraft }}%</b></label>
             <QButton v-if="settings.surfaceStyle !== 'solid'" size="small" :disabled="busy" title="设为 60%，让背景效果更明显" @click="patch({ backgroundOpacity: 0.6 })">推荐强度</QButton>
           </div>
           <input
             id="background-opacity"
+            v-model.number="opacityDraft"
             class="range opacity-range"
             type="range"
             min="35"
             max="100"
             step="5"
-            :style="{ '--fill': fill(settings.backgroundOpacity * 100, 35, 100), '--swatch': colorHex }"
-            :value="Math.round(settings.backgroundOpacity * 100)"
+            :style="{ '--fill': fill(opacityDraft, 35, 100), '--swatch': colorHex }"
             :disabled="busy || settings.surfaceStyle === 'solid'"
-            @change="patch({ backgroundOpacity: Number(($event.target as HTMLInputElement).value) / 100 })"
+            @input="preview({ backgroundOpacity: opacityDraft / 100 })"
+            @change="patch({ backgroundOpacity: opacityDraft / 100 })"
           />
         </div>
         <div class="field">
           <div class="field-heading">
-            <span class="field-label">背景颜色</span>
+            <span class="field-label">{{ settings.surfaceStyle === 'jelly' ? '果冻颜色' : '背景颜色' }}<small v-if="settings.surfaceStyle === 'jelly'">糖果色更出效果</small></span>
             <QButton size="small" :disabled="busy" @click="applyColor(DEFAULT_COLOR)">恢复默认</QButton>
           </div>
           <div class="swatches" role="group" aria-label="常用背景色">
             <label class="color-well" :style="{ '--c': colorHex }" title="自定义颜色">
-              <input id="background-color" class="color-picker" type="color" aria-label="选择背景颜色" :value="colorHex" :disabled="busy" @change="pickColor" />
+              <input id="background-color" class="color-picker" type="color" aria-label="选择背景颜色" :value="colorHex" :disabled="busy" @input="previewColor" @change="pickColor" />
             </label>
             <button
-              v-for="preset in colorPresets"
+              v-for="preset in swatches"
               :key="preset.name"
               type="button"
               class="swatch"
@@ -538,7 +614,7 @@ async function close(): Promise<void> {
       <section class="card card-position">
         <div class="card-head">
           <span class="card-icon" aria-hidden="true"><svg><use href="#i-move" /></svg></span>
-          <div class="card-title"><h2>位置和尺寸</h2><p>停靠在屏幕哪里、有多大</p></div>
+          <div class="card-title"><h2>位置和尺寸</h2><p>拖动滑块时桌面上的灵动岛实时跟随，松手后保存</p></div>
           <div class="card-tools">
             <QButton size="small" :disabled="busy" @click="patch({ anchor: 'topCenter', compactWidth: 232, offsetX: 0, offsetY: 0, scale: 1 })">复位</QButton>
           </div>
@@ -568,7 +644,7 @@ async function close(): Promise<void> {
         </div>
         <div class="field">
           <label class="field-label" for="compact-width">胶囊宽度<b class="value-chip">{{ geometryDraft.compactWidth }} px</b></label>
-          <input id="compact-width" v-model.number="geometryDraft.compactWidth" class="range" type="range" min="200" max="480" step="4" :style="{ '--fill': fill(geometryDraft.compactWidth, 200, 480) }" :disabled="busy" @change="saveGeometry" />
+          <input id="compact-width" v-model.number="geometryDraft.compactWidth" class="range" type="range" min="200" max="480" step="4" :style="{ '--fill': fill(geometryDraft.compactWidth, 200, 480) }" :disabled="busy" @input="previewGeometry" @change="saveGeometry" />
         </div>
         <div class="field">
           <label class="field-label" for="island-scale">整体大小<b class="value-chip">{{ Math.round(geometryDraft.scale * 100) }}%</b></label>
@@ -582,6 +658,7 @@ async function close(): Promise<void> {
             step="0.05"
             :style="{ '--fill': fill(geometryDraft.scale, 0.75, 1.5) }"
             :disabled="busy"
+            @input="previewGeometry"
             @change="saveGeometry"
           />
         </div>
@@ -591,7 +668,7 @@ async function close(): Promise<void> {
       <section class="card wide card-content">
         <div class="card-head">
           <span class="card-icon" aria-hidden="true"><svg><use href="#i-text" /></svg></span>
-          <div class="card-title"><h2>显示内容</h2><p>时间，以及胶囊、悬停、展开三种状态各自的文本</p></div>
+          <div class="card-title"><h2>显示内容</h2><p>三种状态的文字完全由你决定；计时、任务、Codex 等数据只通过占位符出现</p></div>
         </div>
         <div class="content-layout">
           <div class="content-main">
@@ -629,9 +706,14 @@ async function close(): Promise<void> {
           </div>
           <div class="content-side">
             <div class="field">
-              <span class="field-label">插入占位符<small>插入到当前光标位置</small></span>
-              <div class="placeholder-chips">
-                <button v-for="item in state?.placeholders ?? []" :key="item.key" type="button" class="token" :disabled="busy" :title="`插入 {${item.key}}`" @click="insertPlaceholder(item.key)">{{ item.label }}</button>
+              <span class="field-label">插入占位符<small>所有数据只通过占位符显示，悬停看当前值</small></span>
+              <div class="placeholder-groups">
+                <div v-for="group in placeholderGroups" :key="group.name" class="placeholder-group">
+                  <span class="group-name">{{ group.name }}</span>
+                  <div class="placeholder-chips">
+                    <button v-for="item in group.items" :key="item.key" type="button" class="token" :disabled="busy" :title="placeholderTitle(item.key)" @click="insertPlaceholder(item.key)">{{ item.label }}</button>
+                  </div>
+                </div>
               </div>
               <small class="hint">单独缺省：<code>{codex.remaining|暂无额度}</code></small>
             </div>
@@ -646,7 +728,7 @@ async function close(): Promise<void> {
         </div>
       </section>
 
-      <TimerControls v-if="state && settings" :settings="settings" :timers="state.timers" :busy="busy" :can-run="canSimulate" @patch="patch" @command="(kind, action) => run(() => timerCommand(kind, action), applyState)" />
+      <TimerControls v-if="state && settings" :settings="settings" :timers="state.timers" :busy="busy" :can-run="canSimulate" :usage="timerUsage" :mode-label="textLabels[textMode]" @patch="patch" @insert="insertPlaceholder" @command="(kind, action) => run(() => timerCommand(kind, action), applyState)" />
 
       <!-- Behaviour ------------------------------------------------------- -->
       <section class="card card-general">

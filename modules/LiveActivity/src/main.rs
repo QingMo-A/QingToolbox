@@ -429,12 +429,28 @@ impl Module {
             .then(|| self.codex.account_snapshot())
     }
 
+    /// The tasks templates may refer to: the scripted preview while one is
+    /// showing, otherwise the broker's ordered view.
+    fn task_view(&self) -> (Option<LiveActivity>, Vec<LiveActivity>) {
+        if self.preview_active {
+            return (self.model.focus().cloned(), self.model.stack().to_vec());
+        }
+        let snapshot = self.broker.snapshot(VISIBLE_LIMIT);
+        (snapshot.focus, snapshot.activities)
+    }
+
     fn ambient_content(&self) -> Option<ambient::AmbientContent> {
+        let (focus, stack) = self.task_view();
         ambient::content_with_runtime(
             &self.settings,
             ambient::local_time(),
             self.account_data().as_ref(),
             Some(&self.timers.snapshot(self.settings.countdown_seconds)),
+            Some(&ambient::Tasks {
+                focus: focus.as_ref(),
+                stack: &stack,
+                total: stack.len(),
+            }),
         )
     }
 
@@ -524,12 +540,6 @@ impl Module {
         if !self.settings.show_codex_data {
             codex_activities.clear();
         }
-        // Resolve templates after the latest provider snapshot, not before it.
-        let ambient = self.ambient_content();
-        if self.model.ambient() != ambient.as_ref() {
-            self.model.set_ambient(ambient);
-            changed = true;
-        }
         let codex_connected = self.codex.is_connected();
         let live_ids: Vec<String> = codex_activities
             .iter()
@@ -559,6 +569,13 @@ impl Module {
         }
 
         if self.broker.expire(now) > 0 {
+            changed = true;
+        }
+        // Resolve templates after every provider and expiry change of this
+        // tick, so task placeholders never lag one tick behind the broker.
+        let ambient = self.ambient_content();
+        if self.model.ambient() != ambient.as_ref() {
+            self.model.set_ambient(ambient);
             changed = true;
         }
         changed
@@ -854,9 +871,10 @@ impl OverlayState {
                     self.anchor_bounds.height as f64,
                 )
             };
-            self.transition = Some(crate::overlay::Transition::begin(
+            self.transition = Some(crate::overlay::Transition::begin_with(
                 from,
                 (bounds.width as f64, bounds.height as f64),
+                self.settings.surface_style == settings::SurfaceStyle::Jelly,
             ));
             self.target_bounds = bounds;
             self.last_frame = Some(Instant::now());
@@ -1047,6 +1065,7 @@ fn spawn_tick_thread(
 const OPERATIONS: &[&str] = &[
     "getState",
     "setSettings",
+    "previewSettings",
     "previewIsland",
     "dismissPreview",
     "emitMockActivity",
@@ -1065,6 +1084,7 @@ impl Module {
         match method {
             "getState" => Ok(self.state_payload()),
             "setSettings" => self.set_settings(payload),
+            "previewSettings" => self.preview_settings(payload),
             "timerCommand" => {
                 let command: timers::Command = serde_json::from_value(payload.clone())
                     .map_err(|_| ModuleError::invalid("计时器操作无效。"))?;
@@ -1146,7 +1166,9 @@ impl Module {
             self.account_data().as_ref(),
             activity::now_millis(),
         );
-        ambient::apply_timer_values(&self.settings, Some(&timers), &mut template_values);
+        ambient::apply_timer_values(Some(&timers), &mut template_values);
+        let (focus, stack) = self.task_view();
+        text_template::apply_task_values(&mut template_values, focus.as_ref(), &stack, stack.len());
         let snapshot = self.broker.snapshot(VISIBLE_LIMIT);
         let native = self
             .overlay
@@ -1241,6 +1263,18 @@ impl Module {
         Ok(self.state_payload())
     }
 
+    /// Apply geometry or tint while a slider is held, without writing the
+    /// settings file on every pointer move. The page commits the released
+    /// value with `setSettings`, which persists the whole in-memory state.
+    fn preview_settings(&mut self, payload: &Value) -> Result<Value, ModuleError> {
+        let patch: settings::VisualPatch = serde_json::from_value(payload.clone())
+            .map_err(|error| ModuleError::invalid(format!("预览参数无效：{error}")))?;
+        self.settings.apply(patch.into());
+        let fullscreen = self.last_fullscreen;
+        self.sync_overlay(fullscreen);
+        Ok(json!({ "previewed": true }))
+    }
+
     fn preview_island(&mut self, payload: &Value) -> Result<Value, ModuleError> {
         // The preview is rendered from the mock provider's scripted content so
         // that opening the settings page can never disturb a real task. The
@@ -1268,11 +1302,12 @@ impl Module {
         self.preview_until = Some(Instant::now() + Duration::from_secs(30));
         self.model.set_suppressed(false);
         self.suppressed = false;
-        self.model.set_ambient(self.ambient_content());
         // Mirror the preview into the reporting model as well, so an active
         // preview is visible through `getState` without waking the overlay.
+        // It goes in first: the templates' task placeholders read it.
         self.model
             .set_content(Some(focus.clone()), vec![focus.clone()], 0, None);
+        self.model.set_ambient(self.ambient_content());
         self.overlay.send(OverlayCommand::Preview {
             settings: self.settings.clone(),
             focus: focus.clone(),
@@ -1953,6 +1988,9 @@ mod tests {
     fn timer_runtime_outlives_ui_pause_and_hidden_island() {
         let mut module = headless_module("timer-lifecycle");
         module
+            .invoke("setSettings", &json!({"customText":"{stopwatch}"}))
+            .unwrap();
+        module
             .invoke(
                 "timerCommand",
                 &json!({"kind":"stopwatch","action":"start"}),
@@ -1996,27 +2034,110 @@ mod tests {
     }
 
     #[test]
-    fn timer_visibility_and_placeholder_fallbacks_are_independent_of_running() {
+    fn slider_previews_apply_live_but_only_a_commit_is_saved() {
+        let mut module = headless_module("live-slider");
+        let saved = |module: &Module| Settings::load(&module.settings_path).compact_width;
+        let before = saved(&module);
+        module
+            .invoke("previewSettings", &json!({"compactWidth":360,"scale":1.25}))
+            .unwrap();
+        assert_eq!(module.settings.compact_width, 360);
+        assert_eq!(module.settings.scale, 1.25);
+        assert_eq!(saved(&module), before, "dragging must not write the file");
+        assert!(
+            module
+                .invoke("previewSettings", &json!({"customText":"no"}))
+                .is_err(),
+            "only geometry and tint can be previewed"
+        );
+        module
+            .invoke("setSettings", &json!({"compactWidth":360}))
+            .unwrap();
+        assert_eq!(saved(&module), 360);
+        assert_eq!(Settings::load(&module.settings_path).scale, 1.25);
+    }
+
+    #[test]
+    fn timers_reach_the_capsule_only_through_placeholders() {
         let mut module = headless_module("timer-text");
         module
             .invoke(
-                "timerCommand",
-                &json!({"kind":"stopwatch","action":"start"}),
+                "setSettings",
+                &json!({"showClock":false,"customText":"","peekText":"","expandedText":""}),
             )
             .unwrap();
-        module.invoke("setSettings", &json!({"showClock":false,"customText":"计时 {stopwatch|未开始}","showStopwatch":true})).unwrap();
-        assert_eq!(module.model.ambient().unwrap().text, "计时 00:00:00");
+        for kind in ["stopwatch", "countdown"] {
+            module
+                .invoke("timerCommand", &json!({"kind":kind,"action":"start"}))
+                .unwrap();
+        }
+        assert!(
+            module.model.ambient().is_none(),
+            "running timers must not write text the user did not ask for"
+        );
+        assert_eq!(module.model.state(), IslandState::Dormant);
         module
-            .invoke("setSettings", &json!({"showStopwatch":false}))
+            .invoke(
+                "setSettings",
+                &json!({"customText":"计时 {stopwatch} · {stopwatch.state} / {countdown.state}"}),
+            )
             .unwrap();
-        assert_eq!(module.model.ambient().unwrap().text, "计时 未开始");
-        assert!(module.timers.running());
+        assert_eq!(
+            module.model.ambient().unwrap().text,
+            "计时 00:00:00 · 进行中 / 进行中"
+        );
+        // The retired visibility switches no longer hide or add anything.
+        module
+            .invoke(
+                "setSettings",
+                &json!({"showStopwatch":false,"showCountdown":false}),
+            )
+            .unwrap();
+        assert_eq!(
+            module.model.ambient().unwrap().text,
+            "计时 00:00:00 · 进行中 / 进行中"
+        );
+        module
+            .invoke(
+                "timerCommand",
+                &json!({"kind":"stopwatch","action":"pause"}),
+            )
+            .unwrap();
+        assert!(module.model.ambient().unwrap().text.contains("已暂停"));
         assert!(module
             .invoke(
                 "timerCommand",
                 &json!({"kind":"countdown","action":"delete"})
             )
             .is_err());
+    }
+
+    #[test]
+    fn tasks_fill_placeholders_without_taking_over_the_capsule() {
+        let mut module = headless_module("task-text");
+        module
+            .invoke(
+                "setSettings",
+                &json!({"showClock":false,"customText":"专注","peekText":"{task|空闲} · {task.state|-}","expandedText":"{tasks.count} 个任务\n{tasks|无}"}),
+            )
+            .unwrap();
+        assert_eq!(module.model.compact_label().as_deref(), Some("专注"));
+        assert_eq!(module.model.peek_detail().as_deref(), Some("空闲 · -"));
+        module
+            .invoke("emitMockActivity", &json!({"scenario":"waiting"}))
+            .unwrap();
+        module.tick(activity::now_millis());
+        assert_eq!(module.model.compact_label().as_deref(), Some("专注"));
+        let peek = module.model.peek_detail().unwrap();
+        assert!(peek.ends_with("需要你处理"), "{peek}");
+        assert!(module
+            .model
+            .expanded_text()
+            .unwrap()
+            .starts_with("1 个任务\n"));
+        let values = &module.state_payload()["templateValues"];
+        assert_eq!(values["task.state"], "需要你处理");
+        assert_eq!(values["tasks.count"], "1");
     }
 
     #[test]

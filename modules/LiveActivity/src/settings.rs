@@ -54,6 +54,9 @@ pub enum SurfaceStyle {
     Solid,
     Translucent,
     Frosted,
+    /// A glossy, volumetric gel: thicker and more opaque at its rim, with a
+    /// specular highlight and a springy morph. Translucent, never sampled.
+    Jelly,
 }
 impl SurfaceStyle {
     pub fn as_str(self) -> &'static str {
@@ -61,6 +64,7 @@ impl SurfaceStyle {
             Self::Solid => "solid",
             Self::Translucent => "translucent",
             Self::Frosted => "frosted",
+            Self::Jelly => "jelly",
         }
     }
 }
@@ -103,6 +107,9 @@ pub struct Settings {
     /// Whether hovering the compact island reveals the peek row.
     pub peek_on_hover: bool,
     pub click_through: bool,
+    /// Retired: timers used to append their own text. They now only fill the
+    /// `{stopwatch}`/`{countdown}` placeholders, so these switches are kept
+    /// for old settings files and pages but no longer change anything.
     pub show_stopwatch: bool,
     pub show_countdown: bool,
     pub countdown_seconds: u64,
@@ -352,6 +359,33 @@ pub struct SettingsPatch {
     #[serde(rename = "codexDataPosition")]
     pub _legacy_codex_data_position: Option<String>,
     pub codex_idle_shutdown_seconds: Option<u64>,
+}
+
+/// The settings a slider may preview while it is being dragged. Only
+/// geometry and tint: anything else must go through a saved `setSettings`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VisualPatch {
+    pub scale: Option<f64>,
+    pub compact_width: Option<u32>,
+    pub offset_x: Option<i32>,
+    pub offset_y: Option<i32>,
+    pub background_opacity: Option<f64>,
+    pub background_color: Option<RgbColor>,
+}
+
+impl From<VisualPatch> for SettingsPatch {
+    fn from(patch: VisualPatch) -> Self {
+        Self {
+            scale: patch.scale,
+            compact_width: patch.compact_width,
+            offset_x: patch.offset_x,
+            offset_y: patch.offset_y,
+            background_opacity: patch.background_opacity,
+            background_color: patch.background_color,
+            ..Self::default()
+        }
+    }
 }
 
 impl Settings {

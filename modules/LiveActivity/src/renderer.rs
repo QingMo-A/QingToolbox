@@ -63,7 +63,9 @@ impl Renderer {
             GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
             SM_YVIRTUALSCREEN,
         };
-        let pad = (18.0 * scale).round().clamp(8.0, 96.0) as i32;
+        // The blur reaches about 18 logical pixels; sample past the island so
+        // its edges blur real surroundings instead of a clamped border.
+        let pad = (34.0 * scale).round().clamp(12.0, 128.0) as i32;
         let vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
         let vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
         let x = bounds.x.saturating_sub(pad).max(vx);
@@ -131,13 +133,7 @@ impl Renderer {
         {
             previous.blurred.clone()
         } else {
-            crate::blur::gaussian(
-                &raw,
-                width as usize,
-                height as usize,
-                (4.0 * scale).round().clamp(3.0, 16.0) as usize,
-            )
-            .map_err(str::to_string)?
+            frost(&raw, width as usize, height as usize, scale)?
         };
         self.samples += 1;
         self.sample_micros = started.elapsed().as_micros() as u64;
@@ -152,19 +148,44 @@ impl Renderer {
         });
         Ok(())
     }
+    /// The frosted backdrop at a screen pixel, bilinearly filtered so the
+    /// half-resolution sample never shows as blocks.
     fn pixel(&self, x: i32, y: i32) -> Option<u32> {
         let b = self.backdrop.as_ref()?;
-        let sx = (((x - b.region.x) as i64 * b.width as i64) / b.region.width as i64)
-            .clamp(0, b.width as i64 - 1) as usize;
-        let sy = (((y - b.region.y) as i64 * b.height as i64) / b.region.height as i64)
-            .clamp(0, b.height as i64 - 1) as usize;
-        Some(b.blurred[sy * b.width + sx])
+        let fx = ((x - b.region.x) as f64 + 0.5) * b.width as f64 / b.region.width as f64 - 0.5;
+        let fy = ((y - b.region.y) as f64 + 0.5) * b.height as f64 / b.region.height as f64 - 0.5;
+        let fx = fx.clamp(0.0, (b.width - 1) as f64);
+        let fy = fy.clamp(0.0, (b.height - 1) as f64);
+        let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
+        let (x1, y1) = ((x0 + 1).min(b.width - 1), (y0 + 1).min(b.height - 1));
+        let (tx, ty) = (fx - x0 as f64, fy - y0 as f64);
+        let at = |x: usize, y: usize| b.blurred[y * b.width + x];
+        let top = mix(at(x0, y0), at(x1, y0), tx);
+        let bottom = mix(at(x0, y1), at(x1, y1), tx);
+        Some(mix(top, bottom, ty))
     }
 }
 impl Drop for Renderer {
     fn drop(&mut self) {
         self.clear();
     }
+}
+
+/// Turn a half-resolution desktop sample into the glass backdrop: a ~9 px
+/// half-resolution (~18 logical px) blur, then vibrancy, so colours behind
+/// the glass read richer instead of greyer.
+fn frost(raw: &[u32], width: usize, height: usize, scale: f64) -> Result<Vec<u32>, String> {
+    let mut blurred = crate::blur::gaussian(
+        raw,
+        width,
+        height,
+        (9.0 * scale).round().clamp(5.0, 24.0) as usize,
+    )
+    .map_err(str::to_string)?;
+    for pixel in blurred.iter_mut() {
+        *pixel = saturate(*pixel, 1.65);
+    }
+    Ok(blurred)
 }
 
 struct Surface {
@@ -384,6 +405,9 @@ struct Foreground {
     surface: Surface,
     coverage: Surface,
     reveal: std::cell::Cell<f64>,
+    /// A soft drop shadow under glyphs: (offset in pixels, opacity). Used on
+    /// jelly, whose vivid gel can sit close to the text's own brightness.
+    shadow: std::cell::Cell<(i32, f64)>,
 }
 impl Foreground {
     unsafe fn new(width: i32, height: i32) -> Result<Self, String> {
@@ -393,6 +417,7 @@ impl Foreground {
             surface,
             coverage: Surface::new(width, height)?,
             reveal: std::cell::Cell::new(1.0),
+            shadow: std::cell::Cell::new((0, 0.0)),
         })
     }
     unsafe fn label(&self, text: &str, rect: RECT, font_size: f64, bold: bool, color: u32) {
@@ -438,6 +463,34 @@ impl Foreground {
         GdiFlush();
         let rgb = colorref_to_rgb(color);
         let reveal = self.reveal.get();
+        let coverage_at = |x: i32, y: i32| {
+            let coverage = *self
+                .coverage
+                .pixels
+                .add((y * self.surface.width + x) as usize);
+            (coverage & 255)
+                .max((coverage >> 8) & 255)
+                .max((coverage >> 16) & 255)
+        };
+        let (offset, shadow) = self.shadow.get();
+        if shadow > 0.0 && offset > 0 {
+            for y in (rect.top + offset).max(0)..(rect.bottom + offset).min(self.surface.height) {
+                for x in rect.left.max(0)..rect.right.min(self.surface.width) {
+                    let source = y - offset;
+                    if source < rect.top.max(0) || source >= rect.bottom.min(self.surface.height) {
+                        continue;
+                    }
+                    let alpha = (coverage_at(x, source) as f64 * reveal * shadow).round() as u32;
+                    if alpha > 0 {
+                        let destination = self
+                            .surface
+                            .pixels
+                            .add((y * self.surface.width + x) as usize);
+                        *destination = ink_over(*destination, 0, alpha);
+                    }
+                }
+            }
+        }
         for y in rect.top.max(0)..rect.bottom.min(self.surface.height) {
             for x in rect.left.max(0)..rect.right.min(self.surface.width) {
                 let index = (y * self.surface.width + x) as usize;
@@ -563,35 +616,6 @@ impl Foreground {
             },
         );
     }
-    /// A pill: a rounded rectangle whose radius is half its height.
-    unsafe fn capsule(
-        &self,
-        left: f64,
-        top: f64,
-        width: f64,
-        height: f64,
-        color: u32,
-        opacity: f64,
-    ) {
-        if width <= 0.0 || height <= 0.0 {
-            return;
-        }
-        let radius = (height / 2.0).min(width / 2.0);
-        let (cx, cy) = (left + width / 2.0, top + height / 2.0);
-        self.shape(
-            left - 1.0,
-            top - 1.0,
-            left + width + 1.0,
-            top + height + 1.0,
-            color,
-            |x, y| {
-                let dx = (x - cx).abs() - (width / 2.0 - radius);
-                let dy = (y - cy).abs() - (height / 2.0 - radius);
-                let distance = dx.max(0.0).hypot(dy.max(0.0)) + dx.max(dy).min(0.0) - radius;
-                (0.5 - distance) * opacity
-            },
-        );
-    }
     /// A one-pixel rule that fades out at both ends.
     unsafe fn hairline(&self, left: f64, right: f64, y: f64, color: u32, opacity: f64) {
         let fade = ((right - left) / 4.0).clamp(1.0, 28.0);
@@ -642,6 +666,68 @@ pub fn corner_alpha(x: i32, y: i32, width: i32, height: i32, radius: f64) -> u8 
 /// the clickable shape is exactly the painted one at every animation frame.
 pub fn island_radius(height: i32, scale: f64) -> f64 {
     (22.0 * scale).min(height as f64 / 2.0)
+}
+
+/// Linear blend of two 0x00RRGGBB colours.
+fn mix(a: u32, b: u32, t: f64) -> u32 {
+    let t = t.clamp(0.0, 1.0);
+    let mut result = 0;
+    for shift in [0, 8, 16] {
+        let x = ((a >> shift) & 255) as f64;
+        let y = ((b >> shift) & 255) as f64;
+        result |= ((x + (y - x) * t).round().clamp(0.0, 255.0) as u32) << shift;
+    }
+    result
+}
+
+fn luma(color: u32) -> f64 {
+    ((color >> 16) & 255) as f64 * 0.2126
+        + ((color >> 8) & 255) as f64 * 0.7152
+        + (color & 255) as f64 * 0.0722
+}
+
+/// Push a colour away from (amount > 1) or towards (< 1) its own grey.
+fn saturate(color: u32, amount: f64) -> u32 {
+    let grey = luma(color);
+    let mut result = 0;
+    for shift in [0, 8, 16] {
+        let channel = ((color >> shift) & 255) as f64;
+        result |= ((grey + (channel - grey) * amount).round().clamp(0.0, 255.0) as u32) << shift;
+    }
+    result
+}
+
+/// Shift a colour's brightness part of the way to `target` luma, keeping its
+/// hue. Frosted glass uses it so text keeps its contrast over any wallpaper.
+fn toward_luma(color: u32, target: f64, amount: f64) -> u32 {
+    let shift_by = (target - luma(color)) * amount;
+    let mut result = 0;
+    for shift in [0, 8, 16] {
+        let channel = ((color >> shift) & 255) as f64;
+        result |= ((channel + shift_by).round().clamp(0.0, 255.0) as u32) << shift;
+    }
+    result
+}
+
+/// Lay premultiplied ink *under* existing ink: text drawn earlier stays on top.
+fn ink_beneath(ink: u32, rgb: u32, alpha: f64) -> u32 {
+    let ink_alpha = (ink >> 24) as f64 / 255.0;
+    let weight = alpha.clamp(0.0, 1.0) * (1.0 - ink_alpha);
+    let mut result = (((ink_alpha + weight) * 255.0).round().min(255.0) as u32) << 24;
+    for shift in [0, 8, 16] {
+        let value = ((ink >> shift) & 255) as f64 + ((rgb >> shift) & 255) as f64 * weight;
+        result |= (value.round().min(255.0) as u32) << shift;
+    }
+    result
+}
+
+/// A stable per-pixel hash in -2..=2: frosted grain that never shimmers.
+fn grain(x: i32, y: i32) -> i32 {
+    let mut h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA77);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^= h >> 12;
+    (h % 5) as i32 - 2
 }
 
 /// Text is composited independently of background opacity. It remains readable
@@ -702,7 +788,18 @@ unsafe fn compose(
     let surface = Foreground::new(bounds.width, bounds.height)?;
     let light = settings.background_color.is_light();
     let primary = if light { 0x00302014 } else { 0x00F5F1EF };
-    let secondary = if light { 0x00665442 } else { 0x00BFB4AA };
+    let jelly = material == SurfaceStyle::Jelly;
+    // Grey reads as dirt on a vivid gel; jelly's second line is a softened
+    // primary instead, lifted off the gel by a one-pixel shadow.
+    let secondary = match (light, jelly) {
+        (true, true) => 0x004A3826,
+        (false, true) => 0x00E4DEDA,
+        (true, false) => 0x00665442,
+        (false, false) => 0x00BFB4AA,
+    };
+    if jelly && !light {
+        surface.shadow.set(((scale.round() as i32).max(1), 0.32));
+    }
     let caption = if light { secondary } else { 0x00E2D5CC };
     let unit = |value: f64| (value * scale).round() as i32;
     let at = |value: f64| value * scale;
@@ -716,9 +813,14 @@ unsafe fn compose(
     let height = bounds.height as f64 / scale;
     let single = DT_SINGLELINE;
     let focus = model.focus();
-    let accent = accent_color(light, focus.map(|a| a.state));
+    // On jelly the idle clock face takes the text colour: the ambient blue
+    // vanishes into a saturated gel. Task states keep their own colours.
+    let accent = if jelly && focus.is_none() {
+        primary
+    } else {
+        accent_color(light, focus.map(|a| a.state))
+    };
     let ambient = model.ambient();
-    let expanded_extra = model.expanded_text_extra_height();
     let header = model.account_header();
     let header_offset = if header.is_some() { 24.0 } else { 0.0 };
     let clock = ambient.and_then(|content| content.clock.as_deref());
@@ -810,171 +912,60 @@ unsafe fn compose(
         }
     }
     if model.state() == IslandState::Expanded {
-        let overflow = model.overflow();
-        let rule_end = if overflow > 0 {
-            width - 50.0
-        } else {
-            width - 16.0
-        };
+        // The card shows only the user's expanded template. Tasks reach it
+        // through placeholders ({task}, {tasks}, ...), never as implicit rows.
         surface.hairline(
             at(16.0),
-            at(rule_end),
+            at(width - 16.0),
             at(40.0 + header_offset),
             primary,
             if light { 0.16 } else { 0.14 },
         );
-        if overflow > 0 {
-            surface.label_right(
-                &format!("+{overflow}"),
-                rect(width - 46.0, 31.0 + header_offset, 30.0, 18.0),
-                10.0 * scale,
+        if let Some(text) = model.expanded_text() {
+            // The first line is the headline; anything after it is body.
+            // The block is centred in the card's settled height, so it does
+            // not slide while the window is still growing.
+            let (lead, rest) = text.split_once('\n').unwrap_or((text, ""));
+            let column = unit(width - 44.0);
+            let lead_height = (surface
+                .measure(lead, column, 20.0 * scale, true, DT_WORDBREAK)
+                .1 as f64
+                / scale)
+                .min(56.0);
+            let rest_height = surface
+                .measure(rest, column, 13.0 * scale, false, DT_WORDBREAK)
+                .1 as f64
+                / scale;
+            let block = lead_height
+                + if rest_height > 0.0 {
+                    6.0 + rest_height
+                } else {
+                    0.0
+                };
+            let settled = model.state().logical_size().1;
+            let region = 41.0 + header_offset;
+            let top = (region + (settled - 14.0 - region - block) / 2.0).max(54.0 + header_offset);
+            surface.paragraph(
+                lead,
+                rect(22.0, top, width - 44.0, lead_height.max(1.0)),
+                20.0 * scale,
                 true,
+                primary,
+            );
+            let body = top + lead_height + 6.0;
+            surface.paragraph(
+                rest,
+                rect(22.0, body, width - 44.0, height.min(settled) - body - 14.0),
+                13.0 * scale,
+                false,
                 secondary,
             );
         }
-        if model.stack().is_empty() {
-            if let Some(text) = ambient.and_then(|content| content.expanded_text.as_deref()) {
-                // The first line is the headline; anything after it is body.
-                // The block is centred in the card's settled height, so it
-                // does not slide while the window is still growing.
-                let (lead, rest) = text.split_once('\n').unwrap_or((text, ""));
-                let column = unit(width - 44.0);
-                let lead_height = (surface
-                    .measure(lead, column, 20.0 * scale, true, DT_WORDBREAK)
-                    .1 as f64
-                    / scale)
-                    .min(56.0);
-                let rest_height = surface
-                    .measure(rest, column, 13.0 * scale, false, DT_WORDBREAK)
-                    .1 as f64
-                    / scale;
-                let block = lead_height
-                    + if rest_height > 0.0 {
-                        6.0 + rest_height
-                    } else {
-                        0.0
-                    };
-                let settled = model.state().logical_size().1 + expanded_extra;
-                let region = 41.0 + header_offset;
-                let top =
-                    (region + (settled - 14.0 - region - block) / 2.0).max(54.0 + header_offset);
-                surface.paragraph(
-                    lead,
-                    rect(22.0, top, width - 44.0, lead_height.max(1.0)),
-                    20.0 * scale,
-                    true,
-                    primary,
-                );
-                let body = top + lead_height + 6.0;
-                surface.paragraph(
-                    rest,
-                    rect(22.0, body, width - 44.0, height.min(settled) - body - 14.0),
-                    13.0 * scale,
-                    false,
-                    secondary,
-                );
-            }
-        } else {
-            let track = if light { 0x00000000 } else { 0x00FFFFFF };
-            for (index, activity) in model.stack().iter().take(3).enumerate() {
-                let y = if header.is_some() {
-                    74.0 + index as f64 * 44.0
-                } else {
-                    50.0 + index as f64 * 50.0
-                };
-                let tone = accent_color(light, Some(activity.state));
-                let fraction = activity.progress.as_ref().and_then(|p| p.fraction());
-                if matches!(
-                    activity.state,
-                    ActivityState::Running | ActivityState::Waiting
-                ) {
-                    surface.glow(at(22.0), at(y + 9.0), at(7.5), tone, 0.3);
-                }
-                surface.disc(at(22.0), at(y + 9.0), at(3.2), tone, 1.0);
-                let percent = fraction.map(|f| format!("{}%", (f * 100.0).round() as i32));
-                let percent_width = percent
-                    .as_deref()
-                    .map(|text| {
-                        surface
-                            .measure(text, unit(width), 10.5 * scale, true, single)
-                            .0 as f64
-                            / scale
-                            + 1.0
-                    })
-                    .unwrap_or(0.0);
-                if let Some(percent) = &percent {
-                    surface.label_right(
-                        percent,
-                        rect(width - 17.0 - percent_width, y, percent_width, 18.0),
-                        10.5 * scale,
-                        true,
-                        tone,
-                    );
-                }
-                surface.label(
-                    &activity.title,
-                    rect(
-                        34.0,
-                        y,
-                        width
-                            - 51.0
-                            - if percent.is_some() {
-                                percent_width + 6.0
-                            } else {
-                                0.0
-                            },
-                        18.0,
-                    ),
-                    12.0 * scale,
-                    true,
-                    primary,
-                );
-                surface.label(
-                    activity
-                        .subtitle
-                        .as_deref()
-                        .unwrap_or(activity.state.as_str()),
-                    rect(34.0, y + 18.0, width - 51.0, 16.0),
-                    10.0 * scale,
-                    false,
-                    secondary,
-                );
-                if let Some(fraction) = fraction {
-                    let full = width - 51.0;
-                    surface.capsule(
-                        at(34.0),
-                        at(y + 38.0),
-                        at(full),
-                        at(3.0),
-                        track,
-                        if light { 0.1 } else { 0.14 },
-                    );
-                    surface.capsule(
-                        at(34.0),
-                        at(y + 38.0),
-                        at(full * fraction.clamp(0.0, 1.0)).max(at(3.0)),
-                        at(3.0),
-                        tone,
-                        1.0,
-                    );
-                }
-            }
-            if let Some(text) = model.expanded_text() {
-                surface.paragraph(
-                    text,
-                    rect(22.0, 213.0, width - 44.0, expanded_extra),
-                    12.0 * scale,
-                    false,
-                    secondary,
-                );
-            }
-        }
-        // Account quota is independent of task activity. A clock-only island
-        // must expose it too; reserve two footer lines for remaining/reset.
+        // Retired account rows still have a reserved footer for old clients.
         if let Some(account) = model.account() {
             surface.paragraph(
                 account,
-                rect(17.0, 213.0 + expanded_extra, width - 34.0, 42.0),
+                rect(17.0, 213.0, width - 34.0, 42.0),
                 10.0 * scale,
                 false,
                 secondary,
@@ -993,15 +984,37 @@ unsafe fn compose(
     } else {
         settings.background_opacity
     };
-    // Glass edge: a hairline rim lit from above on dark capsules and a quiet
-    // ink outline on light ones, plus a faint top sheen. Both are ink, so they
-    // stay visible however translucent the tint is.
-    let (rim, rim_top, rim_bottom) = if light {
-        (0x000000, 0.09, 0.15)
-    } else {
-        (0xFFFFFF, 0.24, 0.07)
+    let (w, h) = (bounds.width as f64, bounds.height as f64);
+    // Edge light. Dark capsules catch a hairline lit from above, light ones a
+    // quiet ink outline; jelly always carries a bright, glossy lip.
+    let (rim, rim_top, rim_bottom) = match (material, light) {
+        (SurfaceStyle::Jelly, _) => (0xFFFFFF, 0.62, 0.14),
+        (_, true) => (0x000000, 0.09, 0.15),
+        _ => (0xFFFFFF, 0.24, 0.07),
     };
     let sheen_depth = 24.0 * scale;
+    let tint = {
+        let c = settings.background_color;
+        (c.r.clamp(0, 255) as u32) << 16
+            | (c.g.clamp(0, 255) as u32) << 8
+            | c.b.clamp(0, 255) as u32
+    };
+    let tint_luma = luma(tint);
+    // Jelly: how deep the gel's colour and density gradient reaches, the
+    // glossy cap across its top, and where the refracted light pools.
+    let gel_depth = (h.min(w) * 0.5).min(18.0 * scale).max(1.0);
+    let gel = saturate(tint, 1.35);
+    let gel_lit = mix(gel, 0xFFFFFF, 0.18);
+    let gel_deep = mix(gel, 0x000000, 0.32);
+    let gel_glow = mix(gel, 0xFFFFFF, 0.6);
+    let gloss_inset = radius * 0.55 + 2.0 * scale;
+    let gloss_top = 2.0 * scale;
+    // A thin cap along the top lip: tall enough to read as gloss, short
+    // enough to stay clear of the header's glyphs.
+    let gloss_bottom = (h * 0.36).min(12.0 * scale).max(gloss_top + 4.0 * scale);
+    let gloss_radius = (gloss_bottom - gloss_top) / 2.0;
+    let caustic_at = (h * 0.18).min(14.0 * scale);
+    let caustic_width = (h * 0.07).clamp(2.5 * scale, 8.0 * scale);
     // Only the sampled background is blurred. Foreground text remains
     // separate; material tint and deterministic grain are applied last.
     for (index, pixel) in pixels.iter_mut().enumerate() {
@@ -1013,44 +1026,84 @@ unsafe fn compose(
             *pixel = 0;
             continue;
         }
-        let depth = y as f64 / bounds.height.max(1) as f64;
+        let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
+        let depth = py / h;
+        let mut ink = *pixel;
+        match material {
+            SurfaceStyle::Jelly => {
+                // Glossy cap: a soft pill of light under the text.
+                let dx = (px - w / 2.0).abs() - (w / 2.0 - gloss_inset - gloss_radius);
+                let dy = (py - (gloss_top + gloss_bottom) / 2.0).abs() - 0.0;
+                let cap = dx.max(0.0).hypot(dy.max(0.0)) + dx.max(dy).min(0.0) - gloss_radius;
+                let cover = (0.5 - cap / (1.2 * scale)).clamp(0.0, 1.0);
+                if cover > 0.0 {
+                    let fade =
+                        (1.0 - (py - gloss_top) / (gloss_bottom - gloss_top)).clamp(0.0, 1.0);
+                    ink = ink_beneath(ink, 0xFFFFFF, 0.5 * cover * fade.powf(1.6));
+                }
+            }
+            SurfaceStyle::Frosted => {
+                // A diagonal specular sweep and light trapped in the glass edge.
+                let sweep = (1.0 - (px / w * 0.55 + depth)).max(0.0);
+                let edge_glow = (1.0 + distance / (5.0 * scale)).clamp(0.0, 1.0);
+                let light_amount = 0.14 * sweep * sweep + 0.09 * edge_glow * edge_glow;
+                if light_amount > 0.0 {
+                    ink = ink_beneath(ink, 0xFFFFFF, light_amount);
+                }
+            }
+            _ if !light => {
+                let sheen = 0.05 * (1.0 - py / sheen_depth).max(0.0);
+                if sheen > 0.0 {
+                    ink = ink_over(ink, 0xFFFFFF, (sheen * 255.0).round() as u32);
+                }
+            }
+            _ => {}
+        }
         let rim_alpha =
             (1.8 + distance).clamp(0.0, 1.0) * (rim_top + (rim_bottom - rim_top) * depth);
-        let sheen = if light {
-            0.0
-        } else {
-            0.05 * (1.0 - (y as f64 + 0.5) / sheen_depth).max(0.0)
-        };
-        let mut ink = *pixel;
-        if sheen > 0.0 {
-            ink = ink_over(ink, 0xFFFFFF, (sheen * 255.0).round() as u32);
-        }
         if rim_alpha > 0.0 {
             ink = ink_over(ink, rim, (rim_alpha * 255.0).round() as u32);
         }
-        let grain = if material == SurfaceStyle::Solid {
-            0
-        } else {
-            ((x.wrapping_mul(17) ^ y.wrapping_mul(31)) & 3) - 1
-        };
-        let gradient = (5.0 * (1.0 - y as f64 / bounds.height as f64)).round() as i32 + grain;
-        let r = (settings.background_color.r + gradient).clamp(0, 255) as u32;
-        let g = (settings.background_color.g + gradient).clamp(0, 255) as u32;
-        let b = (settings.background_color.b + gradient).clamp(0, 255) as u32;
-        let tint = r << 16 | g << 8 | b;
-        *pixel = if material == SurfaceStyle::Frosted {
-            compose_pixel(
-                ink,
-                crate::blur::tint(
-                    renderer.pixel(bounds.x + x, bounds.y + y).unwrap_or(tint),
-                    tint,
-                    opacity,
-                ),
-                1.0,
-                a,
-            )
-        } else {
-            compose_pixel(ink, tint, opacity, a)
+        *pixel = match material {
+            SurfaceStyle::Frosted => {
+                let backdrop = renderer
+                    .pixel(bounds.x + x, bounds.y + y)
+                    .map(|color| toward_luma(color, tint_luma, 0.3))
+                    .unwrap_or(tint);
+                let glass = crate::blur::tint(backdrop, tint, opacity);
+                let noise = grain(x, y);
+                let mut grained = 0;
+                for shift in [0, 8, 16] {
+                    let channel = ((glass >> shift) & 255) as i32 + noise;
+                    grained |= (channel.clamp(0, 255) as u32) << shift;
+                }
+                compose_pixel(ink, grained, 1.0, a)
+            }
+            SurfaceStyle::Jelly => {
+                // Thicker gel at the rim: deeper colour, higher density.
+                let edge = (1.0 + distance / gel_depth).clamp(0.0, 1.0);
+                let mut body = mix(gel_lit, gel_deep, edge.powf(1.7));
+                let from_bottom = h - py;
+                let across = (1.0 - ((px - w / 2.0) / (w / 2.0)).powi(2)).max(0.0);
+                let caustic =
+                    (-((from_bottom - caustic_at) / caustic_width).powi(2)).exp() * across * 0.32;
+                body = mix(body, gel_glow, caustic);
+                let density =
+                    (opacity + (0.98 - opacity).max(0.0) * edge.powf(2.4)).clamp(0.0, 1.0);
+                compose_pixel(ink, body, density, a)
+            }
+            _ => {
+                let grain = if material == SurfaceStyle::Solid {
+                    0
+                } else {
+                    ((x.wrapping_mul(17) ^ y.wrapping_mul(31)) & 3) - 1
+                };
+                let gradient = (5.0 * (1.0 - depth)).round() as i32 + grain;
+                let r = (settings.background_color.r + gradient).clamp(0, 255) as u32;
+                let g = (settings.background_color.g + gradient).clamp(0, 255) as u32;
+                let b = (settings.background_color.b + gradient).clamp(0, 255) as u32;
+                compose_pixel(ink, r << 16 | g << 8 | b, opacity, a)
+            }
         };
     }
     Ok(surface)
@@ -1332,6 +1385,7 @@ mod tests {
                 SurfaceStyle::Solid,
                 SurfaceStyle::Translucent,
                 SurfaceStyle::Frosted,
+                SurfaceStyle::Jelly,
             ] {
                 let expanded_window = crate::win32::IslandWindow::create(style).unwrap();
                 let settings = Settings {
@@ -1360,7 +1414,7 @@ mod tests {
                 }
                 renderer.clear();
             }
-            eprintln!("Clock-only expanded native drawing verified: 3 materials, 3 scales, 3 resize heights.");
+            eprintln!("Clock-only expanded native drawing verified: 4 materials, 3 scales, 3 resize heights.");
         }
     }
     fn gallery_model(
@@ -1409,14 +1463,44 @@ mod tests {
         name: &str,
     ) -> (Bounds, Vec<u32>) {
         let (w, h) = model.state().logical_size();
-        let extra = model.expanded_text_extra_height();
         let bounds = Bounds {
             x: 0,
             y: 0,
             width: (w * scale).round() as i32,
-            height: ((h + extra) * scale).round() as i32,
+            height: (h * scale).round() as i32,
         };
-        let renderer = Renderer::default();
+        let mut renderer = Renderer::default();
+        if material == SurfaceStyle::Frosted {
+            // A synthetic desktop under the island: wide colour stripes.
+            let pad = 40;
+            let region = Bounds {
+                x: -pad,
+                y: -pad,
+                width: bounds.width + pad * 2,
+                height: bounds.height + pad * 2,
+            };
+            let (sw, sh) = (
+                ((region.width + 1) / 2) as usize,
+                ((region.height + 1) / 2) as usize,
+            );
+            let raw = (0..sw * sh)
+                .map(|i| match (i % sw) / 6 % 3 {
+                    0 => 0xEA78B8,
+                    1 => 0x50C4D7,
+                    _ => 0xF6C445,
+                })
+                .collect::<Vec<u32>>();
+            let blurred = frost(&raw, sw, sh, scale).unwrap();
+            renderer.backdrop = Some(Backdrop {
+                region,
+                output: bounds,
+                width: sw,
+                height: sh,
+                raw,
+                blurred,
+                sampled: Instant::now(),
+            });
+        }
         let pixels = unsafe {
             let surface = compose(
                 &renderer, material, bounds, scale, model, settings, progress,
@@ -1563,6 +1647,129 @@ mod tests {
             "the header must not fade during a morph"
         );
         assert!(count(&end, 6..26, 34..140) > 20, "header text missing");
+    }
+
+    #[test]
+    fn frosted_glass_is_blurred_vivid_and_keeps_text_crisp() {
+        let model = gallery_model(IslandState::Peek, None);
+        let settings = Settings {
+            surface_style: SurfaceStyle::Frosted,
+            background_opacity: 0.45,
+            ..Settings::default()
+        };
+        let (bounds, pixels) = compose_pixels(
+            &model,
+            &settings,
+            SurfaceStyle::Frosted,
+            1.5,
+            1.0,
+            "frosted-peek-150",
+        );
+        let at = |x: i32, y: i32| pixels[(y * bounds.width + x) as usize];
+        let channel = |p: u32, shift: u32| ((p >> shift) & 255) as i32;
+        // 12 px stripes (6 px at half resolution) are gone, not merely softened.
+        let row = bounds.height - 10;
+        let (a, b) = (at(260, row), at(272, row));
+        for shift in [0, 8, 16] {
+            assert!(
+                (channel(a, shift) - channel(b, shift)).abs() <= 14,
+                "{a:08x} vs {b:08x}"
+            );
+        }
+        // ...yet the glass is not a flat tint: the desktop's colour survives.
+        let spread = (0..bounds.width)
+            .map(|x| channel(at(x, row), 16) - channel(at(x, row), 0))
+            .fold((i32::MAX, i32::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
+        assert!(spread.1 - spread.0 > 6, "frost lost all colour: {spread:?}");
+        assert!(
+            pixels
+                .iter()
+                .any(|&p| channel(p, 0) > 225 && channel(p, 8) > 225 && (p >> 24) == 255),
+            "text must stay crisp on top of the frost"
+        );
+        for &p in &pixels {
+            for shift in [0, 8, 16] {
+                assert!(((p >> shift) & 255) <= p >> 24, "not premultiplied");
+            }
+        }
+    }
+
+    #[test]
+    fn jelly_is_denser_at_its_rim_and_glossy_on_top() {
+        let model = gallery_model(IslandState::Peek, None);
+        for (tag, color) in [
+            (
+                "cherry",
+                crate::settings::RgbColor {
+                    r: 220,
+                    g: 38,
+                    b: 82,
+                },
+            ),
+            (
+                "lime",
+                crate::settings::RgbColor {
+                    r: 120,
+                    g: 200,
+                    b: 60,
+                },
+            ),
+            ("ink", crate::settings::RgbColor::default()),
+        ] {
+            let settings = Settings {
+                surface_style: SurfaceStyle::Jelly,
+                background_opacity: 0.6,
+                background_color: color,
+                ..Settings::default()
+            };
+            let (bounds, pixels) = compose_pixels(
+                &model,
+                &settings,
+                SurfaceStyle::Jelly,
+                1.5,
+                1.0,
+                &format!("jelly-{tag}-peek-150"),
+            );
+            let at = |x: i32, y: i32| pixels[(y * bounds.width + x) as usize];
+            let alpha = |p: u32| (p >> 24) as i32;
+            let rim = at(bounds.width - 2, bounds.height / 2);
+            let inside = at(bounds.width - 45, bounds.height - 22);
+            assert!(
+                alpha(rim) > alpha(inside) + 30,
+                "{tag}: gel must thicken at the rim"
+            );
+            // The glossy cap lifts the top of the body above its lower half.
+            let lum = |p: u32| (p & 255) + ((p >> 8) & 255) + ((p >> 16) & 255);
+            let cap = at(bounds.width - 60, 5);
+            let below = at(bounds.width - 60, bounds.height / 2 + 8);
+            assert!(lum(cap) > lum(below) + 40, "{tag}: no glossy cap");
+        }
+        let jelly_model = gallery_model(IslandState::Expanded, None);
+        let settings = Settings {
+            surface_style: SurfaceStyle::Jelly,
+            background_color: crate::settings::RgbColor {
+                r: 120,
+                g: 60,
+                b: 220,
+            },
+            ..Settings::default()
+        };
+        compose_pixels(
+            &jelly_model,
+            &settings,
+            SurfaceStyle::Jelly,
+            1.5,
+            1.0,
+            "jelly-grape-expanded-150",
+        );
+        compose_pixels(
+            &gallery_model(IslandState::Compact, None),
+            &settings,
+            SurfaceStyle::Jelly,
+            1.5,
+            1.0,
+            "jelly-grape-compact-150",
+        );
     }
 
     #[test]

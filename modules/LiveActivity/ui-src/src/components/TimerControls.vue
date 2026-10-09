@@ -2,10 +2,20 @@
 import { computed, ref, watch } from 'vue'
 import { QButton } from '@qingtoolbox/module-ui'
 import type { Settings, SettingsPatch, TimerView } from '../types'
-const props = defineProps<{ settings: Settings; timers: { stopwatch: TimerView; countdown: TimerView }; busy: boolean; canRun: boolean }>()
+const props = defineProps<{
+  settings: Settings
+  timers: { stopwatch: TimerView; countdown: TimerView }
+  busy: boolean
+  canRun: boolean
+  /** Which texts (常驻/悬停/展开) already reference each timer. */
+  usage: { stopwatch: string[]; countdown: string[] }
+  /** The text the insert buttons write into. */
+  modeLabel: string
+}>()
 const emit = defineEmits<{
   command: [kind: 'stopwatch' | 'countdown', action: 'start' | 'pause' | 'reset']
   patch: [patch: SettingsPatch]
+  insert: [key: string]
 }>()
 const minutes = ref(5)
 const seconds = ref(0)
@@ -41,16 +51,15 @@ function status(view: TimerView): string {
   <section class="card card-timers">
     <div class="card-head">
       <span class="card-icon" aria-hidden="true"><svg><use href="#i-timer" /></svg></span>
-      <div class="card-title"><h2>计时与倒计时</h2><p>在胶囊里显示正计时或倒计时，关闭窗口后仍会继续</p></div>
+      <div class="card-title"><h2>计时与倒计时</h2><p>计时数据只通过占位符显示，放在哪段文字、配什么字由你决定</p></div>
     </div>
     <div class="timer-grid">
       <div v-for="kind in (['stopwatch', 'countdown'] as const)" :key="kind" class="timer-tile" :class="{ finished: timers[kind].finished, running: timers[kind].running }">
         <div class="timer-heading">
           <strong>{{ kind === 'stopwatch' ? '计时器' : '倒计时' }}</strong>
-          <label class="timer-visibility">
-            <span>显示</span>
-            <input type="checkbox" role="switch" class="toggle small" :checked="kind === 'stopwatch' ? settings.showStopwatch : settings.showCountdown" :disabled="busy" @change="emit('patch', kind === 'stopwatch' ? { showStopwatch: ($event.target as HTMLInputElement).checked } : { showCountdown: ($event.target as HTMLInputElement).checked })" />
-          </label>
+          <span class="timer-usage" :class="{ used: usage[kind].length }" :title="usage[kind].length ? '这些文本里有它的占位符' : '还没有文本引用它；它不会自动出现在胶囊里'">
+            {{ usage[kind].length ? `显示于 ${usage[kind].join('、')}` : '未在文本中使用' }}
+          </span>
         </div>
         <div class="timer-dial" :class="kind">
           <svg class="dial" viewBox="0 0 120 120" aria-hidden="true">
@@ -64,7 +73,11 @@ function status(view: TimerView): string {
             <div class="timer-status">{{ status(timers[kind]) }}</div>
           </div>
         </div>
-        <p v-if="kind === 'stopwatch'" class="timer-note">表盘上的光点每分钟绕行一圈；暂停后保留已计时间，重置才清零。</p>
+        <div class="timer-insert" role="group" :aria-label="`插入${kind === 'stopwatch' ? '计时器' : '倒计时'}占位符`">
+          <button type="button" :disabled="busy" :title="`插入到${modeLabel}文本：{${kind}}`" @click="emit('insert', kind)">+ {{ kind === 'stopwatch' ? '计时器' : '倒计时' }}</button>
+          <button type="button" :disabled="busy" :title="`插入到${modeLabel}文本：{${kind}.state}`" @click="emit('insert', `${kind}.state`)">+ 状态</button>
+        </div>
+        <p v-if="kind === 'stopwatch'" class="timer-note">光点每分钟绕行一圈；暂停保留已计时间，重置才清零。</p>
         <div v-if="kind === 'countdown'" class="duration" title="修改时长会重置倒计时">
           <div class="duration-inputs">
             <label><input v-model="minutes" type="number" min="0" max="10080" step="1" :disabled="busy || timers.countdown.running" @change="durationChanged" aria-label="倒计时分钟" /><span>分</span></label>
@@ -101,7 +114,22 @@ function status(view: TimerView): string {
 .timer-tile.running { border-color: color-mix(in srgb, var(--q-brand) 45%, var(--q-border)); }
 .timer-tile.finished { border-color: var(--q-brand); background: color-mix(in srgb, var(--q-brand) 9%, var(--q-surface-soft)); box-shadow: 0 0 0 3px var(--q-brand-soft); }
 .timer-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--q-text); font-size: 12.5px; }
-.timer-visibility { display: flex; align-items: center; gap: 7px; color: var(--q-text-3); font-size: 11px; cursor: pointer; }
+.timer-usage { overflow: hidden; padding: 1px 8px; border-radius: 99px; color: var(--q-text-3); background: color-mix(in srgb, var(--q-text-3) 12%, transparent); font-size: 10.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.timer-usage.used { color: var(--q-brand); background: var(--q-brand-soft); }
+.timer-insert { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.timer-insert button {
+  padding: 5px 0;
+  border: 1px dashed color-mix(in srgb, var(--q-brand) 45%, var(--q-border));
+  border-radius: 8px;
+  color: var(--q-brand);
+  background: transparent;
+  font: 600 11.5px/1.3 inherit;
+  cursor: pointer;
+  transition: background-color 150ms, border-color 150ms, transform 150ms;
+}
+.timer-insert button:hover:not(:disabled) { border-style: solid; background: var(--q-brand-soft); }
+.timer-insert button:active:not(:disabled) { transform: scale(.97); }
+.timer-insert button:disabled { opacity: .5; cursor: default; }
 
 .timer-dial { position: relative; display: grid; place-items: center; width: min(100%, 150px); aspect-ratio: 1; margin: 0 auto; }
 .dial { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
@@ -152,7 +180,7 @@ function status(view: TimerView): string {
 .duration-presets button.active { color: var(--q-brand); border-color: var(--q-brand); background: var(--q-brand-soft); }
 .duration-presets button:disabled { opacity: .5; cursor: default; }
 .timer-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: auto; }
-.timer-actions :deep(.q-button) { flex: 1; }
+.timer-actions :deep(.q-button) { flex: 1; min-width: 0; padding: 0 10px; white-space: nowrap; }
 
 :root[data-appearance-preset='qing-nova'] .timer-tile { border: 3px solid #111; border-radius: 0; background: #fff; box-shadow: 4px 4px 0 #111; }
 :root[data-appearance-preset='qing-nova'] .dial-arc { stroke-linecap: butt; }

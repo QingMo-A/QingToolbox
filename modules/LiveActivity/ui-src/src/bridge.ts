@@ -5,6 +5,7 @@ import type {
   ModuleState,
   MockScenario,
   SettingsPatch,
+  VisualPatch,
 } from './types'
 
 /**
@@ -31,6 +32,11 @@ export function getState(): Promise<ModuleState> {
 
 export function setSettings(patch: SettingsPatch): Promise<ModuleState> {
   return invokeModule<ModuleState>('setSettings', patch as Record<string, unknown>)
+}
+
+/** Move the real island while a slider is held; nothing is saved. */
+export function previewSettings(patch: VisualPatch): Promise<unknown> {
+  return invokeModule<unknown>('previewSettings', patch as Record<string, unknown>)
 }
 
 /** Show a scripted island. Never touches real activity state. */
