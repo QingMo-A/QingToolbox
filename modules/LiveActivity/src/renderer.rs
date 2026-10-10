@@ -12,17 +12,32 @@ use windows_sys::Win32::{
     UI::WindowsAndMessaging::{UpdateLayeredWindow, ULW_ALPHA},
 };
 
-/// How long a desktop sample stays fresh. Glass must follow what moves
-/// behind it, so it samples at 30 Hz; after half a second of an unchanged
-/// desktop it relaxes to 10 Hz until something moves again. A sample costs
-/// about half a millisecond of CPU (GDI waits on the compositor otherwise).
-fn background_interval(still: u32) -> Duration {
-    if still >= 15 {
-        Duration::from_millis(100)
-    } else {
-        Duration::from_millis(33)
+/// How long a desktop sample stays fresh.
+///
+/// The old 30 Hz `CAPTUREBLT` loop made DWM repeatedly flatten every layered
+/// window and could briefly reset the hardware cursor plane.  The foreground
+/// (text, pointer highlight and shape animation) still renders at display
+/// cadence from a cached backdrop; only the desktop sample is throttled here.
+fn background_interval(material: SurfaceStyle, still: u32) -> Duration {
+    match material {
+        // Frost is deliberately diffuse, so a 10 Hz changing backdrop and a
+        // 4 Hz settled backdrop remain visually continuous.
+        SurfaceStyle::Frosted if still >= 5 => Duration::from_millis(250),
+        SurfaceStyle::Frosted => Duration::from_millis(100),
+        // Liquid keeps more of the source image and therefore receives a
+        // slightly fresher sample. Pointer-driven light/refraction remains
+        // smooth because it does not wait for another capture.
+        SurfaceStyle::Liquid if still >= 8 => Duration::from_millis(200),
+        SurfaceStyle::Liquid => Duration::from_millis(66),
+        _ => Duration::from_millis(250),
     }
 }
+
+/// Copy only the desktop surface. `CAPTUREBLT` asks GDI to include layered
+/// windows and forces extra DWM composition even though this window is already
+/// excluded from capture; that work is both unnecessary and responsible for
+/// cursor-plane flicker on a number of Windows 11 GPU drivers.
+const DESKTOP_COPY_ROP: u32 = SRCCOPY;
 
 #[derive(Default)]
 pub struct Renderer {
@@ -87,7 +102,7 @@ impl Renderer {
     pub fn until_refresh(&self) -> Duration {
         self.backdrop
             .as_ref()
-            .map(|b| background_interval(self.still).saturating_sub(b.sampled.elapsed()))
+            .map(|b| background_interval(b.kind, self.still).saturating_sub(b.sampled.elapsed()))
             .unwrap_or_default()
     }
     /// Sample (or keep) the desktop under `cover`: the island's current
@@ -141,7 +156,7 @@ impl Renderer {
             width: right - x,
             height: bottom - y,
         };
-        let interval = background_interval(self.still);
+        let interval = background_interval(material, self.still);
         if self.backdrop.as_ref().is_some_and(|b| {
             b.kind == material
                 && b.blur == blur
@@ -182,7 +197,7 @@ impl Renderer {
             region.y,
             region.width,
             region.height,
-            SRCCOPY | CAPTUREBLT,
+            DESKTOP_COPY_ROP,
         );
         ReleaseDC(std::ptr::null_mut(), desktop);
         if copied == 0 {
@@ -1792,11 +1807,30 @@ pub fn draw(
             SourceConstantAlpha: 255,
             AlphaFormat: AC_SRC_ALPHA as u8,
         };
+        // `apply` already keeps the HWND geometry current. Supplying unchanged
+        // geometry to every pixel update makes DWM run the window-position
+        // path again, which is visible as cursor/input jitter on some systems.
+        // The API explicitly accepts null position/size pointers when those
+        // values are unchanged.
+        let position_changed = renderer.last_bounds.map_or(true, |previous| {
+            previous.x != bounds.x || previous.y != bounds.y
+        });
+        let size_changed = renderer.last_bounds.map_or(true, |previous| {
+            previous.width != bounds.width || previous.height != bounds.height
+        });
         if UpdateLayeredWindow(
             window.handle(),
             std::ptr::null_mut(),
-            &position,
-            &size,
+            if position_changed {
+                &position
+            } else {
+                std::ptr::null()
+            },
+            if size_changed {
+                &size
+            } else {
+                std::ptr::null()
+            },
             surface.dc,
             &source,
             0,
@@ -1817,6 +1851,27 @@ pub fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn glass_sampling_is_bounded_and_does_not_force_layered_capture() {
+        assert_eq!(DESKTOP_COPY_ROP & CAPTUREBLT, 0);
+        assert_eq!(
+            background_interval(SurfaceStyle::Frosted, 0),
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            background_interval(SurfaceStyle::Frosted, 5),
+            Duration::from_millis(250)
+        );
+        assert_eq!(
+            background_interval(SurfaceStyle::Liquid, 0),
+            Duration::from_millis(66)
+        );
+        assert_eq!(
+            background_interval(SurfaceStyle::Liquid, 8),
+            Duration::from_millis(200)
+        );
+    }
+
     #[test]
     fn windows_text_is_terminated_and_counts_utf16_not_utf8_bytes() {
         assert_eq!(windows_text_buffer(""), vec![0]);
@@ -1956,7 +2011,8 @@ mod tests {
             .unwrap());
             window.set_visible(true);
             std::thread::sleep(Duration::from_millis(80));
-            renderer.backdrop.as_mut().unwrap().sampled = Instant::now() - background_interval(0);
+            renderer.backdrop.as_mut().unwrap().sampled =
+                Instant::now() - background_interval(SurfaceStyle::Frosted, 0);
             // A second capture with our card now visible must still see only
             // the stripes; otherwise it recursively blurs its own text.
             assert!(

@@ -58,6 +58,10 @@ pub struct IslandWindow {
     requested_style: SurfaceStyle,
     material: Cell<SurfaceStyle>,
     material_fallback: RefCell<Option<String>>,
+    /// Last geometry successfully handed to Windows. Rendering often runs at
+    /// display cadence; the HWND only needs a position transaction when this
+    /// rectangle actually changes.
+    applied_bounds: Cell<Option<Bounds>>,
 }
 
 /// Pointer and geometry shared with the window procedure.
@@ -280,7 +284,13 @@ impl IslandWindow {
         self.hit_state.clicked.swap(0, Ordering::Relaxed) != 0
     }
     pub fn take_layout_change(&self) -> bool {
-        self.hit_state.layout_changed.swap(0, Ordering::Relaxed) != 0
+        let changed = self.hit_state.layout_changed.swap(0, Ordering::Relaxed) != 0;
+        if changed {
+            // A display/DPI/work-area event can move the native window outside
+            // our model, so force the next computed rectangle through.
+            self.applied_bounds.set(None);
+        }
+        changed
     }
     pub fn is_visible(&self) -> bool {
         unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(self.handle) != 0 }
@@ -355,6 +365,7 @@ impl IslandWindow {
                 requested_style,
                 material: Cell::new(material),
                 material_fallback: RefCell::new(material_fallback),
+                applied_bounds: Cell::new(None),
             })
         }
     }
@@ -373,6 +384,9 @@ impl IslandWindow {
         self.hit_state.set_interactive(interactive);
         self.hit_state.set_scale(scale);
         self.hit_state.set_size(bounds.width, bounds.height);
+        if self.applied_bounds.get() == Some(bounds) {
+            return Ok(());
+        }
         unsafe {
             let (x, y, width, height) = bounds.as_win32();
             let result = SetWindowPos(
@@ -388,6 +402,7 @@ impl IslandWindow {
                 return Err("could not position the island window".to_string());
             }
         }
+        self.applied_bounds.set(Some(bounds));
         Ok(())
     }
 
