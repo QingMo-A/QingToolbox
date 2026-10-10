@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.10",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-10T16:15:24Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.10-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/9ab15ada16d79d4bcd1e5b8d203fe34ccedc0457/modules/LiveActivity/packages/qing.liveactivity-0.1.10-tauri.qmod",
+        "size": 529995,
+        "sha256": "f0418a4a130e6681eee155ec3754ea35b329d33d50ef5d8f09756fcfb332f1be"
+      },
+      "releaseNotes": {
+        "zh-CN": "修复启用灵动岛后鼠标指针闪烁：玻璃桌面采样不再强制合成分层窗口，并将背景采样与前景动画解耦；磨砂与液态玻璃采用各自的有界采样频率，指针高光、文字和形变仍按显示器刷新。窗口位置和尺寸未变化时不再重复提交原生几何，降低 DWM 与显卡驱动负担。保留五种材质、既有配置、占位符和 Codex 能力范围。",
+        "en-US": "Fix mouse-pointer flicker while Qing Island is enabled: glass backdrop sampling no longer forces layered-window composition, and backdrop capture is decoupled from foreground animation. Frosted and liquid glass use bounded material-specific capture rates while pointer highlights, text and morphing stay display-paced. Unchanged native window geometry is no longer resubmitted, reducing DWM and GPU-driver work. Preserve all five materials, existing settings, placeholders and Codex capability boundaries."
+      }
+    },
+    {
       "version": "0.1.9",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
