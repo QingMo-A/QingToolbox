@@ -14,10 +14,11 @@ use windows_sys::Win32::{
 
 /// How long a desktop sample stays fresh.
 ///
-/// The old 30 Hz `CAPTUREBLT` loop made DWM repeatedly flatten every layered
-/// window and could briefly reset the hardware cursor plane.  The foreground
-/// (text, pointer highlight and shape animation) still renders at display
-/// cadence from a cached backdrop; only the desktop sample is throttled here.
+/// A full composited desktop sample is relatively expensive and can briefly
+/// disturb the hardware cursor plane on some drivers when requested at frame
+/// rate. The foreground (text, pointer highlight and shape animation) still
+/// renders at display cadence from a cached backdrop; only the desktop sample
+/// is throttled here.
 fn background_interval(material: SurfaceStyle, still: u32) -> Duration {
     match material {
         // Frost is deliberately diffuse, so a 10 Hz changing backdrop and a
@@ -33,11 +34,12 @@ fn background_interval(material: SurfaceStyle, still: u32) -> Duration {
     }
 }
 
-/// Copy only the desktop surface. `CAPTUREBLT` asks GDI to include layered
-/// windows and forces extra DWM composition even though this window is already
-/// excluded from capture; that work is both unnecessary and responsible for
-/// cursor-plane flicker on a number of Windows 11 GPU drivers.
-const DESKTOP_COPY_ROP: u32 = SRCCOPY;
+/// The glass must see the actual composited scene, including translucent and
+/// layered application windows. `SRCCOPY` alone silently drops those windows
+/// and leaves wallpaper/older pixels under the capsule. The island itself is
+/// excluded with `WDA_EXCLUDEFROMCAPTURE`, while the bounded cadence above
+/// prevents this path from becoming a frame-rate capture loop.
+const DESKTOP_COPY_ROP: u32 = SRCCOPY | CAPTUREBLT;
 
 #[derive(Default)]
 pub struct Renderer {
@@ -1852,8 +1854,8 @@ pub fn draw(
 mod tests {
     use super::*;
     #[test]
-    fn glass_sampling_is_bounded_and_does_not_force_layered_capture() {
-        assert_eq!(DESKTOP_COPY_ROP & CAPTUREBLT, 0);
+    fn glass_sampling_is_bounded_and_includes_the_composited_desktop() {
+        assert_ne!(DESKTOP_COPY_ROP & CAPTUREBLT, 0);
         assert_eq!(
             background_interval(SurfaceStyle::Frosted, 0),
             Duration::from_millis(100)
@@ -1939,7 +1941,7 @@ mod tests {
         );
         unsafe {
             let backdrop = OwnedBackdrop(CreateWindowExW(
-                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
                 "STATIC\0".encode_utf16().collect::<Vec<_>>().as_ptr(),
                 std::ptr::null(),
                 WS_POPUP,
@@ -1953,6 +1955,10 @@ mod tests {
                 std::ptr::null(),
             ));
             assert!(!backdrop.0.is_null());
+            // This deliberately makes the test background a layered window.
+            // A plain SRCCOPY capture omits it and used to make both glass
+            // materials show wallpaper instead of the content behind them.
+            assert_ne!(SetLayeredWindowAttributes(backdrop.0, 0, 255, LWA_ALPHA), 0);
             ShowWindow(backdrop.0, SW_SHOWNOACTIVATE);
             let dc = GetDC(backdrop.0);
             for x in (0..backdrop_width).step_by(6) {
@@ -2084,6 +2090,28 @@ mod tests {
                 std::fs::write(path, &bmp).unwrap();
                 bmp.fill(0);
             }
+            // Liquid uses the same native capture path at full resolution.
+            // Exercise it while the frosted island is still visible: the
+            // island must remain excluded and the layered stripes behind it
+            // must remain present for refraction.
+            renderer.clear();
+            renderer
+                .background(bounds, 1.0, SurfaceStyle::Liquid, settings.frost_blur)
+                .unwrap();
+            let liquid_left = renderer
+                .sample(bounds.x as f64 + 70.0, bounds.y as f64 + 30.0)
+                .unwrap();
+            let liquid_right = renderer
+                .sample(bounds.x as f64 + 270.0, bounds.y as f64 + 30.0)
+                .unwrap();
+            assert!(
+                ((liquid_left >> 16) & 255) > ((liquid_right >> 16) & 255) + 15,
+                "liquid glass did not receive the layered content behind it"
+            );
+            assert!(
+                ((liquid_right >> 8) & 255) > ((liquid_left >> 8) & 255) + 8,
+                "liquid glass backdrop became a flat tint"
+            );
             renderer.clear();
             assert!(renderer.backdrop.is_none() && renderer.last_pixels.is_empty());
             window.set_visible(false);
