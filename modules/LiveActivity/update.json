@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.11",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-10T22:11:45Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.11-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/1d8b9fee6ec3b46a4f4751145bd9b52f26dbfd6b/modules/LiveActivity/packages/qing.liveactivity-0.1.11-tauri.qmod",
+        "size": 530124,
+        "sha256": "d82b50c7156e0b9c39edcb1e50613cebc628eaf9138191654749167f59449073"
+      },
+      "releaseNotes": {
+        "zh-CN": "修复磨砂玻璃和液态玻璃无法正确显示胶囊后方内容：桌面取样重新包含 DWM 合成的分层与半透明窗口，灵动岛自身仍由系统排除，避免递归抓取。保留上一版的材质分频采样、前景动画解耦和原生窗口几何去重，兼顾真实背景与鼠标稳定性。新增原生分层窗口集成检查，同时验证磨砂模糊、液态玻璃背景输入、清晰文字和自身排除。",
+        "en-US": "Fix frosted and liquid glass failing to show the real content behind the capsule: desktop sampling again includes DWM-composited layered and translucent windows while the island itself remains system-excluded to prevent recursive capture. Keep material-specific bounded sampling, foreground-animation decoupling and native geometry deduplication from the previous update. Add a native layered-window integration check covering frosted blur, liquid backdrop input, crisp text and self-exclusion."
+      }
+    },
+    {
       "version": "0.1.10",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
