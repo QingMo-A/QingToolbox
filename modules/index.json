@@ -21,7 +21,7 @@
     },
     "qing.liveactivity": {
       "name": { "zh-CN": "灵动岛", "en-US": "Qing Island" },
-      "description": { "zh-CN": "桌面时钟与文本占位符、实时 GPU 磨砂/液态玻璃和果冻材质。玻璃设计借鉴 electron-liquid-glass、liquidDX11（MIT），来源仓库见模块介绍。", "en-US": "Clock and text placeholders with live GPU glass and jelly. Glass design references: electron-liquid-glass and liquidDX11 (MIT); repositories in module README/settings." },
+      "description": { "zh-CN": "可自定义的桌面灵动岛：时间、计时/倒计时与 Codex 数据占位符。\n支持轻量 Markdown、行内图标和 {space} 左右排版，字体跟随工具箱。\n可调整位置和大小；提供实色、半透明、GPU 磨砂、液态玻璃与果冻材质。\nCodex 额度可自动读取；任务状态需接入共享服务，不等同于剩余 Token 数。\n玻璃实现借鉴（MIT）：[electron-liquid-glass](https://github.com/hicccc77/electron-liquid-glass) · [liquidDX11](https://github.com/poncippg-spec/liquidDX11)。", "en-US": "A customizable desktop island for clocks, stopwatch/countdown and Codex placeholders.\nSupports lightweight Markdown, inline icons, {space} left/right alignment and toolbox fonts.\nAdjustable placement and size; solid, translucent, GPU-frosted, liquid-glass and jelly materials.\nCodex quotas are read automatically; task state needs a shared service. Quota is not remaining tokens.\nGlass design references (MIT): [electron-liquid-glass](https://github.com/hicccc77/electron-liquid-glass) · [liquidDX11](https://github.com/poncippg-spec/liquidDX11)." },
       "icon": "LiveActivity/icon.svg",
       "moduleManifest": "LiveActivity/module.json",
       "updateManifest": "LiveActivity/update.json",

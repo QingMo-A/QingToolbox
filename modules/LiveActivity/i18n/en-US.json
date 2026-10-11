@@ -1,6 +1,6 @@
 {
   "module.name": "Qing Island",
-  "module.description": "Clock, timer and Codex text placeholders with live GPU glass. Glass design references (MIT): hicccc77/electron-liquid-glass and poncippg-spec/liquidDX11; repository links and notices in README/settings.",
+  "module.description": "A customizable desktop island for clocks, stopwatch/countdown and Codex placeholders.\nSupports lightweight Markdown, inline icons, {space} left/right alignment and toolbox fonts.\nAdjustable placement and size; solid, translucent, GPU-frosted, liquid-glass and jelly materials.\nCodex quotas are read automatically; task state needs a shared service. Quota is not remaining tokens.\nGlass design references (MIT): [electron-liquid-glass](https://github.com/hicccc77/electron-liquid-glass) · [liquidDX11](https://github.com/poncippg-spec/liquidDX11).",
   "view.title": "Qing Island",
   "view.subtitle": "Customize a desktop island for time, text and optional account quotas.",
   "sections.general": "General",

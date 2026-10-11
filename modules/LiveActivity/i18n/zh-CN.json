@@ -1,6 +1,6 @@
 {
   "module.name": "灵动岛",
-  "module.description": "时间、计时与 Codex 文本占位符；GPU 磨砂、液态玻璃与果冻材质。玻璃实现借鉴 electron-liquid-glass、liquidDX11（MIT）；仓库链接及声明见模块介绍与设置页。",
+  "module.description": "可自定义的桌面灵动岛：时间、计时/倒计时与 Codex 数据占位符。\n支持轻量 Markdown、行内图标和 {space} 左右排版，字体跟随工具箱。\n可调整位置和大小；提供实色、半透明、GPU 磨砂、液态玻璃与果冻材质。\nCodex 额度可自动读取；任务状态需接入共享服务，不等同于剩余 Token 数。\n玻璃实现借鉴（MIT）：[electron-liquid-glass](https://github.com/hicccc77/electron-liquid-glass) · [liquidDX11](https://github.com/poncippg-spec/liquidDX11)。",
   "view.title": "灵动岛",
   "view.subtitle": "自定义桌面胶囊，显示时间、文本和可选账号额度。",
   "sections.general": "常规",
