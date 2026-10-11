@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.15",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-11T13:21:21Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.15-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/c7cbb73f618b57b4916e8591b437cf49062eacd6/modules/LiveActivity/packages/qing.liveactivity-0.1.15-tauri.qmod",
+        "size": 596337,
+        "sha256": "84528f106cc235dc7095d8e005d3bb19b91b884f880530effbf834724d3e5903"
+      },
+      "releaseNotes": {
+        "zh-CN": "更新模块介绍，按行展示当前功能及玻璃实现的借鉴仓库链接。新版工具箱支持点击介绍中的链接。",
+        "en-US": "Refresh the module introduction with line-separated features and named glass-reference links. Updated toolbox builds can open introduction links."
+      }
+    },
+    {
       "version": "0.1.14",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
