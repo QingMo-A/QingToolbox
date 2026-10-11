@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.13",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-11T12:02:39Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.13-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/a96844c717151e638db8aec6c8de2704d22ed83e/modules/LiveActivity/packages/qing.liveactivity-0.1.13-tauri.qmod",
+        "size": 575233,
+        "sha256": "bb5a5efec5392fbf2cb557012f1274cea2017c699fd95d77e16185e4f8c1e11c"
+      },
+      "releaseNotes": {
+        "zh-CN": "胶囊原生字体与设置预览跟随工具箱，包括导入字体；运行时同步宿主字体变化，Dev 与正式版配置隔离。图标、常驻、右侧、悬停和展开五个内容位置独立编辑与清空，日期、时间、任务和 Codex 数据均通过占位符添加，图标支持符号/Emoji以及可选时钟和任务状态预设。新配置默认空白，旧配置中的日期、时间和图标一次性转为可编辑字段，不恢复已清空的悬停/展开模板。保留 GPU 玻璃、计时器和 Codex 功能。",
+        "en-US": "Follow the host font in native glyphs and settings previews, including privately registered imported fonts; synchronize changes at runtime and isolate Dev/release profiles. Independently edit or clear the icon, compact, right-side, hover and expanded slots. Insert dates, time, tasks and Codex values through placeholders. Icons accept symbols/emoji or explicit clock/status presets. New profiles start blank; migrate legacy clock/date/icon content once into editable fields without restoring cleared hover/expanded templates. Preserve GPU glass, timers and Codex behavior."
+      }
+    },
+    {
       "version": "0.1.12",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
