@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.12",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-11T05:12:41Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.12-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/94c510bb73318721d806b2e158f2f28fa99a5206/modules/LiveActivity/packages/qing.liveactivity-0.1.12-tauri.qmod",
+        "size": 547047,
+        "sha256": "c3f5a3466d87c52a4c21f29919fb83777c4c119e3f29975fbd28736fcce81517"
+      },
+      "releaseNotes": {
+        "zh-CN": "磨砂与液态玻璃改用 DXGI、D3D11 与 DirectComposition 实时 GPU 背景，不再循环使用 GDI 截屏；文字独立合成保持清晰，GPU 区域比较避免静止背景和自身绘制造成重复刷新。新增独立圆角输入层，保留点击、悬停和鼠标穿透；隐藏释放采集，显示器/会话变更重建，暂时失败回退半透明并定时重试。模块介绍、设置与随包文档注明 electron-liquid-glass、liquidDX11 的借鉴范围、仓库和许可。已有配置、文本模板、计时与 Codex 能力边界不变。",
+        "en-US": "Replace frosted/liquid desktop snapshots with live DXGI, D3D11 and DirectComposition GPU glass. Keep glyphs separate from blur; compare the padded region on the GPU to avoid static/self-presentation redraw loops. Preserve hover, clicks and click-through through a rounded input companion. Release capture when hidden, rebuild on display/session changes and retry temporary translucent fallback. Credit electron-liquid-glass and liquidDX11 with repositories, reference scope and license notices in the module description, settings and package. Preserve settings, templates, timers and Codex observation boundaries."
+      }
+    },
+    {
       "version": "0.1.11",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
