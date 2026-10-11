@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.14",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-11T12:44:11Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.14-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/22f1732dad3ff87561eaa695ed6619ae76a210e6/modules/LiveActivity/packages/qing.liveactivity-0.1.14-tauri.qmod",
+        "size": 595557,
+        "sha256": "5b74a4272bea94b0831f1106f9451351ed7ca766822f38011f59f818f8138b0d"
+      },
+      "releaseNotes": {
+        "zh-CN": "新增安全的轻量 Markdown、可放在文字中间的图标占位符，以及逐行仅最后一个生效的 {space} 左右对齐。合并常驻图标和右侧编辑、迁移旧配置，原生与预览字体继续跟随工具箱。",
+        "en-US": "Adds safe lightweight Markdown, inline icon placeholders, and last-spacer-per-line left/right alignment. Unifies compact editing, migrates legacy icon/right slots, and preserves host font inheritance."
+      }
+    },
+    {
       "version": "0.1.13",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
