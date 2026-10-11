@@ -14,6 +14,7 @@ pub const MAX_RENDERED_CHARS: usize = 96;
 pub const PLACEHOLDERS: &[(&str, &str)] = &[
     ("time", "时间"),
     ("date", "日期"),
+    ("weekday", "星期"),
     ("stopwatch", "计时器"),
     ("stopwatch.state", "计时器状态"),
     ("countdown", "倒计时"),
@@ -62,6 +63,15 @@ pub fn values(
                 "{:04}-{:02}-{:02}",
                 time.year, time.month, time.day
             )),
+        );
+        result.insert(
+            "weekday".into(),
+            Some(
+                ["日", "一", "二", "三", "四", "五", "六"]
+                    .get(time.weekday as usize)
+                    .unwrap_or(&"?")
+                    .to_string(),
+            ),
         );
     }
     // Visibility covers built-in rows AND template values. Acquisition is independent.

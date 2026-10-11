@@ -26,6 +26,7 @@ const props = withDefaults(defineProps<{
   opacity: number
   backgroundColor: RgbColor
   clock: string | null
+  icon?: string
   date?: string | null
   customText: string
   peekText?: string | null
@@ -37,7 +38,7 @@ const props = withDefaults(defineProps<{
   live?: boolean
   /** Frosted blur radius in logical pixels. */
   frostBlur?: number
-}>(), { compactWidth: 232, offsetX: 0, offsetY: 0, date: null, peekText: null, expandedText: null, live: false, frostBlur: 6 })
+}>(), { compactWidth: 232, offsetX: 0, offsetY: 0, date: null, icon: '', peekText: null, expandedText: null, live: false, frostBlur: 6 })
 
 const stage = ref<HTMLElement | null>(null)
 const stageSize = ref({ width: 640, height: 320 })
@@ -255,10 +256,12 @@ const expandedParts = computed(() => {
       <LiquidLens :id="lensId" :width="box.width" :height="box.height" :radius="box.radius" :scale="box.scale" :margin="LENS_MARGIN" />
       <i class="lens-clip" :style="lensClipStyle" aria-hidden="true" />
     </template>
-    <div class="island" :class="[`material-${surfaceStyle}`, `is-${state}`, { touched: pointer }]" :style="islandStyle" @pointermove="pointerMoved" @pointerleave="pointerLeft">
+    <div class="island" :class="[`material-${surfaceStyle}`, `is-${state}`, { touched: pointer, 'has-icon': !!icon }]" :style="islandStyle" @pointermove="pointerMoved" @pointerleave="pointerLeft">
       <div class="island-bar">
-        <svg class="orb" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.7" /><path d="M7 7V4M7 7l2.2 1.1" /></svg>
-        <span class="pill-text">{{ customText || date || 'Qing Island' }}</span>
+        <svg v-if="icon === '{icon.clock}'" class="orb" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.7" /><path d="M7 7V4M7 7l2.2 1.1" /></svg>
+        <svg v-else-if="icon === '{icon.status}'" class="orb" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="3.7" fill="currentColor" stroke="none" /></svg>
+        <span v-else-if="icon" class="custom-icon">{{ icon }}</span>
+        <span class="pill-text">{{ customText }}</span>
         <span v-if="clock" class="clock">{{ clock }}</span>
       </div>
       <div v-if="state === 'peek' && peekText" class="island-row">
@@ -342,7 +345,7 @@ const expandedParts = computed(() => {
   overflow: hidden;
   contain: layout paint;
   color: var(--island-ink);
-  font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  font-family: var(--q-font-family, inherit);
   background-image: var(--island-sheen);
   box-shadow: inset 0 1px 0 var(--island-rim-top), inset 0 0 0 1px var(--island-rim), 0 2px 6px rgb(0 0 0 / .14);
   transition:
@@ -461,12 +464,13 @@ const expandedParts = computed(() => {
   white-space: nowrap;
 }
 .orb { flex: none; width: calc(14px * var(--s)); height: calc(14px * var(--s)); fill: none; stroke: var(--island-accent); stroke-width: 1.35; stroke-linecap: round; }
+.custom-icon { flex: none; max-width: calc(64px * var(--s)); overflow: hidden; font-size: calc(14px * var(--s)); font-weight: 400; }
 .pill-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.clock { flex: none; margin-left: calc(3px * var(--s)); font-variant-numeric: tabular-nums; }
+.clock { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; margin-left: calc(3px * var(--s)); font-variant-numeric: tabular-nums; }
 .island-row {
   height: calc(22px * var(--s));
   margin-top: calc(-2px * var(--s));
-  padding: 0 calc(16px * var(--s)) 0 calc(33px * var(--s));
+  padding: 0 calc(16px * var(--s)) 0 calc(14px * var(--s));
   overflow: hidden;
   color: var(--island-muted);
   font-size: calc(11px * var(--s));

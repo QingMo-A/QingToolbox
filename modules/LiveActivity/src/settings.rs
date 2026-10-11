@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 /// Current settings schema. Bump when a field's meaning changes, not when a
 /// field is added, so that additive changes stay forward-compatible.
-pub const SETTINGS_VERSION: u32 = 4;
+pub const SETTINGS_VERSION: u32 = 5;
 pub const DEFAULT_PEEK_TEXT: &str = "{date}";
 pub const DEFAULT_EXPANDED_TEXT: &str = "{date}\n{time}";
 pub const MAX_CUSTOM_TEXT_CHARS: usize = 256;
@@ -19,6 +19,9 @@ pub const MAX_FALLBACK_CHARS: usize = 48;
 
 fn legacy_settings_version() -> u32 {
     1
+}
+fn legacy_show_clock() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,9 +127,12 @@ pub struct Settings {
     pub show_stopwatch: bool,
     pub show_countdown: bool,
     pub countdown_seconds: u64,
+    #[serde(default = "legacy_show_clock")]
     pub show_clock: bool,
     pub show_seconds: bool,
     pub clock_24_hour: bool,
+    pub icon_text: String,
+    pub right_text: String,
     pub custom_text: String,
     #[serde(default)]
     pub peek_text: String,
@@ -144,6 +150,9 @@ pub struct Settings {
     pub show_codex_data: bool,
     /// Retained for v1 profile/API compatibility; automatic mode ignores it.
     pub codex_idle_shutdown_seconds: u64,
+    /// Runtime host selection, never persisted in the module's preferences.
+    #[serde(skip)]
+    pub host_font: crate::host_font::Selection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,12 +202,14 @@ impl Default for Settings {
             show_stopwatch: true,
             show_countdown: true,
             countdown_seconds: 300,
-            show_clock: true,
+            show_clock: false,
             show_seconds: false,
             clock_24_hour: true,
+            icon_text: String::new(),
+            right_text: String::new(),
             custom_text: String::new(),
-            peek_text: DEFAULT_PEEK_TEXT.into(),
-            expanded_text: DEFAULT_EXPANDED_TEXT.into(),
+            peek_text: String::new(),
+            expanded_text: String::new(),
             placeholder_fallback: "暂无数据".into(),
             surface_style: SurfaceStyle::Translucent,
             background_opacity: 0.72,
@@ -206,6 +217,7 @@ impl Default for Settings {
             frost_blur: 6,
             show_codex_data: true,
             codex_idle_shutdown_seconds: 300,
+            host_font: Default::default(),
         }
     }
 }
@@ -237,7 +249,7 @@ impl Settings {
         self.expanded_text = normalize_text(&self.expanded_text, true);
         // Older blank templates meant implicit clock/custom-text fallbacks.
         // Materialize those once so they are editable; v4 blanks stay blank.
-        if self.version < SETTINGS_VERSION {
+        if self.version < 4 {
             if self.peek_text.is_empty() {
                 self.peek_text = if !self.custom_text.is_empty() {
                     self.custom_text.clone()
@@ -264,6 +276,32 @@ impl Settings {
                 self.expanded_text = normalize_text(&self.expanded_text, true);
             }
         }
+        // Make the old uneditable clock/date/orb explicit exactly once. A v4
+        // cleared hover/expanded template must stay cleared during this move.
+        if self.version < 5 {
+            if self.show_clock {
+                if self.custom_text.is_empty() {
+                    self.custom_text = "{date} · 周{weekday}".into();
+                }
+                if self.right_text.is_empty() {
+                    self.right_text = "{time}".into();
+                }
+            }
+            if self.icon_text.is_empty()
+                && (self.show_clock
+                    || !self.custom_text.is_empty()
+                    || !self.peek_text.is_empty()
+                    || !self.expanded_text.is_empty())
+            {
+                self.icon_text = "{icon.clock}".into();
+            }
+        }
+        self.show_clock = false; // compatibility field, no implicit content
+        self.icon_text = normalize_text(&self.icon_text, false)
+            .chars()
+            .take(32)
+            .collect();
+        self.right_text = normalize_text(&self.right_text, false);
         self.placeholder_fallback = self
             .placeholder_fallback
             .chars()
@@ -362,6 +400,8 @@ pub struct SettingsPatch {
     pub show_clock: Option<bool>,
     pub show_seconds: Option<bool>,
     pub clock_24_hour: Option<bool>,
+    pub icon_text: Option<String>,
+    pub right_text: Option<String>,
     pub custom_text: Option<String>,
     pub peek_text: Option<String>,
     pub expanded_text: Option<String>,
@@ -457,6 +497,12 @@ impl Settings {
         if let Some(value) = patch.clock_24_hour {
             self.clock_24_hour = value;
         }
+        if let Some(value) = patch.icon_text {
+            self.icon_text = value;
+        }
+        if let Some(value) = patch.right_text {
+            self.right_text = value;
+        }
         if let Some(value) = patch.custom_text {
             self.custom_text = value;
         }
@@ -504,8 +550,12 @@ mod tests {
         assert_eq!(settings.peek_text, "旧内容");
         assert_eq!(settings.expanded_text, "{date}\n{time}\n旧内容");
         let defaults = Settings::default();
-        assert_eq!(defaults.peek_text, DEFAULT_PEEK_TEXT);
-        assert_eq!(defaults.expanded_text, DEFAULT_EXPANDED_TEXT);
+        assert!(
+            defaults.icon_text.is_empty()
+                && defaults.right_text.is_empty()
+                && defaults.custom_text.is_empty()
+        );
+        assert!(defaults.peek_text.is_empty() && defaults.expanded_text.is_empty());
         settings.apply(
             serde_json::from_value(serde_json::json!({
                 "peekText":"  悬停\r\n{time}\u{0000}  ",
@@ -536,7 +586,7 @@ mod tests {
 
     #[test]
     fn old_implicit_text_becomes_editable_once_and_clearing_survives_reload() {
-        for version in 1..SETTINGS_VERSION {
+        for version in 1..4 {
             for show_clock in [true, false] {
                 for custom_text in ["", "专注 {time}"] {
                     let mut settings: Settings = serde_json::from_value(serde_json::json!({
@@ -607,6 +657,35 @@ mod tests {
         assert_eq!(settings.background_color, RgbColor::default());
         assert_eq!(settings.compact_width, 232);
         assert_eq!((settings.offset_x, settings.offset_y), (0, 0));
+    }
+    #[test]
+    fn v4_clock_and_icon_become_editable_without_restoring_cleared_templates() {
+        let mut settings: Settings = serde_json::from_value(serde_json::json!({"version":4,"showClock":true,"customText":"","peekText":"","expandedText":""})).unwrap();
+        settings.normalize();
+        assert_eq!(settings.custom_text, "{date} · 周{weekday}");
+        assert_eq!(settings.right_text, "{time}");
+        assert_eq!(settings.icon_text, "{icon.clock}");
+        assert!(settings.peek_text.is_empty() && settings.expanded_text.is_empty());
+        settings.apply(
+            serde_json::from_value(
+                serde_json::json!({"customText":"","rightText":"","iconText":""}),
+            )
+            .unwrap(),
+        );
+        let path = temp_path("cleared-all");
+        settings.save(&path).unwrap();
+        let mut restored = Settings::load(&path);
+        restored.apply(SettingsPatch {
+            show_seconds: Some(true),
+            ..Default::default()
+        });
+        assert!(
+            restored.custom_text.is_empty()
+                && restored.icon_text.is_empty()
+                && restored.right_text.is_empty()
+        );
+        assert!(crate::ambient::content_at(&restored, None).is_none());
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

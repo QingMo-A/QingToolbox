@@ -44,6 +44,8 @@ const DESKTOP_COPY_ROP: u32 = SRCCOPY | CAPTUREBLT;
 
 #[derive(Default)]
 pub struct Renderer {
+    font_selection: crate::host_font::Selection,
+    font_registration: crate::host_font::Registration,
     gpu: Option<crate::gpu_glass::Glass>,
     gpu_retry: Option<Instant>,
     backdrop: Option<Backdrop>,
@@ -529,6 +531,7 @@ fn outward_normal(px: f64, py: f64, w: f64, h: f64, radius: f64) -> (f64, f64) {
 }
 
 struct Surface {
+    font_family: String,
     dc: HDC,
     bitmap: HBITMAP,
     previous: HGDIOBJ,
@@ -569,6 +572,7 @@ impl Surface {
         }
         let previous = SelectObject(dc, bitmap);
         Ok(Self {
+            font_family: "Segoe UI Variable".into(),
             dc,
             bitmap,
             previous,
@@ -613,7 +617,7 @@ impl Surface {
         if text.is_empty() || rect.right <= rect.left || rect.bottom <= rect.top {
             return;
         }
-        let Some(font) = Font::select(self.dc, font_size, bold) else {
+        let Some(font) = Font::select(self.dc, font_size, bold, &self.font_family) else {
             return;
         };
         SetBkMode(self.dc, TRANSPARENT as i32);
@@ -642,7 +646,7 @@ impl Surface {
         if text.is_empty() || width <= 0 {
             return (0, 0);
         }
-        let Some(font) = Font::select(self.dc, font_size, bold) else {
+        let Some(font) = Font::select(self.dc, font_size, bold, &self.font_family) else {
             return (0, 0);
         };
         let text = windows_text_buffer(text);
@@ -679,17 +683,11 @@ struct Font {
     old: HGDIOBJ,
 }
 impl Font {
-    unsafe fn select(dc: HDC, font_size: f64, strong: bool) -> Option<Self> {
+    unsafe fn select(dc: HDC, font_size: f64, strong: bool, family: &str) -> Option<Self> {
         if !font_size.is_finite() || font_size <= 0.0 {
             return None;
         }
-        let face: Vec<u16> = if strong {
-            "Segoe UI Semibold\0"
-        } else {
-            "Segoe UI\0"
-        }
-        .encode_utf16()
-        .collect();
+        let face = windows_text_buffer(family);
         let font = CreateFontW(
             -(font_size.round() as i32),
             0,
@@ -1116,7 +1114,8 @@ unsafe fn compose(
     settings: &Settings,
     progress: f64,
 ) -> Result<Foreground, String> {
-    let surface = Foreground::new(bounds.width, bounds.height)?;
+    let mut surface = Foreground::new(bounds.width, bounds.height)?;
+    surface.coverage.font_family = settings.host_font.family.clone();
     let liquid = material == SurfaceStyle::Liquid;
     let tint = {
         let c = settings.background_color;
@@ -1174,8 +1173,9 @@ unsafe fn compose(
     let header = model.account_header();
     let header_offset = if header.is_some() { 24.0 } else { 0.0 };
     let clock = ambient.and_then(|content| content.clock.as_deref());
+    let icon = ambient.and_then(|content| content.icon.as_deref());
     let ink_key = format!(
-        "{}x{}@{:.4}|{:.3}|{light}|{vivid}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
+        "{}x{}@{:.4}|{:.3}|{light}|{vivid}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{icon:?}|{:?}",
         bounds.width,
         bounds.height,
         scale,
@@ -1191,6 +1191,7 @@ unsafe fn compose(
         focus
             .and_then(|a| a.progress.as_ref())
             .and_then(|p| p.fraction()),
+        settings.host_font,
     );
     let reuse = renderer
         .ink
@@ -1211,42 +1212,76 @@ unsafe fn compose(
                     / scale
                     + 1.0
             })
+            .unwrap_or(0.0)
+            .min(width * 0.6);
+        let icon_width = icon
+            .map(|text| {
+                if matches!(text, "{icon.clock}" | "{icon.status}") {
+                    14.0
+                } else {
+                    (surface
+                        .measure(text, unit(64.0), 14.0 * scale, false, single)
+                        .0 as f64
+                        / scale)
+                        .min(64.0)
+                }
+            })
             .unwrap_or(0.0);
+        let label_x = 14.0
+            + if icon.is_some() {
+                icon_width + 8.0
+            } else {
+                0.0
+            };
 
         // Status orb: a live dot with a light pool while something is working or
         // waiting, a progress ring around it when the task reports one, and a
         // drawn clock face when the island is only showing the user's own text.
         let (cx, cy) = (at(21.0), at(16.0));
-        match focus {
-            Some(activity) => {
-                if matches!(
-                    activity.state,
-                    ActivityState::Running | ActivityState::Waiting
-                ) {
-                    surface.glow(cx, cy, at(10.0), accent, 0.34);
-                }
-                match activity.progress.as_ref().and_then(|p| p.fraction()) {
-                    Some(fraction) => {
-                        surface.ring((cx, cy), at(6.4), at(1.7), 1.0, accent, 0.26);
-                        surface.ring((cx, cy), at(6.4), at(1.7), fraction, accent, 1.0);
-                        surface.disc(cx, cy, at(2.4), accent, 1.0);
+        match icon {
+            Some("{icon.status}") => match focus {
+                Some(activity) => {
+                    if matches!(
+                        activity.state,
+                        ActivityState::Running | ActivityState::Waiting
+                    ) {
+                        surface.glow(cx, cy, at(10.0), accent, 0.34);
                     }
-                    None => surface.disc(cx, cy, at(3.7), accent, 1.0),
+                    match activity.progress.as_ref().and_then(|p| p.fraction()) {
+                        Some(fraction) => {
+                            surface.ring((cx, cy), at(6.4), at(1.7), 1.0, accent, 0.26);
+                            surface.ring((cx, cy), at(6.4), at(1.7), fraction, accent, 1.0);
+                            surface.disc(cx, cy, at(2.4), accent, 1.0);
+                        }
+                        None => surface.disc(cx, cy, at(3.7), accent, 1.0),
+                    }
                 }
-            }
-            None => {
+                None => {
+                    surface.disc(cx, cy, at(3.7), accent, 1.0);
+                }
+            },
+            Some("{icon.clock}") => {
                 surface.ring((cx, cy), at(5.7), at(1.35), 1.0, accent, 1.0);
                 surface.segment((cx, cy), (cx, cy - at(3.0)), at(1.35), accent);
                 surface.segment((cx, cy), (cx + at(2.2), cy + at(1.1)), at(1.35), accent);
             }
+            Some(text) => surface.label(
+                text,
+                rect(14.0, 0.0, icon_width, 32.0),
+                14.0 * scale,
+                false,
+                primary,
+            ),
+            None => {}
         }
         surface.label(
             &model.compact_label().unwrap_or_default(),
             rect(
-                33.0,
+                label_x,
                 0.0,
                 width
-                    - 47.0
+                    - label_x
+                    - 14.0
                     - if clock.is_some() {
                         clock_width + 8.0
                     } else {
@@ -1283,7 +1318,7 @@ unsafe fn compose(
             if let Some(text) = model.peek_detail() {
                 surface.label(
                     &text,
-                    rect(33.0, 30.0 + header_offset, width - 49.0, 22.0),
+                    rect(label_x, 30.0 + header_offset, width - label_x - 16.0, 22.0),
                     11.0 * scale,
                     false,
                     secondary,
@@ -1804,6 +1839,12 @@ pub fn draw(
     if bounds.is_empty() {
         return Ok(false);
     }
+    if renderer.font_selection != settings.host_font {
+        renderer.font_registration = crate::host_font::Registration::load(&settings.host_font);
+        renderer.font_selection = settings.host_font.clone();
+        renderer.ink = None;
+        renderer.last_frame = None;
+    }
     unsafe {
         if renderer
             .gpu_retry
@@ -2019,6 +2060,14 @@ mod tests {
         use crate::activity::{ActivityProgress, ActivityState, LiveActivity, ProviderKind};
         let mut model = IslandModel::new();
         model.set_ambient(Some(crate::ambient::AmbientContent {
+            icon: Some(
+                if focus.is_some() {
+                    "{icon.status}"
+                } else {
+                    "{icon.clock}"
+                }
+                .into(),
+            ),
             clock: Some("12:34".into()),
             date: "2026-10-09 · 周五".into(),
             text: "专注当下 · Focus".into(),
@@ -2047,6 +2096,50 @@ mod tests {
         }
         assert_eq!(model.state(), state);
         model
+    }
+
+    #[test]
+    fn clearing_icon_and_text_leaves_no_hidden_native_ink() {
+        let settings = Settings::default();
+        let model = gallery_model(IslandState::Compact, None);
+        let bounds = Bounds {
+            x: 0,
+            y: 0,
+            width: 232,
+            height: 32,
+        };
+        let mut empty = IslandModel::new();
+        empty.set_ambient(Some(Default::default()));
+        let mut renderer = Renderer::default();
+        unsafe {
+            compose(
+                &mut renderer,
+                SurfaceStyle::Solid,
+                bounds,
+                1.0,
+                &model,
+                &settings,
+                1.0,
+            )
+            .unwrap();
+        }
+        assert!(renderer.ink.as_ref().unwrap().1.iter().any(|v| *v != 0));
+        unsafe {
+            compose(
+                &mut renderer,
+                SurfaceStyle::Solid,
+                bounds,
+                1.0,
+                &empty,
+                &settings,
+                1.0,
+            )
+            .unwrap();
+        }
+        assert!(
+            renderer.ink.as_ref().unwrap().1.iter().all(|v| *v == 0),
+            "cleared text must not restore a clock, date, status dot or module name"
+        );
     }
 
     /// A desktop worth looking at glass over: a dusk wallpaper with soft
@@ -2336,12 +2429,12 @@ mod tests {
             .count()
         };
         assert_eq!(
-            count(&start, 56..120, 22..300),
+            count(&start, 56..213, 22..300),
             0,
             "body visible before the morph"
         );
         assert!(
-            count(&end, 56..120, 22..300) > 40,
+            count(&end, 56..213, 22..300) > 40,
             "expanded body text missing"
         );
         assert_eq!(

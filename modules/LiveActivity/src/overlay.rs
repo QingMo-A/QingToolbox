@@ -278,7 +278,7 @@ impl IslandModel {
             || !self.stack.is_empty()
             || self.account.is_some()
             || self.account_header.is_some())
-        .then(|| "Qing Island".to_owned())
+        .then(String::new)
     }
 
     /// Only the editable hover template produces the extra text row.
@@ -1069,7 +1069,7 @@ mod tests {
     #[test]
     fn a_task_never_writes_into_the_capsule() {
         let mut model = seeded();
-        assert_eq!(model.compact_label().as_deref(), Some("Qing Island"));
+        assert_eq!(model.compact_label().as_deref(), Some(""));
         model.set_ambient(Some(crate::ambient::AmbientContent {
             text: "专注当下".into(),
             ..Default::default()

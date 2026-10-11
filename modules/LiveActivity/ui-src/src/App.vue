@@ -32,6 +32,7 @@ import type {
   VisualPatch,
 } from './types'
 import IslandPreview from './components/IslandPreview.vue'
+import { adoptFont } from './hostFont'
 import ActivityRow from './components/ActivityRow.vue'
 import ProviderCard from './components/ProviderCard.vue'
 import DiagnosticsPanel from './components/DiagnosticsPanel.vue'
@@ -49,13 +50,15 @@ const error = ref<string | null>(null)
 /** Set while the settings page is showing its own standalone preview. */
 const previewing = ref(false)
 const customTextDraft = ref('')
+const iconTextDraft = ref('')
+const rightTextDraft = ref('')
 const peekTextDraft = ref('')
 const expandedTextDraft = ref('')
-const textMode = ref<'customText' | 'peekText' | 'expandedText'>('customText')
-const textDrafts = { customText: customTextDraft, peekText: peekTextDraft, expandedText: expandedTextDraft }
-const textLabels = { customText: '常驻', peekText: '悬停', expandedText: '展开' }
-const textHints = { customText: '胶囊里一直显示的一行', peekText: '指针停留时出现在第二行', expandedText: '点击展开后显示，第一行作为标题' }
-const textInputId = computed(() => ({ customText: 'custom-text', peekText: 'peek-text', expandedText: 'expanded-text' }[textMode.value]))
+const textMode = ref<'iconText' | 'customText' | 'rightText' | 'peekText' | 'expandedText'>('customText')
+const textDrafts = { iconText: iconTextDraft, customText: customTextDraft, rightText: rightTextDraft, peekText: peekTextDraft, expandedText: expandedTextDraft }
+const textLabels = { iconText: '图标', customText: '常驻', rightText: '右侧', peekText: '悬停', expandedText: '展开' }
+const textHints = { iconText: '符号、Emoji 或图标预设；留空隐藏', customText: '胶囊里一直显示的一行', rightText: '胶囊右侧，可放时间或任何文字', peekText: '指针停留时出现在第二行', expandedText: '点击展开后显示，第一行作为标题' }
+const textInputId = computed(() => `${textMode.value}-editor`)
 const activeTextDraft = computed({ get: () => textDrafts[textMode.value].value, set: value => { textDrafts[textMode.value].value = value } })
 const fallbackDraft = ref('暂无数据')
 const DEFAULT_COLOR: RgbColor = { r: 21, g: 26, b: 37 }
@@ -123,6 +126,9 @@ async function run<T>(action: () => Promise<T>, apply: (value: T) => void): Prom
 }
 
 function applyState(next: ModuleState): void {
+  if (next.hostFont) void adoptFont(next.hostFont)
+  if (state.value?.settings.iconText !== next.settings.iconText) iconTextDraft.value = next.settings.iconText
+  if (state.value?.settings.rightText !== next.settings.rightText) rightTextDraft.value = next.settings.rightText
   if (state.value?.settings.customText !== next.settings.customText) customTextDraft.value = next.settings.customText
   if (state.value?.settings.peekText !== next.settings.peekText) peekTextDraft.value = next.settings.peekText
   if (state.value?.settings.expandedText !== next.settings.expandedText) expandedTextDraft.value = next.settings.expandedText
@@ -268,7 +274,7 @@ async function insertPlaceholder(key: string): Promise<void> {
 
 function selectTextMode(mode: typeof textMode.value): void {
   textMode.value = mode
-  previewState.value = mode === 'customText' ? 'compact' : mode === 'peekText' ? 'peek' : 'expanded'
+  previewState.value = mode === 'expandedText' ? 'expanded' : mode === 'peekText' ? 'peek' : 'compact'
 }
 async function saveText(): Promise<void> {
   await patch({ [textMode.value]: activeTextDraft.value })
@@ -294,14 +300,15 @@ const settings = computed(() => state.value?.settings ?? null)
 const island = computed(() => state.value?.island ?? null)
 // Data sources only fill placeholders; nothing is appended on their behalf.
 const previewText = computed(() => renderText(customTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value))
+const previewIcon = computed(() => ['{icon.clock}', '{icon.status}'].includes(iconTextDraft.value) ? iconTextDraft.value : renderText(iconTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value))
 const previewPeekText = computed(() => renderText(peekTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) || null)
 const previewExpandedText = computed(() => renderText(expandedTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) || null)
 /** What the draft in the editor resolves to right now. */
-const renderedDraft = computed(() => textMode.value === 'customText' ? previewText.value : textMode.value === 'peekText' ? previewPeekText.value : previewExpandedText.value)
+const renderedDraft = computed(() => textMode.value === 'iconText' ? previewIcon.value : renderText(activeTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value))
 /** Placeholder chips, grouped by the data source that fills them. */
 const placeholderGroups = computed(() => {
   const groups: { name: string; owns: (key: string) => boolean }[] = [
-    { name: '时间', owns: key => key === 'time' || key === 'date' },
+    { name: '时间', owns: key => key === 'time' || key === 'date' || key === 'weekday' },
     { name: '计时', owns: key => key.startsWith('stopwatch') || key.startsWith('countdown') },
     { name: '任务', owns: key => key === 'task' || key.startsWith('task.') || key === 'tasks' || key.startsWith('tasks.') },
     { name: 'Codex', owns: key => key.startsWith('codex.') },
@@ -347,11 +354,7 @@ const recommendedOpacity = computed(() => settings.value?.surfaceStyle === 'liqu
 const unsupported = computed(() => state.value?.platform === 'unsupported')
 const canSimulate = computed(() => Boolean(state.value?.active && settings.value?.enabled))
 const previewClock = computed(() => {
-  if (!settings.value?.showClock) return null
-  if (island.value?.ambient?.clock) return island.value.ambient.clock
-  const date = new Date()
-  const hour = settings.value.clock24Hour ? String(date.getHours()).padStart(2, '0') : String(date.getHours() % 12 || 12)
-  return `${hour}:${String(date.getMinutes()).padStart(2, '0')}${settings.value.showSeconds ? `:${String(date.getSeconds()).padStart(2, '0')}` : ''}${settings.value.clock24Hour ? '' : date.getHours() < 12 ? ' AM' : ' PM'}`
+  return renderText(rightTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) || null
 })
 /** One honest line about the real island window, for the hero. */
 const desktopStatus = computed(() => {
@@ -522,6 +525,7 @@ async function close(): Promise<void> {
             :background-color="colorDraft"
             :frost-blur="frostBlurDraft"
             :clock="previewClock"
+            :icon="previewIcon"
             :date="island?.ambient?.date ?? null"
             :custom-text="previewText"
             :peek-text="previewPeekText"
@@ -700,24 +704,20 @@ async function close(): Promise<void> {
       <section class="card wide card-content">
         <div class="card-head">
           <span class="card-icon" aria-hidden="true"><svg><use href="#i-text" /></svg></span>
-          <div class="card-title"><h2>显示内容</h2><p>三种状态的文字完全由你决定；计时、任务、Codex 等数据只通过占位符出现</p></div>
+          <div class="card-title"><h2>显示内容</h2><p>字体跟随工具箱 · {{ state?.hostFont?.family ?? '默认字体' }}；留空不显示</p></div>
         </div>
         <div class="content-layout">
           <div class="content-main">
             <div class="clock-row">
               <div class="clock-options">
                 <label class="switch chip-switch">
-                  <span><strong>显示时间</strong></span>
-                  <input type="checkbox" role="switch" class="toggle small" :checked="settings.showClock" :disabled="busy" @change="patch({ showClock: ($event.target as HTMLInputElement).checked })" />
-                </label>
-                <label class="switch chip-switch">
-                  <span><strong>显示秒数</strong></span>
-                  <input type="checkbox" role="switch" class="toggle small" :checked="settings.showSeconds" :disabled="busy || !settings.showClock" @change="patch({ showSeconds: ($event.target as HTMLInputElement).checked })" />
+                  <span><strong>时间占位符显示秒数</strong></span>
+                  <input type="checkbox" role="switch" class="toggle small" :checked="settings.showSeconds" :disabled="busy" @change="patch({ showSeconds: ($event.target as HTMLInputElement).checked })" />
                 </label>
               </div>
               <div class="segmented clock-format">
-                <button type="button" :class="{ active: settings.clock24Hour }" :disabled="busy || !settings.showClock" @click="patch({ clock24Hour: true })">24 小时制</button>
-                <button type="button" :class="{ active: !settings.clock24Hour }" :disabled="busy || !settings.showClock" @click="patch({ clock24Hour: false })">12 小时制</button>
+                <button type="button" :class="{ active: settings.clock24Hour }" :disabled="busy" @click="patch({ clock24Hour: true })">24 小时制</button>
+                <button type="button" :class="{ active: !settings.clock24Hour }" :disabled="busy" @click="patch({ clock24Hour: false })">12 小时制</button>
               </div>
             </div>
             <div class="field custom-text-field">
@@ -727,8 +727,11 @@ async function close(): Promise<void> {
               <label class="field-label" :for="textInputId">{{ textLabels[textMode] }}文本<small>{{ textHints[textMode] }}</small></label>
               <div class="text-editor">
                 <textarea v-if="textMode === 'expandedText'" :id="textInputId" v-model="activeTextDraft" class="text-input expanded-text-input" rows="3" maxlength="256" placeholder="支持换行与占位符，留空不显示" :disabled="busy" @keydown.ctrl.enter.prevent="saveText" />
-                <input v-else :id="textInputId" v-model="activeTextDraft" class="text-input" type="text" maxlength="256" :placeholder="textMode === 'peekText' ? '文字或占位符，留空不显示' : '文字或 {codex.remaining}，留空取消'" :disabled="busy" @keydown.enter.prevent="saveText" />
+                <input v-else :id="textInputId" v-model="activeTextDraft" class="text-input" type="text" :maxlength="textMode === 'iconText' ? 32 : 256" :placeholder="textMode === 'iconText' ? '例如 ★、♫、Emoji；留空隐藏' : '文字或 {time} 等占位符，留空不显示'" :disabled="busy" @keydown.enter.prevent="saveText" />
                 <QButton size="small" :disabled="busy || activeTextDraft === settings[textMode]" @click="saveText">保存</QButton>
+              </div>
+              <div v-if="textMode === 'iconText'" class="placeholder-chips">
+                <button v-for="item in [{ name: '无图标', value: '' }, { name: '时钟', value: '{icon.clock}' }, { name: '任务状态', value: '{icon.status}' }, { name: '星星', value: '★' }, { name: '音符', value: '♫' }]" :key="item.name" type="button" class="token" :disabled="busy" @click="iconTextDraft = item.value">{{ item.name }}</button>
               </div>
               <p class="render-line" :class="{ dirty: activeTextDraft !== settings[textMode] }">
                 <span class="render-tag">{{ activeTextDraft !== settings[textMode] ? '未保存' : '效果' }}</span>

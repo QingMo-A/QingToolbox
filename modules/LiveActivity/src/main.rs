@@ -43,6 +43,7 @@ mod broker;
 mod diagnostics;
 mod display;
 mod fullscreen;
+mod host_font;
 mod overlay;
 mod paths;
 mod priority;
@@ -280,6 +281,7 @@ impl OverlayRuntime {
 
 /// Everything the invoke handlers read or write.
 struct Module {
+    host_font: host_font::Watcher,
     active: bool,
     wake: Arc<Condvar>,
     settings: Settings,
@@ -317,12 +319,15 @@ impl Module {
     }
 
     fn with_settings_path(overlay: OverlayChannel, settings_path: std::path::PathBuf) -> Self {
-        let settings = Settings::load(&settings_path);
+        let mut settings = Settings::load(&settings_path);
+        let host_font = host_font::Watcher::new(&settings_path);
+        settings.host_font = host_font.selection.clone();
         let mock = MockProvider::new();
         let wake = Arc::new(Condvar::new());
         let codex = providers::codex::worker::ManagedCodex::new(Arc::clone(&wake));
         diagnostics::information("module", "Qing Island loaded (inactive)");
         Self {
+            host_font,
             active: false,
             wake,
             settings,
@@ -514,10 +519,11 @@ impl Module {
     /// Returns whether anything visible changed, so the caller can decide
     /// whether the overlay needs telling.
     fn tick(&mut self, now: u64) -> bool {
+        let mut changed = self.refresh_host_font();
         if !self.active || !self.settings.enabled {
-            return false;
+            return changed;
         }
-        let mut changed = self.program.update(false);
+        changed |= self.program.update(false);
         if self.hidden_until.is_some_and(|at| Instant::now() >= at) {
             self.hidden_until = None;
             changed = true;
@@ -591,6 +597,8 @@ impl Module {
     fn tick_sleep(&self, now: u64) -> Duration {
         let cap_duration = if self.settings.show_clock
             || [
+                &self.settings.icon_text,
+                &self.settings.right_text,
                 &self.settings.custom_text,
                 &self.settings.peek_text,
                 &self.settings.expanded_text,
@@ -605,7 +613,10 @@ impl Module {
         {
             MAX_TICK_SLEEP
         } else {
-            self.program.until_probe().max(Duration::from_millis(16))
+            self.program
+                .until_probe()
+                .max(Duration::from_millis(16))
+                .min(MAX_TICK_SLEEP)
         };
         let cap = cap_duration.as_millis() as u64;
         match self.broker.next_expiry() {
@@ -1091,7 +1102,7 @@ fn spawn_tick_thread(
             let running = guard.active && guard.settings.enabled;
             // Active modules continue a low-frequency presence probe even if
             // the clock/data display are hidden; inactive modules have no timer.
-            let work = running;
+            let work = running || guard.preview_active;
             if work {
                 let fullscreen = current_fullscreen();
                 let changed = guard.tick(activity::now_millis());
@@ -1158,7 +1169,12 @@ impl Module {
                 return Err(ModuleError::new("unsupported", "仅支持 Windows。"));
                 Ok(json!({"opened": true}))
             }
-            "getState" => Ok(self.state_payload()),
+            "getState" => {
+                if self.refresh_host_font() {
+                    self.sync_overlay(self.last_fullscreen);
+                }
+                Ok(self.state_payload())
+            }
             "setSettings" => self.set_settings(payload),
             "previewSettings" => self.preview_settings(payload),
             "timerCommand" => {
@@ -1263,6 +1279,7 @@ impl Module {
         json!({
             "active": self.active,
             "settings": self.settings,
+            "hostFont": self.settings.host_font,
             "island": {
                 "state": visual_state,
                 "suppressed": self.suppressed,
@@ -1306,6 +1323,15 @@ impl Module {
             "uptimeSeconds": self.started.elapsed().as_secs(),
             "platform": if cfg!(windows) { "windows" } else { "unsupported" },
         })
+    }
+
+    fn refresh_host_font(&mut self) -> bool {
+        if !self.host_font.refresh() {
+            return false;
+        }
+        self.settings.host_font = self.host_font.selection.clone();
+        self.wake.notify_all();
+        true
     }
 
     fn diagnostics_payload(&self) -> Value {
@@ -1802,7 +1828,7 @@ mod tests {
         module
             .invoke(
                 "setSettings",
-                &json!({"showClock":true,"customText":"专注当下","fullscreenPolicy":"always"}),
+                &json!({"rightText":"{time}","customText":"专注当下","fullscreenPolicy":"always"}),
             )
             .unwrap();
         let state = module.state_payload();
@@ -1824,7 +1850,7 @@ mod tests {
         module.set_active(true);
         assert_eq!(module.state_payload()["island"]["state"], "compact");
         module
-            .invoke("setSettings", &json!({"showClock":false,"customText":""}))
+            .invoke("setSettings", &json!({"rightText":"","customText":""}))
             .unwrap();
         assert_eq!(module.state_payload()["island"]["state"], "dormant");
     }

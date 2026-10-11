@@ -102,6 +102,8 @@ export type Settings = {
   showClock: boolean
   showSeconds: boolean
   clock24Hour: boolean
+  iconText: string
+  rightText: string
   customText: string
   peekText: string
   expandedText: string
@@ -143,6 +145,7 @@ export type DiagnosticsEntry = {
 }
 
 export type ModuleState = {
+  hostFont: { family: string; resourceUrl: string | null }
   active: boolean
   settings: Settings
   island: IslandView

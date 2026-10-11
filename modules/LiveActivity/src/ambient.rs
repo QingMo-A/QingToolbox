@@ -5,6 +5,7 @@ use serde::Serialize;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AmbientContent {
+    pub icon: Option<String>,
     pub clock: Option<String>,
     pub date: String,
     pub text: String,
@@ -13,13 +14,7 @@ pub struct AmbientContent {
 }
 impl AmbientContent {
     pub fn label(&self) -> &str {
-        if !self.text.is_empty() {
-            &self.text
-        } else if !self.date.is_empty() {
-            &self.date
-        } else {
-            "Qing Island"
-        }
+        &self.text
     }
 }
 
@@ -89,29 +84,14 @@ pub fn content_with_runtime(
     timers: Option<&crate::timers::Snapshot>,
     tasks: Option<&Tasks>,
 ) -> Option<AmbientContent> {
-    if !settings.show_clock
+    if settings.icon_text.is_empty()
+        && settings.right_text.is_empty()
         && settings.custom_text.is_empty()
         && settings.peek_text.is_empty()
         && settings.expanded_text.is_empty()
     {
         return None;
     }
-    let clock = time
-        .filter(|_| settings.show_clock)
-        .map(|time| clock_label(time, settings.show_seconds, settings.clock_24_hour));
-    let date = time
-        .filter(|_| settings.show_clock)
-        .map(|time| {
-            let weekdays = ["日", "一", "二", "三", "四", "五", "六"];
-            format!(
-                "{:04}-{:02}-{:02} · 周{}",
-                time.year,
-                time.month,
-                time.day,
-                weekdays.get(time.weekday as usize).unwrap_or(&"?")
-            )
-        })
-        .unwrap_or_default();
     let mut values =
         crate::text_template::values(settings, time, account, crate::activity::now_millis());
     apply_timer_values(timers, &mut values);
@@ -127,17 +107,32 @@ pub fn content_with_runtime(
     };
     let peek_text = optional_text(&settings.peek_text);
     let expanded_text = optional_text(&settings.expanded_text);
+    let clock = optional_text(&settings.right_text);
+    let icon = if matches!(
+        settings.icon_text.as_str(),
+        "{icon.clock}" | "{icon.status}"
+    ) {
+        Some(settings.icon_text.clone())
+    } else {
+        optional_text(&settings.icon_text)
+    };
     let text = crate::text_template::render(
         &settings.custom_text,
         &values,
         &settings.placeholder_fallback,
     );
-    if clock.is_none() && text.is_empty() && peek_text.is_none() && expanded_text.is_none() {
+    if icon.is_none()
+        && clock.is_none()
+        && text.is_empty()
+        && peek_text.is_none()
+        && expanded_text.is_none()
+    {
         return None;
     }
     Some(AmbientContent {
+        icon,
         clock,
-        date,
+        date: String::new(),
         text,
         peek_text,
         expanded_text,
@@ -283,7 +278,11 @@ mod tests {
     }
     #[test]
     fn minute_clock_does_not_change_on_each_second() {
-        let settings = Settings::default();
+        let settings = Settings {
+            custom_text: "{date} · 周{weekday}".into(),
+            right_text: "{time}".into(),
+            ..Default::default()
+        };
         let mut later = time(10);
         later.second = 40;
         assert_eq!(
@@ -292,7 +291,36 @@ mod tests {
         );
         assert!(content_at(&settings, Some(later))
             .unwrap()
-            .date
+            .text
             .contains("周二"));
+    }
+    #[test]
+    fn every_visible_slot_is_explicit_and_clearable() {
+        assert!(content_at(&Settings::default(), Some(time(10))).is_none());
+        let mut settings = Settings {
+            icon_text: "★".into(),
+            right_text: "右 {time}".into(),
+            ..Default::default()
+        };
+        let content = content_at(&settings, Some(time(10))).unwrap();
+        assert_eq!(content.label(), "");
+        assert_eq!(content.icon.as_deref(), Some("★"));
+        assert_eq!(content.clock.as_deref(), Some("右 10:05"));
+        assert!(
+            content.date.is_empty()
+                && content.peek_text.is_none()
+                && content.expanded_text.is_none()
+        );
+        settings.icon_text = "{icon.status}".into();
+        assert_eq!(
+            content_at(&settings, Some(time(10)))
+                .unwrap()
+                .icon
+                .as_deref(),
+            Some("{icon.status}")
+        );
+        settings.icon_text.clear();
+        settings.right_text.clear();
+        assert!(content_at(&settings, Some(time(10))).is_none());
     }
 }

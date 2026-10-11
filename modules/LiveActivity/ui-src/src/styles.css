@@ -479,6 +479,8 @@ input.toggle.small:checked::before { transform: translateX(14px); }
 .clock-format { flex: 1; min-width: 210px; }
 .custom-text-field { gap: 10px; }
 .text-modes button { font-weight: 600; }
+.text-modes { flex-wrap: wrap; }
+.text-modes button { padding-inline: 8px; min-width: 54px; }
 .render-line {
   display: flex;
   align-items: baseline;
