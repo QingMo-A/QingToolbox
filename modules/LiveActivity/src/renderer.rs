@@ -611,13 +611,34 @@ impl Surface {
         color: u32,
         flags: u32,
     ) {
+        self.styled_text(
+            text,
+            rect,
+            font_size,
+            crate::rich_text::Style {
+                bold,
+                ..Default::default()
+            },
+            color,
+            flags,
+        );
+    }
+    unsafe fn styled_text(
+        &self,
+        text: &str,
+        rect: RECT,
+        font_size: f64,
+        style: crate::rich_text::Style,
+        color: u32,
+        flags: u32,
+    ) {
         // DrawTextW requires a readable text buffer even for an empty string.
         // An empty Vec's as_ptr() is only a Rust dangling sentinel, not a valid
         // Windows string. Empty/temporarily clipped content needs no GDI call.
         if text.is_empty() || rect.right <= rect.left || rect.bottom <= rect.top {
             return;
         }
-        let Some(font) = Font::select(self.dc, font_size, bold, &self.font_family) else {
+        let Some(font) = Font::styled(self.dc, font_size, style, &self.font_family) else {
             return;
         };
         SetBkMode(self.dc, TRANSPARENT as i32);
@@ -643,10 +664,29 @@ impl Surface {
         bold: bool,
         flags: u32,
     ) -> (i32, i32) {
+        self.styled_measure(
+            text,
+            width,
+            font_size,
+            crate::rich_text::Style {
+                bold,
+                ..Default::default()
+            },
+            flags,
+        )
+    }
+    unsafe fn styled_measure(
+        &self,
+        text: &str,
+        width: i32,
+        font_size: f64,
+        style: crate::rich_text::Style,
+        flags: u32,
+    ) -> (i32, i32) {
         if text.is_empty() || width <= 0 {
             return (0, 0);
         }
-        let Some(font) = Font::select(self.dc, font_size, bold, &self.font_family) else {
+        let Some(font) = Font::styled(self.dc, font_size, style, &self.font_family) else {
             return (0, 0);
         };
         let text = windows_text_buffer(text);
@@ -684,19 +724,35 @@ struct Font {
 }
 impl Font {
     unsafe fn select(dc: HDC, font_size: f64, strong: bool, family: &str) -> Option<Self> {
+        Self::styled(
+            dc,
+            font_size,
+            crate::rich_text::Style {
+                bold: strong,
+                ..Default::default()
+            },
+            family,
+        )
+    }
+    unsafe fn styled(
+        dc: HDC,
+        font_size: f64,
+        style: crate::rich_text::Style,
+        family: &str,
+    ) -> Option<Self> {
         if !font_size.is_finite() || font_size <= 0.0 {
             return None;
         }
-        let face = windows_text_buffer(family);
+        let face = windows_text_buffer(if style.code { "Consolas" } else { family });
         let font = CreateFontW(
             -(font_size.round() as i32),
             0,
             0,
             0,
-            if strong { 600 } else { 400 },
+            if style.bold { 600 } else { 400 },
+            u32::from(style.italic),
             0,
-            0,
-            0,
+            u32::from(style.strike),
             DEFAULT_CHARSET as u32,
             OUT_DEFAULT_PRECIS as u32,
             CLIP_DEFAULT_PRECIS as u32,
@@ -748,6 +804,233 @@ struct Foreground {
     shadow: std::cell::Cell<(i32, f64)>,
 }
 impl Foreground {
+    unsafe fn run_width(&self, run: &crate::rich_text::Run, size: f64) -> i32 {
+        match run {
+            crate::rich_text::Run::Icon { .. } => size.ceil() as i32 + 2,
+            crate::rich_text::Run::Text { text, style } => {
+                self.coverage
+                    .styled_measure(text, 16384, size, *style, DT_SINGLELINE)
+                    .0
+            }
+        }
+    }
+    unsafe fn rich_runs(
+        &self,
+        runs: &[crate::rich_text::Run],
+        mut area: RECT,
+        size: f64,
+        color: u32,
+        accent: u32,
+        focus: Option<&crate::activity::LiveActivity>,
+    ) {
+        let total: i32 = runs.iter().map(|run| self.run_width(run, size)).sum();
+        let truncated = total > area.right - area.left;
+        let ellipsis = self.run_width(
+            &crate::rich_text::Run::Text {
+                text: "…".into(),
+                style: Default::default(),
+            },
+            size,
+        );
+        let end = area.right;
+        let start = area.left;
+        if truncated {
+            area.right = (area.right - ellipsis).max(area.left);
+        }
+        for run in runs {
+            let width = self.run_width(run, size);
+            if area.left >= area.right {
+                break;
+            }
+            let draw = RECT {
+                right: (area.left + width).min(area.right),
+                ..area
+            };
+            match run {
+                crate::rich_text::Run::Text { text, style } => {
+                    self.coverage.bar(draw, 0);
+                    self.coverage.styled_text(
+                        text,
+                        draw,
+                        size,
+                        *style,
+                        0xFFFFFF,
+                        DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX,
+                    );
+                    self.paint(draw, color);
+                }
+                crate::rich_text::Run::Icon { name, .. } if width <= area.right - area.left => {
+                    let cx = area.left as f64 + width as f64 / 2.0;
+                    let cy = (area.top + area.bottom) as f64 / 2.0;
+                    if name == "clock" {
+                        self.ring((cx, cy), size * 0.41, size * 0.1, 1.0, accent, 1.0);
+                        self.segment((cx, cy), (cx, cy - size * 0.22), size * 0.1, accent);
+                        self.segment(
+                            (cx, cy),
+                            (cx + size * 0.16, cy + size * 0.08),
+                            size * 0.1,
+                            accent,
+                        );
+                    } else {
+                        if focus.is_some_and(|a| {
+                            matches!(a.state, ActivityState::Running | ActivityState::Waiting)
+                        }) {
+                            self.glow(cx, cy, size * 0.45, accent, 0.2);
+                        }
+                        if let Some(progress) = focus
+                            .and_then(|a| a.progress.as_ref())
+                            .and_then(|p| p.fraction())
+                        {
+                            self.ring((cx, cy), size * 0.42, size * 0.11, 1.0, accent, 0.26);
+                            self.ring((cx, cy), size * 0.42, size * 0.11, progress, accent, 1.0);
+                            self.disc(cx, cy, size * 0.16, accent, 1.0);
+                        } else {
+                            self.disc(cx, cy, size * 0.27, accent, 1.0);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            area.left += width;
+        }
+        if truncated {
+            self.label(
+                "…",
+                RECT {
+                    left: (end - ellipsis).max(start),
+                    right: end,
+                    ..area
+                },
+                size,
+                false,
+                color,
+            );
+        }
+    }
+    unsafe fn rich_line(
+        &self,
+        line: &crate::rich_text::Line,
+        area: RECT,
+        size: f64,
+        color: u32,
+        accent: u32,
+        focus: Option<&crate::activity::LiveActivity>,
+    ) {
+        let width = (area.right - area.left).max(0);
+        let right_width: i32 = line.right.iter().map(|run| self.run_width(run, size)).sum();
+        let right_width = right_width.min(if line.left.is_empty() {
+            width
+        } else {
+            width * 3 / 5
+        });
+        let gap = if !line.right.is_empty() && !line.left.is_empty() {
+            (size * 0.65) as i32
+        } else {
+            0
+        };
+        self.rich_runs(
+            &line.left,
+            RECT {
+                right: area.right - right_width - gap,
+                ..area
+            },
+            size,
+            color,
+            accent,
+            focus,
+        );
+        self.rich_runs(
+            &line.right,
+            RECT {
+                left: area.right - right_width,
+                ..area
+            },
+            size,
+            color,
+            accent,
+            focus,
+        );
+    }
+    /// Wrap author runs while keeping their styles; aligned lines stay one row.
+    unsafe fn rich_rows(
+        &self,
+        line: &crate::rich_text::Line,
+        width: i32,
+        size: f64,
+        limit: usize,
+    ) -> Vec<crate::rich_text::Line> {
+        use crate::rich_text::{Line, Run};
+        if !line.right.is_empty() {
+            return vec![line.clone()];
+        }
+        let mut rows = vec![Line::default()];
+        let mut used = 0;
+        for run in &line.left {
+            let mut remaining = run.clone();
+            loop {
+                let available = (width - used).max(0);
+                if self.run_width(&remaining, size) <= available || rows.len() >= limit {
+                    used += self.run_width(&remaining, size);
+                    rows.last_mut().unwrap().left.push(remaining);
+                    break;
+                }
+                if let Run::Text { text, style } = &remaining {
+                    let boundaries: Vec<usize> = text
+                        .char_indices()
+                        .map(|(i, _)| i)
+                        .chain(std::iter::once(text.len()))
+                        .collect();
+                    let (mut low, mut high) = (0, boundaries.len() - 1);
+                    while low < high {
+                        let mid = (low + high + 1) / 2;
+                        if self
+                            .coverage
+                            .styled_measure(
+                                &text[..boundaries[mid]],
+                                16384,
+                                size,
+                                *style,
+                                DT_SINGLELINE,
+                            )
+                            .0
+                            <= available
+                        {
+                            low = mid;
+                        } else {
+                            high = mid - 1;
+                        }
+                    }
+                    let mut cut = boundaries[low];
+                    if cut == 0 && used == 0 {
+                        cut = boundaries[1];
+                    }
+                    if cut > 0 {
+                        // Prefer a word boundary where available; CJK can wrap between glyphs.
+                        if let Some((i, ch)) = text[..cut]
+                            .char_indices()
+                            .rev()
+                            .find(|(_, c)| c.is_whitespace())
+                        {
+                            if i > cut / 2 {
+                                cut = i + ch.len_utf8();
+                            }
+                        }
+                        rows.last_mut().unwrap().left.push(Run::Text {
+                            text: text[..cut].into(),
+                            style: *style,
+                        });
+                        remaining = Run::Text {
+                            text: text[cut..].into(),
+                            style: *style,
+                        };
+                    }
+                }
+                rows.push(Line::default());
+                used = 0;
+            }
+        }
+        rows
+    }
     unsafe fn new(width: i32, height: i32) -> Result<Self, String> {
         let surface = Surface::new(width, height)?;
         std::slice::from_raw_parts_mut(surface.pixels, (width * height) as usize).fill(0);
@@ -1192,7 +1475,7 @@ unsafe fn compose(
             .and_then(|a| a.progress.as_ref())
             .and_then(|p| p.fraction()),
         settings.host_font,
-    );
+    ) + &format!("|{:?}", ambient.and_then(|content| content.rich.as_ref()));
     let reuse = renderer
         .ink
         .as_ref()
@@ -1204,187 +1487,256 @@ unsafe fn compose(
         std::slice::from_raw_parts_mut(surface.surface.pixels, cached.len())
             .copy_from_slice(&cached);
     } else {
-        let clock_width = clock
-            .map(|text| {
-                surface
-                    .measure(text, unit(width), 12.0 * scale, true, single)
-                    .0 as f64
-                    / scale
-                    + 1.0
-            })
-            .unwrap_or(0.0)
-            .min(width * 0.6);
-        let icon_width = icon
-            .map(|text| {
-                if matches!(text, "{icon.clock}" | "{icon.status}") {
-                    14.0
-                } else {
-                    (surface
-                        .measure(text, unit(64.0), 14.0 * scale, false, single)
-                        .0 as f64
-                        / scale)
-                        .min(64.0)
-                }
-            })
-            .unwrap_or(0.0);
-        let label_x = 14.0
-            + if icon.is_some() {
-                icon_width + 8.0
-            } else {
-                0.0
-            };
-
-        // Status orb: a live dot with a light pool while something is working or
-        // waiting, a progress ring around it when the task reports one, and a
-        // drawn clock face when the island is only showing the user's own text.
-        let (cx, cy) = (at(21.0), at(16.0));
-        match icon {
-            Some("{icon.status}") => match focus {
-                Some(activity) => {
-                    if matches!(
-                        activity.state,
-                        ActivityState::Running | ActivityState::Waiting
-                    ) {
-                        surface.glow(cx, cy, at(10.0), accent, 0.34);
-                    }
-                    match activity.progress.as_ref().and_then(|p| p.fraction()) {
-                        Some(fraction) => {
-                            surface.ring((cx, cy), at(6.4), at(1.7), 1.0, accent, 0.26);
-                            surface.ring((cx, cy), at(6.4), at(1.7), fraction, accent, 1.0);
-                            surface.disc(cx, cy, at(2.4), accent, 1.0);
-                        }
-                        None => surface.disc(cx, cy, at(3.7), accent, 1.0),
-                    }
-                }
-                None => {
-                    surface.disc(cx, cy, at(3.7), accent, 1.0);
-                }
-            },
-            Some("{icon.clock}") => {
-                surface.ring((cx, cy), at(5.7), at(1.35), 1.0, accent, 1.0);
-                surface.segment((cx, cy), (cx, cy - at(3.0)), at(1.35), accent);
-                surface.segment((cx, cy), (cx + at(2.2), cy + at(1.1)), at(1.35), accent);
+        if let Some(rich) = ambient.and_then(|content| content.rich.as_ref()) {
+            if let Some(line) = rich.compact.lines.first() {
+                surface.rich_line(
+                    line,
+                    rect(14.0, 0.0, width - 28.0, 32.0),
+                    12.0 * scale,
+                    primary,
+                    accent,
+                    focus,
+                );
             }
-            Some(text) => surface.label(
-                text,
-                rect(14.0, 0.0, icon_width, 32.0),
-                14.0 * scale,
-                false,
-                primary,
-            ),
-            None => {}
-        }
-        surface.label(
-            &model.compact_label().unwrap_or_default(),
-            rect(
-                label_x,
-                0.0,
-                width
-                    - label_x
-                    - 14.0
-                    - if clock.is_some() {
-                        clock_width + 8.0
+            surface.reveal.set(content_opacity(progress));
+            if model.state() == IslandState::Peek {
+                if let Some(line) = rich.peek.lines.first() {
+                    surface.rich_line(
+                        line,
+                        rect(14.0, 30.0, width - 28.0, 22.0),
+                        11.0 * scale,
+                        secondary,
+                        accent,
+                        focus,
+                    );
+                }
+            }
+            if model.state() == IslandState::Expanded {
+                surface.hairline(
+                    at(16.0),
+                    at(width - 16.0),
+                    at(40.0),
+                    primary,
+                    if light { 0.16 } else { 0.14 },
+                );
+                let mut rows = Vec::new();
+                let mut total = 0.0;
+                for (index, line) in rich.expanded.lines.iter().enumerate() {
+                    let size = if index == 0 { 20.0 } else { 13.0 };
+                    let row_height = size + 6.0;
+                    let wrapped = surface.rich_rows(
+                        line,
+                        unit(width - 44.0),
+                        size * scale,
+                        if index == 0 { 2 } else { 10 },
+                    );
+                    for row in wrapped {
+                        if total + row_height > 190.0 {
+                            break;
+                        }
+                        total += row_height;
+                        rows.push((row, size, row_height, index == 0));
+                    }
+                    if total >= 171.0 {
+                        break;
+                    }
+                }
+                let mut top = (41.0 + (260.0 - 14.0 - 41.0 - total) / 2.0).max(54.0);
+                for (row, size, row_height, headline) in rows {
+                    surface.rich_line(
+                        &row,
+                        rect(22.0, top, width - 44.0, row_height),
+                        size * scale,
+                        if headline { primary } else { secondary },
+                        accent,
+                        focus,
+                    );
+                    top += row_height;
+                }
+            }
+        } else {
+            let clock_width = clock
+                .map(|text| {
+                    surface
+                        .measure(text, unit(width), 12.0 * scale, true, single)
+                        .0 as f64
+                        / scale
+                        + 1.0
+                })
+                .unwrap_or(0.0)
+                .min(width * 0.6);
+            let icon_width = icon
+                .map(|text| {
+                    if matches!(text, "{icon.clock}" | "{icon.status}") {
+                        14.0
                     } else {
-                        0.0
-                    },
-                32.0,
-            ),
-            12.0 * scale,
-            true,
-            primary,
-        );
-        if let Some(clock) = clock {
-            surface.label_right(
-                clock,
-                rect(width - 14.0 - clock_width, 0.0, clock_width, 32.0),
+                        (surface
+                            .measure(text, unit(64.0), 14.0 * scale, false, single)
+                            .0 as f64
+                            / scale)
+                            .min(64.0)
+                    }
+                })
+                .unwrap_or(0.0);
+            let label_x = 14.0
+                + if icon.is_some() {
+                    icon_width + 8.0
+                } else {
+                    0.0
+                };
+
+            // Status orb: a live dot with a light pool while something is working or
+            // waiting, a progress ring around it when the task reports one, and a
+            // drawn clock face when the island is only showing the user's own text.
+            let (cx, cy) = (at(21.0), at(16.0));
+            match icon {
+                Some("{icon.status}") => match focus {
+                    Some(activity) => {
+                        if matches!(
+                            activity.state,
+                            ActivityState::Running | ActivityState::Waiting
+                        ) {
+                            surface.glow(cx, cy, at(10.0), accent, 0.34);
+                        }
+                        match activity.progress.as_ref().and_then(|p| p.fraction()) {
+                            Some(fraction) => {
+                                surface.ring((cx, cy), at(6.4), at(1.7), 1.0, accent, 0.26);
+                                surface.ring((cx, cy), at(6.4), at(1.7), fraction, accent, 1.0);
+                                surface.disc(cx, cy, at(2.4), accent, 1.0);
+                            }
+                            None => surface.disc(cx, cy, at(3.7), accent, 1.0),
+                        }
+                    }
+                    None => {
+                        surface.disc(cx, cy, at(3.7), accent, 1.0);
+                    }
+                },
+                Some("{icon.clock}") => {
+                    surface.ring((cx, cy), at(5.7), at(1.35), 1.0, accent, 1.0);
+                    surface.segment((cx, cy), (cx, cy - at(3.0)), at(1.35), accent);
+                    surface.segment((cx, cy), (cx + at(2.2), cy + at(1.1)), at(1.35), accent);
+                }
+                Some(text) => surface.label(
+                    text,
+                    rect(14.0, 0.0, icon_width, 32.0),
+                    14.0 * scale,
+                    false,
+                    primary,
+                ),
+                None => {}
+            }
+            surface.label(
+                &model.compact_label().unwrap_or_default(),
+                rect(
+                    label_x,
+                    0.0,
+                    width
+                        - label_x
+                        - 14.0
+                        - if clock.is_some() {
+                            clock_width + 8.0
+                        } else {
+                            0.0
+                        },
+                    32.0,
+                ),
                 12.0 * scale,
                 true,
                 primary,
             );
-        }
-        if let Some(header) = header {
-            surface.label(
-                header,
-                rect(16.0, 32.0, width - 32.0, 22.0),
-                10.0 * scale,
-                false,
-                caption,
-            );
-        }
-
-        // Everything below the header belongs to the target state only.
-        surface.reveal.set(content_opacity(progress));
-        if model.state() == IslandState::Peek {
-            if let Some(text) = model.peek_detail() {
-                surface.label(
-                    &text,
-                    rect(label_x, 30.0 + header_offset, width - label_x - 16.0, 22.0),
-                    11.0 * scale,
-                    false,
-                    secondary,
-                );
-            }
-        }
-        if model.state() == IslandState::Expanded {
-            // The card shows only the user's expanded template. Tasks reach it
-            // through placeholders ({task}, {tasks}, ...), never as implicit rows.
-            surface.hairline(
-                at(16.0),
-                at(width - 16.0),
-                at(40.0 + header_offset),
-                primary,
-                if light { 0.16 } else { 0.14 },
-            );
-            if let Some(text) = model.expanded_text() {
-                // The first line is the headline; anything after it is body.
-                // The block is centred in the card's settled height, so it does
-                // not slide while the window is still growing.
-                let (lead, rest) = text.split_once('\n').unwrap_or((text, ""));
-                let column = unit(width - 44.0);
-                let lead_height = (surface
-                    .measure(lead, column, 20.0 * scale, true, DT_WORDBREAK)
-                    .1 as f64
-                    / scale)
-                    .min(56.0);
-                let rest_height = surface
-                    .measure(rest, column, 13.0 * scale, false, DT_WORDBREAK)
-                    .1 as f64
-                    / scale;
-                let block = lead_height
-                    + if rest_height > 0.0 {
-                        6.0 + rest_height
-                    } else {
-                        0.0
-                    };
-                let settled = model.state().logical_size().1;
-                let region = 41.0 + header_offset;
-                let top =
-                    (region + (settled - 14.0 - region - block) / 2.0).max(54.0 + header_offset);
-                surface.paragraph(
-                    lead,
-                    rect(22.0, top, width - 44.0, lead_height.max(1.0)),
-                    20.0 * scale,
+            if let Some(clock) = clock {
+                surface.label_right(
+                    clock,
+                    rect(width - 14.0 - clock_width, 0.0, clock_width, 32.0),
+                    12.0 * scale,
                     true,
                     primary,
                 );
-                let body = top + lead_height + 6.0;
-                surface.paragraph(
-                    rest,
-                    rect(22.0, body, width - 44.0, height.min(settled) - body - 14.0),
-                    13.0 * scale,
-                    false,
-                    secondary,
-                );
             }
-            // Retired account rows still have a reserved footer for old clients.
-            if let Some(account) = model.account() {
-                surface.paragraph(
-                    account,
-                    rect(17.0, 213.0, width - 34.0, 42.0),
+            if let Some(header) = header {
+                surface.label(
+                    header,
+                    rect(16.0, 32.0, width - 32.0, 22.0),
                     10.0 * scale,
                     false,
-                    secondary,
+                    caption,
                 );
+            }
+
+            // Everything below the header belongs to the target state only.
+            surface.reveal.set(content_opacity(progress));
+            if model.state() == IslandState::Peek {
+                if let Some(text) = model.peek_detail() {
+                    surface.label(
+                        &text,
+                        rect(label_x, 30.0 + header_offset, width - label_x - 16.0, 22.0),
+                        11.0 * scale,
+                        false,
+                        secondary,
+                    );
+                }
+            }
+            if model.state() == IslandState::Expanded {
+                // The card shows only the user's expanded template. Tasks reach it
+                // through placeholders ({task}, {tasks}, ...), never as implicit rows.
+                surface.hairline(
+                    at(16.0),
+                    at(width - 16.0),
+                    at(40.0 + header_offset),
+                    primary,
+                    if light { 0.16 } else { 0.14 },
+                );
+                if let Some(text) = model.expanded_text() {
+                    // The first line is the headline; anything after it is body.
+                    // The block is centred in the card's settled height, so it does
+                    // not slide while the window is still growing.
+                    let (lead, rest) = text.split_once('\n').unwrap_or((text, ""));
+                    let column = unit(width - 44.0);
+                    let lead_height = (surface
+                        .measure(lead, column, 20.0 * scale, true, DT_WORDBREAK)
+                        .1 as f64
+                        / scale)
+                        .min(56.0);
+                    let rest_height = surface
+                        .measure(rest, column, 13.0 * scale, false, DT_WORDBREAK)
+                        .1 as f64
+                        / scale;
+                    let block = lead_height
+                        + if rest_height > 0.0 {
+                            6.0 + rest_height
+                        } else {
+                            0.0
+                        };
+                    let settled = model.state().logical_size().1;
+                    let region = 41.0 + header_offset;
+                    let top = (region + (settled - 14.0 - region - block) / 2.0)
+                        .max(54.0 + header_offset);
+                    surface.paragraph(
+                        lead,
+                        rect(22.0, top, width - 44.0, lead_height.max(1.0)),
+                        20.0 * scale,
+                        true,
+                        primary,
+                    );
+                    let body = top + lead_height + 6.0;
+                    surface.paragraph(
+                        rest,
+                        rect(22.0, body, width - 44.0, height.min(settled) - body - 14.0),
+                        13.0 * scale,
+                        false,
+                        secondary,
+                    );
+                }
+                // Retired account rows still have a reserved footer for old clients.
+                if let Some(account) = model.account() {
+                    surface.paragraph(
+                        account,
+                        rect(17.0, 213.0, width - 34.0, 42.0),
+                        10.0 * scale,
+                        false,
+                        secondary,
+                    );
+                }
             }
         }
         GdiFlush();
@@ -2075,6 +2427,7 @@ mod tests {
             expanded_text: Some(
                 "周五 · 专注当下\n2026-10-09 12:34\n剩余额度 68%，2 小时 14 分后重置".into(),
             ),
+            rich: None,
         }));
         if let Some(focus) = focus {
             let stack = vec![
@@ -2096,6 +2449,113 @@ mod tests {
         }
         assert_eq!(model.state(), state);
         model
+    }
+
+    #[test]
+    fn rich_text_draws_inline_icons_alignment_styles_and_wrapped_unicode() {
+        let settings = Settings {
+            custom_text: "**专注** {icon.clock}{space}12:34".into(),
+            peek_text: "*悬停* {icon.status}{space}75%".into(),
+            expanded_text: "**今日** {icon.clock}\n*斜体* 与 ~~删除线~~\n这是很长的一段中文　有全角空格，用来检查自动换行，图标 {icon.status} 也能在文字中间。\n左{space}中{space}右".into(),
+            ..Default::default()
+        };
+        let mut renderer = Renderer::default();
+        let mut model = IslandModel::new();
+        model.set_ambient(crate::ambient::content_at(&settings, None));
+        let bounds = |state: IslandState| {
+            let (width, height) = state.logical_size();
+            Bounds {
+                x: 0,
+                y: 0,
+                width: width as i32,
+                height: height as i32,
+            }
+        };
+        for state in [
+            IslandState::Compact,
+            IslandState::Peek,
+            IslandState::Expanded,
+        ] {
+            match state {
+                IslandState::Peek => model.set_hovered(true),
+                IslandState::Expanded => model.toggle_expanded(),
+                _ => {}
+            }
+            let bounds = bounds(state);
+            unsafe {
+                compose(
+                    &mut renderer,
+                    SurfaceStyle::Solid,
+                    bounds,
+                    1.0,
+                    &model,
+                    &settings,
+                    1.0,
+                )
+                .unwrap();
+            }
+            let ink = &renderer.ink.as_ref().unwrap().1;
+            let pixels = |x0: usize, x1: usize, y0: usize, y1: usize| {
+                (y0..y1)
+                    .flat_map(|y| (x0..x1).map(move |x| ink[y * bounds.width as usize + x]))
+                    .filter(|v| *v >> 24 > 0)
+                    .count()
+            };
+            assert!(pixels(14, 120, 0, 32) > 20, "author content must render");
+            assert!(
+                pixels(
+                    bounds.width as usize - 60,
+                    bounds.width as usize - 14,
+                    0,
+                    32
+                ) > 10,
+                "spacer aligns right text to the edge"
+            );
+            assert_eq!(pixels(0, 13, 0, 32), 0, "no fixed prefix icon");
+            if state == IslandState::Expanded {
+                assert!(pixels(22, bounds.width as usize - 22, 54, 240) > 50);
+            }
+            write_scene(&format!("rich-{state:?}"), bounds, ink, &|_, _| 0x15202D);
+        }
+        model.set_hovered(false);
+        model.toggle_expanded();
+        model.set_ambient(crate::ambient::content_at(&settings, None));
+        let compact = bounds(IslandState::Compact);
+        unsafe {
+            compose(
+                &mut renderer,
+                SurfaceStyle::Solid,
+                compact,
+                1.0,
+                &model,
+                &settings,
+                1.0,
+            )
+            .unwrap();
+        }
+        let strong = renderer.ink.as_ref().unwrap().clone();
+        let plain = Settings {
+            custom_text: "专注 {icon.clock}{space}12:34".into(),
+            ..settings.clone()
+        };
+        model.set_ambient(crate::ambient::content_at(&plain, None));
+        unsafe {
+            compose(
+                &mut renderer,
+                SurfaceStyle::Solid,
+                compact,
+                1.0,
+                &model,
+                &plain,
+                1.0,
+            )
+            .unwrap();
+        }
+        assert_ne!(
+            renderer.ink.as_ref().unwrap(),
+            &strong,
+            "style-only changes must invalidate glyph cache"
+        );
     }
 
     #[test]

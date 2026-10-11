@@ -49,6 +49,7 @@ mod paths;
 mod priority;
 mod programs;
 mod providers;
+mod rich_text;
 mod settings;
 mod text_template;
 mod timers;
@@ -1833,7 +1834,11 @@ mod tests {
             .unwrap();
         let state = module.state_payload();
         assert_eq!(state["counts"]["activities"], 0);
-        assert!(state["island"]["ambient"]["clock"].as_str().is_some());
+        assert!(
+            state["island"]["ambient"]["rich"]["compact"]["lines"][0]["right"][0]["text"]
+                .as_str()
+                .is_some()
+        );
         assert_eq!(state["island"]["state"], "compact");
         module
             .invoke("emitMockActivity", &json!({"scenario":"waiting"}))

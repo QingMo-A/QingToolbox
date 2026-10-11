@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Anchor, RgbColor, SurfaceStyle } from '../types'
 import { FLUID, JELLY, frostedTint, isLight, jellyDensity, jellyPalette, liquidTint } from '../material'
 import LiquidLens from './LiquidLens.vue'
+import RichLine from './RichLine.vue'
+import type { RichContent } from '../richText'
 
 /**
  * A pure-geometry rendering of the island on a miniature desktop.
@@ -29,6 +31,7 @@ const props = withDefaults(defineProps<{
   icon?: string
   date?: string | null
   customText: string
+  rich?: RichContent
   peekText?: string | null
   expandedText?: string | null
   compactWidth?: number
@@ -258,19 +261,24 @@ const expandedParts = computed(() => {
     </template>
     <div class="island" :class="[`material-${surfaceStyle}`, `is-${state}`, { touched: pointer, 'has-icon': !!icon }]" :style="islandStyle" @pointermove="pointerMoved" @pointerleave="pointerLeft">
       <div class="island-bar">
+        <RichLine v-if="rich?.compact.lines[0]" :line="rich.compact.lines[0]" />
+        <template v-else>
         <svg v-if="icon === '{icon.clock}'" class="orb" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.7" /><path d="M7 7V4M7 7l2.2 1.1" /></svg>
         <svg v-else-if="icon === '{icon.status}'" class="orb" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="3.7" fill="currentColor" stroke="none" /></svg>
         <span v-else-if="icon" class="custom-icon">{{ icon }}</span>
         <span class="pill-text">{{ customText }}</span>
         <span v-if="clock" class="clock">{{ clock }}</span>
+        </template>
       </div>
-      <div v-if="state === 'peek' && peekText" class="island-row">
-        <span>{{ peekText }}</span>
+      <div v-if="state === 'peek' && (rich || peekText)" class="island-row">
+        <RichLine v-if="rich?.peek.lines[0]" :line="rich.peek.lines[0]" />
+        <span v-else>{{ peekText }}</span>
       </div>
       <template v-if="state === 'expanded'">
         <i class="island-rule" aria-hidden="true" />
-        <div v-if="expandedText" class="island-stack">
-          <div class="expanded-caption"><strong>{{ expandedParts.lead }}</strong><span v-if="expandedParts.rest">{{ expandedParts.rest }}</span></div>
+        <div v-if="rich || expandedText" class="island-stack">
+          <div v-if="rich" class="rich-expanded"><RichLine v-for="(line, i) in rich.expanded.lines" :key="i" :line="line" wrap :class="{ headline: i === 0 }" /></div>
+          <div v-else class="expanded-caption"><strong>{{ expandedParts.lead }}</strong><span v-if="expandedParts.rest">{{ expandedParts.rest }}</span></div>
         </div>
       </template>
     </div>
@@ -468,6 +476,8 @@ const expandedParts = computed(() => {
 .pill-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .clock { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; margin-left: calc(3px * var(--s)); font-variant-numeric: tabular-nums; }
 .island-row {
+  display: flex;
+  align-items: center;
   height: calc(22px * var(--s));
   margin-top: calc(-2px * var(--s));
   padding: 0 calc(16px * var(--s)) 0 calc(14px * var(--s));
@@ -498,6 +508,9 @@ const expandedParts = computed(() => {
   animation: content-in 300ms 90ms cubic-bezier(.2, .8, .2, 1) both;
 }
 .expanded-caption { overflow-wrap: anywhere; }
+.rich-expanded { max-height: calc(190px * var(--s)); overflow: hidden; font-size: calc(13px * var(--s)); color: var(--island-muted); }
+.rich-expanded > .rich-line { min-height: calc(19px * var(--s)); }
+.rich-expanded .headline { font-size: calc(20px * var(--s)); line-height: 1.3; color: var(--island-ink); max-height: calc(52px * var(--s)); overflow: hidden; }
 .expanded-caption strong { display: block; font-size: calc(20px * var(--s)); font-weight: 600; line-height: 1.32; color: var(--island-ink); }
 .expanded-caption span { display: block; margin-top: calc(6px * var(--s)); color: var(--island-muted); font-size: calc(13px * var(--s)); line-height: 1.45; white-space: pre-wrap; }
 @keyframes content-in { from { opacity: 0; transform: translateY(4px); } }

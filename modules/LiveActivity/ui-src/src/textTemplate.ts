@@ -30,7 +30,7 @@ export function renderText(template: string, values: Record<string, string | nul
 
 /** Mirrors `text_template::PLACEHOLDERS` in the module. */
 export const KNOWN_KEYS = [
-  'time', 'date',
+  'time', 'date', 'weekday',
   'stopwatch', 'stopwatch.state', 'countdown', 'countdown.state',
   'task', 'task.state', 'task.detail', 'task.progress', 'task.source', 'tasks', 'tasks.count',
   'codex.working', 'codex.waiting',

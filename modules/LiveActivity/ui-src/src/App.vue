@@ -38,7 +38,9 @@ import ProviderCard from './components/ProviderCard.vue'
 import DiagnosticsPanel from './components/DiagnosticsPanel.vue'
 import { RefreshGate } from './refreshGate'
 import MaterialGallery from './components/MaterialGallery.vue'
-import { renderText, usesPlaceholder } from './textTemplate'
+import { usesPlaceholder } from './textTemplate'
+import { renderRich, richEmpty } from './richText'
+import RichLine from './components/RichLine.vue'
 import TimerControls from './components/TimerControls.vue'
 
 const context = ref<ModuleContext | null>(null)
@@ -50,14 +52,12 @@ const error = ref<string | null>(null)
 /** Set while the settings page is showing its own standalone preview. */
 const previewing = ref(false)
 const customTextDraft = ref('')
-const iconTextDraft = ref('')
-const rightTextDraft = ref('')
 const peekTextDraft = ref('')
 const expandedTextDraft = ref('')
-const textMode = ref<'iconText' | 'customText' | 'rightText' | 'peekText' | 'expandedText'>('customText')
-const textDrafts = { iconText: iconTextDraft, customText: customTextDraft, rightText: rightTextDraft, peekText: peekTextDraft, expandedText: expandedTextDraft }
-const textLabels = { iconText: '图标', customText: '常驻', rightText: '右侧', peekText: '悬停', expandedText: '展开' }
-const textHints = { iconText: '符号、Emoji 或图标预设；留空隐藏', customText: '胶囊里一直显示的一行', rightText: '胶囊右侧，可放时间或任何文字', peekText: '指针停留时出现在第二行', expandedText: '点击展开后显示，第一行作为标题' }
+const textMode = ref<'customText' | 'peekText' | 'expandedText'>('customText')
+const textDrafts = { customText: customTextDraft, peekText: peekTextDraft, expandedText: expandedTextDraft }
+const textLabels = { customText: '常驻', peekText: '悬停', expandedText: '展开' }
+const textHints = { customText: '胶囊的一行；用 {space} 将内容分到左右两端', peekText: '指针停留时出现在第二行', expandedText: '支持换行；第一行字号更大，每行独立左右对齐' }
 const textInputId = computed(() => `${textMode.value}-editor`)
 const activeTextDraft = computed({ get: () => textDrafts[textMode.value].value, set: value => { textDrafts[textMode.value].value = value } })
 const fallbackDraft = ref('暂无数据')
@@ -127,8 +127,6 @@ async function run<T>(action: () => Promise<T>, apply: (value: T) => void): Prom
 
 function applyState(next: ModuleState): void {
   if (next.hostFont) void adoptFont(next.hostFont)
-  if (state.value?.settings.iconText !== next.settings.iconText) iconTextDraft.value = next.settings.iconText
-  if (state.value?.settings.rightText !== next.settings.rightText) rightTextDraft.value = next.settings.rightText
   if (state.value?.settings.customText !== next.settings.customText) customTextDraft.value = next.settings.customText
   if (state.value?.settings.peekText !== next.settings.peekText) peekTextDraft.value = next.settings.peekText
   if (state.value?.settings.expandedText !== next.settings.expandedText) expandedTextDraft.value = next.settings.expandedText
@@ -266,10 +264,22 @@ async function insertPlaceholder(key: string): Promise<void> {
   const start = input?.selectionStart ?? activeTextDraft.value.length
   const end = input?.selectionEnd ?? start
   const token = `{${key}}`
-  activeTextDraft.value = Array.from(activeTextDraft.value.slice(0, start) + token + activeTextDraft.value.slice(end)).slice(0, 256).join('')
+  activeTextDraft.value = Array.from(activeTextDraft.value.slice(0, start) + token + activeTextDraft.value.slice(end)).slice(0, 1024).join('')
   await nextTick()
   input?.focus()
   input?.setSelectionRange(Math.min(start + token.length, activeTextDraft.value.length), Math.min(start + token.length, activeTextDraft.value.length))
+}
+
+async function formatSelection(marker: string): Promise<void> {
+  refreshGate.invalidate()
+  const input = document.getElementById(textInputId.value) as HTMLInputElement | HTMLTextAreaElement | null
+  const start = input?.selectionStart ?? activeTextDraft.value.length
+  const end = input?.selectionEnd ?? start
+  const selected = activeTextDraft.value.slice(start, end) || '文字'
+  activeTextDraft.value = Array.from(activeTextDraft.value.slice(0, start) + marker + selected + marker + activeTextDraft.value.slice(end)).slice(0, 1024).join('')
+  await nextTick()
+  input?.focus()
+  input?.setSelectionRange(start + marker.length, Math.min(start + marker.length + selected.length, activeTextDraft.value.length))
 }
 
 function selectTextMode(mode: typeof textMode.value): void {
@@ -299,12 +309,12 @@ async function showMock(scenario: 'working' | 'waiting' | 'success' | 'failed' |
 const settings = computed(() => state.value?.settings ?? null)
 const island = computed(() => state.value?.island ?? null)
 // Data sources only fill placeholders; nothing is appended on their behalf.
-const previewText = computed(() => renderText(customTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value))
-const previewIcon = computed(() => ['{icon.clock}', '{icon.status}'].includes(iconTextDraft.value) ? iconTextDraft.value : renderText(iconTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value))
-const previewPeekText = computed(() => renderText(peekTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) || null)
-const previewExpandedText = computed(() => renderText(expandedTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) || null)
+const previewRich = computed(() => {
+  const render = (text: string) => renderRich(text, state.value?.templateValues ?? {}, fallbackDraft.value)
+  return { compact: render(customTextDraft.value), peek: render(peekTextDraft.value), expanded: render(expandedTextDraft.value) }
+})
 /** What the draft in the editor resolves to right now. */
-const renderedDraft = computed(() => textMode.value === 'iconText' ? previewIcon.value : renderText(activeTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value))
+const renderedDraft = computed(() => renderRich(activeTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value))
 /** Placeholder chips, grouped by the data source that fills them. */
 const placeholderGroups = computed(() => {
   const groups: { name: string; owns: (key: string) => boolean }[] = [
@@ -353,9 +363,6 @@ const opacityValue = computed(() => {
 const recommendedOpacity = computed(() => settings.value?.surfaceStyle === 'liquid' ? 0.48 : 0.6)
 const unsupported = computed(() => state.value?.platform === 'unsupported')
 const canSimulate = computed(() => Boolean(state.value?.active && settings.value?.enabled))
-const previewClock = computed(() => {
-  return renderText(rightTextDraft.value, state.value?.templateValues ?? {}, fallbackDraft.value) || null
-})
 /** One honest line about the real island window, for the hero. */
 const desktopStatus = computed(() => {
   if (!state.value) return { on: false, text: '正在读取…' }
@@ -524,12 +531,9 @@ async function close(): Promise<void> {
             :opacity="opacityDraft / 100"
             :background-color="colorDraft"
             :frost-blur="frostBlurDraft"
-            :clock="previewClock"
-            :icon="previewIcon"
-            :date="island?.ambient?.date ?? null"
-            :custom-text="previewText"
-            :peek-text="previewPeekText"
-            :expanded-text="previewExpandedText"
+            :clock="null"
+            custom-text=""
+            :rich="previewRich"
             :live="previewing"
           />
           <aside class="preview-notes">
@@ -726,17 +730,19 @@ async function close(): Promise<void> {
               </div>
               <label class="field-label" :for="textInputId">{{ textLabels[textMode] }}文本<small>{{ textHints[textMode] }}</small></label>
               <div class="text-editor">
-                <textarea v-if="textMode === 'expandedText'" :id="textInputId" v-model="activeTextDraft" class="text-input expanded-text-input" rows="3" maxlength="256" placeholder="支持换行与占位符，留空不显示" :disabled="busy" @keydown.ctrl.enter.prevent="saveText" />
-                <input v-else :id="textInputId" v-model="activeTextDraft" class="text-input" type="text" :maxlength="textMode === 'iconText' ? 32 : 256" :placeholder="textMode === 'iconText' ? '例如 ★、♫、Emoji；留空隐藏' : '文字或 {time} 等占位符，留空不显示'" :disabled="busy" @keydown.enter.prevent="saveText" />
+                <textarea v-if="textMode === 'expandedText'" :id="textInputId" v-model="activeTextDraft" class="text-input expanded-text-input" rows="4" maxlength="1024" placeholder="**标题**&#10;{icon.clock} {time}{space}{codex.remaining}" :disabled="busy" @keydown.ctrl.enter.prevent="saveText" />
+                <input v-else :id="textInputId" v-model="activeTextDraft" class="text-input" type="text" maxlength="1024" placeholder="**文字** {icon.clock}{space}{time}；留空隐藏" :disabled="busy" @keydown.enter.prevent="saveText" />
                 <QButton size="small" :disabled="busy || activeTextDraft === settings[textMode]" @click="saveText">保存</QButton>
               </div>
-              <div v-if="textMode === 'iconText'" class="placeholder-chips">
-                <button v-for="item in [{ name: '无图标', value: '' }, { name: '时钟', value: '{icon.clock}' }, { name: '任务状态', value: '{icon.status}' }, { name: '星星', value: '★' }, { name: '音符', value: '♫' }]" :key="item.name" type="button" class="token" :disabled="busy" @click="iconTextDraft = item.value">{{ item.name }}</button>
+              <div class="placeholder-chips format-tools">
+                <button v-for="item in [{ name: '加粗', marker: '**' }, { name: '斜体', marker: '*' }, { name: '删除线', marker: '~~' }, { name: '等宽', marker: '`' }]" :key="item.marker" type="button" class="token" :disabled="busy" @pointerdown.prevent @click="formatSelection(item.marker)">{{ item.name }}</button>
+                <button v-for="item in [{ name: '时钟图标', key: 'icon.clock' }, { name: '状态图标', key: 'icon.status' }, { name: '左右分隔', key: 'space' }]" :key="item.key" type="button" class="token" :disabled="busy" :title="`插入 {${item.key}}`" @pointerdown.prevent @click="insertPlaceholder(item.key)">{{ item.name }}</button>
               </div>
-              <p class="render-line" :class="{ dirty: activeTextDraft !== settings[textMode] }">
+              <small class="hint">轻量 Markdown：**加粗**、*斜体*、~~删除线~~、`等宽`。同一行只认最后一个 {space}；用反斜杠转义语法。最多 1024 字，显示最多 256 字，右侧优先保留。</small>
+              <div class="render-line" :class="{ dirty: activeTextDraft !== settings[textMode] }">
                 <span class="render-tag">{{ activeTextDraft !== settings[textMode] ? '未保存' : '效果' }}</span>
-                <span class="render-text">{{ renderedDraft || '（这一状态不显示文本）' }}</span>
-              </p>
+                <div class="render-text"><span v-if="richEmpty(renderedDraft)">（这一状态不显示文本）</span><template v-else><RichLine v-for="(line, i) in renderedDraft.lines" :key="i" :line="line" :wrap="textMode === 'expandedText'" /></template></div>
+              </div>
             </div>
           </div>
           <div class="content-side">

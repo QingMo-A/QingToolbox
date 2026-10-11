@@ -11,6 +11,13 @@ pub struct AmbientContent {
     pub text: String,
     pub peek_text: Option<String>,
     pub expanded_text: Option<String>,
+    pub rich: Option<RichContent>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RichContent {
+    pub compact: crate::rich_text::Document,
+    pub peek: crate::rich_text::Document,
+    pub expanded: crate::rich_text::Document,
 }
 impl AmbientContent {
     pub fn label(&self) -> &str {
@@ -98,6 +105,25 @@ pub fn content_with_runtime(
     if let Some(tasks) = tasks {
         crate::text_template::apply_task_values(&mut values, tasks.focus, tasks.stack, tasks.total);
     }
+    if settings.icon_text.is_empty() && settings.right_text.is_empty() {
+        let render =
+            |text: &str| crate::rich_text::render(text, &values, &settings.placeholder_fallback);
+        let rich = RichContent {
+            compact: render(&settings.custom_text),
+            peek: render(&settings.peek_text),
+            expanded: render(&settings.expanded_text),
+        };
+        if rich.compact.is_empty() && rich.peek.is_empty() && rich.expanded.is_empty() {
+            return None;
+        }
+        return Some(AmbientContent {
+            text: rich.compact.plain(),
+            peek_text: (!rich.peek.is_empty()).then(|| rich.peek.plain()),
+            expanded_text: (!rich.expanded.is_empty()).then(|| rich.expanded.plain()),
+            rich: Some(rich),
+            ..Default::default()
+        });
+    }
     let optional_text = |template: &str| {
         (!template.is_empty())
             .then(|| {
@@ -136,6 +162,7 @@ pub fn content_with_runtime(
         text,
         peek_text,
         expanded_text,
+        rich: None,
     })
 }
 

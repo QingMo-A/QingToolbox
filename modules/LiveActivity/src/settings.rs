@@ -11,10 +11,10 @@ use serde::{Deserialize, Serialize};
 
 /// Current settings schema. Bump when a field's meaning changes, not when a
 /// field is added, so that additive changes stay forward-compatible.
-pub const SETTINGS_VERSION: u32 = 5;
+pub const SETTINGS_VERSION: u32 = 6;
 pub const DEFAULT_PEEK_TEXT: &str = "{date}";
 pub const DEFAULT_EXPANDED_TEXT: &str = "{date}\n{time}";
-pub const MAX_CUSTOM_TEXT_CHARS: usize = 256;
+pub const MAX_CUSTOM_TEXT_CHARS: usize = 1024;
 pub const MAX_FALLBACK_CHARS: usize = 48;
 
 fn legacy_settings_version() -> u32 {
@@ -302,6 +302,32 @@ impl Settings {
             .take(32)
             .collect();
         self.right_text = normalize_text(&self.right_text, false);
+        // v6 uses one inline Markdown template instead of independent slots.
+        // Escape old literal punctuation once, then materialize their layout.
+        if self.version < 6 {
+            self.custom_text = crate::rich_text::escape_legacy(&self.custom_text);
+            self.peek_text = crate::rich_text::escape_legacy(&self.peek_text);
+            self.expanded_text = crate::rich_text::escape_legacy(&self.expanded_text);
+            self.right_text = crate::rich_text::escape_legacy(&self.right_text);
+            if !matches!(self.icon_text.as_str(), "{icon.clock}" | "{icon.status}") {
+                self.icon_text = crate::rich_text::escape_legacy(&self.icon_text);
+            }
+        }
+        if !self.icon_text.is_empty() {
+            self.custom_text = format!(
+                "{}{}{}",
+                self.icon_text,
+                if self.custom_text.is_empty() { "" } else { " " },
+                self.custom_text
+            );
+        }
+        if !self.right_text.is_empty() {
+            self.custom_text.push_str("{space}");
+            self.custom_text.push_str(&self.right_text);
+        }
+        self.icon_text.clear();
+        self.right_text.clear();
+        self.custom_text = normalize_text(&self.custom_text, false);
         self.placeholder_fallback = self
             .placeholder_fallback
             .chars()
@@ -563,7 +589,7 @@ mod tests {
             }))
             .unwrap(),
         );
-        assert_eq!(settings.custom_text, "旧内容");
+        assert_eq!(settings.custom_text, "{icon.clock} 旧内容{space}{time}");
         assert_eq!(settings.peek_text, "悬停 {time}");
         assert_eq!(settings.expanded_text, "{date}\n剩余 {codex.remaining}");
         let path = temp_path("state-text");
@@ -572,7 +598,7 @@ mod tests {
         let _ = std::fs::remove_file(path);
         settings.apply(
             serde_json::from_value(
-                serde_json::json!({"peekText":" ", "expandedText":"🌟".repeat(300)}),
+                serde_json::json!({"peekText":" ", "expandedText":"🌟".repeat(1200)}),
             )
             .unwrap(),
         );
@@ -581,7 +607,7 @@ mod tests {
             settings.expanded_text.chars().count(),
             MAX_CUSTOM_TEXT_CHARS
         );
-        assert_eq!(settings.custom_text, "旧内容");
+        assert_eq!(settings.custom_text, "{icon.clock} 旧内容{space}{time}");
     }
 
     #[test]
@@ -662,9 +688,11 @@ mod tests {
     fn v4_clock_and_icon_become_editable_without_restoring_cleared_templates() {
         let mut settings: Settings = serde_json::from_value(serde_json::json!({"version":4,"showClock":true,"customText":"","peekText":"","expandedText":""})).unwrap();
         settings.normalize();
-        assert_eq!(settings.custom_text, "{date} · 周{weekday}");
-        assert_eq!(settings.right_text, "{time}");
-        assert_eq!(settings.icon_text, "{icon.clock}");
+        assert_eq!(
+            settings.custom_text,
+            "{icon.clock} {date} · 周{weekday}{space}{time}"
+        );
+        assert!(settings.right_text.is_empty() && settings.icon_text.is_empty());
         assert!(settings.peek_text.is_empty() && settings.expanded_text.is_empty());
         settings.apply(
             serde_json::from_value(
@@ -686,6 +714,39 @@ mod tests {
         );
         assert!(crate::ambient::content_at(&restored, None).is_none());
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn v5_slots_merge_once_and_old_literal_markup_stays_literal() {
+        let mut settings: Settings = serde_json::from_value(serde_json::json!({
+            "version":5, "iconText":"{icon.clock}", "customText":"**原样** {space}",
+            "rightText":"{time}", "peekText":"*原样*", "expandedText":"{icon.status}\n~~原样~~"
+        }))
+        .unwrap();
+        settings.normalize();
+        assert!(settings.icon_text.is_empty() && settings.right_text.is_empty());
+        assert_eq!(
+            settings.custom_text,
+            "{icon.clock} \\*\\*原样\\*\\* \\{space}{space}{time}"
+        );
+        let before = settings.clone();
+        settings.normalize();
+        assert_eq!(before, settings, "migration must be idempotent");
+        let mut values = crate::text_template::Values::new();
+        values.insert("time".into(), Some("12:34".into()));
+        let compact = crate::rich_text::render(&settings.custom_text, &values, "");
+        assert_eq!(compact.plain(), " **原样** {space} 12:34");
+        assert_eq!(compact.lines[0].right.len(), 1);
+        let expanded = crate::rich_text::render(&settings.expanded_text, &values, "");
+        assert_eq!(expanded.plain(), "{icon.status}\n~~原样~~");
+        settings.apply(SettingsPatch {
+            custom_text: Some("**新内容** {icon.status}{space}{time}".into()),
+            ..Default::default()
+        });
+        assert_eq!(
+            settings.custom_text,
+            "**新内容** {icon.status}{space}{time}"
+        );
     }
 
     #[test]
@@ -828,7 +889,10 @@ mod tests {
                     .unwrap(),
             );
             assert_eq!(settings, before);
-            assert_eq!(settings.custom_text, "常驻 {codex.remaining|未知}");
+            assert_eq!(
+                settings.custom_text,
+                "{icon.clock} 常驻 {codex.remaining|未知}{space}{time}"
+            );
             assert_eq!(settings.expanded_text, "展开\n{codex.updated}");
             assert!(serde_json::to_value(&settings)
                 .unwrap()

@@ -134,7 +134,7 @@ export type IslandView = {
   /** Retired API 1 preset-display keys; external data uses text templates. */
   account: null
   accountHeader: null
-  ambient: { clock: string | null; date: string; text: string; peekText: string | null; expandedText: string | null } | null
+  ambient: { clock: string | null; date: string; text: string; peekText: string | null; expandedText: string | null; rich?: import('./richText').RichContent | null } | null
 }
 
 export type DiagnosticsEntry = {
