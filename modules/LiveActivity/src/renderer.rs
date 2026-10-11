@@ -1,4 +1,4 @@
-//! Bounded CPU glass renderer; no browser or continuous GPU frame loop.
+//! Cached native glyphs/materials, with live DXGI/D3D11 glass presentation.
 #![cfg(windows)]
 use crate::{
     activity::ActivityState,
@@ -12,7 +12,7 @@ use windows_sys::Win32::{
     UI::WindowsAndMessaging::{UpdateLayeredWindow, ULW_ALPHA},
 };
 
-/// How long a desktop sample stays fresh.
+/// Legacy CPU reference cadence, retained for synthetic material tests only.
 ///
 /// A full composited desktop sample is relatively expensive and can briefly
 /// disturb the hardware cursor plane on some drivers when requested at frame
@@ -39,10 +39,13 @@ fn background_interval(material: SurfaceStyle, still: u32) -> Duration {
 /// and leaves wallpaper/older pixels under the capsule. The island itself is
 /// excluded with `WDA_EXCLUDEFROMCAPTURE`, while the bounded cadence above
 /// prevents this path from becoming a frame-rate capture loop.
+#[cfg(test)]
 const DESKTOP_COPY_ROP: u32 = SRCCOPY | CAPTUREBLT;
 
 #[derive(Default)]
 pub struct Renderer {
+    gpu: Option<crate::gpu_glass::Glass>,
+    gpu_retry: Option<Instant>,
     backdrop: Option<Backdrop>,
     /// The pointer in island-local pixels while it hovers liquid glass.
     pub pointer: Option<(f64, f64)>,
@@ -93,6 +96,8 @@ impl Drop for Backdrop {
 }
 impl Renderer {
     pub fn clear(&mut self) {
+        self.gpu = None;
+        self.gpu_retry = None;
         self.backdrop = None;
         self.ink = None;
         self.last_frame = None;
@@ -102,14 +107,36 @@ impl Renderer {
         self.last_bounds = None;
     }
     pub fn until_refresh(&self) -> Duration {
+        if let Some(gpu) = self.gpu.as_ref() {
+            return gpu.until_refresh();
+        }
+        if let Some(retry) = self.gpu_retry {
+            return retry.saturating_duration_since(Instant::now());
+        }
         self.backdrop
             .as_ref()
             .map(|b| background_interval(b.kind, self.still).saturating_sub(b.sampled.elapsed()))
             .unwrap_or_default()
     }
+    pub fn invalidate_capture(&mut self) {
+        if let Some(gpu) = self.gpu.as_mut() {
+            gpu.invalidate_capture();
+        }
+    }
+    pub fn backend(&self) -> &'static str {
+        if self.gpu.is_some() {
+            "dxgi-d3d11-directcomposition"
+        } else {
+            "layered-window"
+        }
+    }
+    pub fn pending_retry(&self) -> bool {
+        self.gpu_retry.is_some()
+    }
     /// Sample (or keep) the desktop under `cover`: the island's current
     /// bounds, or, during a change of shape, everything it will pass through,
     /// so an animation never waits on a capture per frame.
+    #[cfg(test)]
     unsafe fn background(
         &mut self,
         cover: Bounds,
@@ -255,7 +282,21 @@ impl Renderer {
         self.sample_from(sx, sy, true)
     }
     fn sample_from(&self, sx: f64, sy: f64, sharp: bool) -> Option<u32> {
-        let b = self.backdrop.as_ref()?;
+        CpuSample(self.backdrop.as_ref()).sample_from(sx, sy, sharp)
+    }
+}
+/// CPU material workers may borrow the old synthetic backdrop, never COM
+/// objects or the D3D immediate context. Keep that boundary explicit.
+struct CpuSample<'a>(Option<&'a Backdrop>);
+impl CpuSample<'_> {
+    fn sample(&self, sx: f64, sy: f64) -> Option<u32> {
+        self.sample_from(sx, sy, false)
+    }
+    fn sample_sharp(&self, sx: f64, sy: f64) -> Option<u32> {
+        self.sample_from(sx, sy, true)
+    }
+    fn sample_from(&self, sx: f64, sy: f64, sharp: bool) -> Option<u32> {
+        let b = self.0?;
         let (source, width, height) = if sharp && !b.sharp.is_empty() {
             (&b.sharp, b.width, b.height)
         } else {
@@ -1319,6 +1360,12 @@ unsafe fn compose(
         renderer.ink = Some((ink_key, drawn.to_vec()));
     }
 
+    // For GPU glass this is exclusively our transparent, premultiplied ink.
+    // No background capture or blur is ever performed on the CPU.
+    if renderer.gpu.is_some() && material.samples_backdrop() {
+        return Ok(surface);
+    }
+
     let pixels = std::slice::from_raw_parts_mut(
         surface.surface.pixels,
         (bounds.width * bounds.height) as usize,
@@ -1419,7 +1466,7 @@ unsafe fn compose(
         _ => 2.0,
     };
     let pass = Pass {
-        renderer,
+        renderer: CpuSample(renderer.backdrop.as_ref()),
         material,
         width: bounds.width,
         origin: (bounds.x as f64, bounds.y as f64),
@@ -1464,7 +1511,7 @@ unsafe fn compose(
 /// Everything the per-pixel material pass needs, computed once per frame,
 /// so rows can be shaded independently (and in parallel).
 struct Pass<'a> {
-    renderer: &'a Renderer,
+    renderer: CpuSample<'a>,
     material: SurfaceStyle,
     width: i32,
     origin: (f64, f64),
@@ -1751,21 +1798,72 @@ pub fn draw(
 ) -> Result<bool, String> {
     let Placement {
         bounds,
-        cover,
+        cover: _,
         scale,
     } = placement;
     if bounds.is_empty() {
         return Ok(false);
     }
     unsafe {
+        if renderer
+            .gpu_retry
+            .is_some_and(|retry| Instant::now() >= retry)
+        {
+            renderer.gpu_retry = None;
+            if window.restore_gpu_material() {
+                renderer.last_bounds = None;
+                renderer.last_frame = None;
+            }
+        }
         let requested = window.material();
         if requested.samples_backdrop() {
-            if let Err(error) = renderer.background(cover, scale, requested, settings.frost_blur) {
-                window.fallback_to_translucent(&error);
-                renderer.backdrop = None;
+            renderer.backdrop = None;
+            if renderer
+                .gpu
+                .as_ref()
+                .is_some_and(|g| !g.matches_output(bounds))
+            {
+                renderer.gpu = None;
+            }
+            if renderer.gpu.is_none() {
+                match crate::gpu_glass::Glass::new(window.handle(), bounds) {
+                    Ok(gpu) => renderer.gpu = Some(gpu),
+                    Err(error) => {
+                        window.fallback_to_translucent(&error);
+                        renderer.gpu_retry = Some(Instant::now() + Duration::from_secs(10));
+                    }
+                }
+            }
+            if renderer.gpu.is_some() {
+                let started = Instant::now();
+                let ink = compose(
+                    renderer, requested, bounds, scale, model, settings, progress,
+                )?;
+                let pixels = std::slice::from_raw_parts(
+                    ink.surface.pixels,
+                    (bounds.width * bounds.height) as usize,
+                );
+                let gpu = renderer.gpu.as_mut().unwrap();
+                match gpu.draw(bounds, scale, settings, renderer.pointer, pixels) {
+                    Ok(painted) => {
+                        renderer.samples = gpu.samples;
+                        renderer.sample_micros = started.elapsed().as_micros() as u64;
+                        return Ok(painted);
+                    }
+                    Err(error) => {
+                        // Drop DComp before switching the same HWND to a
+                        // layered translucent fallback; no stale glass remains.
+                        renderer.gpu = None;
+                        renderer.last_bounds = None;
+                        renderer.last_frame = None;
+                        renderer.gpu_retry = Some(Instant::now() + Duration::from_secs(10));
+                        window.fallback_to_translucent(&error);
+                    }
+                }
             }
         } else {
             renderer.backdrop = None;
+            renderer.gpu = None;
         }
         // Read after sampling: a failed capture has just downgraded it.
         let material = window.material();
@@ -1912,259 +2010,7 @@ mod tests {
     #[test]
     #[ignore = "requires an unlocked interactive Windows desktop"]
     fn native_glass_blurs_background_not_text_and_does_not_sample_itself() {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
-        struct OwnedBackdrop(windows_sys::Win32::Foundation::HWND);
-        impl Drop for OwnedBackdrop {
-            fn drop(&mut self) {
-                unsafe {
-                    DestroyWindow(self.0);
-                }
-            }
-        }
-        crate::win32::enable_dpi_awareness();
-        let monitor = crate::win32::primary_monitor().unwrap();
-        let bounds = Bounds {
-            x: monitor.x + 100,
-            y: monitor.y + 100,
-            width: 340,
-            height: 60,
-        };
-        let pad = 96;
-        let backdrop_width = 510 + 2 * pad;
-        let backdrop_height = 390 + 2 * pad;
-        let window = crate::win32::IslandWindow::create(SurfaceStyle::Frosted).unwrap();
-        assert_eq!(
-            window.material(),
-            SurfaceStyle::Frosted,
-            "{:?}",
-            window.material_fallback()
-        );
-        unsafe {
-            let backdrop = OwnedBackdrop(CreateWindowExW(
-                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
-                "STATIC\0".encode_utf16().collect::<Vec<_>>().as_ptr(),
-                std::ptr::null(),
-                WS_POPUP,
-                bounds.x - pad,
-                bounds.y - pad,
-                backdrop_width,
-                backdrop_height,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null(),
-            ));
-            assert!(!backdrop.0.is_null());
-            // This deliberately makes the test background a layered window.
-            // A plain SRCCOPY capture omits it and used to make both glass
-            // materials show wallpaper instead of the content behind them.
-            assert_ne!(SetLayeredWindowAttributes(backdrop.0, 0, 255, LWA_ALPHA), 0);
-            ShowWindow(backdrop.0, SW_SHOWNOACTIVATE);
-            let dc = GetDC(backdrop.0);
-            for x in (0..backdrop_width).step_by(6) {
-                let color = if x % 12 == 0 {
-                    if x < pad + bounds.width / 2 {
-                        0xB878EA
-                    } else {
-                        0xD7C450
-                    }
-                } else {
-                    0x302820
-                };
-                let brush = CreateSolidBrush(color);
-                FillRect(
-                    dc,
-                    &RECT {
-                        left: x,
-                        top: 0,
-                        right: x + 6,
-                        bottom: backdrop_height,
-                    },
-                    brush,
-                );
-                DeleteObject(brush);
-            }
-            ReleaseDC(backdrop.0, dc);
-            GdiFlush();
-            let mut model = IslandModel::new();
-            model.set_ambient(Some(crate::ambient::AmbientContent {
-                clock: Some("12:34".into()),
-                date: "2026-10-06".into(),
-                text: "Qing Island".into(),
-                ..Default::default()
-            }));
-            model.set_hovered(true);
-            let settings = Settings {
-                surface_style: SurfaceStyle::Frosted,
-                background_opacity: 0.5,
-                ..Default::default()
-            };
-            let mut renderer = Renderer::default();
-            window.apply(bounds, true, 1.0).unwrap();
-            std::thread::sleep(Duration::from_millis(80));
-            assert!(draw(
-                &mut renderer,
-                &window,
-                Placement {
-                    bounds,
-                    cover: bounds,
-                    scale: 1.0
-                },
-                &model,
-                &settings,
-                1.0
-            )
-            .unwrap());
-            window.set_visible(true);
-            std::thread::sleep(Duration::from_millis(80));
-            renderer.backdrop.as_mut().unwrap().sampled =
-                Instant::now() - background_interval(SurfaceStyle::Frosted, 0);
-            // A second capture with our card now visible must still see only
-            // the stripes; otherwise it recursively blurs its own text.
-            assert!(
-                !draw(
-                    &mut renderer,
-                    &window,
-                    Placement {
-                        bounds,
-                        cover: bounds,
-                        scale: 1.0
-                    },
-                    &model,
-                    &settings,
-                    1.0
-                )
-                .unwrap(),
-                "background capture included the island itself or was unstable"
-            );
-            assert!(renderer.samples >= 2);
-            let at = |x: usize, y: usize| renderer.last_pixels[y * bounds.width as usize + x];
-            let left = at(70, 55);
-            let adjacent = at(76, 55);
-            let right = at(270, 55);
-            for shift in [0, 8, 16] {
-                let difference =
-                    (((left >> shift) & 255) as i32 - ((adjacent >> shift) & 255) as i32).abs();
-                assert!(
-                    difference <= 8,
-                    "6px stripes were not blurred: {difference}"
-                );
-            }
-            assert!(
-                ((left >> 16) & 255) > ((right >> 16) & 255) + 15,
-                "left/right background lost its color"
-            );
-            assert!(
-                ((right >> 8) & 255) > ((left >> 8) & 255) + 8,
-                "glass became a flat tint"
-            );
-            assert!(
-                renderer
-                    .last_pixels
-                    .iter()
-                    .any(|&p| (p & 255) > 230 && ((p >> 8) & 255) > 230),
-                "foreground text was blurred away"
-            );
-            eprintln!(
-                "Native glass verified: {} samples; latest {} us",
-                renderer.samples, renderer.sample_micros
-            );
-            if let Some(path) = std::env::var_os("QING_ISLAND_TEST_IMAGE") {
-                // Test-only BMP of our composed card, never a runtime export API.
-                let pixels = &renderer.last_pixels;
-                let bytes = 54 + pixels.len() * 4;
-                let mut bmp = Vec::with_capacity(bytes);
-                bmp.extend_from_slice(b"BM");
-                bmp.extend_from_slice(&(bytes as u32).to_le_bytes());
-                bmp.extend_from_slice(&[0; 4]);
-                bmp.extend_from_slice(&54u32.to_le_bytes());
-                bmp.extend_from_slice(&40u32.to_le_bytes());
-                bmp.extend_from_slice(&bounds.width.to_le_bytes());
-                bmp.extend_from_slice(&(-bounds.height).to_le_bytes());
-                bmp.extend_from_slice(&1u16.to_le_bytes());
-                bmp.extend_from_slice(&32u16.to_le_bytes());
-                bmp.extend_from_slice(&[0; 24]);
-                for pixel in pixels {
-                    bmp.extend_from_slice(&pixel.to_le_bytes());
-                }
-                std::fs::write(path, &bmp).unwrap();
-                bmp.fill(0);
-            }
-            // Liquid uses the same native capture path at full resolution.
-            // Exercise it while the frosted island is still visible: the
-            // island must remain excluded and the layered stripes behind it
-            // must remain present for refraction.
-            renderer.clear();
-            renderer
-                .background(bounds, 1.0, SurfaceStyle::Liquid, settings.frost_blur)
-                .unwrap();
-            let liquid_left = renderer
-                .sample(bounds.x as f64 + 70.0, bounds.y as f64 + 30.0)
-                .unwrap();
-            let liquid_right = renderer
-                .sample(bounds.x as f64 + 270.0, bounds.y as f64 + 30.0)
-                .unwrap();
-            assert!(
-                ((liquid_left >> 16) & 255) > ((liquid_right >> 16) & 255) + 15,
-                "liquid glass did not receive the layered content behind it"
-            );
-            assert!(
-                ((liquid_right >> 8) & 255) > ((liquid_left >> 8) & 255) + 8,
-                "liquid glass backdrop became a flat tint"
-            );
-            renderer.clear();
-            assert!(renderer.backdrop.is_none() && renderer.last_pixels.is_empty());
-            window.set_visible(false);
-            // The user-visible regression: a clock-only island has an empty
-            // custom-text paragraph on expansion. Exercise real GDI drawing,
-            // not only the model, including transient resize clipping.
-            model.set_ambient(Some(crate::ambient::AmbientContent {
-                clock: Some("12:34".into()),
-                date: String::new(),
-                text: String::new(),
-                ..Default::default()
-            }));
-            model.toggle_expanded();
-            assert_eq!(model.state(), IslandState::Expanded);
-            for style in [
-                SurfaceStyle::Solid,
-                SurfaceStyle::Translucent,
-                SurfaceStyle::Frosted,
-                SurfaceStyle::Liquid,
-                SurfaceStyle::Jelly,
-            ] {
-                let expanded_window = crate::win32::IslandWindow::create(style).unwrap();
-                let settings = Settings {
-                    surface_style: style,
-                    ..settings.clone()
-                };
-                for scale in [0.75, 1.0, 1.5] {
-                    for height in [32, 60, 260] {
-                        let expanded = Bounds {
-                            width: (340.0 * scale) as i32,
-                            height: (height as f64 * scale) as i32,
-                            ..bounds
-                        };
-                        expanded_window.apply(expanded, true, scale).unwrap();
-                        assert!(draw(
-                            &mut renderer,
-                            &expanded_window,
-                            Placement {
-                                bounds: expanded,
-                                cover: expanded,
-                                scale
-                            },
-                            &model,
-                            &settings,
-                            1.0
-                        )
-                        .unwrap());
-                    }
-                }
-                renderer.clear();
-            }
-            eprintln!("Clock-only expanded native drawing verified: 5 materials, 3 scales, 3 resize heights.");
-        }
+        crate::gpu_glass::test_live_capture();
     }
     fn gallery_model(
         state: IslandState,

@@ -1,6 +1,6 @@
 {
   "module.name": "灵动岛",
-  "module.description": "显示本地时间与文本占位符；计时、任务与 Codex 数据都只通过占位符出现。提供磨砂玻璃、液态玻璃与果冻材质，位置尺寸实时调节。",
+  "module.description": "时间、计时与 Codex 文本占位符；GPU 磨砂、液态玻璃与果冻材质。玻璃实现借鉴 electron-liquid-glass、liquidDX11（MIT）；仓库链接及声明见模块介绍与设置页。",
   "view.title": "灵动岛",
   "view.subtitle": "自定义桌面胶囊，显示时间、文本和可选账号额度。",
   "sections.general": "常规",

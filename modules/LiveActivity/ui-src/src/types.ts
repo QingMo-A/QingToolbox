@@ -169,6 +169,7 @@ export type ModuleState = {
     clickThrough: boolean
     glassSamples: number | null
     glassSampleMicros: number | null
+    renderBackend?: string
   }
   uptimeSeconds: number
   platform: 'windows' | 'unsupported'

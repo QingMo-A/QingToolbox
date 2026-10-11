@@ -54,6 +54,7 @@ try {
     Copy-Item -LiteralPath $binary -Destination $installedBinary
     Copy-Item -Path (Join-Path $uiDist '*') -Destination (Join-Path $resourceRoot 'ui') -Recurse
     Copy-Item -Path (Join-Path $moduleRoot 'i18n/*') -Destination (Join-Path $resourceRoot 'i18n')
+    Copy-Item -LiteralPath (Join-Path $moduleRoot 'third-party') -Destination $resourceRoot -Recurse
     node (Join-Path $modulesRoot 'scripts/module-licenses.mjs') $moduleRoot (Join-Path $resourceRoot 'LICENSES.txt')
     if ($LASTEXITCODE -ne 0) { throw 'Qing Island dependency license collection failed.' }
     Write-Host "Qing Island development resources updated: $resourceRoot"

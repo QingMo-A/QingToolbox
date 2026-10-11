@@ -1,6 +1,6 @@
 {
   "module.name": "Qing Island",
-  "module.description": "A local clock and text placeholders; timers, tasks and Codex data appear only through placeholders. Frosted glass, liquid glass and jelly materials with live geometry adjustment.",
+  "module.description": "Clock, timer and Codex text placeholders with live GPU glass. Glass design references (MIT): hicccc77/electron-liquid-glass and poncippg-spec/liquidDX11; repository links and notices in README/settings.",
   "view.title": "Qing Island",
   "view.subtitle": "Customize a desktop island for time, text and optional account quotas.",
   "sections.general": "General",

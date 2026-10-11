@@ -53,6 +53,8 @@ mod text_template;
 mod timers;
 
 #[cfg(windows)]
+mod gpu_glass;
+#[cfg(windows)]
 mod renderer;
 #[cfg(windows)]
 mod win32;
@@ -722,14 +724,17 @@ fn run_overlay_thread_windows(
         }
         dirty |= state.poll_pointer();
         dirty |= state.pointer_moved();
-        dirty |= state
+        let layout_changed = state
             .window
             .as_ref()
             .is_some_and(|w| w.take_layout_change());
-        let glass_active = state
-            .window
-            .as_ref()
-            .is_some_and(|w| w.is_visible() && w.material().samples_backdrop());
+        dirty |= layout_changed;
+        if layout_changed {
+            state.renderer.invalidate_capture();
+        }
+        let glass_active = state.window.as_ref().is_some_and(|w| {
+            w.is_visible() && (w.material().samples_backdrop() || state.renderer.pending_retry())
+        });
         if dirty
             || state.transition.as_ref().is_some_and(|t| t.is_active())
             || glass_active && state.renderer.until_refresh().is_zero()
@@ -745,6 +750,7 @@ fn run_overlay_thread_windows(
             "materialFallback":state.window.as_ref().and_then(|w|w.material_fallback()),
             "clickThrough":state.window.as_ref().is_some_and(|w|w.click_through()),
             "glassSamples":state.renderer.samples,"glassSampleMicros":state.renderer.sample_micros,
+            "renderBackend":state.renderer.backend(),
         });
         let animating = state.transition.as_ref().is_some_and(|t| t.is_active());
         // Animation frames are paced by the display itself: wait for the
@@ -759,7 +765,10 @@ fn run_overlay_thread_windows(
             state
                 .window
                 .as_ref()
-                .filter(|w| w.is_visible() && w.material().samples_backdrop())
+                .filter(|w| {
+                    w.is_visible()
+                        && (w.material().samples_backdrop() || state.renderer.pending_retry())
+                })
                 .map(|_| state.renderer.until_refresh())
         });
     }
@@ -1131,11 +1140,24 @@ const OPERATIONS: &[&str] = &[
     "timerCommand",
     "hideTemporarily",
     "restoreIsland",
+    "openGlassReference",
 ];
 
 impl Module {
     fn invoke(&mut self, method: &str, payload: &Value) -> Result<Value, ModuleError> {
         match method {
+            "openGlassReference" => {
+                let source = payload
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ModuleError::invalid("借鉴来源无效。"))?;
+                #[cfg(windows)]
+                crate::win32::open_glass_reference(source)
+                    .map_err(|error| ModuleError::new("open_failed", error))?;
+                #[cfg(not(windows))]
+                return Err(ModuleError::new("unsupported", "仅支持 Windows。"));
+                Ok(json!({"opened": true}))
+            }
             "getState" => Ok(self.state_payload()),
             "setSettings" => self.set_settings(payload),
             "previewSettings" => self.preview_settings(payload),
@@ -1279,6 +1301,7 @@ impl Module {
                 "materialFallback":native["materialFallback"],
                 "clickThrough":native["clickThrough"].as_bool().unwrap_or(false),
                 "glassSamples":native["glassSamples"],"glassSampleMicros":native["glassSampleMicros"],
+                "renderBackend":native["renderBackend"],
             },
             "uptimeSeconds": self.started.elapsed().as_secs(),
             "platform": if cfg!(windows) { "windows" } else { "unsupported" },
@@ -1645,6 +1668,133 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Exercise the actual wait/message loop without clock/provider commands.
+    /// A direct call to renderer::draw cannot catch a capture timer that stops
+    /// once the initial shape transition finishes.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires an unlocked interactive Windows desktop"]
+    fn visible_glass_keeps_sampling_and_presenting_without_settings_changes() {
+        use windows_sys::Win32::{
+            Foundation::HWND,
+            Graphics::Gdi::{CreateSolidBrush, DeleteObject, FillRect, GdiFlush, GetDC, ReleaseDC},
+            UI::WindowsAndMessaging::*,
+        };
+        struct BackdropWindow(HWND);
+        impl Drop for BackdropWindow {
+            fn drop(&mut self) {
+                unsafe {
+                    DestroyWindow(self.0);
+                }
+            }
+        }
+        struct Runtime(OverlayRuntime);
+        impl Drop for Runtime {
+            fn drop(&mut self) {
+                self.0.shutdown();
+            }
+        }
+        crate::win32::enable_dpi_awareness();
+        let monitor = crate::win32::primary_monitor().unwrap();
+        for material in [
+            settings::SurfaceStyle::Frosted,
+            settings::SurfaceStyle::Liquid,
+        ] {
+            let settings = Settings {
+                enabled: true,
+                anchor: settings::Anchor::TopLeft,
+                offset_x: 100,
+                offset_y: 200,
+                peek_on_hover: false,
+                click_through: true,
+                surface_style: material,
+                ..Default::default()
+            };
+            let ambient = ambient::AmbientContent {
+                text: "Glass refresh check".into(),
+                ..Default::default()
+            };
+            let mut model = IslandModel::new();
+            model.set_ambient(Some(ambient.clone()));
+            let bounds = geometry(&model, &monitor, &settings);
+            unsafe {
+                let background = BackdropWindow(CreateWindowExW(
+                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
+                    "STATIC\0".encode_utf16().collect::<Vec<_>>().as_ptr(),
+                    std::ptr::null(),
+                    WS_POPUP,
+                    bounds.x - 100,
+                    bounds.y - 100,
+                    bounds.width + 200,
+                    bounds.height + 200,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                ));
+                assert!(!background.0.is_null());
+                assert_ne!(
+                    SetLayeredWindowAttributes(background.0, 0, 255, LWA_ALPHA),
+                    0
+                );
+                ShowWindow(background.0, SW_SHOWNOACTIVATE);
+                let paint = |color| {
+                    let dc = GetDC(background.0);
+                    let brush = CreateSolidBrush(color);
+                    FillRect(
+                        dc,
+                        &windows_sys::Win32::Foundation::RECT {
+                            left: 0,
+                            top: 0,
+                            right: bounds.width + 200,
+                            bottom: bounds.height + 200,
+                        },
+                        brush,
+                    );
+                    DeleteObject(brush);
+                    ReleaseDC(background.0, dc);
+                    GdiFlush();
+                    crate::win32::wait_for_vblank();
+                };
+                paint(0x3030D0);
+                let runtime = Runtime(OverlayRuntime::start());
+                runtime.0.channel.send(OverlayCommand::Sync {
+                    settings,
+                    focus: None,
+                    stack: Vec::new(),
+                    overflow: 0,
+                    ambient: Some(ambient),
+                    temporarily_hidden: false,
+                    fullscreen: false,
+                });
+                std::thread::sleep(Duration::from_millis(1200));
+                let before = runtime.0.channel.report.lock().unwrap().clone();
+                assert_eq!(before["material"], material.as_str(), "{before:?}");
+                assert_eq!(before["visible"], true);
+                std::thread::sleep(Duration::from_millis(800));
+                let settled = runtime.0.channel.report.lock().unwrap().clone();
+                assert_eq!(
+                    settled["renderBackend"], "dxgi-d3d11-directcomposition",
+                    "{settled:?}"
+                );
+                assert!(settled["renderCount"].as_u64().unwrap() > 0);
+                paint(0x20D030);
+                std::thread::sleep(Duration::from_millis(800));
+                let changed = runtime.0.channel.report.lock().unwrap().clone();
+                assert!(changed["renderCount"].as_u64().unwrap() > settled["renderCount"].as_u64().unwrap(),
+                    "background changed without a new frame for {material:?}: before={settled:?}, after={changed:?}, failure={:?}",
+                    runtime.0.channel.failure());
+                eprintln!(
+                    "{material:?} live loop: {} → {} samples; {} → {} frames",
+                    settled["glassSamples"],
+                    changed["glassSamples"],
+                    settled["renderCount"],
+                    changed["renderCount"]
+                );
+            }
+        }
+    }
 
     #[test]
     fn clock_and_custom_text_are_not_broker_tasks_and_stop_with_the_module() {

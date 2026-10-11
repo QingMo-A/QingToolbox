@@ -652,3 +652,9 @@ input.toggle.small:checked::before { transform: translateX(14px); }
     transition-duration: .01ms !important;
   }
 }
+/* Attribution is discoverable without crowding the actual controls. */
+.glass-sources summary { cursor: pointer; font-weight: 600; }
+.glass-source-links { display: grid; gap: .5rem; margin-top: 1rem; }
+.glass-source-links a { color: var(--q-primary, #2864f0); width: fit-content; text-decoration: none; }
+.glass-source-links a:hover { text-decoration: underline; }
+.glass-source-links span { opacity: .7; font-size: .85rem; margin-bottom: .5rem; }

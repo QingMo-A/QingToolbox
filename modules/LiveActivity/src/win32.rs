@@ -49,9 +49,38 @@ const CLASS_NAME: &[u16] = &[
     0,
 ];
 
+/// Open only these reviewed, fixed HTTPS repositories, never an arbitrary
+/// URL, filesystem path, command line or protocol handler supplied by Web UI.
+pub fn open_glass_reference(source: &str) -> Result<(), String> {
+    let url = match source {
+        "electron-liquid-glass" => "https://github.com/hicccc77/electron-liquid-glass",
+        "liquidDX11" => "https://github.com/poncippg-spec/liquidDX11",
+        _ => return Err("未知的玻璃借鉴来源。".into()),
+    };
+    let verb: Vec<u16> = "open\0".encode_utf16().collect();
+    let url: Vec<u16> = url.encode_utf16().chain(Some(0)).collect();
+    let result = unsafe {
+        windows_sys::Win32::UI::Shell::ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            url.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+        )
+    };
+    if result as isize <= 32 {
+        return Err("无法打开系统默认浏览器。".into());
+    }
+    Ok(())
+}
+
 /// A message-only identity for the island window.
 pub struct IslandWindow {
     handle: HWND,
+    /// Glass rendering never participates in occlusion/input. A nearly
+    /// transparent, rounded companion owns only the capsule's mouse region.
+    input_handle: HWND,
     /// Shared with the window procedure, which is a free function and therefore
     /// cannot borrow from the owning struct.
     hit_state: Arc<HitState>,
@@ -70,6 +99,7 @@ pub struct IslandWindow {
 /// atomics are sufficient and no lock is taken in the hit-test path — which is
 /// important because that path runs on every mouse move.
 struct HitState {
+    render_handle: AtomicIsize,
     /// Client rectangle in physical pixels, updated on every resize.
     width: AtomicIsize,
     height: AtomicIsize,
@@ -88,6 +118,7 @@ struct HitState {
 impl HitState {
     fn new() -> Self {
         Self {
+            render_handle: AtomicIsize::new(0),
             width: AtomicIsize::new(0),
             height: AtomicIsize::new(0),
             controls: std::sync::Mutex::new(Vec::new()),
@@ -230,7 +261,11 @@ unsafe extern "system" fn window_proc(
             // window validates its region and the message loop stays quiet
             // instead of repainting continuously.
             let mut paint = PAINTSTRUCT::default();
-            BeginPaint(hwnd, &mut paint);
+            let dc = BeginPaint(hwnd, &mut paint);
+            if hit_state_for(hwnd).is_some_and(|s| s.render_handle.load(Ordering::Relaxed) != hwnd as isize) {
+                use windows_sys::Win32::Graphics::Gdi::{FillRect, GetStockObject, BLACK_BRUSH};
+                FillRect(dc, &paint.rcPaint, GetStockObject(BLACK_BRUSH) as _);
+            }
             EndPaint(hwnd, &paint);
             0
         }
@@ -267,15 +302,66 @@ impl IslandWindow {
         self.material_fallback.borrow().clone()
     }
     pub fn fallback_to_translucent(&self, reason: &str) {
+        let through = self.click_through();
         self.material.set(SurfaceStyle::Translucent);
         *self.material_fallback.borrow_mut() = Some(reason.into());
         unsafe {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                GWL_EXSTYLE, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TRANSPARENT,
+            };
+            let flags = GetWindowLongPtrW(self.handle, GWL_EXSTYLE);
+            SetWindowLongPtrW(
+                self.handle,
+                GWL_EXSTYLE,
+                (flags & !(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT) as isize)
+                    | WS_EX_LAYERED as isize
+                    | if through {
+                        WS_EX_TRANSPARENT as isize
+                    } else {
+                        0
+                    },
+            );
+            if !self.input_handle.is_null() {
+                ShowWindow(self.input_handle, SW_HIDE);
+            }
             windows_sys::Win32::UI::WindowsAndMessaging::SetWindowDisplayAffinity(self.handle, 0);
         }
+        self.applied_bounds.set(None);
         crate::diagnostics::warning("overlay/material", reason);
+    }
+    /// Recover after a temporary GPU/driver/session failure without requiring
+    /// a settings toggle. The companion is reused; no input window is leaked.
+    pub fn restore_gpu_material(&self) -> bool {
+        if self.input_handle.is_null() || !self.requested_style.samples_backdrop() {
+            return false;
+        }
+        unsafe {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                SetWindowDisplayAffinity, GWL_EXSTYLE, WDA_EXCLUDEFROMCAPTURE,
+                WS_EX_NOREDIRECTIONBITMAP, WS_EX_TRANSPARENT,
+            };
+            if SetWindowDisplayAffinity(self.handle, WDA_EXCLUDEFROMCAPTURE) == 0 {
+                return false;
+            }
+            let flags = GetWindowLongPtrW(self.handle, GWL_EXSTYLE);
+            SetWindowLongPtrW(
+                self.handle,
+                GWL_EXSTYLE,
+                (flags & !(WS_EX_LAYERED as isize))
+                    | (WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT) as isize,
+            );
+        }
+        self.material.set(self.requested_style);
+        *self.material_fallback.borrow_mut() = None;
+        self.applied_bounds.set(None);
+        true
     }
     pub fn handle(&self) -> HWND {
         self.handle
+    }
+    #[cfg(test)]
+    pub fn test_input_handle(&self) -> HWND {
+        self.input_handle
     }
     pub fn hovered(&self) -> bool {
         self.hit_state.hovered.load(Ordering::Relaxed) != 0
@@ -320,8 +406,17 @@ impl IslandWindow {
             // harmless; the failure mode we care about is a foreign class.
             RegisterClassW(&class);
 
-            let extended_style =
-                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED;
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                WS_EX_NOREDIRECTIONBITMAP, WS_EX_TRANSPARENT,
+            };
+            let extended_style = WS_EX_TOPMOST
+                | WS_EX_TOOLWINDOW
+                | WS_EX_NOACTIVATE
+                | if requested_style.samples_backdrop() {
+                    WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT
+                } else {
+                    WS_EX_LAYERED
+                };
             let handle = CreateWindowExW(
                 extended_style,
                 CLASS_NAME.as_ptr(),
@@ -341,6 +436,9 @@ impl IslandWindow {
             }
             // Publish the shared state so the window procedure can find it.
             SetWindowLongPtrW(handle, GWLP_USERDATA, Arc::as_ptr(&hit_state) as isize);
+            hit_state
+                .render_handle
+                .store(handle as isize, Ordering::Relaxed);
             let mut material = requested_style;
             let mut material_fallback = None;
             // Glass materials sample the desktop under the island, so the
@@ -359,8 +457,53 @@ impl IslandWindow {
                         Some("系统无法排除悬浮窗自身的背景采样，已回退半透明".to_string());
                 }
             }
+            let mut input_handle = std::ptr::null_mut();
+            if material.samples_backdrop() {
+                input_handle = CreateWindowExW(
+                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
+                    CLASS_NAME.as_ptr(),
+                    std::ptr::null(),
+                    WS_POPUP,
+                    0,
+                    0,
+                    1,
+                    1,
+                    handle,
+                    std::ptr::null_mut(),
+                    instance,
+                    std::ptr::null(),
+                );
+                if input_handle.is_null() {
+                    DestroyWindow(handle);
+                    return Err("could not create glass input window".into());
+                }
+                SetWindowLongPtrW(
+                    input_handle,
+                    GWLP_USERDATA,
+                    Arc::as_ptr(&hit_state) as isize,
+                );
+                use windows_sys::Win32::UI::WindowsAndMessaging::{
+                    SetLayeredWindowAttributes, SetWindowDisplayAffinity, LWA_ALPHA,
+                    WDA_EXCLUDEFROMCAPTURE,
+                };
+                SetLayeredWindowAttributes(input_handle, 0, 1, LWA_ALPHA);
+                if SetWindowDisplayAffinity(input_handle, WDA_EXCLUDEFROMCAPTURE) == 0 {
+                    DestroyWindow(input_handle);
+                    DestroyWindow(handle);
+                    return Err("could not exclude glass input window from capture".into());
+                }
+            } else if requested_style.samples_backdrop() {
+                use windows_sys::Win32::UI::WindowsAndMessaging::GWL_EXSTYLE;
+                SetWindowLongPtrW(
+                    handle,
+                    GWL_EXSTYLE,
+                    (extended_style & !(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT)
+                        | WS_EX_LAYERED) as isize,
+                );
+            }
             Ok(Self {
                 handle,
+                input_handle,
                 hit_state,
                 requested_style,
                 material: Cell::new(material),
@@ -403,6 +546,33 @@ impl IslandWindow {
             }
         }
         self.applied_bounds.set(Some(bounds));
+        if self.material().samples_backdrop() && !self.input_handle.is_null() {
+            unsafe {
+                use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
+                SetWindowPos(
+                    self.input_handle,
+                    std::ptr::null_mut(),
+                    bounds.x,
+                    bounds.y,
+                    bounds.width,
+                    bounds.height,
+                    SWP_NOACTIVATE | SWP_NOZORDER,
+                );
+                let diameter =
+                    (crate::renderer::island_radius(bounds.height, scale) * 2.0).round() as i32;
+                let region = CreateRoundRectRgn(
+                    0,
+                    0,
+                    bounds.width + 1,
+                    bounds.height + 1,
+                    diameter,
+                    diameter,
+                );
+                if !region.is_null() && SetWindowRgn(self.input_handle, region, 1) == 0 {
+                    windows_sys::Win32::Graphics::Gdi::DeleteObject(region);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -416,14 +586,19 @@ impl IslandWindow {
     pub fn set_click_through(&self, enabled: bool) {
         use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, WS_EX_TRANSPARENT};
         unsafe {
-            let current = GetWindowLongPtrW(self.handle, GWL_EXSTYLE);
+            let target = if self.material().samples_backdrop() {
+                self.input_handle
+            } else {
+                self.handle
+            };
+            let current = GetWindowLongPtrW(target, GWL_EXSTYLE);
             let next = if enabled {
                 current | WS_EX_TRANSPARENT as isize
             } else {
                 current & !(WS_EX_TRANSPARENT as isize)
             };
             if current != next {
-                SetWindowLongPtrW(self.handle, GWL_EXSTYLE, next);
+                SetWindowLongPtrW(target, GWL_EXSTYLE, next);
             }
         }
         if enabled {
@@ -434,7 +609,12 @@ impl IslandWindow {
 
     pub fn click_through(&self) -> bool {
         use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, WS_EX_TRANSPARENT};
-        unsafe { GetWindowLongPtrW(self.handle, GWL_EXSTYLE) & WS_EX_TRANSPARENT as isize != 0 }
+        let target = if self.material().samples_backdrop() {
+            self.input_handle
+        } else {
+            self.handle
+        };
+        unsafe { GetWindowLongPtrW(target, GWL_EXSTYLE) & WS_EX_TRANSPARENT as isize != 0 }
     }
 
     pub fn set_visible(&self, visible: bool) {
@@ -447,6 +627,20 @@ impl IslandWindow {
             self.hit_state.set_interactive(false);
         }
         let was_visible = self.is_visible();
+        if !self.input_handle.is_null() {
+            let show = visible && self.material().samples_backdrop();
+            unsafe {
+                if (windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(self.input_handle)
+                    != 0)
+                    != show
+                {
+                    ShowWindow(
+                        self.input_handle,
+                        if show { SW_SHOWNOACTIVATE } else { SW_HIDE },
+                    );
+                }
+            }
+        }
         if visible == was_visible {
             return;
         }
@@ -653,6 +847,12 @@ pub fn primary_monitor() -> Option<MonitorMetrics> {
 
 impl Drop for IslandWindow {
     fn drop(&mut self) {
+        if !self.input_handle.is_null() {
+            unsafe {
+                SetWindowLongPtrW(self.input_handle, GWLP_USERDATA, 0);
+                DestroyWindow(self.input_handle);
+            }
+        }
         if self.is_alive() {
             unsafe {
                 // Clear the shared pointer before the Arc that owns it goes

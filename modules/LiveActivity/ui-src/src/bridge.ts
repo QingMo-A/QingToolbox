@@ -77,3 +77,6 @@ export function timerCommand(kind: 'stopwatch' | 'countdown', action: 'start' | 
 }
 export function hideTemporarily(): Promise<ModuleState> { return invokeModule<ModuleState>('hideTemporarily') }
 export function restoreIsland(): Promise<ModuleState> { return invokeModule<ModuleState>('restoreIsland') }
+export function openGlassReference(source: 'electron-liquid-glass' | 'liquidDX11'): Promise<unknown> {
+  return invokeModule('openGlassReference', { source })
+}

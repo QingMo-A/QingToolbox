@@ -17,6 +17,7 @@ import {
   timerCommand,
   hideTemporarily,
   restoreIsland,
+  openGlassReference,
 } from './bridge'
 import type {
   Anchor,
@@ -849,6 +850,17 @@ async function close(): Promise<void> {
       </section>
 
       <!-- Diagnostics ----------------------------------------------------- -->
+      <details class="card wide glass-sources">
+        <summary>玻璃实现 · 借鉴来源</summary>
+        <div class="glass-source-links">
+          <a href="https://github.com/hicccc77/electron-liquid-glass" target="_blank" rel="noopener noreferrer"
+             @click.prevent="run(() => openGlassReference('electron-liquid-glass'), () => {})">electron-liquid-glass ↗</a>
+          <span>MIT · DXGI / D3D11 / DirectComposition 架构、分离模糊与折射思路</span>
+          <a href="https://github.com/poncippg-spec/liquidDX11" target="_blank" rel="noopener noreferrer"
+             @click.prevent="run(() => openGlassReference('liquidDX11'), () => {})">liquidDX11 ↗</a>
+          <span>MIT（原始代码）· 磨砂、SDF 轮廓及边缘光照思路</span>
+        </div>
+      </details>
       <section class="card wide card-diagnostics">
         <div class="card-head">
           <span class="card-icon" aria-hidden="true"><svg><use href="#i-pulse" /></svg></span>
@@ -868,7 +880,7 @@ async function close(): Promise<void> {
         协议 v{{ context?.protocolVersion ?? 1 }}
       </span>
       <span v-if="state?.overlay.visible" class="muted telemetry">
-        原生渲染 {{ state.overlay.renderCount }} 帧<template v-if="state.overlay.glassSampleMicros"> · 磨砂采样 {{ (state.overlay.glassSampleMicros / 1000).toFixed(1) }} ms</template>
+        原生渲染 {{ state.overlay.renderCount }} 帧<template v-if="state.overlay.renderBackend === 'dxgi-d3d11-directcomposition'"> · GPU 玻璃</template>
       </span>
     </footer>
   </div>
