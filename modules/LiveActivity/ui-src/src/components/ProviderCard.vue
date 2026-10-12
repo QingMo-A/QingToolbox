@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { CodexAccount, ProviderHealth, ProviderKind, ProviderStatus } from '../types'
 import CodexQuota from './CodexQuota.vue'
+import { threadObservationLabel } from '../quota'
 
 const props = defineProps<{
   kind: ProviderKind
@@ -34,11 +35,13 @@ const HEALTH: Record<ProviderHealth, string> = {
 const detail = computed(() => {
   if (!props.implemented) return '稍后支持'
   if (props.kind === 'codex') {
+    const observation = threadObservationLabel(props.account ?? null)
+    if (props.account?.threadsStale && observation) return observation
     const message = props.status?.detail
     if (message?.includes('CLI was not found')) return '未找到 Codex 程序；请安装 Codex 或配置程序路径'
     if (message === 'connecting') return '正在连接 Codex…'
     if (props.status?.health === 'connected') {
-      if (props.account?.connectionMode === 'shared') return `共享实例 · 工作 ${props.account.workingThreads} · 等待 ${props.account.waitingThreads}`
+      if (props.account?.connectionMode === 'shared') return observation ?? '共享实例 · 正在读取任务状态'
       return '仅额度连接 · 桌面任务未接入'
     }
   }
@@ -59,7 +62,7 @@ const health = computed<ProviderHealth | 'planned'>(() =>
       </span>
       <strong>{{ NAME[kind] }}</strong>
       <span class="health"><i class="dot" />{{ implemented ? HEALTH[status?.health ?? 'disabled'] : '规划中' }}</span>
-      <span v-if="implemented && status && (kind !== 'codex' || account?.connectionMode === 'shared')" class="count" title="活动数">
+      <span v-if="implemented && status && (kind !== 'codex' || account?.connectionMode === 'shared' && !account?.threadsStale)" class="count" title="活动数">
         {{ status.activityCount }}
       </span>
     </div>

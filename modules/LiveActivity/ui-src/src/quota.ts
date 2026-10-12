@@ -1,4 +1,17 @@
-import type { RateLimitWindow } from './types'
+import type { CodexAccount, RateLimitWindow } from './types'
+
+export function cachedQuotaHint(account: CodexAccount | null): string | null {
+  if (!account?.limits || !account.stale) return null
+  return `上次成功数据 · ${timeLabel(account.updatedAtMs, true)} · 当前未更新`
+}
+
+export function threadObservationLabel(account: CodexAccount | null): string | null {
+  if (account?.threadConnectionMode !== 'shared' || account.threadsUpdatedAtMs == null) return null
+  const counts = `工作 ${account.workingThreads} · 等待 ${account.waitingThreads}`
+  return account.threadsStale
+    ? `上次观察 · ${counts} · ${timeLabel(account.threadsUpdatedAtMs, true)}（当前未确认）`
+    : `共享实例 · ${counts}`
+}
 
 export function remainingPercent(window: RateLimitWindow): number | null {
   const used = window.usedFraction

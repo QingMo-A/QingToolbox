@@ -433,7 +433,7 @@ impl Module {
     }
 
     fn account_data(&self) -> Option<providers::codex::worker::AccountSnapshot> {
-        (self.active && self.settings.enabled && self.program.state.running)
+        (self.active && self.settings.enabled)
             .then(|| self.codex.account_snapshot())
     }
 
@@ -2127,9 +2127,26 @@ mod tests {
         module.program.force_for_test(false);
         module.tick(activity::now_millis());
         assert!(!module.codex.configured_for_test());
-        assert!(module.account_data().is_none());
+        assert!(module.account_data().unwrap().limits.is_none());
         module.set_active(false);
         assert!(module.program.state.checked_at_ms.is_none());
+    }
+
+    #[test]
+    fn codex_exit_keeps_template_quota_as_explicitly_cached_data() {
+        let mut module = headless_module("codex-cache-after-exit");
+        module.settings.custom_text = "余量 {codex.remaining}".into();
+        module.program.force_for_test(true);
+        module.reconcile_providers();
+        module.codex.set_limits_for_test(Some(providers::codex::protocol::RateLimits::parse(&json!({"usedPercent":25}))));
+        let stamp = module.account_data().unwrap().updated_at_ms;
+        module.program.force_for_test(false);
+        module.tick(activity::now_millis());
+        module.sync_overlay(false);
+        let cached = module.account_data().unwrap();
+        assert!(cached.stale);
+        assert_eq!(cached.updated_at_ms, stamp);
+        assert_eq!(module.model.ambient().unwrap().text, "余量 75%（缓存）");
     }
 
     #[test]
@@ -2180,7 +2197,7 @@ mod tests {
         module.program.force_for_test(false);
         module.tick(activity::now_millis());
         module.sync_overlay(false);
-        assert_eq!(module.model.ambient().unwrap().text, "额度 未连接");
+        assert_eq!(module.model.ambient().unwrap().text, "额度 75%（缓存）");
         assert!(module.model.account_header().is_none());
     }
 

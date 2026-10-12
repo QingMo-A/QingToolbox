@@ -34,6 +34,7 @@ export const KNOWN_KEYS = [
   'stopwatch', 'stopwatch.state', 'countdown', 'countdown.state',
   'task', 'task.state', 'task.detail', 'task.progress', 'task.source', 'tasks', 'tasks.count',
   'codex.working', 'codex.waiting',
+  'codex.state', 'codex.freshness', 'codex.threads.updated',
   'codex.remaining', 'codex.reset', 'codex.primary.remaining', 'codex.primary.reset',
   'codex.secondary.remaining', 'codex.secondary.reset', 'codex.updated',
 ]

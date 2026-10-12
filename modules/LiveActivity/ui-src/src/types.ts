@@ -75,6 +75,11 @@ export type CodexAccount = {
   connectionMode: 'shared' | 'accountOnly' | null
   workingThreads: number
   waitingThreads: number
+  stale: boolean
+  threadsStale: boolean
+  threadsUpdatedAtMs: number | null
+  threadConnectionMode: 'shared' | null
+  observedState: string | null
 }
 
 export type Anchor = 'topLeft' | 'topCenter' | 'topRight' | 'bottomLeft' | 'bottomCenter' | 'bottomRight'

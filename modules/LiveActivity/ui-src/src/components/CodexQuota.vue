@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { CodexAccount } from '../types'
-import { quotaLabel, remainingPercent, resetLabel, timeLabel } from '../quota'
+import { cachedQuotaHint, quotaLabel, remainingPercent, resetLabel, timeLabel } from '../quota'
 
 const props = defineProps<{ account: CodexAccount | null; connected: boolean }>()
+const cacheHint = computed(() => cachedQuotaHint(props.account))
 const rows = computed(() => {
   const limits = props.account?.limits
   return [
@@ -17,7 +18,8 @@ const rows = computed(() => {
 </script>
 
 <template>
-  <div class="codex-quota">
+  <div class="codex-quota" :class="{ cached: !!cacheHint }">
+    <p v-if="cacheHint" class="quota-cache" role="status">{{ cacheHint }}<span v-if="account?.error"> · {{ account.error }}</span></p>
     <div v-if="rows.length" class="quota-windows">
       <div v-for="row in rows" :key="row.id" class="quota-window" :class="{ low: row.remaining !== null && row.remaining <= 10 }">
         <div class="quota-heading">
@@ -32,7 +34,7 @@ const rows = computed(() => {
     </div>
     <p v-else class="quota-empty">{{ account?.error || (connected ? '正在读取额度…' : '额度尚未读取') }}</p>
     <div class="quota-refresh">
-      <span :title="timeLabel(account?.updatedAtMs, true)">数据刷新 {{ timeLabel(account?.updatedAtMs) }}</span>
+      <span :title="timeLabel(account?.updatedAtMs, true)">最后成功读取 {{ timeLabel(account?.updatedAtMs) }}</span>
       <span>{{ account?.pollIntervalSeconds ?? 10 }} 秒间隔</span>
     </div>
   </div>
@@ -40,6 +42,8 @@ const rows = computed(() => {
 
 <style scoped>
 .codex-quota { margin-top: 4px; padding-top: 12px; border-top: 1px dashed var(--q-border); }
+.quota-cache { margin: 0 0 10px; color: var(--q-warning, #c27c12); font-size: 11px; line-height: 1.5; }
+.cached .quota-track i { opacity: .6; }
 .quota-windows { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 18px; }
 .quota-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; color: var(--q-text-2); font-size: 12px; }
 .quota-heading strong { color: var(--q-text); font-size: 13px; font-variant-numeric: tabular-nums; }

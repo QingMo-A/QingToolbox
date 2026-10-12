@@ -26,6 +26,12 @@ pub struct AccountSnapshot {
     pub connection_mode: Option<String>,
     pub working_threads: usize,
     pub waiting_threads: usize,
+    pub stale: bool,
+    pub threads_stale: bool,
+    pub threads_updated_at_ms: Option<u64>,
+    /// Provenance of the last successful task observation, not the live connection.
+    pub thread_connection_mode: Option<String>,
+    pub observed_state: Option<String>,
 }
 impl Default for AccountSnapshot {
     fn default() -> Self {
@@ -38,7 +44,33 @@ impl Default for AccountSnapshot {
             connection_mode: None,
             working_threads: 0,
             waiting_threads: 0,
+            stale: false,
+            threads_stale: false,
+            threads_updated_at_ms: None,
+            thread_connection_mode: None,
+            observed_state: None,
         }
+    }
+}
+
+impl AccountSnapshot {
+    pub fn mark_stale(&mut self, reason: &str) {
+        self.stale = self.limits.is_some();
+        self.threads_stale = self.threads_updated_at_ms.is_some();
+        self.connection_mode = None;
+        if self.limits.is_some() {
+            self.error = Some(reason.into());
+        }
+    }
+
+    pub fn refresh_freshness(&mut self, now_ms: u64) {
+        let max_age = super::POLL_INTERVAL.as_millis() as u64 * 3;
+        self.stale |= self
+            .updated_at_ms
+            .is_some_and(|at| now_ms.saturating_sub(at) > max_age);
+        self.threads_stale |= self
+            .threads_updated_at_ms
+            .is_some_and(|at| now_ms.saturating_sub(at) > max_age);
     }
 }
 
@@ -63,6 +95,15 @@ impl Default for Snapshot {
             account: AccountSnapshot::default(),
             activities: Vec::new(),
         }
+    }
+}
+
+impl Snapshot {
+    fn pause(&mut self, reason: &str) {
+        self.connected = false;
+        self.activities.clear();
+        self.account.mark_stale(reason);
+        self.status = disabled_status(ProviderKind::Codex, reason);
     }
 }
 
@@ -103,7 +144,10 @@ impl ManagedCodex {
             if let Some(worker) = self.worker.take() {
                 let _ = worker.join();
             }
-            *self.snapshot.lock().unwrap_or_else(|p| p.into_inner()) = Snapshot::default();
+            self.snapshot
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .pause("采集已停止；保留上次成功数据");
         } else if changed {
             self.refresh();
         }
@@ -132,6 +176,8 @@ impl ManagedCodex {
         self.commands = Some(tx);
         self.worker = Some(std::thread::spawn(move || {
             let mut provider = CodexProvider::new();
+            let saved = shared.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            provider.restore_snapshot(saved.threads, saved.usage, saved.limits, &saved.account);
             provider.set_cancel(Arc::clone(&stop));
             provider.set_enabled(true);
             let mut idle_since = Instant::now();
@@ -158,9 +204,7 @@ impl ManagedCodex {
                     {
                         provider.stop();
                         let mut snapshot = shared.lock().unwrap_or_else(|p| p.into_inner());
-                        *snapshot = Snapshot::default();
-                        snapshot.status =
-                            disabled_status(ProviderKind::Codex, "空闲已暂停；刷新可重新连接");
+                        snapshot.pause("空闲已暂停；保留上次数据，刷新可重新连接");
                         paused = true;
                         wake.notify_all();
                     }
@@ -186,11 +230,15 @@ impl ManagedCodex {
     }
     pub fn poll(&mut self) -> Vec<LiveActivity> {
         self.ensure_worker();
-        self.snapshot
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .activities
-            .clone()
+        let mut snapshot = self.snapshot.lock().unwrap_or_else(|p| p.into_inner());
+        snapshot
+            .account
+            .refresh_freshness(crate::activity::now_millis());
+        if snapshot.account.threads_stale {
+            Vec::new()
+        } else {
+            snapshot.activities.clone()
+        }
     }
     pub fn is_connected(&self) -> bool {
         self.snapshot
@@ -199,22 +247,28 @@ impl ManagedCodex {
             .connected
     }
     pub fn status(&self) -> ProviderStatus {
-        self.snapshot
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .status
-            .clone()
+        let snapshot = self.snapshot.lock().unwrap_or_else(|p| p.into_inner());
+        let mut account = snapshot.account.clone();
+        account.refresh_freshness(crate::activity::now_millis());
+        let mut status = snapshot.status.clone();
+        if account.threads_stale {
+            status.activity_count = 0;
+        }
+        status
     }
     pub fn cached(&self) -> (Vec<ThreadRecord>, Option<TokenUsage>, Option<RateLimits>) {
         let value = self.snapshot.lock().unwrap_or_else(|p| p.into_inner());
         (value.threads.clone(), value.usage, value.limits)
     }
     pub fn account_snapshot(&self) -> AccountSnapshot {
-        self.snapshot
+        let mut account = self
+            .snapshot
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .account
-            .clone()
+            .clone();
+        account.refresh_freshness(crate::activity::now_millis());
+        account
     }
 
     #[cfg(test)]
@@ -247,5 +301,64 @@ mod tests {
         assert!(provider.worker.is_none());
         provider.configure(false, 10);
         assert!(!provider.is_connected());
+    }
+
+    #[test]
+    fn pause_and_restart_preserve_quota_and_stamp_without_live_tasks() {
+        let mut provider = ManagedCodex::new(Arc::new(Condvar::new()));
+        let limits = RateLimits::parse(&serde_json::json!({"usedPercent":25}));
+        provider.set_limits_for_test(Some(limits));
+        let stamp = provider.account_snapshot().updated_at_ms;
+        provider.configure(false, 0);
+        let cached = provider.account_snapshot();
+        assert_eq!(cached.limits, Some(limits));
+        assert_eq!(cached.updated_at_ms, stamp);
+        assert!(cached.stale);
+        assert!(provider.poll().is_empty());
+        provider.configure(true, 0);
+        assert_eq!(provider.account_snapshot().limits, Some(limits));
+    }
+
+    #[test]
+    fn stalled_worker_data_becomes_historical_without_disappearing() {
+        let mut account = AccountSnapshot {
+            limits: Some(RateLimits::parse(&serde_json::json!({"usedPercent":25}))),
+            updated_at_ms: Some(100),
+            threads_updated_at_ms: Some(100),
+            ..Default::default()
+        };
+        account.refresh_freshness(30101);
+        assert!(account.stale && account.threads_stale);
+        assert!(account.limits.is_some());
+        assert_eq!(account.updated_at_ms, Some(100));
+    }
+
+    #[test]
+    fn stalled_task_snapshot_is_not_republished_as_current_work() {
+        let mut provider = ManagedCodex::new(Arc::new(Condvar::new()));
+        provider.simulated = true;
+        {
+            let mut snapshot = provider.snapshot.lock().unwrap();
+            snapshot.account.threads_updated_at_ms = Some(crate::activity::now_millis());
+            snapshot.account.working_threads = 1;
+            snapshot.status.activity_count = 1;
+            snapshot.activities.push(LiveActivity::running(
+                "t",
+                ProviderKind::Codex,
+                "task",
+                "task",
+            ));
+        }
+        assert_eq!(provider.poll().len(), 1);
+        provider
+            .snapshot
+            .lock()
+            .unwrap()
+            .account
+            .threads_updated_at_ms = Some(1);
+        assert!(provider.poll().is_empty());
+        assert_eq!(provider.status().activity_count, 0);
+        assert_eq!(provider.account_snapshot().working_threads, 1);
+        assert!(provider.account_snapshot().threads_stale);
     }
 }

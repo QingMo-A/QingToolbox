@@ -28,6 +28,9 @@ pub const PLACEHOLDERS: &[(&str, &str)] = &[
     ("tasks.count", "任务数量"),
     ("codex.working", "Codex 工作中"),
     ("codex.waiting", "Codex 等待中"),
+    ("codex.state", "Codex 状态（区分上次观察）"),
+    ("codex.freshness", "Codex 额度新鲜度"),
+    ("codex.threads.updated", "Codex 任务最后读取时间"),
     ("codex.remaining", "Codex 剩余额度"),
     ("codex.reset", "Codex 距重置"),
     ("codex.primary.remaining", "主额度剩余"),
@@ -93,7 +96,7 @@ pub fn values(
                     format!("{prefix}.remaining"),
                     window
                         .and_then(|w| w.remaining_percent())
-                        .map(|v| format!("{v:.0}%")),
+                        .map(|v| format!("{v:.0}%{}", if account.stale { "（缓存）" } else { "" })),
                 );
                 result.insert(
                     format!("{prefix}.reset"),
@@ -105,16 +108,59 @@ pub fn values(
             "codex.updated".into(),
             account.updated_at_ms.and_then(format_timestamp),
         );
+        result.insert(
+            "codex.freshness".into(),
+            Some(
+                if account.limits.is_none() {
+                    "未读取"
+                } else if account.stale {
+                    "上次数据"
+                } else {
+                    "已更新"
+                }
+                .into(),
+            ),
+        );
+        result.insert(
+            "codex.threads.updated".into(),
+            account.threads_updated_at_ms.and_then(format_timestamp),
+        );
         // Thread counts are only known through a shared app-server; an
         // account-only connection cannot see desktop tasks, so it says nothing.
-        if account.connection_mode.as_deref() == Some("shared") {
+        if account.thread_connection_mode.as_deref() == Some("shared")
+            && account.threads_updated_at_ms.is_some()
+        {
+            let suffix = if account.threads_stale {
+                "（上次）"
+            } else {
+                ""
+            };
             result.insert(
                 "codex.working".into(),
-                Some(account.working_threads.to_string()),
+                Some(format!("{}{suffix}", account.working_threads)),
             );
             result.insert(
                 "codex.waiting".into(),
-                Some(account.waiting_threads.to_string()),
+                Some(format!("{}{suffix}", account.waiting_threads)),
+            );
+            let state =
+                account
+                    .observed_state
+                    .as_deref()
+                    .unwrap_or(if account.working_threads > 0 {
+                        "工作中"
+                    } else if account.waiting_threads > 0 {
+                        "等待处理"
+                    } else {
+                        "空闲"
+                    });
+            result.insert(
+                "codex.state".into(),
+                Some(if account.threads_stale {
+                    format!("上次{state}（当前未确认）")
+                } else {
+                    state.into()
+                }),
             );
         }
     }
@@ -385,6 +431,8 @@ mod tests {
     fn codex_thread_counts_need_a_shared_connection() {
         let shared = AccountSnapshot {
             connection_mode: Some("shared".into()),
+            thread_connection_mode: Some("shared".into()),
+            threads_updated_at_ms: Some(1),
             working_threads: 2,
             waiting_threads: 1,
             ..Default::default()
@@ -393,10 +441,33 @@ mod tests {
         assert_eq!(render("{codex.working}/{codex.waiting}", &v, "?"), "2/1");
         let only_quota = AccountSnapshot {
             connection_mode: Some("accountOnly".into()),
+            thread_connection_mode: None,
+            threads_updated_at_ms: None,
             ..shared
         };
         let v = values(&Settings::default(), None, Some(&only_quota), 0);
         assert_eq!(render("{codex.working|未接入}", &v, "?"), "未接入");
+    }
+    #[test]
+    fn historical_values_are_retained_but_never_labelled_current() {
+        let history = AccountSnapshot {
+            limits: Some(crate::providers::codex::protocol::RateLimits::parse(
+                &serde_json::json!({"usedPercent":25}),
+            )),
+            stale: true,
+            threads_stale: true,
+            threads_updated_at_ms: Some(1),
+            thread_connection_mode: Some("shared".into()),
+            working_threads: 2,
+            ..Default::default()
+        };
+        let v = values(&Settings::default(), None, Some(&history), 0);
+        assert_eq!(
+            render("{codex.remaining} {codex.working}", &v, "?"),
+            "75%（缓存） 2（上次）"
+        );
+        assert_eq!(render("{codex.state}", &v, "?"), "上次工作中（当前未确认）");
+        assert_eq!(render("{codex.freshness}", &v, "?"), "上次数据");
     }
     #[test]
     fn secondary_is_not_invented_and_primary_falls_back_only_when_unknown() {
