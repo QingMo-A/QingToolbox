@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.16",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-12T15:43:32Z",
+      "package": {
+        "fileName": "qing.liveactivity-0.1.16-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/054407956f8354ae13d74441d716d4009f4a6f26/modules/LiveActivity/packages/qing.liveactivity-0.1.16-tauri.qmod",
+        "size": 600952,
+        "sha256": "4cc1a2e72befe663b755d52f04a5e013e5323372064439372e1d9bfab066d6aa"
+      },
+      "releaseNotes": {
+        "zh-CN": "读取失败、断线、Codex 退出及采集暂停时保留最后成功数据和读取时间；部分响应保留缺失字段。额度与模板标明缓存，历史工作/等待状态注明上次观察而非当前状态；恢复有效读取后替换旧值，过期任务不继续发布为实时活动。缓存仅保留于模块进程内，兼容已有配置。",
+        "en-US": "Retain last successful Codex data and timestamps on read failures, disconnection, external Codex exit and acquisition pauses; preserve missing fields in partial responses. Label cached quotas and historical work/wait observations explicitly rather than asserting current state. Replace history after successful reads and stop publishing expired observations as live activities. Cache remains process-local; existing profiles are preserved."
+      }
+    },
+    {
       "version": "0.1.15",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
