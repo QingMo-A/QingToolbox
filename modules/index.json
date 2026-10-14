@@ -27,6 +27,14 @@
       "updateManifest": "LiveActivity/update.json",
       "visibility": "public"
     },
+    "qing.passwordnotes": {
+      "name": { "zh-CN": "密码记事本", "en-US": "Password Notes" },
+      "description": { "zh-CN": "按分类整理游戏和网站的多组账号密码，支持备注、分别复制、密码显隐和 TXT 明文导出。本机 DPAPI 加密保存。需要支持通用文件选择与弹窗接口的新版工具箱构建。", "en-US": "Categorized accounts and passwords with notes, reveal, separate copying and plaintext TXT exports. Local storage uses Windows DPAPI. Requires a toolbox build with generic file and popup services." },
+      "icon": "PasswordNotes/icon.svg",
+      "moduleManifest": "PasswordNotes/module.json",
+      "updateManifest": "PasswordNotes/update.json",
+      "visibility": "public"
+    },
     "qing.pdf": {
       "name": { "zh-CN": "PDF 工具", "en-US": "Qing PDF" },
       "description": { "zh-CN": "在本地合并、拆分、提取和旋转 PDF。", "en-US": "Merge, split, extract and rotate PDFs locally." },

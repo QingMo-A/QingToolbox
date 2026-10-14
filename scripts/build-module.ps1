@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('canary','launcher','pdf','texttools','windowtopmost','powerguard','screenpin','liveactivity')]
+    [ValidateSet('canary','launcher','pdf','texttools','windowtopmost','powerguard','screenpin','liveactivity','passwordnotes')]
     [string]$Module,
     [string]$QingToolboxHostRoot = $env:QINGTOOLBOX_HOST_ROOT
 )
@@ -15,9 +15,10 @@ try {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($hostRoot)) { throw 'Compatible toolbox host checkout not found.' }
     $env:QINGTOOLBOX_HOST_ROOT = $hostRoot
     $env:QINGTOOLBOX_MODULES_ROOT = $root
-    if ($Module -eq 'liveactivity') {
+    if ($Module -in @('liveactivity','passwordnotes')) {
         # New module builds belong to the modules branch, not a host release.
-        & (Join-Path $root 'modules/LiveActivity/build.ps1') -QingToolboxHostRoot $hostRoot
+        $directory = if ($Module -eq 'liveactivity') { 'LiveActivity' } else { 'PasswordNotes' }
+        & (Join-Path $root "modules/$directory/build.ps1") -QingToolboxHostRoot $hostRoot
     } else {
         & (Join-Path $hostRoot "scripts/build-tauri-$Module.ps1")
     }

@@ -1,0 +1,37 @@
+# 密码记事本 / Password Notes
+
+Windows x64 独立进程模块，模块 ID `qing.passwordnotes`，版本 `0.1.0`，API 版本 `1`。需要已实现通用保存位置和弹窗接口的工具箱（当前本地最新 `0.3.4-alpha` 构建）。模块不内置到宿主。
+
+## 使用
+
+先建立自定义分类（例如游戏、网站、工作），再在分类下添加游戏或网站条目。条目可保存名称、对应的 HTTP/HTTPS 链接和备注；每个条目支持 1–64 组账号密码，以及各账号自己的备注。可编辑、跨分类移动和删除条目。链接按钮复制链接，不自动导航到第三方网页。
+
+账号和密码可分别复制。默认密码显示为固定 `***`，与真实长度无关。点击眼睛才读取并显示对应密码；再次点击、切换分类、窗口失去焦点、页面隐藏或 30 秒到期都会重新隐藏。迟到的读取响应不能在窗口失焦后重新显示密码。编辑页密码输入也默认隐藏。
+
+搜索只匹配名称、链接、备注及账号，不搜索密码。列表和常规刷新响应不包含密码；编辑/显示密码是显式操作。复制由 Rust 后端执行，不要求先把密码显露在网页列表中。
+
+导出支持当前分类或全部分类。使用宿主的风险确认弹窗和原生保存位置选择器，然后保存带 UTF-8 BOM 的 `.txt`。取消确认或文件选择不会写文件。导出包含完整明文密码，不会删除、替换本机加密记事本。
+
+## 数据与安全边界
+
+- 数据保存到宿主指定的模块数据目录中的 `vault.dpapi`。整个文档使用 Windows 当前用户范围的 [DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata) 加密；不使用机器范围的通用密钥，也不另存明文 JSON。
+- 保存先校验和加密，再在同一目录原子替换。已有文件保留为加密的 `vault.dpapi.bak`；保存失败不切换内存中的文档。读取失败或解密失败不以空文档覆盖原文件，修改会被阻止。
+- DPAPI 不是应用主密码：通常需要原 Windows 用户和设备才能解密。相同用户权限的恶意程序仍可能访问数据和进程内存。此版本没有独立主密码、同步、跨设备加密备份或自动填充；不要把它当作已经通过安全审计的专业密码管理器。
+- 常规响应、错误和日志不包含密码。原生密码字段和临时解密/序列化缓冲区使用 `zeroize` 清理，但无法保证浏览器或操作系统里不存在短暂副本。
+- 复制设置 Windows 的禁止剪贴板历史/云同步格式（[Microsoft Clipboard Formats](https://learn.microsoft.com/en-us/windows/win32/dataxchg/clipboard-formats#cloud-clipboard-and-clipboard-history-formats)）。这不能阻止第三方剪贴板软件读取当前内容；本版不自动清空用户剪贴板。
+- **TXT 是明文**，不属于上述加密保护范围。导出后应自行妥善保管；不要上传公共网盘或分享给他人。
+- 本版上限为 64 个分类、256 个条目、500 组账号，另有文档和响应大小限制。密码保留原始空格，不进行 trim。
+
+主题、皮肤、字体及按钮/弹窗组件使用工具箱共享 Module UI；不维护独立配色库。界面支持窄窗口与减少动画偏好。无后台监听；加载、启用、停用与卸载遵循宿主 API 1，停用不销毁驻留数据。
+
+## 构建
+
+在 modules 工作区执行：
+
+```powershell
+cargo test --manifest-path modules/PasswordNotes/Cargo.toml --locked
+./scripts/build-module.ps1 -Module passwordnotes -QingToolboxHostRoot F:/QingToolbox-toolbox
+./scripts/package-module.ps1 -ModuleId qing.passwordnotes -QingToolboxHostRoot F:/QingToolbox-toolbox -SkipBuild -OutputDirectory ./modules/PasswordNotes/packages
+```
+
+UI 的 `npm test` 使用合成账号和模拟宿主；不会访问用户真实记事本、复制真实密码或发送网络消息。模块原生许可来自锁定依赖，构建包附带许可文本。
