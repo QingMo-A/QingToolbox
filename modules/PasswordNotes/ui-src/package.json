@@ -1,7 +1,7 @@
 {
   "name": "qing-passwordnotes-web",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "scripts": { "dev": "vite --host 127.0.0.1", "build": "node ../../../scripts/build-module-ui.mjs", "typecheck": "node ../../../scripts/build-module-ui.mjs --typecheck", "test": "vitest run" },
   "dependencies": { "@tauri-apps/api": "2.8.0", "vue": "3.5.42" },

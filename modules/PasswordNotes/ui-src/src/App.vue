@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { QButton, QIcon, QIconButton, QModal, QModalInput, selectSavePath, showDialog, showNotification } from '@qingtoolbox/module-ui'
 import { call } from './bridge'
-import type { Category, Draft, EditEntry, Entry, State } from './types'
+import { MAX_SECURITY_FIELDS, securityFieldLabel, type Category, type Draft, type DraftAccount, type EditEntry, type Entry, type SecurityField, type State } from './types'
 import VaultIcon from './VaultIcon.vue'
 import { RevealCache } from './RevealCache'
 
@@ -22,6 +22,14 @@ const reveals = new RevealCache(() => { revealRevision.value++ }, REVEAL_SECONDS
 const editVisible = ref(new Set<number>())
 const pendingReveal = ref(new Set<string>())
 const copied = ref(new Set<string>())
+const expandedSecurity = ref(new Set<string>())
+const securityKeys = new WeakMap<SecurityField, number>()
+let nextSecurityKey = 0
+function securityFieldKey(field: SecurityField) {
+  if (!securityKeys.has(field)) securityKeys.set(field, ++nextSecurityKey)
+  return securityKeys.get(field)!
+}
+const newAccount = (): DraftAccount => ({ account: '', password: '', note: '', securityFields: [] })
 let privacyEpoch = 0
 let disposed = false
 let statusTimer: ReturnType<typeof setTimeout> | undefined
@@ -46,7 +54,8 @@ function apply(next: State) {
   state.value = next
   if (!next.categories.some(c => c.id === selectedId.value)) selectedId.value = next.categories[0]?.id ?? ''
 }
-function hideSecrets() { privacyEpoch++; reveals.clear(); editVisible.value = new Set() }
+function hideSecrets() { privacyEpoch++; reveals.clear(); editVisible.value = new Set(); expandedSecurity.value = new Set() }
+function toggleSecurity(id: string) { const next = new Set(expandedSecurity.value); next.has(id) ? next.delete(id) : next.add(id); expandedSecurity.value = next }
 function choose(id: string) { hideSecrets(); selectedId.value = id; search.value = '' }
 function shown(id: string) { void revealRevision.value; return reveals.get(id) }
 function announce(value: string) { status.value = value; clearTimeout(statusTimer); statusTimer = setTimeout(() => { status.value = '' }, 3200) }
@@ -85,25 +94,38 @@ async function editEntry(entry?: Entry, category = selected.value) {
   if (!category || locked.value) return
   hideSecrets(); editError.value = ''
   await run(async () => {
-    const value: EditEntry = entry ? await call<EditEntry>('getEntryForEdit', { id: entry.id }) : { name: '', link: '', remark: '', credentials: [{ account: '', password: '', note: '' }] }
-    Object.assign(draft, { ...value, id: entry?.id, categoryId: category.id, credentials: value.credentials.map(a => ({ ...a })) })
+    const value: EditEntry = entry ? await call<EditEntry>('getEntryForEdit', { id: entry.id }) : { name: '', link: '', remark: '', credentials: [newAccount()] }
+    Object.assign(draft, { ...value, id: entry?.id, categoryId: category.id, credentials: value.credentials.map(a => ({ ...a, securityFields: (a.securityFields ?? []).map(field => ({ ...field })) })) })
     editing.value = true
   })
 }
 function closeEditor() {
   if (busy.value) return
   editing.value = false; editVisible.value = new Set(); editError.value = ''
-  for (const a of draft.credentials) { a.password = ''; a.account = ''; a.note = '' }
+  for (const a of draft.credentials) clearAccount(a)
   Object.assign(draft, { id: undefined, categoryId: '', name: '', link: '', remark: '', credentials: [] })
 }
 function toggleEdit(index: number) { const next = new Set(editVisible.value); next.has(index) ? next.delete(index) : next.add(index); editVisible.value = next }
-function removeDraftAccount(index: number) { draft.credentials[index].password = ''; draft.credentials.splice(index, 1); editVisible.value = new Set() }
+function clearAccount(account: DraftAccount) {
+  account.password = ''; account.account = ''; account.note = ''
+  for (const field of account.securityFields) { field.label = ''; field.value = '' }
+}
+function removeDraftAccount(index: number) { clearAccount(draft.credentials[index]); draft.credentials.splice(index, 1); editVisible.value = new Set() }
+function addSecurityField(account: DraftAccount) {
+  if (busy.value || account.securityFields.length >= MAX_SECURITY_FIELDS) return
+  account.securityFields.push({ kind: 'phone', label: '', value: '' })
+}
+function removeSecurityField(account: DraftAccount, index: number) {
+  const field = account.securityFields[index]
+  field.label = ''; field.value = ''; account.securityFields.splice(index, 1)
+}
 async function saveEntry() {
   if (busy.value) return
   if (!draft.name.trim() || !draft.categoryId || !draft.credentials.length || draft.credentials.some(a => !a.account.trim() || !a.password)) { editError.value = '请填写游戏 / 网站名称，以及每组的账号和密码。'; return }
+  if (draft.credentials.some(a => a.securityFields.some(field => field.value.trim() && field.kind === 'custom' && !field.label.trim()))) { editError.value = '请为已填写的自定义安全信息设置名称。'; return }
   busy.value = true; editError.value = ''; error.value = ''
   try {
-    const next = await call<State>('saveEntry', { ...draft, credentials: draft.credentials.map(a => ({ ...a })) })
+    const next = await call<State>('saveEntry', { ...draft, credentials: draft.credentials.map(a => ({ ...a, securityFields: a.securityFields.filter(field => field.value.trim()).map(field => ({ ...field, label: field.kind === 'custom' ? field.label.trim() : '', value: field.value.trim() })) })) })
     selectedId.value = draft.categoryId; apply(next); busy.value = false; closeEditor(); announce('条目已加密保存')
   } catch (cause) { editError.value = message(cause) } finally { busy.value = false }
 }
@@ -128,12 +150,12 @@ async function reveal(entryId: string, credentialId: string) {
   } catch (cause) { error.value = message(cause) }
   finally { const next = new Set(pendingReveal.value); next.delete(credentialId); pendingReveal.value = next }
 }
-async function copy(entryId: string, credentialId: string, field: 'account' | 'password') {
+async function copy(entryId: string, credentialId: string, field: 'account' | 'password' | 'securityField', securityFieldIndex?: number) {
   if (locked.value) return
   await run(async () => {
-    await call('copyCredential', { entryId, credentialId, field })
-    flashCopied(`${credentialId}:${field}`)
-    announce(field === 'account' ? '账号已复制' : '密码已复制')
+    await call('copyCredential', { entryId, credentialId, field, ...(field === 'securityField' ? { securityFieldIndex } : {}) })
+    flashCopied(`${credentialId}:${field}${field === 'securityField' ? `:${securityFieldIndex}` : ''}`)
+    announce(field === 'account' ? '账号已复制' : field === 'password' ? '密码已复制' : '安全信息已复制')
   })
 }
 async function copyLink(entry: Entry) { await run(async () => { await call('copyLink', { id: entry.id }); flashCopied(`${entry.id}:link`); announce('链接已复制') }) }
@@ -142,7 +164,7 @@ async function exportTxt(all: boolean) {
   const categoryId = all ? null : selectedId.value
   await run(async () => {
     hideSecrets()
-    const answer = await showDialog({ title: '导出明文 TXT', labels: ['导出的文件包含完整账号和真实密码，任何能打开文件的人都能读取。', all ? '范围：全部分类。请不要上传公共网盘或发送给他人。' : `范围：${selected.value?.name ?? '当前分类'}。请妥善保管。`, '本机加密数据不会被删除或替换。'], buttons: [{ id: 'cancel', label: '取消' }, { id: 'export', label: '我了解，继续导出', variant: 'primary' }] })
+    const answer = await showDialog({ title: '导出明文 TXT', labels: ['导出的文件包含完整账号、真实密码和已填写的安全信息，任何能打开文件的人都能读取。', all ? '范围：全部分类。请不要上传公共网盘或发送给他人。' : `范围：${selected.value?.name ?? '当前分类'}。请妥善保管。`, '本机加密数据不会被删除或替换。'], buttons: [{ id: 'cancel', label: '取消' }, { id: 'export', label: '我了解，继续导出', variant: 'primary' }] })
     if (answer?.buttonId !== 'export') return
     const path = await selectSavePath({ title: '保存密码记事本 TXT', defaultPath: '密码记事本.txt', filters: [{ name: '文本文件', extensions: ['txt'] }] })
     if (!path) return
@@ -161,7 +183,7 @@ onMounted(() => { window.addEventListener('blur', hideSecrets); window.addEventL
 onBeforeUnmount(() => {
   disposed = true; hideSecrets(); clearTimeout(statusTimer); for (const timer of copyTimers.values()) clearTimeout(timer)
   window.removeEventListener('blur', hideSecrets); window.removeEventListener('keydown', shortcuts); document.removeEventListener('visibilitychange', visibility)
-  for (const a of draft.credentials) a.password = ''
+  for (const a of draft.credentials) clearAccount(a)
 })
 </script>
 
@@ -255,6 +277,17 @@ onBeforeUnmount(() => {
                     </button>
                     <button type="button" class="cell-action" :class="{ copied: copied.has(`${a.id}:password`) }" aria-label="复制密码" title="复制密码" :disabled="locked" @click="copy(entry.id, a.id, 'password')"><VaultIcon :name="copied.has(`${a.id}:password`) ? 'check' : 'copy'" :size="15" /></button>
                   </div>
+                  <section v-if="a.securityFields?.length" class="security-info">
+                    <button type="button" class="security-info-toggle" :aria-expanded="expandedSecurity.has(a.id)" :aria-controls="`security-${a.id}`" @click="toggleSecurity(a.id)"><VaultIcon name="shield" :size="13" /><span>安全信息</span><small>{{ a.securityFields.length }}</small><span class="security-chevron" :class="{ expanded: expandedSecurity.has(a.id) }" aria-hidden="true">⌄</span></button>
+                    <Transition name="security-info">
+                      <div v-if="expandedSecurity.has(a.id)" :id="`security-${a.id}`" class="security-info-list">
+                        <div v-for="(field, index) in a.securityFields" :key="index" class="security-info-row">
+                          <span class="security-info-label">{{ securityFieldLabel(field) }}</span><span class="security-info-value">{{ field.value }}</span>
+                          <button type="button" class="cell-action" :class="{ copied: copied.has(`${a.id}:securityField:${index}`) }" :aria-label="`复制${securityFieldLabel(field)} ${a.account} 第${index + 1}条`" :title="`复制${securityFieldLabel(field)}`" :disabled="locked" @click="copy(entry.id, a.id, 'securityField', index)"><VaultIcon :name="copied.has(`${a.id}:securityField:${index}`) ? 'check' : 'copy'" :size="14" /></button>
+                        </div>
+                      </div>
+                    </Transition>
+                  </section>
                 </div>
               </div>
             </article>
@@ -288,8 +321,27 @@ onBeforeUnmount(() => {
         <div class="edit-grid"><QModalInput v-model="draft.name" label="游戏 / 网站名称" placeholder="例如：Steam、某个游戏或网站" :max-length="128" :disabled="busy" /><label class="local-field"><span>分类</span><select v-model="draft.categoryId" :disabled="busy"><option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option></select></label></div>
         <QModalInput v-model="draft.link" label="对应链接（可选）" placeholder="https://example.com" :max-length="1024" :disabled="busy" />
         <label class="local-field"><span>条目备注（可选）</span><textarea v-model="draft.remark" rows="2" maxlength="2048" placeholder="例如：服务器、区服、角色或用途" :disabled="busy" /></label>
-        <div class="accounts-heading"><h3>账号与密码 <small>{{ draft.credentials.length }}</small></h3><QButton type="button" variant="ghost" :disabled="busy || draft.credentials.length >= 64" @click="draft.credentials.push({ account: '', password: '', note: '' })"><VaultIcon name="plus" :size="15" />再加一组</QButton></div>
-        <TransitionGroup name="record" tag="div" class="draft-accounts"><section v-for="(a, index) in draft.credentials" :key="a.id ?? `new-${index}`" class="draft-account"><div class="draft-account-heading"><span><b>{{ index + 1 }}</b>账号</span><QIconButton type="button" label="移除此组账号" :disabled="busy || draft.credentials.length <= 1" @click="removeDraftAccount(index)"><QIcon name="remove" :size="14" /></QIconButton></div><div class="edit-grid"><QModalInput v-model="a.account" label="账号" placeholder="用户名、邮箱或账号 ID" :max-length="256" :disabled="busy" /><div class="password-editor"><QModalInput v-model="a.password" label="密码" :type="editVisible.has(index) ? 'text' : 'password'" placeholder="输入密码" :max-length="4096" :disabled="busy" /><QIconButton type="button" :label="editVisible.has(index) ? '隐藏输入的密码' : '显示输入的密码'" :disabled="busy" @click="toggleEdit(index)"><VaultIcon :name="editVisible.has(index) ? 'eyeOff' : 'eye'" :size="16" /></QIconButton></div></div><QModalInput v-model="a.note" label="账号备注（可选）" placeholder="例如：主号、小号、角色名" :max-length="256" :disabled="busy" /></section></TransitionGroup>
+        <div class="accounts-heading"><h3>账号与密码 <small>{{ draft.credentials.length }}</small></h3><QButton type="button" variant="ghost" :disabled="busy || draft.credentials.length >= 64" @click="draft.credentials.push(newAccount())"><VaultIcon name="plus" :size="15" />再加一组</QButton></div>
+        <TransitionGroup name="record" tag="div" class="draft-accounts">
+          <section v-for="(a, index) in draft.credentials" :key="a.id ?? `new-${index}`" class="draft-account">
+            <div class="draft-account-heading"><span><b>{{ index + 1 }}</b>账号</span><QIconButton type="button" label="移除此组账号" :disabled="busy || draft.credentials.length <= 1" @click="removeDraftAccount(index)"><QIcon name="remove" :size="14" /></QIconButton></div>
+            <div class="edit-grid"><QModalInput v-model="a.account" label="账号" placeholder="用户名、邮箱或账号 ID" :max-length="256" :disabled="busy" /><div class="password-editor"><QModalInput v-model="a.password" label="密码" :type="editVisible.has(index) ? 'text' : 'password'" placeholder="输入密码" :max-length="4096" :disabled="busy" /><QIconButton type="button" :label="editVisible.has(index) ? '隐藏输入的密码' : '显示输入的密码'" :disabled="busy" @click="toggleEdit(index)"><VaultIcon :name="editVisible.has(index) ? 'eyeOff' : 'eye'" :size="16" /></QIconButton></div></div>
+            <QModalInput v-model="a.note" label="账号备注（可选）" placeholder="例如：主号、小号、角色名" :max-length="256" :disabled="busy" />
+            <section class="security-editor">
+              <div class="security-editor-heading"><div><strong>安全信息 <small>可选 · {{ a.securityFields.length }}/{{ MAX_SECURITY_FIELDS }}</small></strong><p>可添加多条安全手机、邮箱或自定义信息；空白行不保存。</p></div><QButton type="button" class="add-security-field" variant="ghost" :disabled="busy || a.securityFields.length >= MAX_SECURITY_FIELDS" @click="addSecurityField(a)"><VaultIcon name="plus" :size="13" />添加安全信息</QButton></div>
+              <TransitionGroup name="record" tag="div" class="security-field-list">
+                <div v-for="(field, fieldIndex) in a.securityFields" :key="securityFieldKey(field)" class="security-field-edit">
+                  <div class="security-field-inputs" :class="{ 'is-custom': field.kind === 'custom' }">
+                    <label class="local-field"><span>信息类型</span><select v-model="field.kind" :disabled="busy" aria-label="安全信息类型"><option value="phone">安全手机</option><option value="email">安全邮箱</option><option value="custom">自定义</option></select></label>
+                    <QModalInput v-if="field.kind === 'custom'" v-model="field.label" label="自定义名称" placeholder="例如：备用联系方式" :max-length="32" :disabled="busy" />
+                    <QModalInput v-model="field.value" class="security-field-value" :label="field.kind === 'phone' ? '手机号码' : field.kind === 'email' ? '邮箱地址' : '信息内容'" :placeholder="field.kind === 'phone' ? '可包含国家或地区区号' : field.kind === 'email' ? 'name@example.com' : '填写需要保存的信息'" :max-length="256" :disabled="busy" />
+                  </div>
+                  <QIconButton type="button" label="移除这条安全信息" :disabled="busy" @click="removeSecurityField(a, fieldIndex)"><QIcon name="remove" :size="14" /></QIconButton>
+                </div>
+              </TransitionGroup>
+            </section>
+          </section>
+        </TransitionGroup>
         <p v-if="editError" class="edit-error" role="alert">{{ editError }}</p>
       </form>
       <template #actions><span class="save-hint"><VaultIcon name="lock" :size="13" />本机加密保存 · Ctrl Enter</span><QButton type="button" :disabled="busy" @click="closeEditor">取消</QButton><QButton type="button" variant="primary" :loading="busy" @click="saveEntry">保存条目</QButton></template>

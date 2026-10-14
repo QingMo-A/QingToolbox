@@ -106,7 +106,21 @@ impl App {
                 let value = match text(payload, "field")? {
                     "account" => &credential.account,
                     "password" => &credential.password,
-                    _ => return Err(Error::new("invalidField", "只能复制账号或密码。")),
+                    "securityField" => {
+                        let index = payload
+                            .get("securityFieldIndex")
+                            .and_then(Value::as_u64)
+                            .and_then(|index| usize::try_from(index).ok())
+                            .ok_or_else(|| Error::new("invalidField", "安全信息序号无效。"))?;
+                        &credential
+                            .security_fields
+                            .get(index)
+                            .ok_or_else(|| {
+                                Error::new("invalidField", "安全信息不存在，请刷新后重试。")
+                            })?
+                            .value
+                    }
+                    _ => return Err(Error::new("invalidField", "只能复制账号、密码或安全信息。")),
                 };
                 platform::copy(value)?;
                 Ok(json!({"copied":true}))
@@ -188,5 +202,22 @@ mod tests {
         let mut value = json!({"credentials":[{"password":"synthetic"}]});
         wipe(&mut value);
         assert_eq!(value["credentials"][0]["password"], "");
+    }
+    #[test]
+    #[cfg(windows)]
+    fn invalid_security_copy_requests_are_rejected_before_the_clipboard_is_touched() {
+        let root =
+            std::env::temp_dir().join(format!("qing-passwordnotes-copy-{}", std::process::id()));
+        let mut app = App::new(Some(root.clone()));
+        app.invoke("saveCategory", &json!({"name":"分类"})).unwrap();
+        app.invoke("saveEntry", &json!({"categoryId":app.vault.categories[0].id,"name":"示例","credentials":[{"account":"synthetic","password":"synthetic-password","securityFields":[{"kind":"email","value":"safe@example.com"}]}]})).unwrap();
+        for index in [json!(-1), json!(100), json!(null), json!(0.5), json!("0")] {
+            let payload = json!({"entryId":app.vault.categories[0].entries[0].id,"credentialId":app.vault.categories[0].entries[0].credentials[0].id,"field":"securityField","securityFieldIndex":index});
+            assert_eq!(
+                app.invoke("copyCredential", &payload).unwrap_err().code,
+                "invalidField"
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

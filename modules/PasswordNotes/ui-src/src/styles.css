@@ -171,6 +171,20 @@ h1 { margin: 0; font-size: 20px; font-weight: 750; letter-spacing: -.03em; line-
 .reveal-ring circle { fill: none; stroke: var(--q-warning, #b66a0b); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 100; animation: pn-drain linear forwards; }
 .password-cell.revealed .reveal { color: var(--q-warning, #b66a0b); }
 
+.security-info { grid-column: 1 / -1; min-width: 0; }
+.security-info-toggle { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 30px; padding: 3px 7px; border: 0; border-radius: 8px; background: transparent; color: var(--q-text-2); font-size: 11.5px; cursor: pointer; text-align: left; transition: color 150ms ease, background 150ms ease; }
+.security-info-toggle:hover { background: var(--q-brand-soft); color: var(--q-brand); }
+.security-info-toggle small { padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--q-text) 6%, transparent); color: var(--q-text-3); font-size: 10.5px; }
+.security-chevron { margin-left: auto; transition: transform 180ms var(--pn-ease); }
+.security-chevron.expanded { transform: rotate(180deg); }
+.security-info-list { display: grid; gap: 3px; margin-top: 4px; padding: 7px; border: 1px solid var(--pn-hairline); border-radius: 10px; background: var(--pn-card); }
+.security-info-row { display: grid; grid-template-columns: minmax(60px, auto) minmax(0, 1fr) 28px; align-items: center; gap: 8px; }
+.security-info-label { max-width: 120px; color: var(--q-text-3); font-size: 11px; overflow-wrap: anywhere; }
+.security-info-value { color: var(--q-text); font-size: 12px; overflow-wrap: anywhere; user-select: text; }
+.security-info-row .cell-action { width: 28px; height: 28px; }
+.security-info-enter-active, .security-info-leave-active { transition: opacity 160ms ease, transform 180ms var(--pn-ease); }
+.security-info-enter-from, .security-info-leave-to { opacity: 0; transform: translateY(-4px); }
+
 /* ------------------------------------------------------------ Empty states */
 .empty-state { display: flex; align-items: center; justify-content: center; flex-direction: column; min-height: 320px; padding: 40px 26px; border: 1px dashed var(--pn-hairline); border-radius: 20px; background: color-mix(in srgb, var(--pn-card) 60%, transparent); text-align: center; }
 .empty-mark { display: grid; place-items: center; width: 64px; height: 64px; margin-bottom: 16px; border-radius: 20px; background: var(--q-brand-soft); color: var(--q-brand); box-shadow: 0 12px 24px -16px color-mix(in srgb, var(--q-brand) 70%, transparent); }
@@ -196,7 +210,9 @@ h1 { margin: 0; font-size: 20px; font-weight: 750; letter-spacing: -.03em; line-
 .notice > span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--pn-success); color: #fff; }
 
 /* ---------------------------------------------------------------- Editor */
-.entry-editor { width: min(100%, 680px); max-height: 89vh; }
+.q-modal-layer .q-modal-card.entry-editor { display: flex; flex-direction: column; width: min(100%, 680px); max-height: 89vh; overflow: hidden; }
+.entry-editor > .q-modal-header, .entry-editor > .q-modal-actions { flex: none; }
+.entry-editor > .q-modal-content { min-height: 0; overflow-y: auto; }
 .edit-form { display: grid; gap: 16px; }
 .form-hint { display: flex; align-items: center; gap: 7px; margin: 0; padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, var(--q-brand) 6%, transparent); color: var(--q-text-2); font-size: 12px; line-height: 1.6; }
 .form-hint svg { color: var(--q-brand); }
@@ -211,6 +227,18 @@ h1 { margin: 0; font-size: 20px; font-weight: 750; letter-spacing: -.03em; line-
 .accounts-heading .q-button { min-height: 30px; padding: 0 10px; font-size: 12px; }
 .draft-accounts { position: relative; display: grid; gap: 12px; }
 .draft-account { display: grid; gap: 12px; padding: 12px 14px 14px; border: 1px solid var(--pn-hairline); border-radius: 14px; background: color-mix(in srgb, var(--q-surface-soft) 40%, var(--q-surface)); }
+.security-editor { min-width: 0; padding-top: 12px; border-top: 1px dashed var(--pn-hairline); }
+.security-editor-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.security-editor-heading strong { font-size: 12px; }
+.security-editor-heading small { margin-left: 5px; color: var(--q-text-3); font-size: 11px; font-weight: 400; }
+.security-editor-heading p { margin: 4px 0 0; color: var(--q-text-3); font-size: 11px; line-height: 1.6; }
+.security-editor-heading .q-button { min-height: 30px; padding: 0 8px; font-size: 11.5px; }
+.security-field-list { position: relative; display: grid; gap: 10px; }
+.security-field-list:not(:empty) { margin-top: 12px; }
+.security-field-edit { display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 7px; align-items: start; }
+.security-field-edit > .q-icon-button { width: 28px; height: 30px; min-height: 0; margin-top: 23px; padding: 0; border-color: transparent; background: transparent; color: var(--q-text-3); }
+.security-field-inputs { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 10px; min-width: 0; }
+.security-field-inputs.is-custom > .security-field-value { grid-column: 1 / -1; }
 .draft-account-heading { display: flex; align-items: center; justify-content: space-between; color: var(--q-text-2); font-size: 12px; font-weight: 600; }
 .draft-account-heading span { display: inline-flex; align-items: center; gap: 7px; }
 .draft-account-heading b { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: var(--q-brand-soft); color: var(--q-brand); font-size: 11px; }
@@ -252,6 +280,7 @@ h1 { margin: 0; font-size: 20px; font-weight: 750; letter-spacing: -.03em; line-
   .category { width: auto; }
   .sidebar-foot { display: none; }
   .edit-grid { grid-template-columns: 1fr; gap: 12px; }
+  .security-field-inputs { grid-template-columns: 1fr; }
   .save-hint { display: none; }
   .entry-tools { opacity: 1; transform: none; }
 }

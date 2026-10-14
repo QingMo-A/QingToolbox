@@ -94,8 +94,7 @@ impl Store {
                 "记事本内容已损坏或版本不受支持；请保留原文件和加密备份。",
             )
         })?;
-        vault.validate()?;
-        Ok(vault)
+        vault.into_current_schema()
     }
     pub fn save(&self, vault: &Vault) -> Result<()> {
         vault.validate()?;
@@ -175,6 +174,40 @@ mod tests {
         fs::write(store.path(), b"bad").unwrap();
         assert!(store.load().is_err());
         assert_eq!(fs::read(store.path()).unwrap(), b"bad");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    #[cfg(windows)]
+    fn legacy_vault_is_upgraded_without_writing_and_new_fields_stay_encrypted() {
+        let root = test_root();
+        let store = Store { root: root.clone() };
+        let mut vault = Vault::default();
+        vault.save_category(None, "游戏").unwrap();
+        vault.save_entry(serde_json::from_value(serde_json::json!({"categoryId":vault.categories[0].id,"name":"测试","credentials":[{"account":"synthetic-account","password":"synthetic-secret"}]})).unwrap()).unwrap();
+        let mut legacy = serde_json::to_value(&vault).unwrap();
+        legacy["schemaVersion"] = serde_json::json!(1);
+        legacy["categories"][0]["entries"][0]["credentials"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("securityFields");
+        let clear = Zeroizing::new(serde_json::to_vec(&legacy).unwrap());
+        let mut original = HEADER.to_vec();
+        original.extend_from_slice(&platform::protect(&clear, false).unwrap());
+        fs::write(store.path(), &original).unwrap();
+        let mut upgraded = store.load().unwrap();
+        assert_eq!(upgraded.schema_version, 2);
+        assert_eq!(fs::read(store.path()).unwrap(), original);
+        upgraded.categories[0].entries[0].credentials[0].security_fields =
+            vec![crate::model::SecurityField {
+                kind: crate::model::SecurityFieldKind::Email,
+                label: String::new(),
+                value: "synthetic-safe@example.com".into(),
+            }];
+        store.save(&upgraded).unwrap();
+        assert_eq!(store.load().unwrap().snapshot(), upgraded.snapshot());
+        assert!(!String::from_utf8_lossy(&fs::read(store.path()).unwrap())
+            .contains("synthetic-safe@example.com"));
+        assert_eq!(fs::read(root.join("vault.dpapi.bak")).unwrap(), original);
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

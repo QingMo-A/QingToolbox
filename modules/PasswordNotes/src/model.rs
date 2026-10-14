@@ -18,6 +18,35 @@ impl Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
+pub const MAX_SECURITY_FIELDS: usize = 16;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SecurityFieldKind {
+    Phone,
+    Email,
+    Custom,
+}
+
+#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SecurityField {
+    #[zeroize(skip)]
+    pub kind: SecurityFieldKind,
+    #[serde(default)]
+    pub label: String,
+    pub value: String,
+}
+impl SecurityField {
+    pub fn label(&self) -> &str {
+        match self.kind {
+            SecurityFieldKind::Phone => "安全手机",
+            SecurityFieldKind::Email => "安全邮箱",
+            SecurityFieldKind::Custom => &self.label,
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Credential {
@@ -25,6 +54,8 @@ pub struct Credential {
     pub account: String,
     pub password: String,
     pub note: String,
+    #[serde(default)]
+    pub security_fields: Vec<SecurityField>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -51,7 +82,7 @@ pub struct Vault {
 impl Default for Vault {
     fn default() -> Self {
         Self {
-            schema_version: 1,
+            schema_version: 2,
             categories: Vec::new(),
         }
     }
@@ -83,12 +114,21 @@ fn identifier(value: &str) -> bool {
 }
 
 impl Vault {
+    // Upgrade only in memory; reading an old vault never rewrites its files.
+    // An older module will fail closed on the new schema rather than erase it.
+    pub fn into_current_schema(mut self) -> Result<Self> {
+        if self.schema_version == 1 {
+            self.schema_version = 2;
+        }
+        self.validate()?;
+        Ok(self)
+    }
     pub fn snapshot(&self) -> Value {
         // Secrets never enter the regular list, refresh or search surface.
-        json!({"categories":self.categories.iter().map(|c| json!({"id":c.id,"name":c.name,"entries":c.entries.iter().map(|e| json!({"id":e.id,"name":e.name,"link":e.link,"remark":e.remark,"credentials":e.credentials.iter().map(|a| json!({"id":a.id,"account":a.account,"note":a.note})).collect::<Vec<_>>()})).collect::<Vec<_>>()})).collect::<Vec<_>>()})
+        json!({"categories":self.categories.iter().map(|c| json!({"id":c.id,"name":c.name,"entries":c.entries.iter().map(|e| json!({"id":e.id,"name":e.name,"link":e.link,"remark":e.remark,"credentials":e.credentials.iter().map(|a| json!({"id":a.id,"account":a.account,"note":a.note,"securityFields":a.security_fields})).collect::<Vec<_>>()})).collect::<Vec<_>>()})).collect::<Vec<_>>()})
     }
     pub fn validate(&self) -> Result<()> {
-        if self.schema_version != 1 || self.categories.len() > 64 {
+        if self.schema_version != 2 || self.categories.len() > 64 {
             return Err(Error::new("vaultInvalid", "记事本格式或分类数量不受支持。"));
         }
         let mut ids = BTreeSet::new();
@@ -133,6 +173,21 @@ impl Vault {
                         return Err(Error::new("passwordEmpty", "密码不能为空。"));
                     }
                     field(&a.note, 512, false, false)?;
+                    if a.security_fields.len() > MAX_SECURITY_FIELDS {
+                        return Err(Error::new(
+                            "securityFieldsTooMany",
+                            "每组账号最多添加 16 条安全信息。",
+                        ));
+                    }
+                    for info in &a.security_fields {
+                        field(
+                            &info.label,
+                            128,
+                            info.kind == SecurityFieldKind::Custom,
+                            false,
+                        )?;
+                        field(&info.value, 1024, true, false)?;
+                    }
                 }
             }
         }
@@ -218,6 +273,33 @@ impl Vault {
                 account: a.account.trim().into(),
                 password: a.password.clone(),
                 note: a.note.trim().into(),
+                // Missing fields in a legacy edit mean 'leave them alone';
+                // an explicit empty array is how the new editor clears them.
+                security_fields: a
+                    .security_fields
+                    .clone()
+                    .unwrap_or_else(|| {
+                        existing
+                            .as_ref()
+                            .and_then(|e| {
+                                e.credentials
+                                    .iter()
+                                    .find(|old| Some(&old.id) == a.id.as_ref())
+                            })
+                            .map(|old| old.security_fields.clone())
+                            .unwrap_or_default()
+                    })
+                    .iter()
+                    .map(|info| SecurityField {
+                        kind: info.kind,
+                        label: if info.kind == SecurityFieldKind::Custom {
+                            info.label.trim().into()
+                        } else {
+                            String::new()
+                        },
+                        value: info.value.trim().into(),
+                    })
+                    .collect(),
             });
         }
         let entry = Entry {
@@ -292,6 +374,9 @@ impl Vault {
                     if !a.note.is_empty() {
                         out.push_str(&format!("  账号备注：{}\r\n", a.note));
                     }
+                    for info in &a.security_fields {
+                        out.push_str(&format!("  {}：{}\r\n", info.label(), info.value));
+                    }
                 }
                 out.push_str("\r\n");
             }
@@ -323,6 +408,8 @@ pub struct CredentialInput {
     pub password: String,
     #[serde(default)]
     pub note: String,
+    #[serde(default)]
+    pub security_fields: Option<Vec<SecurityField>>,
 }
 
 #[cfg(test)]
@@ -370,5 +457,133 @@ mod tests {
         let mut v = example();
         v.categories[0].entries[0].id = v.categories[0].id.clone();
         assert!(v.validate().is_err());
+    }
+
+    fn with_security_fields() -> Vault {
+        let mut v = example();
+        let request = serde_json::from_value(json!({
+            "categoryId":v.categories[0].id,
+            "id":v.categories[0].entries[0].id,
+            "name":"示例游戏",
+            "credentials":[{
+                "id":v.categories[0].entries[0].credentials[0].id,
+                "account":"one","password":" secret-one ",
+                "securityFields":[
+                    {"kind":"phone","value":" +1 202 555 0100 "},
+                    {"kind":"phone","value":"+44 7700 900123"},
+                    {"kind":"email","value":"safe@example.com"},
+                    {"kind":"custom","label":" 备用联系 ","value":" other@example.com "}
+                ]
+            }]
+        }))
+        .unwrap();
+        v.save_entry(request).unwrap();
+        v
+    }
+    #[test]
+    fn multiple_security_fields_roundtrip_and_export_without_exposing_passwords() {
+        let v = with_security_fields();
+        let credential = &v.categories[0].entries[0].credentials[0];
+        assert_eq!(credential.security_fields.len(), 4);
+        assert_eq!(credential.security_fields[0].value, "+1 202 555 0100");
+        assert_eq!(credential.security_fields[3].label, "备用联系");
+        let snapshot = v.snapshot();
+        assert_eq!(
+            snapshot["categories"][0]["entries"][0]["credentials"][0]["securityFields"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
+        assert!(!snapshot.to_string().contains("secret-one"));
+        let export = v.text(None).unwrap();
+        assert!(export.contains("安全手机：+44 7700 900123"));
+        assert!(export.contains("安全邮箱：safe@example.com"));
+        assert!(export.contains("备用联系：other@example.com"));
+        let reloaded: Vault = serde_json::from_slice(&serde_json::to_vec(&v).unwrap()).unwrap();
+        assert_eq!(reloaded.snapshot(), snapshot);
+    }
+    #[test]
+    fn legacy_accounts_gain_empty_fields_and_unknown_versions_fail_closed() {
+        let mut old = serde_json::to_value(example()).unwrap();
+        old["schemaVersion"] = json!(1);
+        for account in old["categories"][0]["entries"][0]["credentials"]
+            .as_array_mut()
+            .unwrap()
+        {
+            account.as_object_mut().unwrap().remove("securityFields");
+        }
+        let upgraded = serde_json::from_value::<Vault>(old)
+            .unwrap()
+            .into_current_schema()
+            .unwrap();
+        assert_eq!(upgraded.schema_version, 2);
+        assert!(upgraded.categories[0].entries[0].credentials[0]
+            .security_fields
+            .is_empty());
+        assert_eq!(
+            upgraded.categories[0].entries[0].credentials[0].password,
+            " secret-one "
+        );
+        let mut unsupported = upgraded;
+        unsupported.schema_version = 3;
+        assert!(unsupported.into_current_schema().is_err());
+    }
+    #[test]
+    fn missing_fields_preserve_existing_values_but_empty_array_removes_them() {
+        let mut v = with_security_fields();
+        let mut request = json!({"categoryId":v.categories[0].id,"id":v.categories[0].entries[0].id,"name":"改名","credentials":[{"id":v.categories[0].entries[0].credentials[0].id,"account":"one","password":"same-password"}]});
+        v.save_entry(serde_json::from_value(request.clone()).unwrap())
+            .unwrap();
+        assert_eq!(
+            v.categories[0].entries[0].credentials[0]
+                .security_fields
+                .len(),
+            4
+        );
+        request["credentials"][0]["securityFields"] = json!([]);
+        v.save_entry(serde_json::from_value(request).unwrap())
+            .unwrap();
+        assert!(v.categories[0].entries[0].credentials[0]
+            .security_fields
+            .is_empty());
+    }
+    #[test]
+    fn security_field_limits_controls_and_custom_names_are_validated() {
+        let mut v = with_security_fields();
+        let credential = &mut v.categories[0].entries[0].credentials[0];
+        credential.security_fields = (0..=MAX_SECURITY_FIELDS)
+            .map(|_| SecurityField {
+                kind: SecurityFieldKind::Email,
+                label: String::new(),
+                value: "safe@example.com".into(),
+            })
+            .collect();
+        assert_eq!(v.validate().unwrap_err().code, "securityFieldsTooMany");
+        for (kind, label, value) in [
+            (SecurityFieldKind::Custom, "", "value"),
+            (SecurityFieldKind::Phone, "", "\nprivate-value"),
+            (SecurityFieldKind::Email, "", " "),
+        ] {
+            let mut v = example();
+            v.categories[0].entries[0].credentials[0].security_fields = vec![SecurityField {
+                kind,
+                label: label.into(),
+                value: value.into(),
+            }];
+            let error = v.validate().unwrap_err();
+            assert!(!error.message.contains("private-value"));
+        }
+        assert!(
+            serde_json::from_value::<SecurityField>(json!({"kind":"unknown","value":"value"}))
+                .is_err()
+        );
+        let mut field = SecurityField {
+            kind: SecurityFieldKind::Custom,
+            label: "contact".into(),
+            value: "sensitive-value".into(),
+        };
+        field.zeroize();
+        assert!(field.label.is_empty() && field.value.is_empty());
     }
 }
