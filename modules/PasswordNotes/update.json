@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.2",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-14T14:49:44Z",
+      "package": {
+        "fileName": "qing.passwordnotes-0.1.2-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/c83a1d551e657c7c0937e5b3a517bb57398fb1f1/modules/PasswordNotes/packages/qing.passwordnotes-0.1.2-tauri.qmod",
+        "size": 374475,
+        "sha256": "d087edca9c03f37d4dcb6235e231c3507ef5877676d59a3a610e830ed86ab868"
+      },
+      "releaseNotes": {
+        "zh-CN": "每组账号新增可选安全信息，可重复添加安全手机、安全邮箱或自定义名称，最多 16 条；支持编辑、移除、单独复制及 TXT 导出，列表默认折叠，离开窗口后重新折叠。编辑弹窗支持滚动并固定标题和保存按钮。安全信息随账号一起 DPAPI 加密保存；兼容旧数据，首次保存后升级文档结构，请勿降级到 0.1.1 或更旧模块。",
+        "en-US": "Optional per-account security fields: repeatable recovery phones, emails and custom labels (up to 16), editing, removal, individual copying and TXT export. Details fold on blur; the scrollable editor keeps its header and save actions visible. Fields use the existing user-scoped DPAPI storage. Legacy vaults load without rewriting; the first save upgrades their schema, so do not downgrade to 0.1.1 or older."
+      }
+    },
+    {
       "version": "0.1.1",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
