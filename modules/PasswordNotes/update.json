@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.1",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-14T05:34:23Z",
+      "package": {
+        "fileName": "qing.passwordnotes-0.1.1-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/3a035da00a3240f240fc8b1b47f30ecd0622a589/modules/PasswordNotes/packages/qing.passwordnotes-0.1.1-tauri.qmod",
+        "size": 342516,
+        "sha256": "e63d91b6cf53027521f11732989c3dcdbce863b2da3d542aa8dc044e86cc3c71"
+      },
+      "releaseNotes": {
+        "zh-CN": "界面全新设计：保险库状态卡与分类色标；搜索覆盖全部分类（Ctrl+F），仍不匹配密码；条目卡片显示域名链接与按名称着色的标识；显示密码时按钮外圈显示 30 秒自动隐藏倒计时，复制后按钮直接确认。隐私行为不变：默认隐藏、失焦即隐藏、由原生进程执行复制。",
+        "en-US": "Redesigned interface: vault status card and colour-coded categories; search across every category (Ctrl+F) that still never matches passwords; entry cards with host-only links and tinted monograms; a 30-second auto-hide ring while a password is shown and in-place copy confirmation. Privacy behaviour is unchanged."
+      }
+    },
+    {
       "version": "0.1.0",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
