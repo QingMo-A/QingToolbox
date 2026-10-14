@@ -1,6 +1,6 @@
 # 密码记事本 / Password Notes
 
-Windows x64 独立进程模块，模块 ID `qing.passwordnotes`，版本 `0.1.0`，API 版本 `1`。需要已实现通用保存位置和弹窗接口的工具箱（当前本地最新 `0.3.4-alpha` 构建）。模块不内置到宿主。
+Windows x64 独立进程模块，模块 ID `qing.passwordnotes`，版本 `0.1.1`，API 版本 `1`。需要已实现通用保存位置和弹窗接口的工具箱（当前本地最新 `0.3.4-alpha` 构建）。模块不内置到宿主。
 
 ## 使用
 

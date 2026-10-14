@@ -67,6 +67,32 @@ describe('password notebook UI privacy and workflow', () => {
     await open(); await wrapper.findAll('button').find(b => b.text() === '导出分类')!.trigger('click'); await flushPromises()
     expect(mocks.call).toHaveBeenCalledWith('exportTxt', { path: 'C:\\test\\synthetic.txt', categoryId: 'category', includePasswords: true })
   })
+  it('searches every category by name or account, never by password', async () => {
+    const other = { id: 'site', name: '网站', entries: [{ id: 'site-entry', name: 'GitHub', link: 'https://github.com', remark: '', credentials: [{ id: 'site-account', account: 'octo', note: '' }] }] }
+    mocks.call.mockImplementation(async (method: string) => method === 'getState' ? { ...structuredClone(state), categories: [...structuredClone(state).categories, other] } : { copied: true })
+    await open()
+    await wrapper.find('.search input').setValue('octo')
+    expect(wrapper.findAll('.entry-card')).toHaveLength(1)
+    expect(wrapper.get('.entry-card').text()).toContain('GitHub')
+    expect(wrapper.get('.entry-category').text()).toBe('网站')
+    await wrapper.find('.search input').setValue('synthetic-password')
+    expect(wrapper.findAll('.entry-card')).toHaveLength(0)
+  })
+  it('confirms a copy on the button itself without showing the password', async () => {
+    await open()
+    await wrapper.find('[aria-label="复制密码"]').trigger('click'); await flushPromises()
+    expect(wrapper.get('[aria-label="复制密码"]').classes()).toContain('copied')
+    expect(wrapper.find('.password-cell code').text()).toBe('***')
+  })
+  it('shows the auto-hide countdown only while a password is revealed', async () => {
+    await open()
+    expect(wrapper.find('.reveal-ring').exists()).toBe(false)
+    await wrapper.find('[aria-label="显示密码"]').trigger('click'); await flushPromises()
+    expect(wrapper.get('.reveal-ring circle').attributes('style')).toContain('30s')
+    await wrapper.find('[aria-label="隐藏密码"]').trigger('click'); await flushPromises()
+    expect(wrapper.find('.reveal-ring').exists()).toBe(false)
+    expect(wrapper.find('.password-cell code').text()).toBe('***')
+  })
   it('adding or removing an account does not submit the entry form', async () => {
     await open(); await wrapper.find('[aria-label="编辑 示例游戏"]').trigger('click'); await flushPromises()
     const add = document.querySelector<HTMLButtonElement>('.accounts-heading button')!
