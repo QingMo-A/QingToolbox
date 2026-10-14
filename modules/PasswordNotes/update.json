@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.1.3",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-14T16:26:22Z",
+      "package": {
+        "fileName": "qing.passwordnotes-0.1.3-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/ff926436ce4915436007d9d376d4432fa80e5327/modules/PasswordNotes/packages/qing.passwordnotes-0.1.3-tauri.qmod",
+        "size": 425279,
+        "sha256": "86fe3d57e7255ad1efe1f485197ef700fc31102f57d19b51c2a82e2949363ee4"
+      },
+      "releaseNotes": {
+        "zh-CN": "每组账号可添加 TOTP 身份验证器密钥，支持 Base32 密钥或 otpauth://totp/ 链接、离线验证码、剩余时间倒计时、到期刷新和原生复制。默认 6 位 / 30 秒，支持网站指定的其他参数。密钥加密保存，不进入列表、编辑响应或 TXT 导出；留空保留已有密钥，可替换或移除。失焦时清除显示，复制时重新计算。兼容旧数据，首次保存升级为结构 3，请勿降级到 0.1.2 或更旧模块。",
+        "en-US": "Optional per-account offline TOTP using Base32 seeds or otpauth://totp/ links, live countdowns, expiry refresh and native fresh-code copying. Defaults to 6 digits/30 seconds, with service-specific settings. Seeds stay encrypted and excluded from list/edit responses and TXT exports; blank edits preserve existing seeds. Codes hide on blur. Legacy vaults load without rewriting; the first save upgrades to schema 3, so do not downgrade to 0.1.2 or older."
+      }
+    },
+    {
       "version": "0.1.2",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
