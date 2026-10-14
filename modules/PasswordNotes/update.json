@@ -1,1 +1,28 @@
-{ "schemaVersion": 2, "moduleId": "qing.passwordnotes", "publisher": "QingMo-A", "releases": [] }
+{
+  "schemaVersion": 2,
+  "moduleId": "qing.passwordnotes",
+  "publisher": "QingMo-A",
+  "releases": [
+    {
+      "version": "0.1.0",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-14T04:17:09Z",
+      "package": {
+        "fileName": "qing.passwordnotes-0.1.0-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/de1f8ba6a4e52a1d8ee2d2db3d3acb52c5e82556/modules/PasswordNotes/packages/qing.passwordnotes-0.1.0-tauri.qmod",
+        "size": 361649,
+        "sha256": "c1bf6c410874fdbc4154b3ef141435058c3d46f0b67dc0a148a90fa47c45c494"
+      },
+      "releaseNotes": {
+        "zh-CN": "密码记事本首次公开预览：自定义分类、游戏/网站链接与备注，每个条目支持多组账号密码；分别复制账号或密码，默认 *** 隐藏，显示后 30 秒或失焦自动隐藏。支持当前分类/全部分类 TXT 明文导出，导出前确认风险。本机数据使用 Windows 当前用户 DPAPI 加密及原子保存。需要实现通用文件选择与弹窗接口的新版工具箱构建，早期同版本 0.3.4-alpha 可能缺少这些服务。",
+        "en-US": "First public Password Notes preview: categories, game/site links and notes, multiple accounts per entry, separate copying and masked passwords with explicit reveal and timed/blur hiding. Export the selected category or all categories to plaintext TXT after confirmation. User-scoped Windows DPAPI protects local storage with atomic saves. Requires generic file and popup host services; early 0.3.4-alpha builds may lack them."
+      }
+    }
+  ]
+}
