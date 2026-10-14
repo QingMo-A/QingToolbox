@@ -1,8 +1,8 @@
 {
   "id": "qing.passwordnotes",
   "name": "密码记事本",
-  "description": "分类整理游戏和网站的多组账号密码；每组账号可添加多条安全手机、安全邮箱或自定义安全信息，支持分别复制、密码显隐及 TXT 导出。\n数据使用当前 Windows 用户的 DPAPI 加密保存；TXT 导出为明文，不是跨设备加密备份。",
-  "version": "0.1.2",
+  "description": "分类整理游戏和网站的多组账号密码，支持多条安全手机、邮箱、自定义安全信息，以及 TOTP 离线验证码、倒计时和复制。\n本机 DPAPI 加密保存；TXT 导出为明文，但不包含身份验证器密钥。",
+  "version": "0.1.3",
   "apiVersion": 1,
   "author": "QingMo-A",
   "minimumHostVersion": "0.3.4-alpha",
@@ -17,5 +17,5 @@
   "icon": "icon.svg",
   "defaultLanguage": "zh-CN",
   "localization": { "basePath": "i18n", "resources": { "zh-CN": "i18n/zh-CN.json", "en-US": "i18n/en-US.json" } },
-  "operations": ["getState", "saveCategory", "deleteCategory", "saveEntry", "deleteEntry", "getEntryForEdit", "getPassword", "copyCredential", "copyLink", "exportTxt"]
+  "operations": ["getState", "saveCategory", "deleteCategory", "saveEntry", "deleteEntry", "getEntryForEdit", "getPassword", "getTotp", "copyTotp", "copyCredential", "copyLink", "exportTxt"]
 }

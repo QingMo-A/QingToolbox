@@ -29,7 +29,7 @@
     },
     "qing.passwordnotes": {
       "name": { "zh-CN": "密码记事本", "en-US": "Password Notes" },
-      "description": { "zh-CN": "分类整理多组账号密码，每个账号支持多条安全手机、安全邮箱和自定义安全信息，以及分别复制、密码显隐和 TXT 明文导出。本机 DPAPI 加密保存。", "en-US": "Categorized accounts and passwords with repeatable recovery phones, emails and custom security fields, separate copying, password reveal and plaintext TXT export. Local storage uses Windows DPAPI." },
+      "description": { "zh-CN": "分类管理账号密码、安全联系方式和 TOTP 离线验证码，支持验证码倒计时、复制及 TXT 导出。数据使用本机 DPAPI 加密，导出不包含验证器密钥。", "en-US": "Categorized passwords, recovery contacts and offline TOTP codes with countdowns, copying and TXT exports. Local DPAPI storage; exports exclude authenticator seeds." },
       "icon": "PasswordNotes/icon.svg",
       "moduleManifest": "PasswordNotes/module.json",
       "updateManifest": "PasswordNotes/update.json",

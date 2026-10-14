@@ -185,6 +185,18 @@ h1 { margin: 0; font-size: 20px; font-weight: 750; letter-spacing: -.03em; line-
 .security-info-enter-active, .security-info-leave-active { transition: opacity 160ms ease, transform 180ms var(--pn-ease); }
 .security-info-enter-from, .security-info-leave-to { opacity: 0; transform: translateY(-4px); }
 
+.totp-card { grid-column: 1 / -1; display: grid; gap: 8px; min-width: 0; margin-top: 5px; padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--q-brand) 20%, var(--pn-hairline)); border-radius: 12px; background: color-mix(in srgb, var(--q-brand) 5%, var(--pn-card)); }
+.totp-card-heading { display: flex; align-items: center; gap: 7px; color: var(--q-brand); font-size: 12px; font-weight: 600; }
+.totp-card-heading small { margin-left: auto; color: var(--q-text-3); font-size: 10.5px; font-weight: 400; }
+.totp-card-body { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 42px; }
+.totp-value { color: var(--q-text); font: 650 25px/1.2 "Cascadia Mono", Consolas, monospace; letter-spacing: .08em; }
+.totp-placeholder { color: var(--q-text-3); font-size: 12px; }
+.totp-countdown { display: grid; flex: none; place-items: center; width: 42px; height: 42px; padding: 3px; border-radius: 50%; background: conic-gradient(var(--q-brand) var(--totp-progress), var(--pn-hairline) 0); }
+.totp-countdown b { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--pn-card); color: var(--q-text); font-size: 13px; line-height: 1; }
+.totp-countdown small { margin-top: -6px; color: var(--q-text-3); font-size: 8px; font-weight: 400; }
+.totp-card-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.totp-card-actions .q-button { min-height: 29px; padding: 0 8px; font-size: 11.5px; }
+
 /* ------------------------------------------------------------ Empty states */
 .empty-state { display: flex; align-items: center; justify-content: center; flex-direction: column; min-height: 320px; padding: 40px 26px; border: 1px dashed var(--pn-hairline); border-radius: 20px; background: color-mix(in srgb, var(--pn-card) 60%, transparent); text-align: center; }
 .empty-mark { display: grid; place-items: center; width: 64px; height: 64px; margin-bottom: 16px; border-radius: 20px; background: var(--q-brand-soft); color: var(--q-brand); box-shadow: 0 12px 24px -16px color-mix(in srgb, var(--q-brand) 70%, transparent); }
@@ -239,6 +251,18 @@ h1 { margin: 0; font-size: 20px; font-weight: 750; letter-spacing: -.03em; line-
 .security-field-edit > .q-icon-button { width: 28px; height: 30px; min-height: 0; margin-top: 23px; padding: 0; border-color: transparent; background: transparent; color: var(--q-text-3); }
 .security-field-inputs { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 10px; min-width: 0; }
 .security-field-inputs.is-custom > .security-field-value { grid-column: 1 / -1; }
+.totp-editor { min-width: 0; padding-top: 12px; border-top: 1px dashed var(--pn-hairline); }
+.totp-enable { display: flex; align-items: center; gap: 7px; color: var(--q-text); font-size: 12px; cursor: pointer; }
+.totp-enable input { accent-color: var(--q-brand); width: 15px; height: 15px; margin: 0; }
+.totp-enable svg { color: var(--q-brand); }
+.totp-enable small { color: var(--q-text-3); font-size: 11px; }
+.totp-editor-fields { display: grid; gap: 8px; margin-top: 12px; }
+.totp-editor-hint { margin: 0; color: var(--q-text-3); font-size: 11px; line-height: 1.6; }
+.totp-settings { padding: 9px 11px; border: 1px solid var(--pn-hairline); border-radius: 10px; background: var(--pn-card); }
+.totp-settings summary { color: var(--q-text-2); font-size: 11.5px; cursor: pointer; }
+.totp-settings summary span { margin-left: 6px; color: var(--q-text-3); font-size: 10.5px; }
+.totp-settings > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 12px 0 8px; }
+.totp-settings input[type=number] { width: 100%; height: 39px; padding: 0 10px; border: 1px solid var(--q-border); border-radius: 9px; background: var(--q-surface-soft); color: var(--q-text); font-weight: 400; }
 .draft-account-heading { display: flex; align-items: center; justify-content: space-between; color: var(--q-text-2); font-size: 12px; font-weight: 600; }
 .draft-account-heading span { display: inline-flex; align-items: center; gap: 7px; }
 .draft-account-heading b { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: var(--q-brand-soft); color: var(--q-brand); font-size: 11px; }
@@ -281,6 +305,7 @@ h1 { margin: 0; font-size: 20px; font-weight: 750; letter-spacing: -.03em; line-
   .sidebar-foot { display: none; }
   .edit-grid { grid-template-columns: 1fr; gap: 12px; }
   .security-field-inputs { grid-template-columns: 1fr; }
+  .totp-settings > div { grid-template-columns: 1fr; }
   .save-hint { display: none; }
   .entry-tools { opacity: 1; transform: none; }
 }

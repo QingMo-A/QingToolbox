@@ -2,7 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { QButton, QIcon, QIconButton, QModal, QModalInput, selectSavePath, showDialog, showNotification } from '@qingtoolbox/module-ui'
 import { call } from './bridge'
-import { MAX_SECURITY_FIELDS, securityFieldLabel, type Category, type Draft, type DraftAccount, type EditEntry, type Entry, type SecurityField, type State } from './types'
+import { MAX_SECURITY_FIELDS, defaultTotpSettings, securityFieldLabel, type Category, type Draft, type DraftAccount, type EditEntry, type Entry, type SecurityField, type State } from './types'
+import TotpCode from './TotpCode.vue'
 import VaultIcon from './VaultIcon.vue'
 import { RevealCache } from './RevealCache'
 
@@ -29,7 +30,8 @@ function securityFieldKey(field: SecurityField) {
   if (!securityKeys.has(field)) securityKeys.set(field, ++nextSecurityKey)
   return securityKeys.get(field)!
 }
-const newAccount = (): DraftAccount => ({ account: '', password: '', note: '', securityFields: [] })
+const newAccount = (): DraftAccount => ({ account: '', password: '', note: '', securityFields: [], totpEnabled: false, totpSecret: '', totpSettings: defaultTotpSettings() })
+const totpPrivacyEpoch = ref(0)
 let privacyEpoch = 0
 let disposed = false
 let statusTimer: ReturnType<typeof setTimeout> | undefined
@@ -54,7 +56,7 @@ function apply(next: State) {
   state.value = next
   if (!next.categories.some(c => c.id === selectedId.value)) selectedId.value = next.categories[0]?.id ?? ''
 }
-function hideSecrets() { privacyEpoch++; reveals.clear(); editVisible.value = new Set(); expandedSecurity.value = new Set() }
+function hideSecrets() { privacyEpoch++; totpPrivacyEpoch.value++; reveals.clear(); editVisible.value = new Set(); expandedSecurity.value = new Set() }
 function toggleSecurity(id: string) { const next = new Set(expandedSecurity.value); next.has(id) ? next.delete(id) : next.add(id); expandedSecurity.value = next }
 function choose(id: string) { hideSecrets(); selectedId.value = id; search.value = '' }
 function shown(id: string) { void revealRevision.value; return reveals.get(id) }
@@ -95,7 +97,7 @@ async function editEntry(entry?: Entry, category = selected.value) {
   hideSecrets(); editError.value = ''
   await run(async () => {
     const value: EditEntry = entry ? await call<EditEntry>('getEntryForEdit', { id: entry.id }) : { name: '', link: '', remark: '', credentials: [newAccount()] }
-    Object.assign(draft, { ...value, id: entry?.id, categoryId: category.id, credentials: value.credentials.map(a => ({ ...a, securityFields: (a.securityFields ?? []).map(field => ({ ...field })) })) })
+    Object.assign(draft, { ...value, id: entry?.id, categoryId: category.id, credentials: value.credentials.map(a => ({ ...a, securityFields: (a.securityFields ?? []).map(field => ({ ...field })), totpEnabled: !!a.totp, totpSecret: '', totpSettings: { ...(a.totp ?? defaultTotpSettings()) } })) })
     editing.value = true
   })
 }
@@ -108,6 +110,7 @@ function closeEditor() {
 function toggleEdit(index: number) { const next = new Set(editVisible.value); next.has(index) ? next.delete(index) : next.add(index); editVisible.value = next }
 function clearAccount(account: DraftAccount) {
   account.password = ''; account.account = ''; account.note = ''
+  account.totpSecret = ''
   for (const field of account.securityFields) { field.label = ''; field.value = '' }
 }
 function removeDraftAccount(index: number) { clearAccount(draft.credentials[index]); draft.credentials.splice(index, 1); editVisible.value = new Set() }
@@ -123,9 +126,10 @@ async function saveEntry() {
   if (busy.value) return
   if (!draft.name.trim() || !draft.categoryId || !draft.credentials.length || draft.credentials.some(a => !a.account.trim() || !a.password)) { editError.value = '请填写游戏 / 网站名称，以及每组的账号和密码。'; return }
   if (draft.credentials.some(a => a.securityFields.some(field => field.value.trim() && field.kind === 'custom' && !field.label.trim()))) { editError.value = '请为已填写的自定义安全信息设置名称。'; return }
+  if (draft.credentials.some(a => a.totpEnabled && !a.totp && !a.totpSecret.trim())) { editError.value = '请为已开启身份验证器的账号填写密钥。'; return }
   busy.value = true; editError.value = ''; error.value = ''
   try {
-    const next = await call<State>('saveEntry', { ...draft, credentials: draft.credentials.map(a => ({ ...a, securityFields: a.securityFields.filter(field => field.value.trim()).map(field => ({ ...field, label: field.kind === 'custom' ? field.label.trim() : '', value: field.value.trim() })) })) })
+    const next = await call<State>('saveEntry', { ...draft, credentials: draft.credentials.map(a => ({ id: a.id, account: a.account, password: a.password, note: a.note, securityFields: a.securityFields.filter(field => field.value.trim()).map(field => ({ ...field, label: field.kind === 'custom' ? field.label.trim() : '', value: field.value.trim() })), totp: { action: !a.totpEnabled ? 'remove' : a.totpSecret.trim() ? 'set' : 'keep', ...(a.totpEnabled && a.totpSecret.trim() ? { secret: a.totpSecret.trim() } : {}), settings: { ...a.totpSettings } } })) })
     selectedId.value = draft.categoryId; apply(next); busy.value = false; closeEditor(); announce('条目已加密保存')
   } catch (cause) { editError.value = message(cause) } finally { busy.value = false }
 }
@@ -288,6 +292,7 @@ onBeforeUnmount(() => {
                       </div>
                     </Transition>
                   </section>
+                  <TotpCode v-if="a.totp" :entry-id="entry.id" :credential-id="a.id" :config="a.totp" :privacy-epoch="totpPrivacyEpoch" :disabled="locked" @copied="announce('验证码已复制')" @error="error = $event" />
                 </div>
               </div>
             </article>
@@ -339,6 +344,18 @@ onBeforeUnmount(() => {
                   <QIconButton type="button" label="移除这条安全信息" :disabled="busy" @click="removeSecurityField(a, fieldIndex)"><QIcon name="remove" :size="14" /></QIconButton>
                 </div>
               </TransitionGroup>
+            </section>
+            <section class="totp-editor">
+              <label class="totp-enable"><input v-model="a.totpEnabled" type="checkbox" :disabled="busy" /><VaultIcon name="shield" :size="14" /><strong>身份验证器（TOTP）</strong><small>可选</small></label>
+              <div v-if="a.totpEnabled" class="totp-editor-fields">
+                <QModalInput v-model="a.totpSecret" :label="a.totp ? '替换密钥（留空保留原密钥）' : '身份验证器密钥'" type="password" placeholder="Base32 密钥或 otpauth://totp/ 绑定链接" :max-length="4096" :disabled="busy" />
+                <p class="totp-editor-hint">{{ a.totp ? '已有密钥不会显示在编辑界面；取消勾选并保存可移除。' : '使用网站提供的绑定密钥，保存后可离线生成验证码。' }} 密钥加密保存，不包含在 TXT 导出中。</p>
+                <details class="totp-settings"><summary>验证码参数 <span>{{ a.totpSettings.algorithm }} · {{ a.totpSettings.digits }} 位 · {{ a.totpSettings.periodSeconds }} 秒</span></summary><div>
+                  <label class="local-field"><span>算法</span><select v-model="a.totpSettings.algorithm" :disabled="busy"><option>SHA1</option><option>SHA256</option><option>SHA512</option></select></label>
+                  <label class="local-field"><span>验证码位数</span><select v-model.number="a.totpSettings.digits" :disabled="busy"><option :value="6">6 位</option><option :value="8">8 位</option></select></label>
+                  <label class="local-field"><span>更新周期（秒）</span><input v-model.number="a.totpSettings.periodSeconds" type="number" min="15" max="300" step="1" :disabled="busy" /></label>
+                </div><p class="totp-editor-hint">仅按网站要求修改；绑定链接中的参数优先。电脑系统时间需准确。</p></details>
+              </div>
             </section>
           </section>
         </TransitionGroup>

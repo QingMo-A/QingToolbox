@@ -187,4 +187,30 @@ describe('password notebook UI privacy and workflow', () => {
     window.dispatchEvent(new Event('blur')); await flushPromises()
     expect(wrapper.find('.security-info-list').exists()).toBe(false)
   })
+  it('adds an authenticator only with a supplied seed, without leaking editor-only fields', async () => {
+    await open(); await wrapper.get('[aria-label="编辑 示例游戏"]').trigger('click'); await flushPromises()
+    const enable = document.querySelector<HTMLInputElement>('.totp-enable input')!; enable.checked = true; enable.dispatchEvent(new Event('change',{bubbles:true})); await flushPromises()
+    const save = [...document.querySelectorAll<HTMLButtonElement>('.q-modal-actions button')].find(b=>b.textContent?.includes('保存条目'))!
+    save.click(); await flushPromises(); expect(mocks.call).not.toHaveBeenCalledWith('saveEntry',expect.anything())
+    const input = document.querySelector<HTMLInputElement>('.totp-editor-fields input[type=password]')!
+    expect(input.type).toBe('password'); input.value='GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'; input.dispatchEvent(new Event('input',{bubbles:true}))
+    save.click(); await flushPromises()
+    const account = mocks.call.mock.calls.find(([method])=>method==='saveEntry')![1].credentials[0]
+    expect(account.totp).toEqual({action:'set',secret:'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',settings:{algorithm:'SHA1',digits:6,periodSeconds:30}})
+    expect(account).not.toHaveProperty('totpSecret'); expect(account).not.toHaveProperty('totpEnabled')
+  })
+  it('keeps an existing seed when editing without a replacement, and removes it explicitly', async () => {
+    mocks.call.mockImplementation(async (method:string)=>method==='getEntryForEdit'?{...structuredClone(entry),credentials:[{id:'account',account:'demo',password:'synthetic-password',note:'',totp:{algorithm:'SHA256',digits:8,periodSeconds:60}}]}:structuredClone(state))
+    await open(); await wrapper.get('[aria-label="编辑 示例游戏"]').trigger('click'); await flushPromises()
+    expect(document.querySelector<HTMLInputElement>('.totp-editor-fields input[type=password]')!.value).toBe('')
+    ;[...document.querySelectorAll<HTMLButtonElement>('.q-modal-actions button')].find(b=>b.textContent?.includes('保存条目'))!.click(); await flushPromises()
+    let account = mocks.call.mock.calls.find(([method])=>method==='saveEntry')![1].credentials[0]
+    expect(account.totp).toEqual({action:'keep',settings:{algorithm:'SHA256',digits:8,periodSeconds:60}})
+    mocks.call.mockClear()
+    await wrapper.get('[aria-label="编辑 示例游戏"]').trigger('click'); await flushPromises()
+    const enable=document.querySelector<HTMLInputElement>('.totp-enable input')!; enable.checked=false; enable.dispatchEvent(new Event('change',{bubbles:true}))
+    ;[...document.querySelectorAll<HTMLButtonElement>('.q-modal-actions button')].find(b=>b.textContent?.includes('保存条目'))!.click(); await flushPromises()
+    account=mocks.call.mock.calls.find(([method])=>method==='saveEntry')![1].credentials[0]
+    expect(account.totp.action).toBe('remove'); expect(account.totp).not.toHaveProperty('secret')
+  })
 })

@@ -3,6 +3,7 @@ mod app;
 mod model;
 mod platform;
 mod store;
+mod totp;
 
 use model::{Error, Result};
 use serde::Deserialize;

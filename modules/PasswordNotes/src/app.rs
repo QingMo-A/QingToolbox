@@ -86,7 +86,8 @@ impl App {
                 self.edit(|v| v.delete_category(id))
             }
             "saveEntry" => {
-                let request: SaveEntry = serde_json::from_value(payload.clone())
+                let encoded = bytes(payload)?;
+                let request: SaveEntry = serde_json::from_slice(&encoded)
                     .map_err(|_| Error::new("invalidPayload", "条目字段不完整或类型无效。"))?;
                 self.edit(|v| v.save_entry(request))
             }
@@ -94,8 +95,27 @@ impl App {
                 let id = text(payload, "id")?;
                 self.edit(|v| v.delete_entry(id))
             }
-            "getEntryForEdit" => serde_json::to_value(self.vault.entry(text(payload, "id")?)?)
-                .map_err(|_| Error::new("readFailed", "无法读取条目。")),
+            "getEntryForEdit" => self.vault.entry_for_edit(text(payload, "id")?),
+            "getTotp" | "copyTotp" => {
+                let config = self
+                    .vault
+                    .credential(text(payload, "entryId")?, text(payload, "credentialId")?)?
+                    .totp
+                    .as_ref()
+                    .ok_or_else(|| {
+                        Error::new("totpNotConfigured", "此账号尚未设置身份验证器密钥。")
+                    })?;
+                let code = config.generate()?;
+                if method == "copyTotp" {
+                    platform::copy(&code.code)?;
+                }
+                let mut value = serde_json::to_value(&code)
+                    .map_err(|_| Error::new("readFailed", "无法生成验证码。"))?;
+                if method == "copyTotp" {
+                    value["copied"] = json!(true);
+                }
+                Ok(value)
+            }
             "getPassword" => Ok(
                 json!({"password":self.vault.credential(text(payload,"entryId")?,text(payload,"credentialId")?)?.password}),
             ),

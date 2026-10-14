@@ -190,12 +190,16 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("securityFields");
+        legacy["categories"][0]["entries"][0]["credentials"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("totp");
         let clear = Zeroizing::new(serde_json::to_vec(&legacy).unwrap());
         let mut original = HEADER.to_vec();
         original.extend_from_slice(&platform::protect(&clear, false).unwrap());
         fs::write(store.path(), &original).unwrap();
         let mut upgraded = store.load().unwrap();
-        assert_eq!(upgraded.schema_version, 2);
+        assert_eq!(upgraded.schema_version, 3);
         assert_eq!(fs::read(store.path()).unwrap(), original);
         upgraded.categories[0].entries[0].credentials[0].security_fields =
             vec![crate::model::SecurityField {

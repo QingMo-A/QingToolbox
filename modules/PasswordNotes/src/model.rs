@@ -56,6 +56,8 @@ pub struct Credential {
     pub note: String,
     #[serde(default)]
     pub security_fields: Vec<SecurityField>,
+    #[serde(default)]
+    pub totp: Option<crate::totp::Config>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -82,7 +84,7 @@ pub struct Vault {
 impl Default for Vault {
     fn default() -> Self {
         Self {
-            schema_version: 2,
+            schema_version: 3,
             categories: Vec::new(),
         }
     }
@@ -117,18 +119,18 @@ impl Vault {
     // Upgrade only in memory; reading an old vault never rewrites its files.
     // An older module will fail closed on the new schema rather than erase it.
     pub fn into_current_schema(mut self) -> Result<Self> {
-        if self.schema_version == 1 {
-            self.schema_version = 2;
+        if matches!(self.schema_version, 1 | 2) {
+            self.schema_version = 3;
         }
         self.validate()?;
         Ok(self)
     }
     pub fn snapshot(&self) -> Value {
         // Secrets never enter the regular list, refresh or search surface.
-        json!({"categories":self.categories.iter().map(|c| json!({"id":c.id,"name":c.name,"entries":c.entries.iter().map(|e| json!({"id":e.id,"name":e.name,"link":e.link,"remark":e.remark,"credentials":e.credentials.iter().map(|a| json!({"id":a.id,"account":a.account,"note":a.note,"securityFields":a.security_fields})).collect::<Vec<_>>()})).collect::<Vec<_>>()})).collect::<Vec<_>>()})
+        json!({"categories":self.categories.iter().map(|c| json!({"id":c.id,"name":c.name,"entries":c.entries.iter().map(|e| json!({"id":e.id,"name":e.name,"link":e.link,"remark":e.remark,"credentials":e.credentials.iter().map(|a| json!({"id":a.id,"account":a.account,"note":a.note,"securityFields":a.security_fields,"totp":a.totp.as_ref().map(|config| config.settings)})).collect::<Vec<_>>()})).collect::<Vec<_>>()})).collect::<Vec<_>>()})
     }
     pub fn validate(&self) -> Result<()> {
-        if self.schema_version != 2 || self.categories.len() > 64 {
+        if self.schema_version != 3 || self.categories.len() > 64 {
             return Err(Error::new("vaultInvalid", "记事本格式或分类数量不受支持。"));
         }
         let mut ids = BTreeSet::new();
@@ -173,6 +175,9 @@ impl Vault {
                         return Err(Error::new("passwordEmpty", "密码不能为空。"));
                     }
                     field(&a.note, 512, false, false)?;
+                    if let Some(config) = &a.totp {
+                        config.validate()?;
+                    }
                     if a.security_fields.len() > MAX_SECURITY_FIELDS {
                         return Err(Error::new(
                             "securityFieldsTooMany",
@@ -245,6 +250,14 @@ impl Vault {
             .find(|a| a.id == credential_id)
             .ok_or_else(not_found)
     }
+    pub fn entry_for_edit(&self, entry_id: &str) -> Result<Value> {
+        let entry = self.entry(entry_id)?;
+        // Editing may explicitly expose passwords, but never needs a saved
+        // authenticator seed: keep/change/remove use metadata-only projections.
+        Ok(
+            json!({"id":entry.id,"name":entry.name,"link":entry.link,"remark":entry.remark,"credentials":entry.credentials.iter().map(|a| json!({"id":a.id,"account":a.account,"password":a.password,"note":a.note,"securityFields":a.security_fields,"totp":a.totp.as_ref().map(|config| config.settings)})).collect::<Vec<_>>() }),
+        )
+    }
     pub fn save_entry(&mut self, request: SaveEntry) -> Result<()> {
         let existing = if let Some(ref entry_id) = request.id {
             Some(self.entry(entry_id)?.clone())
@@ -268,11 +281,19 @@ impl Vault {
                 Some(_) => return Err(Error::new("credentialMismatch", "账号标识不属于此条目。")),
                 None => id()?,
             };
+            let previous = existing
+                .as_ref()
+                .and_then(|entry| entry.credentials.iter().find(|old| old.id == credential_id));
+            let totp = match &a.totp {
+                Some(change) => change.apply(previous.and_then(|old| old.totp.as_ref()))?,
+                None => previous.and_then(|old| old.totp.as_ref()).cloned(),
+            };
             credentials.push(Credential {
                 id: credential_id,
                 account: a.account.trim().into(),
                 password: a.password.clone(),
                 note: a.note.trim().into(),
+                totp,
                 // Missing fields in a legacy edit mean 'leave them alone';
                 // an explicit empty array is how the new editor clears them.
                 security_fields: a
@@ -410,6 +431,8 @@ pub struct CredentialInput {
     pub note: String,
     #[serde(default)]
     pub security_fields: Option<Vec<SecurityField>>,
+    #[serde(default)]
+    pub totp: Option<crate::totp::Change>,
 }
 
 #[cfg(test)]
@@ -512,12 +535,13 @@ mod tests {
             .unwrap()
         {
             account.as_object_mut().unwrap().remove("securityFields");
+            account.as_object_mut().unwrap().remove("totp");
         }
         let upgraded = serde_json::from_value::<Vault>(old)
             .unwrap()
             .into_current_schema()
             .unwrap();
-        assert_eq!(upgraded.schema_version, 2);
+        assert_eq!(upgraded.schema_version, 3);
         assert!(upgraded.categories[0].entries[0].credentials[0]
             .security_fields
             .is_empty());
@@ -526,7 +550,7 @@ mod tests {
             " secret-one "
         );
         let mut unsupported = upgraded;
-        unsupported.schema_version = 3;
+        unsupported.schema_version = 4;
         assert!(unsupported.into_current_schema().is_err());
     }
     #[test]
@@ -585,5 +609,57 @@ mod tests {
         };
         field.zeroize();
         assert!(field.label.is_empty() && field.value.is_empty());
+    }
+    #[test]
+    fn totp_seed_never_enters_lists_edit_responses_or_plaintext_exports() {
+        let mut v = example();
+        let secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+        let entry_id = v.categories[0].entries[0].id.clone();
+        let credential_id = v.categories[0].entries[0].credentials[0].id.clone();
+        let mut request = json!({"categoryId":v.categories[0].id,"id":entry_id,"name":"TOTP fixture","credentials":[{"id":credential_id,"account":"one","password":"synthetic-password","totp":{"action":"set","secret":secret}}]});
+        v.save_entry(serde_json::from_value(request.clone()).unwrap())
+            .unwrap();
+        assert_eq!(
+            v.snapshot()["categories"][0]["entries"][0]["credentials"][0]["totp"]["periodSeconds"],
+            30
+        );
+        for projected in [
+            v.snapshot().to_string(),
+            v.entry_for_edit(&entry_id).unwrap().to_string(),
+            v.text(None).unwrap(),
+        ] {
+            assert!(!projected.contains(secret));
+            assert!(!projected.contains("\"secret\""));
+        }
+        request["credentials"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("totp");
+        v.save_entry(serde_json::from_value(request.clone()).unwrap())
+            .unwrap();
+        assert!(v
+            .credential(&entry_id, &credential_id)
+            .unwrap()
+            .totp
+            .is_some());
+        request["credentials"][0]["totp"] = json!({"action":"keep","settings":{"algorithm":"SHA256","digits":8,"periodSeconds":60}});
+        v.save_entry(serde_json::from_value(request.clone()).unwrap())
+            .unwrap();
+        let config = v
+            .credential(&entry_id, &credential_id)
+            .unwrap()
+            .totp
+            .as_ref()
+            .unwrap();
+        assert_eq!(config.secret, secret);
+        assert_eq!(config.settings.period_seconds, 60);
+        request["credentials"][0]["totp"] = json!({"action":"remove"});
+        v.save_entry(serde_json::from_value(request).unwrap())
+            .unwrap();
+        assert!(v
+            .credential(&entry_id, &credential_id)
+            .unwrap()
+            .totp
+            .is_none());
     }
 }
