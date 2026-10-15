@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.3.5",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.0-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-15T16:19:28Z",
+      "package": {
+        "fileName": "qing.launcher-0.3.5-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/6c8e8359980be98de271d3ac9ea887b9909e56d4/modules/Launcher/packages/qing.launcher-0.3.5-tauri.qmod",
+        "size": 1508657,
+        "sha256": "ae52bd6aa698476ee73f088332ef5836542a93f0c05d30faaec7d316879249f2"
+      },
+      "releaseNotes": {
+        "zh-CN": "修复快捷键唤醒时白色面板抖动：移除面板位移缩放，仅保留可见图标的入场动画；取消 900ms 时间门限，快速再次唤醒也可播放图标动画。修复部分图标主体过小：优先比较真实原生图标细节，裁除过大留白和浅色外框，并使旧图标缓存自动失效。",
+        "en-US": "Keep the Launcher shell stationary on wake and animate only visible icon glyphs. Remove the 900ms gate so rapid reopen reliably replays the icon wave. Normalize oversized Shell icon canvases, prefer native detail, remove excessive padding/faint framing and invalidate old icon-cache entries."
+      }
+    },
+    {
       "version": "0.3.4",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
