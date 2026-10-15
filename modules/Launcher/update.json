@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.3.6",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.0-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-15T22:14:11Z",
+      "package": {
+        "fileName": "qing.launcher-0.3.6-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/c8a43978e7fe12d0363d012ab86f6050123b6d4a/modules/Launcher/packages/qing.launcher-0.3.6-tauri.qmod",
+        "size": 1508758,
+        "sha256": "004265ce89a3f15935a6e12c48ed5c0e7a18a634e24edd2205c63382adddf7ee"
+      },
+      "releaseNotes": {
+        "zh-CN": "缩小、调淡启动台主面板阴影，使其自然跟随面板圆角，不再超出透明窗口留白后被截成方形。阴影范围随窗口宽度调整，同时收敛各皮肤的过大外发光和投影；保持面板尺寸和图标入场动画不变。",
+        "en-US": "Reduce the panel shadow and keep its rounded falloff inside the transparent window gutter, avoiding rectangular clipping. Scale shadow bounds with the responsive gutter and constrain appearance-specific glows. Preserve panel geometry and icon entrance motion."
+      }
+    },
+    {
       "version": "0.3.5",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
