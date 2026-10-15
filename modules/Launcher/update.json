@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.3.4",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.0-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-15T15:21:50Z",
+      "package": {
+        "fileName": "qing.launcher-0.3.4-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/a7d26124ed649cd3024fe09bc2d263925d5ea805/modules/Launcher/packages/qing.launcher-0.3.4-tauri.qmod",
+        "size": 1507602,
+        "sha256": "f7b96bb12f7c1e5c4a98e28f48849ffba359fcd8a576f6692f4dfec717cd96c9"
+      },
+      "releaseNotes": {
+        "zh-CN": "新增默认开启的 Everything 搜索结果与高清图标缓存，可在启动台设置中关闭或清理；缓存有容量上限并自动过期，保留应用和文件夹配置。缩小设置弹窗阴影并将遮罩限制在启动台内部；合并重复唤醒动画，避免快捷键打开时闪烁。",
+        "en-US": "Add default-on bounded disk caches for Everything result pages and high-resolution icons, with settings to disable or clear them. Preserve apps and folders. Reduce the settings shadow and contain the backdrop within Launcher. Coalesce duplicate reveal animations without blanking an already visible panel."
+      }
+    },
+    {
       "version": "0.3.3",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
