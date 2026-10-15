@@ -32,6 +32,7 @@ export type LauncherState = {
   hotkey: { ctrl: boolean; alt: boolean; shift: boolean; win: boolean; virtualKey: number; keyLabel: string }
   hotkeyStatus: string
   active: boolean
+  cacheEnabled?: boolean
   everythingSettings?: { resultLimit: number; batchLoading: boolean }
 }
 

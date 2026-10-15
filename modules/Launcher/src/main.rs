@@ -12,6 +12,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod cache;
 mod desktop;
 mod everything;
 mod icons;
@@ -70,9 +71,8 @@ struct LauncherItem {
     working_directory: String,
     last_launched_at: Option<String>,
     source: String,
-    /// A bounded, session-local presentation asset. It is intentionally not
-    /// persisted in launcher.json; icons are re-read from the trusted target
-    /// when a module process starts or the Desktop projection refreshes.
+    /// Legacy transient presentation slot, excluded from launcher.json.
+    /// Cached icon assets now live in the disposable, bounded disk cache.
     #[serde(skip)]
     icon_data_url: Option<String>,
 }
@@ -137,6 +137,7 @@ struct StoreDocument {
     custom_order: Option<Vec<String>>,
     hotkey: Option<HotkeySpec>,
     everything_settings: Option<Value>,
+    cache_enabled: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -149,6 +150,8 @@ struct LauncherStore {
     custom_order: Vec<String>,
     hotkey: HotkeySpec,
     everything_settings: SearchSettings,
+    cache_enabled: bool,
+    icon_cache: cache::DiskCache,
 }
 
 #[derive(Debug, Serialize)]
@@ -181,6 +184,7 @@ struct LauncherState {
     hotkey_status: String,
     active: bool,
     everything_settings: SearchSettings,
+    cache_enabled: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -215,6 +219,8 @@ impl LauncherStore {
                 .and_then(|value| serde_json::from_value::<SearchSettings>(value).ok())
                 .unwrap_or_default()
                 .normalized(),
+            cache_enabled: document.cache_enabled.unwrap_or(true),
+            icon_cache: cache::DiskCache::new(data_directory, "icons"),
         };
         store.normalize_folders();
         store.normalize_order();
@@ -230,6 +236,7 @@ impl LauncherStore {
             custom_order: Some(self.custom_order.clone()),
             hotkey: Some(self.hotkey.clone()),
             everything_settings: Some(json!(self.everything_settings)),
+            cache_enabled: Some(self.cache_enabled),
         };
         let bytes = serde_json::to_vec_pretty(&document)
             .map_err(|error| io::Error::other(error.to_string()))?;
@@ -771,6 +778,7 @@ impl LauncherStore {
                 key_label: self.hotkey.key_label.clone(),
             },
             hotkey_status: "HostManaged".to_string(),
+            cache_enabled: self.cache_enabled,
             active: true,
             everything_settings: self.everything_settings,
         }
@@ -789,6 +797,7 @@ fn main() {
         .or_else(|| env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
     let mut everything = EverythingRuntime::new(module_directory, data_directory.clone());
+    everything.set_cache_enabled(store.cache_enabled);
     let mut desktop_loaded = false;
     let mut lifecycle_active = false;
     let stdin = io::stdin();
@@ -1015,6 +1024,36 @@ fn handle_method(
 ) -> Result<Value, (&'static str, String)> {
     match method {
         "ping" => Ok(json!({ "pong": true })),
+        "setCacheSettings" => {
+            let enabled = payload
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .ok_or(("invalid_payload", "enabled must be a boolean".to_string()))?;
+            let previous = store.cache_enabled;
+            store.cache_enabled = enabled;
+            if let Err(error) = store.save() {
+                store.cache_enabled = previous;
+                return Err(("save_failed", format!("缓存设置保存失败：{error}")));
+            }
+            for item in store.items.iter_mut().chain(store.desktop_items.iter_mut()) {
+                item.icon_data_url = None;
+            }
+            everything.set_cache_enabled(enabled);
+            Ok(json!(store.state()))
+        }
+        "clearCache" => {
+            for item in store.items.iter_mut().chain(store.desktop_items.iter_mut()) {
+                item.icon_data_url = None;
+            }
+            store
+                .icon_cache
+                .clear()
+                .map_err(|error| ("cache_clear_failed", format!("图标缓存清理失败：{error}")))?;
+            everything
+                .clear_cache()
+                .map_err(|error| ("cache_clear_failed", format!("搜索缓存清理失败：{error}")))?;
+            Ok(json!({ "cleared": true }))
+        }
         "setEverythingSettings" => {
             let limit = payload
                 .get("resultLimit")
@@ -1064,10 +1103,28 @@ fn handle_method(
                 .chain(store.desktop_items.iter_mut())
                 .find(|item| item.id == id)
                 .ok_or(("item_not_found", "应用不存在。".to_string()))?;
-            if item.icon_data_url.is_none() {
-                item.icon_data_url = icon_data_url(Path::new(&item.target));
-            }
-            Ok(json!({ "dataUrl": item.icon_data_url }))
+            let path = Path::new(&item.target);
+            let key = cache::icon_key(path);
+            let cached = store
+                .cache_enabled
+                .then(|| {
+                    key.as_ref()
+                        .and_then(|key| store.icon_cache.get::<String>(key))
+                        .filter(|url| {
+                            url.starts_with("data:image/png;base64,") && url.len() <= 350_000
+                        })
+                })
+                .flatten();
+            let data_url = cached.or_else(|| {
+                let url = icon_data_url(path)?;
+                if store.cache_enabled {
+                    if let Some(key) = key {
+                        store.icon_cache.put(&key, &url);
+                    }
+                }
+                Some(url)
+            });
+            Ok(json!({ "dataUrl": data_url }))
         }
         "getState" => {
             ensure_desktop(store, desktop_loaded);
@@ -1500,11 +1557,9 @@ fn normalize_items(items: Vec<LauncherItem>, source: &str) -> Vec<LauncherItem> 
         .collect()
 }
 
-/// Resolve a trusted launcher target to a high-resolution session-local PNG.
-///
-/// The launcher deliberately does not persist icon bytes: targets can move or
-/// be replaced while the app is not running, and re-reading them on startup
-/// keeps the persisted document limited to user state.  Shell extraction also
+/// Resolve a trusted launcher target to a high-resolution PNG on a cache miss.
+/// Cached assets are separated from launcher.json and expire automatically.
+/// Shell extraction also
 /// means `.lnk` and `.url` entries receive the same icon Windows shows for
 /// them, rather than a synthetic tile background.
 #[cfg(windows)]
@@ -2106,6 +2161,11 @@ mod tests {
             custom_order: vec!["one".to_string()],
             hotkey: HotkeySpec::default(),
             everything_settings: SearchSettings::default(),
+            cache_enabled: true,
+            icon_cache: cache::DiskCache::new(
+                &env::temp_dir().join(unique_id("launcher-cache-test")),
+                "icons",
+            ),
         }
     }
 
@@ -2127,8 +2187,51 @@ mod tests {
             .unwrap();
             let loaded = LauncherStore::load(&fixture.0);
             assert_eq!(loaded.everything_settings, SearchSettings::default());
+            assert!(loaded.cache_enabled);
             assert_eq!(loaded.items.len(), 1);
         }
+    }
+
+    #[test]
+    fn cache_toggle_persists_and_clear_does_not_change_user_state() {
+        let fixture = DesktopFixture::new();
+        let mut store = test_store();
+        store.path = fixture.0.join("launcher.json");
+        store.icon_cache = cache::DiskCache::new(&fixture.0, "icons");
+        store.save().unwrap();
+        let mut runtime = EverythingRuntime::new(fixture.0.join("missing"), fixture.0.clone());
+        assert!(handle_method(
+            "setCacheSettings",
+            json!({"enabled": "bad"}),
+            &mut store,
+            &mut true,
+            &mut runtime
+        )
+        .is_err());
+        handle_method(
+            "setCacheSettings",
+            json!({"enabled": false}),
+            &mut store,
+            &mut true,
+            &mut runtime,
+        )
+        .unwrap();
+        assert!(!LauncherStore::load(&fixture.0).cache_enabled);
+        store.icon_cache.put("fixture", &"synthetic");
+        let before = fs::read(&store.path).unwrap();
+        handle_method("clearCache", json!({}), &mut store, &mut true, &mut runtime).unwrap();
+        assert_eq!(before, fs::read(&store.path).unwrap());
+        assert!(store.icon_cache.get::<String>("fixture").is_none());
+        handle_method(
+            "setCacheSettings",
+            json!({"enabled": true}),
+            &mut store,
+            &mut true,
+            &mut runtime,
+        )
+        .unwrap();
+        assert!(LauncherStore::load(&fixture.0).cache_enabled);
+        assert_eq!(store.items.len(), 1);
     }
 
     #[test]

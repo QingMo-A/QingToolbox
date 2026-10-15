@@ -386,6 +386,15 @@ kbd {
 .drop-hint-enter-from, .drop-hint-leave-to { opacity: 0; }
 
 /* Dialogs (the shared modal supplies the card; this styles the contents). */
+/* Keep modal dimming inside the rounded launcher rather than painting a
+   monitor-like grey rectangle across its transparent window margins. */
+.q-modal-layer.launcher-settings-layer { inset: 32px; border-radius: calc(var(--q-radius-lg) + 10px); background: color-mix(in srgb, var(--q-text) 12%, transparent); backdrop-filter: blur(2px); padding: 16px; }
+.launcher-settings-layer .q-modal-card.launcher-settings-card { max-height: 100%; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 2px 6px rgba(10,18,34,.08), 0 12px 28px -12px rgba(10,18,34,.24); }
+.launcher-settings-layer .q-modal-content { min-height: 0; overflow-y: auto; }
+.launcher-settings-layer .q-modal-header, .launcher-settings-layer .q-modal-actions { flex-shrink: 0; }
+.launcher-cache-settings { padding-top: 14px; border-top: 1px solid var(--q-border); display: grid; gap: 8px; }
+.cache-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cache-hint, .cache-message { margin: 0; font-size: 12px; line-height: 1.6; color: var(--q-text-2); }
 .hotkey-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .launcher-settings-card .hotkey-input {
   flex: 0 0 100%; width: 100%; min-width: 0; padding: 20px 12px;
@@ -429,6 +438,7 @@ kbd {
 /* Layout at narrow widths --------------------------------------------- */
 @media (max-width: 760px) {
   .launcher-viewport { padding: 18px; }
+  .q-modal-layer.launcher-settings-layer { inset: 18px; }
   .launcher-shell { padding: 22px 20px 16px; }
   .topbar { flex-wrap: wrap; gap: 14px; }
   .brand-heading { gap: 10px; }
@@ -441,6 +451,7 @@ kbd {
 }
 @media (max-width: 450px) {
   .launcher-viewport { padding: 12px; }
+  .q-modal-layer.launcher-settings-layer { inset: 12px; padding: 10px; }
   .launcher-shell { padding: 18px 14px 14px; }
   .top-actions { flex-basis: 100%; justify-content: space-between; }
   .everything-runtime-status { max-width: 160px; }

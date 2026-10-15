@@ -255,11 +255,14 @@ pub struct EverythingRuntime {
     next_result_id: u64,
     search_session: Option<SearchSession>,
     result_path_bytes: usize,
+    cache: super::cache::DiskCache,
+    cache_enabled: bool,
 }
 
 impl EverythingRuntime {
     pub fn new(module_directory: PathBuf, data_directory: PathBuf) -> Self {
         let module_directory = locate_module_directory(module_directory);
+        let cache = super::cache::DiskCache::new(&data_directory, "everything");
         let data_directory = data_directory.join("everything-runtime");
         let instance_name = format!(
             "QL{}",
@@ -279,7 +282,18 @@ impl EverythingRuntime {
             next_result_id: 0,
             search_session: None,
             result_path_bytes: 0,
+            cache,
+            cache_enabled: true,
         }
+    }
+
+    pub fn set_cache_enabled(&mut self, enabled: bool) {
+        self.cache_enabled = enabled;
+    }
+
+    pub fn clear_cache(&mut self) -> io::Result<()> {
+        // Existing result IDs/cursors remain usable; cached pages never contain IDs.
+        self.cache.clear()
     }
 
     pub fn search(
@@ -308,7 +322,6 @@ impl EverythingRuntime {
         // Result ids are scoped to the latest search. Invalidate them before
         // touching the runtime so a failed/new query cannot leave an old id
         // usable through a stale UI event.
-        self.ensure_ready()?;
         self.search_page(mode, query, request_id, settings.normalized(), 0)
     }
 
@@ -346,6 +359,20 @@ impl EverythingRuntime {
         settings: SearchSettings,
         offset: usize,
     ) -> Result<EverythingSearchResponse, EverythingError> {
+        let cache_key =
+            serde_json::to_string(&(mode.as_wire(), &query, settings.result_limit, offset))
+                .unwrap();
+        if self.cache_enabled {
+            if let Some(paths) = self.cache.get::<Vec<PathBuf>>(&cache_key) {
+                if !paths.is_empty()
+                    && paths.len() <= settings.result_limit + 1
+                    && paths.iter().all(|path| path.is_absolute() && path.exists())
+                {
+                    return Ok(self.project_page(paths, mode, query, request_id, settings, offset));
+                }
+            }
+        }
+        self.ensure_ready()?;
         let export_token = self.next_token();
         let export_path = self
             .data_directory
@@ -386,6 +413,9 @@ impl EverythingRuntime {
             return Err(EverythingError::indexing(
                 "Everything 索引尚未建立或索引为空，请稍后重试。",
             ));
+        }
+        if self.cache_enabled && !paths.is_empty() {
+            self.cache.put(&cache_key, &paths);
         }
         Ok(self.project_page(paths, mode, query, request_id, settings, offset))
     }
@@ -1376,6 +1406,78 @@ fn copy_text_to_clipboard(_value: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_pages_survive_restart_get_fresh_ids_and_disable_or_clear_bypass_them() {
+        let dir = std::env::temp_dir().join(super::super::unique_id("launcher-query-cache"));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("synthetic.txt");
+        fs::write(&file, "fixture").unwrap();
+        let settings = SearchSettings {
+            result_limit: 1,
+            batch_loading: true,
+        };
+        let key = serde_json::to_string(&(
+            EverythingSearchMode::File.as_wire(),
+            "synthetic",
+            1usize,
+            0usize,
+        ))
+        .unwrap();
+        let first = EverythingRuntime::new(dir.join("missing-runtime"), dir.clone());
+        first.cache.put(&key, &vec![file.clone()]);
+        let mut next = EverythingRuntime::new(dir.join("missing-runtime"), dir.clone());
+        let a = next
+            .search(
+                EverythingSearchMode::File,
+                "synthetic".into(),
+                "one".into(),
+                settings,
+            )
+            .unwrap();
+        let b = next
+            .search(
+                EverythingSearchMode::File,
+                "synthetic".into(),
+                "two".into(),
+                settings,
+            )
+            .unwrap();
+        assert_eq!(a.results.len(), 1);
+        assert_ne!(a.results[0].id, b.results[0].id);
+        assert!(next.lookup_result(&a.results[0].id).is_err());
+        assert!(next.lookup_result(&b.results[0].id).is_ok());
+        next.set_cache_enabled(false);
+        assert!(next
+            .search(
+                EverythingSearchMode::File,
+                "synthetic".into(),
+                "three".into(),
+                settings
+            )
+            .is_err());
+        next.set_cache_enabled(true);
+        next.clear_cache().unwrap();
+        assert!(next
+            .search(
+                EverythingSearchMode::File,
+                "synthetic".into(),
+                "four".into(),
+                settings
+            )
+            .is_err());
+        next.cache.put(&key, &vec![file.clone()]);
+        fs::remove_file(file).unwrap();
+        assert!(next
+            .search(
+                EverythingSearchMode::File,
+                "synthetic".into(),
+                "five".into(),
+                settings
+            )
+            .is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     fn runtime() -> EverythingRuntime {
         EverythingRuntime::new(PathBuf::from("missing-runtime"), std::env::temp_dir())

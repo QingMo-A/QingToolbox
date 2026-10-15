@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import LauncherIcon from './LauncherIcon.vue'
 import { commandSuggestions, completeCommand } from './searchCommands'
+import { resetIconCache } from './itemIcons'
+import { RevealGate } from './revealMotion'
 import { QButton, QIconButton, QModal, QModalInput, QModalLabel } from '@qingtoolbox/module-ui'
 import LauncherAppIcon from './LauncherAppIcon.vue'
 import { OverlayInteraction } from './overlayInteraction'
@@ -31,6 +33,8 @@ const recentCount = ref(5)
 let recentObserver: ResizeObserver | undefined
 const overlayListeners: UnlistenFn[] = []
 let disposed = false
+const revealGate = new RevealGate()
+let firstRevealHandled = false
 
 function isOutsidePanel(event: PointerEvent): boolean {
   return !(event.target as HTMLElement).closest('.launcher-shell')
@@ -49,9 +53,10 @@ function internalDragChanged(id: string | null): void {
   overlay.value.internalDrag(Boolean(id))
 }
 function reveal(focusSearch = true): void {
+  firstRevealHandled = true
   overlay.value.cancel()
-  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    panel.value?.animate([{ opacity: 0, transform: 'translateY(12px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)' })
+  if (revealGate.accept(performance.now()) && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    panel.value?.animate([{ transform: 'translateY(12px) scale(.98)' }, { transform: 'none' }], { duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)' })
     cascadeIcons()
   }
   if (focusSearch && !recordingHotkey.value && !overlay.value.external) searchInput.value?.focus({ preventScroll: true })
@@ -65,7 +70,7 @@ function cascadeIcons(): void {
   const columns = Math.max(1, Math.round((panel.value?.querySelector('.launcher-grid')?.clientWidth ?? 700) / 120))
   Array.from(tiles).slice(0, 32).forEach((tile, index) => {
     const delay = (index % columns + Math.floor(index / columns)) * 26
-    tile.animate([{ opacity: 0, transform: 'translateY(14px) scale(.9)' }, { opacity: 1, transform: 'none' }],
+    tile.animate([{ opacity: .7, transform: 'translateY(14px) scale(.9)' }, { opacity: 1, transform: 'none' }],
       { duration: 340, delay: 40 + delay, easing: 'cubic-bezier(.34,1.3,.64,1)', fill: 'backwards' })
   })
 }
@@ -103,6 +108,9 @@ const commandIndex = ref(0)
 const suggestions = computed(() => searchFocused.value && !commandDismissed.value ? commandSuggestions(query.value) : [])
 const searchLimitDraft = ref('200')
 const batchLoadingDraft = ref(false)
+const cacheEnabledDraft = ref(true)
+const cacheClearing = ref(false)
+const cacheMessage = ref('')
 const searchSettingsError = ref('')
 const loading = ref(true)
 const busy = ref(false)
@@ -407,6 +415,8 @@ async function saveLauncherSettings(): Promise<void> {
     stopHotkeyRecording()
     hotkeySaving.value = true
     state.value = await invokeModule<LauncherState>('setEverythingSettings', { resultLimit, batchLoading: batchLoadingDraft.value })
+    state.value = await invokeModule<LauncherState>('setCacheSettings', { enabled: cacheEnabledDraft.value })
+    resetIconCache(state.value.cacheEnabled ?? true)
     if (everythingActive.value) scheduleEverythingSearch()
     hotkeyPanelOpen.value = false
   } catch (reason) {
@@ -419,8 +429,23 @@ async function saveLauncherSettings(): Promise<void> {
 async function resetLauncherSettings(): Promise<void> {
   searchLimitDraft.value = '200'
   batchLoadingDraft.value = false
+  cacheEnabledDraft.value = true
   hotkeyDraft.value = DEFAULT_HOTKEY
   await saveLauncherSettings()
+}
+
+async function clearLauncherCache(): Promise<void> {
+  if (cacheClearing.value || hotkeySaving.value) return
+  cacheClearing.value = true
+  cacheMessage.value = ''
+  try {
+    await invokeModule('clearCache')
+    // Keep the already painted icons; clear cached assets without immediately
+    // re-populating the disk just because the settings dialog is still open.
+    resetIconCache(state.value.cacheEnabled ?? true, false)
+    cacheMessage.value = '缓存已清理，后续按需重新读取。'
+  } catch (reason) { cacheMessage.value = messageOf(reason) }
+  finally { cacheClearing.value = false }
 }
 
 function applySearchCommand(prefix: string): void {
@@ -752,6 +777,7 @@ async function load(): Promise<void> {
   try {
     context.value = await getContext()
     state.value = await invokeModule<LauncherState>('getState')
+    resetIconCache(state.value.cacheEnabled ?? true)
     hotkeyDraft.value = formatHotkey(state.value.hotkey)
   } catch (reason) {
     error.value = messageOf(reason)
@@ -779,6 +805,7 @@ async function refresh(): Promise<void> {
   error.value = ''
   try {
     state.value = await invokeModule<LauncherState>('refreshDesktop')
+    resetIconCache(state.value.cacheEnabled ?? true)
   } catch (reason) {
     error.value = messageOf(reason)
   } finally {
@@ -913,6 +940,8 @@ watch(hotkeyPanelOpen, open => {
   else {
     searchLimitDraft.value = String(state.value.everythingSettings?.resultLimit ?? 200)
     batchLoadingDraft.value = state.value.everythingSettings?.batchLoading ?? false
+    cacheEnabledDraft.value = state.value.cacheEnabled ?? true
+    cacheMessage.value = ''
     searchSettingsError.value = ''
     commandDismissed.value = true
   }
@@ -936,9 +965,13 @@ onMounted(() => {
   addOverlayListener<{ focusSearch: boolean }>('launcher:shown', payload => reveal(payload.focusSearch))
   recentObserver = new ResizeObserver(() => { recentCount.value = Math.max(1, Math.floor((recentContainer.value?.clientWidth ?? 740) / 148)) })
   if (recentContainer.value) recentObserver.observe(recentContainer.value)
-  reveal(document.hasFocus())
   window.addEventListener('keydown', onWindowKeydown)
-  void load().then(() => { if (!disposed) void refreshEverythingRuntimeStatus() })
+  void load().then(() => {
+    if (disposed) return
+    // Fallback when the cold-window shown event preceded bridge registration.
+    if (!firstRevealHandled && document.hasFocus()) reveal()
+    void refreshEverythingRuntimeStatus()
+  })
   void listen<{ reason?: string }>('qmod:module-state-changed', async ({ payload }) => {
     if (payload.reason === 'externalDrop') {
       query.value = ''
@@ -1017,7 +1050,7 @@ onBeforeUnmount(() => {
 
 
 
-    <QModal :open="hotkeyPanelOpen" title="启动台设置" :busy="hotkeySaving" close-label="关闭设置" panel-class="launcher-settings-card" @close="stopHotkeyRecording(); hotkeyPanelOpen = false">
+    <QModal :open="hotkeyPanelOpen" title="启动台设置" :busy="hotkeySaving || cacheClearing" close-label="关闭设置" layer-class="launcher-settings-layer" panel-class="launcher-settings-card" @close="stopHotkeyRecording(); hotkeyPanelOpen = false">
       <QModalLabel>快捷键</QModalLabel>
       <div class="hotkey-controls">
         <input
@@ -1041,9 +1074,17 @@ onBeforeUnmount(() => {
         <label class="batch-loading-field"><input v-model="batchLoadingDraft" type="checkbox" :disabled="hotkeySaving" /><span>分批加载</span></label>
         <p v-if="searchSettingsError" class="hotkey-error" role="alert">{{ searchSettingsError }}</p>
       </div>
+      <div class="launcher-cache-settings">
+        <div class="cache-setting-row">
+          <label class="batch-loading-field"><input v-model="cacheEnabledDraft" type="checkbox" :disabled="hotkeySaving || cacheClearing" /><span>开启缓存</span></label>
+          <QButton :disabled="hotkeySaving || cacheClearing" @click="clearLauncherCache">{{ cacheClearing ? '清理中…' : '清理缓存' }}</QButton>
+        </div>
+        <p class="cache-hint">缓存 Everything 搜索结果和高清图标，加快重复访问。搜索缓存 1 分钟、图标缓存 10 分钟；关闭后不再读写缓存。</p>
+        <p v-if="cacheMessage" class="cache-message" role="status">{{ cacheMessage }}</p>
+      </div>
       <template #actions>
-        <QButton class="hotkey-action secondary" :disabled="hotkeySaving" @click="resetLauncherSettings">恢复默认</QButton>
-        <QButton class="hotkey-action secondary" variant="primary" :disabled="hotkeySaving || !hotkeyDraft" @click="saveLauncherSettings">保存</QButton>
+        <QButton class="hotkey-action secondary" :disabled="hotkeySaving || cacheClearing" @click="resetLauncherSettings">恢复默认</QButton>
+        <QButton class="hotkey-action secondary" variant="primary" :disabled="hotkeySaving || cacheClearing || !hotkeyDraft" @click="saveLauncherSettings">保存</QButton>
       </template>
     </QModal>
 

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { cachedItemIcon, loadItemIcon } from './itemIcons'
+import { cachedItemIcon, loadItemIcon, iconCacheEpoch } from './itemIcons'
 const props = defineProps<{ iconKey: string | null }>()
 const root = ref<HTMLElement | null>(null)
 const source = ref<string | null>(null)
 const visible = ref(false)
 let observer: IntersectionObserver | undefined
 let generation = 0
-watch([() => props.iconKey, visible], async ([key, show]) => {
+watch([() => props.iconKey, visible, iconCacheEpoch], async ([key, show]) => {
   const current = ++generation
   const cached = cachedItemIcon(key)
   source.value = cached ?? null

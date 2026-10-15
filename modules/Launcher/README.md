@@ -39,7 +39,7 @@ open/open-folder/copy-path only with a current opaque `resultId`, so it cannot
 turn an arbitrary web-provided path into a process or shell operation. If the
 runtime, index or IPC is unavailable, the UI shows a contained error and the
 ordinary Launcher search remains usable. Windows Shell icons are extracted
-into a bounded session-local PNG and are not persisted in launcher state. The
+into bounded high-resolution PNGs, cached separately from launcher state. The
 old WPF Launcher remains a separate legacy package and is never loaded by the
 Tauri host. Explorer drops are accepted only by the native Tauri window
 boundary, canonicalized there, and delivered as the manifest-declared
@@ -56,6 +56,20 @@ Every page stays below the host's 1 MiB frame budget; a search is capped at
 by scrolling or clicking Load More, and stale pages cannot replace a new query.
 Typing `/` suggests `/e`, `/e:f`, `/e:d`; mouse, arrow keys, Tab and Enter
 complete the chosen prefix with a trailing space.
+
+Launcher 0.3.4 adds an opt-out cache (on by default). Settings provides an
+Enable Cache checkbox and Clear Cache button. Everything query pages persist
+for 60 seconds (64 entries / 16 MiB); Shell icons persist for 10 minutes
+(512 entries / 64 MiB), keyed by target path, file size and modification time.
+Files live only in `launcher-cache-v1/{everything,icons}` below the module's
+data directory. Cache failures fall back to normal queries/extraction; disabled
+caching bypasses both disk and in-memory reuse. Clear removes only cache files,
+not apps, folders, settings or Everything's own managed database. Query hits
+receive fresh session IDs; expired or missing-file pages query Everything again.
+The live Everything readiness badge is never inferred from a cached search.
+The settings backdrop is clipped to the rounded launcher panel with a smaller
+shadow, and cold-mount/native-show entrance animations are coalesced without
+resetting an already visible panel to transparent.
 
 The bounded integration smoke uses `-Everything` with a temporary indexed
 folder. On a machine where the dedicated service has already been authorized,
