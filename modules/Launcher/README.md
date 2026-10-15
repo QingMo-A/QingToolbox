@@ -85,6 +85,13 @@ are removed conservatively without synthesizing high-resolution pixels. Normal
 full-size icons and fully translucent assets are kept intact. Icon cache keys
 are versioned so old padded icons are not reused after updating the module.
 
+Launcher 0.3.6 bounds the main-panel shadow to its transparent window gutter.
+The soft shadow follows the panel's border radius without reaching the native
+window edge (where a large shadow was previously clipped into a rectangle).
+Shadow blur/offset scale with the 32/18/12px responsive gutter; appearance-specific
+glows and hard shadows are bounded too. Panel geometry and icon entrance motion
+are unchanged.
+
 The bounded integration smoke uses `-Everything` with a temporary indexed
 folder. On a machine where the dedicated service has already been authorized,
 `-EverythingService` exercises the production service connection against a

@@ -17,10 +17,16 @@ svg { width: 20px; height: 20px; flex-shrink: 0; }
   --ql-spring: cubic-bezier(.34, 1.45, .64, 1);
   --ql-out: cubic-bezier(.2, .8, .2, 1);
   --ql-radius: calc(var(--q-radius-lg) + 10px);
+  /* Stay inside the transparent native-window gutter. Oversized shadows get
+     cut off by the rectangular WebView surface, losing their rounded falloff. */
+  --ql-frame-gutter: 32px;
+  --ql-shadow-color: rgba(0, 0, 0, .2);
+  --ql-shadow-blur: calc(var(--ql-frame-gutter) * .375);
+  --ql-panel-shadow: 0 calc(var(--ql-frame-gutter) * .125) var(--ql-shadow-blur) calc(var(--ql-frame-gutter) * -.125) var(--ql-shadow-color), 0 1px 4px -1px rgba(0, 0, 0, .08);
   --ql-ink-soft: color-mix(in srgb, var(--q-text) 5%, transparent);
   --ql-ink-softer: color-mix(in srgb, var(--q-text) 3%, transparent);
   --ql-glow: color-mix(in srgb, var(--q-primary) 55%, transparent);
-  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 32px; background: transparent;
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: var(--ql-frame-gutter); background: transparent;
 }
 
 /* Panel ----------------------------------------------------------------- */
@@ -38,7 +44,7 @@ svg { width: 20px; height: 20px; flex-shrink: 0; }
     color-mix(in srgb, var(--q-surface) 97%, transparent);
   box-shadow:
     0 0 0 1px var(--ql-ink-softer),
-    0 40px 100px -30px rgba(0, 0, 0, .45),
+    var(--ql-panel-shadow),
     inset 0 1px 0 color-mix(in srgb, #fff 40%, transparent);
   transition: background-color 240ms ease, border-color 240ms ease, box-shadow 240ms ease;
 }
@@ -437,7 +443,7 @@ kbd {
 
 /* Layout at narrow widths --------------------------------------------- */
 @media (max-width: 760px) {
-  .launcher-viewport { padding: 18px; }
+  .launcher-viewport { --ql-frame-gutter: 18px; }
   .q-modal-layer.launcher-settings-layer { inset: 18px; }
   .launcher-shell { padding: 22px 20px 16px; }
   .topbar { flex-wrap: wrap; gap: 14px; }
@@ -450,7 +456,7 @@ kbd {
   .launcher-shell .mode-tabs button { min-width: 0; padding-inline: 10px; }
 }
 @media (max-width: 450px) {
-  .launcher-viewport { padding: 12px; }
+  .launcher-viewport { --ql-frame-gutter: 12px; }
   .q-modal-layer.launcher-settings-layer { inset: 12px; padding: 10px; }
   .launcher-shell { padding: 18px 14px 14px; }
   .top-actions { flex-basis: 100%; justify-content: space-between; }
@@ -483,7 +489,7 @@ kbd {
 }
 
 /* Cyberpunk (aurora-flow) --------------------------------------------- */
-:root[data-appearance-preset='aurora-flow'] .launcher-viewport { --ql-glow: rgba(0, 240, 255, .6); }
+:root[data-appearance-preset='aurora-flow'] .launcher-viewport { --ql-glow: rgba(0, 240, 255, .6); --ql-shadow-color: rgba(0, 0, 0, .38); }
 :root[data-appearance-preset='aurora-flow'] .launcher-shell {
   border-color: transparent; border-radius: 16px;
   background:
@@ -496,7 +502,7 @@ kbd {
     linear-gradient(rgba(139, 92, 246, .065) 1px, transparent 1px) 0 0 / 40px 40px,
     linear-gradient(90deg, rgba(139, 92, 246, .065) 1px, transparent 1px) 0 0 / 40px 40px,
     rgba(10, 8, 22, .97);
-  box-shadow: 0 0 0 1px rgba(255, 43, 214, .5), 0 0 50px rgba(255, 43, 214, .18), 0 0 120px rgba(0, 240, 255, .07), 0 40px 100px -30px rgba(0, 0, 0, .7);
+  box-shadow: 0 0 0 1px rgba(255, 43, 214, .5), 0 0 var(--ql-shadow-blur) rgba(255, 43, 214, .14), var(--ql-panel-shadow);
 }
 /* Static CRT scanlines over the panel; painted once, never animated. */
 :root[data-appearance-preset='aurora-flow'] .launcher-shell::after {
@@ -530,7 +536,7 @@ kbd {
 :root[data-appearance-preset='qing-nova'] .launcher-shell {
   border: 4px solid #111; border-radius: 22px;
   background: radial-gradient(rgba(17, 17, 17, .1) 1.2px, transparent 1.6px) 0 0 / 16px 16px, #fff7d6;
-  box-shadow: 12px 12px 0 #111;
+  box-shadow: min(8px, calc(var(--ql-frame-gutter) * .5)) min(8px, calc(var(--ql-frame-gutter) * .5)) 0 #111;
 }
 :root[data-appearance-preset='qing-nova'] .launcher-shell h1 { font-family: var(--br-display); font-weight: 900; letter-spacing: 0; text-shadow: 3px 3px 0 #ff4d4d; }
 :root[data-appearance-preset='qing-nova'] .brand-mark { border: 3px solid #111; border-radius: 0; background: #ff4d4d; box-shadow: 4px 4px 0 #111; }
@@ -582,7 +588,7 @@ kbd {
     radial-gradient(ellipse 70% 40% at 50% 0%, rgba(212, 175, 55, .14), transparent 70%),
     var(--deco-art-fan) 0 0 / 64px 64px,
     linear-gradient(180deg, #17151a, #0b0b0d);
-  box-shadow: 0 0 60px rgba(212, 175, 55, .08), 0 40px 110px -30px rgba(0, 0, 0, .85);
+  box-shadow: 0 0 var(--ql-shadow-blur) rgba(212, 175, 55, .08), var(--ql-panel-shadow);
 }
 :root[data-appearance-preset='neon-circuit'] .launcher-shell h1 {
   background: var(--deco-foil); -webkit-background-clip: text; background-clip: text; color: transparent;
@@ -622,7 +628,7 @@ kbd {
     var(--ss-art-mountains) center bottom / 100% auto no-repeat,
     var(--ss-art-grain) 0 0 / 240px 240px,
     #f8f2e4;
-  box-shadow: 0 40px 90px -36px rgba(34, 33, 30, .6), inset 0 0 0 1px rgba(255, 255, 255, .4);
+  box-shadow: var(--ql-panel-shadow), inset 0 0 0 1px rgba(255, 255, 255, .4);
 }
 :root[data-appearance-preset='greenline'] .launcher-shell h1 { font-family: var(--ss-brush); font-size: 24px; font-weight: 400; letter-spacing: .08em; }
 :root[data-appearance-preset='greenline'] .launcher-shell h1::after {
