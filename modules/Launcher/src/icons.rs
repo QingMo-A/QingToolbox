@@ -1,7 +1,7 @@
-//! Shell-owned, high-resolution icons (not file previews or enlarged 32px icons).
+//! Shell-owned icons. Prefer real detail, not the size of a padded Shell canvas.
 #[cfg(windows)]
 pub fn extract(path: &std::path::Path) -> Option<Vec<u8>> {
-    use std::{mem, os::windows::ffi::OsStrExt, ptr};
+    use std::os::windows::ffi::OsStrExt;
     use windows::{
         core::PCWSTR,
         Win32::{
@@ -13,7 +13,6 @@ pub fn extract(path: &std::path::Path) -> Option<Vec<u8>> {
             },
         },
     };
-    use windows_sys::Win32::Graphics::Gdi::*;
     struct Com(bool);
     impl Drop for Com {
         fn drop(&mut self) {
@@ -47,19 +46,36 @@ pub fn extract(path: &std::path::Path) -> Option<Vec<u8>> {
             })
             .ok()?
     };
-    let image = unsafe {
-        factory
+    let read = |size| unsafe {
+        let image = factory
             .GetImage(
-                SIZE { cx: 256, cy: 256 },
+                SIZE { cx: size, cy: size },
                 SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK,
             )
-            .map_err(|e| {
-                #[cfg(test)]
-                eprintln!("Shell image: {e}");
-                let _ = e;
-            })
-            .ok()?
+            .ok()?;
+        read_bitmap(image.0)
     };
+    let mut best = read(256)?;
+    // Some Shell jumbo icons contain a 48px icon in a 256px canvas (and even
+    // a faint frame). Ask for smaller native representations only in that
+    // case; a smaller canvas can contain *more actual detail*. Never request
+    // SIIGBF_SCALEUP and mistake interpolated pixels for a high-res resource.
+    if best.is_padded() {
+        for size in [128, 64] {
+            if let Some(candidate) = read(size) {
+                if candidate.detail_area() > best.detail_area() {
+                    best = candidate;
+                }
+            }
+        }
+    }
+    best.trim_padding().encode()
+}
+
+#[cfg(windows)]
+fn read_bitmap(image: windows_sys::Win32::Graphics::Gdi::HBITMAP) -> Option<IconPixels> {
+    use std::{mem, ptr};
+    use windows_sys::Win32::Graphics::Gdi::*;
     struct Bitmap(HBITMAP);
     impl Drop for Bitmap {
         fn drop(&mut self) {
@@ -68,7 +84,7 @@ pub fn extract(path: &std::path::Path) -> Option<Vec<u8>> {
             }
         }
     }
-    let image = Bitmap(image.0);
+    let image = Bitmap(image);
     let mut bitmap: BITMAP = unsafe { mem::zeroed() };
     if unsafe {
         GetObjectW(
@@ -119,16 +135,78 @@ pub fn extract(path: &std::path::Path) -> Option<Vec<u8>> {
         return None;
     }
     unpremultiply_bgra(&mut bytes);
-    let mut png = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut png, width as u32, height as u32);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder.set_compression(png::Compression::Best);
-        let mut writer = encoder.write_header().ok()?;
-        writer.write_image_data(&bytes).ok()?;
+    Some(IconPixels {
+        width: width as usize,
+        height: height as usize,
+        bytes,
+    })
+}
+
+struct IconPixels {
+    width: usize,
+    height: usize,
+    bytes: Vec<u8>,
+}
+
+impl IconPixels {
+    fn bounds(&self) -> Option<(usize, usize, usize, usize)> {
+        let (mut left, mut top, mut right, mut bottom) = (self.width, self.height, 0, 0);
+        for (i, rgba) in self.bytes.chunks_exact(4).enumerate() {
+            // Ignore faint Shell framing/shadows when measuring the real icon.
+            // A fully translucent asset has no such bounds and is left intact.
+            if rgba[3] >= 96 {
+                let (x, y) = (i % self.width, i / self.width);
+                left = left.min(x);
+                top = top.min(y);
+                right = right.max(x + 1);
+                bottom = bottom.max(y + 1);
+            }
+        }
+        (right > left && bottom > top).then_some((left, top, right, bottom))
     }
-    Some(png)
+    fn detail_area(&self) -> usize {
+        self.bounds().map_or(0, |(l, t, r, b)| (r - l) * (b - t))
+    }
+    fn is_padded(&self) -> bool {
+        self.bounds()
+            .is_some_and(|(l, t, r, b)| (r - l).max(b - t) * 100 < self.width.max(self.height) * 60)
+    }
+    fn trim_padding(self) -> Self {
+        if !self.is_padded() {
+            return self;
+        }
+        let (left, top, right, bottom) = self.bounds().unwrap();
+        // Retain a little breathing space and the subject's anti-aliased edge.
+        let margin = ((right - left).max(bottom - top) / 16).max(2);
+        let (left, top) = (left.saturating_sub(margin), top.saturating_sub(margin));
+        let (right, bottom) = (
+            (right + margin).min(self.width),
+            (bottom + margin).min(self.height),
+        );
+        let mut bytes = Vec::with_capacity((right - left) * (bottom - top) * 4);
+        for y in top..bottom {
+            bytes.extend_from_slice(
+                &self.bytes[(y * self.width + left) * 4..(y * self.width + right) * 4],
+            );
+        }
+        Self {
+            width: right - left,
+            height: bottom - top,
+            bytes,
+        }
+    }
+    fn encode(&self) -> Option<Vec<u8>> {
+        let mut png = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png, self.width as u32, self.height as u32);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.set_compression(png::Compression::Best);
+            let mut writer = encoder.write_header().ok()?;
+            writer.write_image_data(&self.bytes).ok()?;
+        }
+        Some(png)
+    }
 }
 
 fn unpremultiply_bgra(bytes: &mut [u8]) {
@@ -146,6 +224,54 @@ fn unpremultiply_bgra(bytes: &mut [u8]) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    fn fixture(size: usize, subject: std::ops::Range<usize>, alpha: u8) -> IconPixels {
+        let mut image = IconPixels {
+            width: size,
+            height: size,
+            bytes: vec![0; size * size * 4],
+        };
+        for y in subject.clone() {
+            for x in subject.clone() {
+                image.bytes[(y * size + x) * 4..(y * size + x) * 4 + 4]
+                    .copy_from_slice(&[90, 120, 180, alpha]);
+            }
+        }
+        image
+    }
+    #[test]
+    fn padded_jumbo_icon_is_cropped_without_upscaling_or_shell_frame() {
+        let mut image = fixture(256, 104..150, 255);
+        for x in 0..256 {
+            image.bytes[x * 4..x * 4 + 4].copy_from_slice(&[255, 255, 255, 77]);
+        }
+        assert!(image.is_padded());
+        let trimmed = image.trim_padding();
+        assert_eq!((trimmed.width, trimmed.height), (50, 50));
+        assert_eq!(trimmed.detail_area(), 46 * 46);
+        assert!(trimmed.bytes.chunks_exact(4).all(|p| p[3] != 77));
+    }
+    #[test]
+    fn full_size_translucent_and_asymmetric_icons_keep_their_shape() {
+        assert_eq!(fixture(256, 10..246, 255).trim_padding().width, 256);
+        assert_eq!(fixture(256, 104..150, 80).trim_padding().width, 256);
+        let image = IconPixels {
+            width: 256,
+            height: 256,
+            bytes: vec![0; 256 * 256 * 4],
+        }
+        .trim_padding();
+        assert_eq!(image.width, 256);
+        let mut wide = fixture(256, 0..0, 255);
+        for y in 100..124 {
+            for x in 90..162 {
+                wide.bytes[(y * 256 + x) * 4 + 3] = 255;
+            }
+        }
+        let wide = wide.trim_padding();
+        assert_eq!((wide.width, wide.height), (80, 32));
+        assert_eq!(wide.detail_area(), 72 * 24);
+    }
     #[test]
     fn transparent_edges_keep_their_original_color() {
         let mut bytes = [25, 50, 100, 128, 5, 5, 5, 0];

@@ -176,7 +176,7 @@ impl DiskCache {
 pub fn icon_key(path: &Path) -> Option<String> {
     let metadata = fs::metadata(path).ok()?;
     Some(format!(
-        "icon256-v1:{}:{}:{}",
+        "icon-detail-v2:{}:{}:{}",
         super::identity_key(&path.to_string_lossy()),
         metadata.len(),
         metadata
@@ -222,6 +222,7 @@ mod tests {
         let icon = dir.join("fixture.url");
         fs::write(&icon, "a").unwrap();
         let before = icon_key(&icon).unwrap();
+        assert!(before.starts_with("icon-detail-v2:"));
         fs::write(&icon, "longer").unwrap();
         assert_ne!(before, icon_key(&icon).unwrap());
         fs::remove_dir_all(&dir).unwrap();

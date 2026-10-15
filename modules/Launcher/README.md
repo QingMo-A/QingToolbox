@@ -68,8 +68,22 @@ not apps, folders, settings or Everything's own managed database. Query hits
 receive fresh session IDs; expired or missing-file pages query Everything again.
 The live Everything readiness badge is never inferred from a cached search.
 The settings backdrop is clipped to the rounded launcher panel with a smaller
-shadow, and cold-mount/native-show entrance animations are coalesced without
-resetting an already visible panel to transparent.
+shadow.
+
+Launcher 0.3.5 keeps the shell completely stationary on wake. Only the visible
+icon glyphs play the diagonal entrance wave; tile positions, hover targets,
+action buttons and the white panel do not move. Rapid close/reopen restarts
+the icon wave rather than skipping both animations for 900ms. Duplicate show
+callbacks within one frame are coalesced; a cold show waits for real grid tiles.
+Previous animations are cancelled on the next wake/unmount, and reduced-motion
+preferences still disable them.
+
+Shell icons with oversized empty canvases are measured by their actual opaque
+subject rather than PNG dimensions. Smaller native Shell representations are
+checked for better detail when necessary; excessive padding and faint framing
+are removed conservatively without synthesizing high-resolution pixels. Normal
+full-size icons and fully translucent assets are kept intact. Icon cache keys
+are versioned so old padded icons are not reused after updating the module.
 
 The bounded integration smoke uses `-Everything` with a temporary indexed
 folder. On a machine where the dedicated service has already been authorized,

@@ -2,7 +2,7 @@
 import LauncherIcon from './LauncherIcon.vue'
 import { commandSuggestions, completeCommand } from './searchCommands'
 import { resetIconCache } from './itemIcons'
-import { RevealGate } from './revealMotion'
+import { IconRevealMotion } from './revealMotion'
 import { QButton, QIconButton, QModal, QModalInput, QModalLabel } from '@qingtoolbox/module-ui'
 import LauncherAppIcon from './LauncherAppIcon.vue'
 import { OverlayInteraction } from './overlayInteraction'
@@ -33,7 +33,9 @@ const recentCount = ref(5)
 let recentObserver: ResizeObserver | undefined
 const overlayListeners: UnlistenFn[] = []
 let disposed = false
-const revealGate = new RevealGate()
+const iconMotion = new IconRevealMotion()
+let iconRevealFrame = 0
+let pendingIconReveal = false
 let firstRevealHandled = false
 
 function isOutsidePanel(event: PointerEvent): boolean {
@@ -55,23 +57,34 @@ function internalDragChanged(id: string | null): void {
 function reveal(focusSearch = true): void {
   firstRevealHandled = true
   overlay.value.cancel()
-  if (revealGate.accept(performance.now()) && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    panel.value?.animate([{ transform: 'translateY(12px) scale(.98)' }, { transform: 'none' }], { duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)' })
-    cascadeIcons()
-  }
+  pendingIconReveal = true
+  void nextTick(flushIconReveal)
   if (focusSearch && !recordingHotkey.value && !overlay.value.external) searchInput.value?.focus({ preventScroll: true })
 }
 // Icons rise in a quick diagonal wave as the panel opens. Only the first
 // screenful takes part and only transform/opacity move, so a large grid
 // costs no more than a small one.
 function cascadeIcons(): void {
-  const tiles = panel.value?.querySelectorAll<HTMLElement>('.launcher-tile:not(.lifted) .tile-image')
-  if (!tiles) return
+  const grid = panel.value?.querySelector('.grid-scroll')
+  const bounds = grid?.getBoundingClientRect()
+  if (!bounds) return
+  const tiles = Array.from(grid!.querySelectorAll<HTMLElement>('.launcher-tile:not(.lifted)')).filter(tile => {
+    const rect = tile.getBoundingClientRect()
+    return rect.bottom > bounds.top && rect.top < bounds.bottom && rect.right > bounds.left && rect.left < bounds.right
+  })
   const columns = Math.max(1, Math.round((panel.value?.querySelector('.launcher-grid')?.clientWidth ?? 700) / 120))
-  Array.from(tiles).slice(0, 32).forEach((tile, index) => {
-    const delay = (index % columns + Math.floor(index / columns)) * 26
-    tile.animate([{ opacity: .7, transform: 'translateY(14px) scale(.9)' }, { opacity: 1, transform: 'none' }],
-      { duration: 340, delay: 40 + delay, easing: 'cubic-bezier(.34,1.3,.64,1)', fill: 'backwards' })
+  iconMotion.play(tiles, columns)
+}
+function flushIconReveal(): void {
+  if (disposed || loading.value || !pendingIconReveal || iconRevealFrame) return
+  // Coalesce duplicate callbacks within one render frame, never suppress a
+  // distinct fast wake. Cold shows wait for the real grid, not skeleton tiles.
+  iconRevealFrame = requestAnimationFrame(() => {
+    iconRevealFrame = 0
+    if (disposed || loading.value) return
+    pendingIconReveal = false
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) iconMotion.cancel()
+    else cascadeIcons()
   })
 }
 function addOverlayListener<T>(event: string, callback: (payload: T) => void): void {
@@ -935,6 +948,7 @@ async function moveFolderItem(folder: LauncherState['folders'][number], index: n
 }
 
 watch(query, () => { commandIndex.value = 0; commandDismissed.value = false; scheduleEverythingSearch() })
+watch(loading, value => { if (!value) flushIconReveal() }, { flush: 'post' })
 watch(hotkeyPanelOpen, open => {
   if (!open) stopHotkeyRecording()
   else {
@@ -989,6 +1003,8 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   disposed = true
+  cancelAnimationFrame(iconRevealFrame)
+  iconMotion.cancel()
   overlayListeners.splice(0).forEach(unlisten => unlisten())
   recentObserver?.disconnect()
   stopHotkeyRecording()
