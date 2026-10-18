@@ -1,0 +1,24 @@
+{
+  "id": "qing.convert",
+  "name": "Qing Convert",
+  "description": "Convert images, audio, Word and PDF documents locally in batches.",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "author": "QingMo-A",
+  "minimumHostVersion": "0.3.4-alpha",
+  "entry": "bin/qing-convert-module.exe",
+  "runtimeType": "Process",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
+  "loadMode": "Manual",
+  "permissions": ["FileRead", "FileWrite", "ProcessStart", "WindowControl"],
+  "hostCapabilities": ["fileDialog.openFiles", "fileDialog.openDirectory"],
+  "operations": ["getState", "addFiles", "removeFile", "clearFiles", "startConversion", "cancel", "updateSettings", "openResult"],
+  "icon": "icon.svg",
+  "defaultLanguage": "zh-CN",
+  "localization": {
+    "basePath": "i18n",
+    "resources": { "zh-CN": "i18n/zh-CN.json", "en-US": "i18n/en-US.json" }
+  }
+}

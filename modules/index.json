@@ -11,6 +11,14 @@
       "updateManifest": "Canary/update.json",
       "visibility": "development"
     },
+    "qing.convert": {
+      "name": { "zh-CN": "格式转换", "en-US": "Qing Convert" },
+      "description": { "zh-CN": "本地批量转换图片、音频与 Word/PDF 文档。", "en-US": "Convert images, audio and Word/PDF documents locally in batches." },
+      "icon": "Converter/icon.svg",
+      "moduleManifest": "Converter/module.json",
+      "updateManifest": "Converter/update.json",
+      "visibility": "development"
+    },
     "qing.launcher": {
       "name": { "zh-CN": "启动台", "en-US": "Qing Launcher" },
       "description": { "zh-CN": "应用启动、桌面图标、文件夹和 Everything 搜索。", "en-US": "Application launching, desktop items, folders and Everything search." },

@@ -1,23 +1,18 @@
 <script setup lang="ts">
-import { QButton } from '@qingtoolbox/module-ui'
+import { QButton, QIcon, QIconButton, selectFiles, selectDirectory, selectSavePath } from '@qingtoolbox/module-ui'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { open, save } from '@tauri-apps/plugin-dialog'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { getContext, getState, hideModuleWindow, invokeModule } from './bridge'
-import type { ModuleContext, PdfFile, PdfState } from './types'
+import { formatSize, messageOf, splitPreview } from './presentation'
+import PdfIcon from './PdfIcon.vue'
+import type { ModuleContext, PdfState } from './types'
 
 type Tab = 'merge' | 'split' | 'extract' | 'rotate'
-
-const emptyState = (): PdfState => ({
-  mergeFiles: [],
-  source: null,
-  busy: false,
-  activeOperation: null,
-  runtimeStatus: 'Unavailable',
-  message: null,
-  result: null,
-})
-
-const state = ref<PdfState>(emptyState())
+const tabs: { id: Tab; label: string }[] = [
+  { id: 'merge', label: '拼接' }, { id: 'split', label: '均分' },
+  { id: 'extract', label: '提取页面' }, { id: 'rotate', label: '旋转' },
+]
+const state = ref<PdfState>({ mergeFiles: [], source: null, busy: false, activeOperation: null, runtimeStatus: 'Unavailable', message: null, result: null })
 const context = ref<ModuleContext | null>(null)
 const tab = ref<Tab>('merge')
 const parts = ref(2)
@@ -26,112 +21,74 @@ const rotatePages = ref('')
 const degrees = ref(90)
 const loading = ref(true)
 const requestBusy = ref(false)
+const dialogBusy = ref(false)
+const pendingOperation = ref('')
 const error = ref('')
-const notice = ref('')
 const draggingId = ref<string | null>(null)
+const dragTarget = ref<string | null>(null)
+const externalDrag = ref(false)
+let unlistenDrop: (() => void) | undefined
+let disposed = false
 
 const unavailable = computed(() => state.value.runtimeStatus === 'Unavailable')
-const disabled = computed(() => loading.value || requestBusy.value || state.value.busy || unavailable.value)
+const disabled = computed(() => loading.value || requestBusy.value || dialogBusy.value || state.value.busy || unavailable.value)
+const working = computed(() => Boolean(pendingOperation.value) || state.value.busy)
 const sourceReady = computed(() => Boolean(state.value.source))
+const tabIndex = computed(() => tabs.findIndex(item => item.id === tab.value))
 const totalMergePages = computed(() => state.value.mergeFiles.reduce((sum, file) => sum + file.pages, 0))
-const splitRanges = computed(() => {
-  const total = state.value.source?.pages ?? 0
-  const count = Math.max(2, Math.min(parts.value, total || 2))
-  if (!total || count > total) return []
-  const base = Math.floor(total / count)
-  const remainder = total % count
-  let start = 1
-  return Array.from({ length: count }, (_, index) => {
-    const size = base + (index < remainder ? 1 : 0)
-    const range = `${start}–${start + size - 1}`
-    start += size
-    return range
-  })
-})
+const ranges = computed(() => splitPreview(state.value.source?.pages ?? 0, parts.value))
+const splitValid = computed(() => ranges.value.length > 0)
+const runLabels: Record<string, string> = { runMerge: '正在拼接', runSplit: '正在均分', runExtract: '正在提取', runRotate: '正在旋转' }
 
-function apply(next: PdfState | null | undefined): void {
-  if (next) state.value = next
-}
-
-function messageOf(reason: unknown): string {
-  if (reason instanceof Error && reason.message) return reason.message
-  if (typeof reason === 'object' && reason !== null) {
-    const value = reason as { message?: unknown; error?: unknown }
-    if (typeof value.message === 'string' && value.message) return value.message
-    if (typeof value.error === 'string' && value.error) return value.error
-  }
-  return 'PDF 操作未能完成。'
-}
-
-async function call(method: string, payload: Record<string, unknown> = {}): Promise<PdfState | null> {
+async function call(method: string, payload: Record<string, unknown> = {}): Promise<boolean> {
+  if (requestBusy.value) return false
   requestBusy.value = true
+  pendingOperation.value = runLabels[method] ?? ''
   error.value = ''
   try {
-    const next = await invokeModule<PdfState>(method, payload)
-    apply(next)
-    return next
+    state.value = await invokeModule<PdfState>(method, payload)
+    return true
   } catch (reason) {
     error.value = messageOf(reason)
-    return null
+    return false
   } finally {
     requestBusy.value = false
+    pendingOperation.value = ''
   }
+}
+
+async function fileDialog<T>(pick: () => Promise<T>): Promise<T | null> {
+  if (disabled.value) return null
+  dialogBusy.value = true
+  error.value = ''
+  try { return await pick() }
+  catch (reason) { error.value = messageOf(reason); return null }
+  finally { dialogBusy.value = false }
+}
+
+async function addPaths(paths: string[]): Promise<void> {
+  if (disabled.value || paths.length === 0) return
+  if (paths.some(path => !/\.pdf$/i.test(path))) {
+    error.value = '请选择 PDF 文件。'
+    return
+  }
+  if (tab.value === 'merge') await call('addMergeFiles', { paths })
+  else if (paths.length === 1) await call('setSource', { path: paths[0] })
+  else error.value = '此操作一次处理一个 PDF；多个文件请使用“拼接”。'
 }
 
 async function chooseMergeFiles(): Promise<void> {
-  if (disabled.value) return
-  try {
-    const picked = await open({
-      title: '选择要拼接的 PDF',
-      multiple: true,
-      directory: false,
-      filters: [{ name: 'PDF 文件', extensions: ['pdf'] }],
-    })
-    if (!picked) return
-    const paths = Array.isArray(picked) ? picked : [picked]
-    await call('addMergeFiles', { paths })
-  } catch (reason) {
-    error.value = messageOf(reason)
-  }
+  const picked = await fileDialog(() => selectFiles({ title: '选择要拼接的 PDF', multiple: true, filters: [{ name: 'PDF 文件', extensions: ['pdf'] }] }))
+  if (picked) await addPaths(picked)
 }
 
 async function chooseSource(): Promise<void> {
-  if (disabled.value) return
-  try {
-    const picked = await open({
-      title: '选择源 PDF',
-      multiple: false,
-      directory: false,
-      filters: [{ name: 'PDF 文件', extensions: ['pdf'] }],
-    })
-    if (typeof picked === 'string' && picked) await call('setSource', { path: picked })
-  } catch (reason) {
-    error.value = messageOf(reason)
-  }
+  const picked = await fileDialog(() => selectFiles({ title: '选择源 PDF', multiple: false, filters: [{ name: 'PDF 文件', extensions: ['pdf'] }] }))
+  if (picked?.[0]) await addPaths(picked)
 }
 
-async function chooseOutputFile(suggestedName: string): Promise<string | null> {
-  try {
-    const picked = await save({
-      title: '选择输出 PDF',
-      defaultPath: suggestedName,
-      filters: [{ name: 'PDF 文件', extensions: ['pdf'] }],
-    })
-    return picked
-  } catch (reason) {
-    error.value = messageOf(reason)
-    return null
-  }
-}
-
-async function chooseOutputDirectory(): Promise<string | null> {
-  try {
-    const picked = await open({ title: '选择输出文件夹', directory: true, multiple: false })
-    return typeof picked === 'string' ? picked : null
-  } catch (reason) {
-    error.value = messageOf(reason)
-    return null
-  }
+function chooseOutputFile(name: string): Promise<string | null> {
+  return fileDialog(() => selectSavePath({ title: '保存 PDF', defaultPath: name, filters: [{ name: 'PDF 文件', extensions: ['pdf'] }] }))
 }
 
 async function runMerge(): Promise<void> {
@@ -141,140 +98,146 @@ async function runMerge(): Promise<void> {
 }
 
 async function runSplit(): Promise<void> {
-  if (disabled.value || !state.value.source) return
-  const outputDirectory = await chooseOutputDirectory()
-  if (outputDirectory) await call('runSplit', { parts: parts.value, outputDirectory })
+  if (disabled.value || !sourceReady.value || !splitValid.value) return
+  const directory = await fileDialog(() => selectDirectory({ title: '选择输出文件夹' }))
+  if (typeof directory === 'string' && directory) await call('runSplit', { parts: parts.value, outputDirectory: directory })
 }
 
 async function runExtract(): Promise<void> {
   if (disabled.value || !state.value.source || !extractPages.value.trim()) return
-  const stem = state.value.source.name.replace(/\.pdf$/i, '')
-  const outputPath = await chooseOutputFile(`${stem}_pages.pdf`)
+  const outputPath = await chooseOutputFile(`${state.value.source.name.replace(/\.pdf$/i, '')}_pages.pdf`)
   if (outputPath) await call('runExtract', { pages: extractPages.value, outputPath })
 }
 
 async function runRotate(): Promise<void> {
   if (disabled.value || !state.value.source) return
-  const stem = state.value.source.name.replace(/\.pdf$/i, '')
-  const outputPath = await chooseOutputFile(`${stem}_rotated.pdf`)
+  const outputPath = await chooseOutputFile(`${state.value.source.name.replace(/\.pdf$/i, '')}_rotated.pdf`)
   if (outputPath) await call('runRotate', { degrees: degrees.value, pages: rotatePages.value, outputPath })
 }
 
-function reorder(fromId: string, toId: string): void {
+async function reorder(fromId: string, toId: string): Promise<void> {
   if (fromId === toId || disabled.value) return
-  const ids = state.value.mergeFiles.map(file => file.id)
-  const from = ids.indexOf(fromId)
-  const to = ids.indexOf(toId)
+  const before = [...state.value.mergeFiles]
+  const from = before.findIndex(file => file.id === fromId)
+  const to = before.findIndex(file => file.id === toId)
   if (from < 0 || to < 0) return
-  ids.splice(to, 0, ids.splice(from, 1)[0])
-  state.value.mergeFiles = ids
-    .map(id => state.value.mergeFiles.find(file => file.id === id))
-    .filter((file): file is PdfFile => Boolean(file))
-  void call('setMergeOrder', { ids })
+  const next = [...before]
+  next.splice(to, 0, next.splice(from, 1)[0])
+  state.value.mergeFiles = next
+  if (!await call('setMergeOrder', { ids: next.map(file => file.id) })) state.value.mergeFiles = before
 }
 
-function dropFile(file: PdfFile): void {
-  const fromId = draggingId.value
-  draggingId.value = null
-  if (fromId) reorder(fromId, file.id)
+function startDrag(event: DragEvent, id: string): void {
+  if (disabled.value) { event.preventDefault(); return }
+  draggingId.value = id
+  if (event.dataTransfer) { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', id) }
 }
-
-function move(file: PdfFile, offset: number): void {
-  const index = state.value.mergeFiles.findIndex(candidate => candidate.id === file.id)
+function endDrag(): void { draggingId.value = null; dragTarget.value = null }
+function dropFile(id: string): void {
+  const from = draggingId.value
+  endDrag()
+  if (from) void reorder(from, id)
+}
+function move(id: string, offset: number): void {
+  const index = state.value.mergeFiles.findIndex(file => file.id === id)
   const target = state.value.mergeFiles[index + offset]
-  if (target) reorder(file.id, target.id)
+  if (target) void reorder(id, target.id)
 }
-
-function formatSize(value: number): string {
-  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`
-  return `${(value / 1024 / 1024).toFixed(value < 10 * 1024 * 1024 ? 1 : 0)} MB`
+function changeTab(event: KeyboardEvent, index: number): void {
+  let next: number
+  if (event.key === 'ArrowRight') next = (index + 1) % tabs.length
+  else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = tabs.length - 1
+  else return
+  event.preventDefault()
+  tab.value = tabs[next].id
+  document.getElementById(`tab-${tab.value}`)?.focus()
 }
-
-function clearNotice(): void { notice.value = '' }
 
 function onWindowKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && !requestBusy.value) {
+  if (event.key === 'Escape' && !requestBusy.value && !dialogBusy.value) {
     event.preventDefault()
     if (error.value) error.value = ''
-    else void hideModuleWindow()
+    else void hideModuleWindow().catch(reason => { error.value = messageOf(reason) })
   }
 }
 
 onMounted(async () => {
   window.addEventListener('keydown', onWindowKeydown)
+  try { context.value = await getContext(); state.value = await getState() }
+  catch (reason) { error.value = messageOf(reason) }
+  finally { loading.value = false }
   try {
-    context.value = await getContext()
-    apply(await getState())
-  } catch (reason) {
-    error.value = messageOf(reason)
-  } finally {
-    loading.value = false
-  }
+    const stop = await getCurrentWebview().onDragDropEvent(event => {
+      if (disposed) return
+      const payload = event.payload
+      if (payload.type === 'enter' || payload.type === 'over') externalDrag.value = !disabled.value && !draggingId.value
+      else if (payload.type === 'leave') externalDrag.value = false
+      else if (payload.type === 'drop') { externalDrag.value = false; void addPaths(payload.paths) }
+    })
+    if (disposed) stop()
+    else unlistenDrop = stop
+  } catch { /* Older hosts can still use the native file picker. */ }
 })
-
-onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
+onUnmounted(() => { disposed = true; unlistenDrop?.(); window.removeEventListener('keydown', onWindowKeydown) })
 </script>
 
 <template>
-  <main class="viewport">
-    <section class="workspace">
-      <header class="hero">
-        <div class="brand-mark" aria-hidden="true">
-          <img v-if="context?.iconDataUrl" :src="context.iconDataUrl" alt="" />
-          <span v-else>PDF</span>
+  <main class="pdf-viewport" :class="{ 'has-external-drag': externalDrag }" @contextmenu.prevent>
+    <section class="pdf-workspace">
+      <header class="pdf-header">
+        <div class="pdf-brand"><span class="brand-mark"><PdfIcon name="document" /></span><h1>{{ context?.name || 'Qing PDF' }}</h1></div>
+        <div class="header-actions">
+          <span class="runtime" :class="{ unavailable: unavailable && !loading, preparing: loading || working }" :title="state.runtimeStatus" role="status"><i />{{ loading ? '正在准备' : working ? '处理中' : unavailable ? '引擎不可用' : '已就绪' }}</span>
+          <QIconButton label="刷新状态" :disabled="disabled" :loading="loading" @click="call('getState')"><QIcon name="refresh" /></QIconButton>
         </div>
-        <div class="hero-copy">
-          <span class="eyebrow">LOCAL PDF WORKSPACE</span>
-          <h1>{{ context?.name || 'Qing PDF' }}</h1>
-          <p>快速处理 PDF 文档结构，文件始终留在本机。</p>
-        </div>
-        <div class="runtime" :class="{ unavailable }"><span class="status-dot" />{{ loading ? '正在准备…' : state.runtimeStatus }}</div>
       </header>
 
-      <nav class="tabs" aria-label="PDF 工具">
-        <button :class="{ active: tab === 'merge' }" @click="tab = 'merge'">拼接</button>
-        <button :class="{ active: tab === 'split' }" @click="tab = 'split'">均分</button>
-        <button :class="{ active: tab === 'extract' }" @click="tab = 'extract'">提取页面</button>
-        <button :class="{ active: tab === 'rotate' }" @click="tab = 'rotate'">旋转</button>
+      <nav class="pdf-tabs" role="tablist" aria-label="PDF 工具" :style="{ '--tab-index': tabIndex }">
+        <span class="tab-thumb" aria-hidden="true" />
+        <button v-for="(item, index) in tabs" :id="`tab-${item.id}`" :key="item.id" role="tab" :aria-selected="tab === item.id" :aria-controls="`panel-${item.id}`" :tabindex="tab === item.id ? 0 : -1" :class="{ active: tab === item.id }" @click="tab = item.id" @keydown="changeTab($event, index)"><PdfIcon :name="item.id" /><span>{{ item.label }}</span></button>
       </nav>
 
-      <div v-if="unavailable && !loading" class="alert error-alert">内置 qpdf 运行时不可用，请重新安装完整模块包。</div>
-      <div v-if="error" class="alert error-alert"><span>{{ error }}</span><button aria-label="关闭" @click="error = ''">×</button></div>
-      <div v-if="notice" class="alert"><span>{{ notice }}</span><button aria-label="关闭" @click="clearNotice">×</button></div>
+      <Transition name="notice"><div v-if="error || (unavailable && !loading)" class="error-banner" role="alert"><QIcon name="statusWarning" /><span>{{ error || '内置 PDF 引擎不可用，请重新安装完整模块包。' }}</span><QIconButton v-if="error" label="关闭提示" @click="error = ''"><QIcon name="close" /></QIconButton></div></Transition>
 
-      <section v-if="tab === 'merge'" class="tool-card">
-        <div class="tool-heading">
-          <div><h2>拼接 PDF</h2><p>按最终文档需要的顺序排列文件。</p></div>
-          <div class="heading-actions"><QButton :disabled="disabled" @click="chooseMergeFiles">＋ 添加 PDF</QButton><QButton variant="ghost" :disabled="disabled || !state.mergeFiles.length" @click="call('clearMergeFiles')">清空</QButton></div>
-        </div>
-        <div v-if="state.mergeFiles.length" class="file-list">
-          <article v-for="(file, index) in state.mergeFiles" :key="file.id" class="file-row" :class="{ dragging: draggingId === file.id }" draggable="true" @dragstart="draggingId = file.id" @dragend="draggingId = null" @dragover.prevent @drop.prevent="dropFile(file)">
-            <span class="drag-handle" aria-hidden="true">⠿</span><span class="order">{{ index + 1 }}</span><span class="pdf-mini">PDF</span>
-            <span class="file-copy"><strong>{{ file.name }}</strong><small>{{ file.directory }}</small></span><span class="meta">{{ file.pages }} 页 · {{ formatSize(file.size) }}</span>
-            <span class="row-actions"><button :disabled="disabled || index === 0" aria-label="上移" @click="move(file, -1)">↑</button><button :disabled="disabled || index === state.mergeFiles.length - 1" aria-label="下移" @click="move(file, 1)">↓</button><button :disabled="disabled" aria-label="移除" @click="call('removeMergeFile', { id: file.id })">×</button></span>
-          </article>
-        </div>
-        <button v-else class="drop-zone" :disabled="disabled" @click="chooseMergeFiles"><span class="drop-icon">＋</span><strong>拼接列表中还没有 PDF</strong><small>点击选择文件；拖放支持将在宿主统一接入。</small></button>
-        <footer class="tool-footer"><span>{{ totalMergePages }} 页</span><QButton variant="primary" :disabled="disabled || state.mergeFiles.length < 2" @click="runMerge">开始拼接</QButton></footer>
-      </section>
+      <Transition name="panel" mode="out-in">
+        <section :id="`panel-${tab}`" :key="tab" class="tool-card" role="tabpanel" :aria-labelledby="`tab-${tab}`" :aria-busy="working">
+          <template v-if="tab === 'merge'">
+            <div class="tool-heading"><div><h2>拼接 PDF</h2><span class="subtle">{{ state.mergeFiles.length }} 个文件 · {{ totalMergePages }} 页</span></div><div class="heading-actions"><QButton :disabled="disabled" :loading="dialogBusy" @click="chooseMergeFiles"><PdfIcon name="add" />添加 PDF</QButton><QIconButton label="清空列表" :disabled="disabled || !state.mergeFiles.length" @click="call('clearMergeFiles')"><QIcon name="remove" /></QIconButton></div></div>
+            <TransitionGroup v-if="state.mergeFiles.length" name="files" tag="div" class="file-list">
+              <article v-for="(file, index) in state.mergeFiles" :key="file.id" class="file-row" :class="{ dragging: draggingId === file.id, 'drop-target': dragTarget === file.id }" :draggable="!disabled" @dragstart="startDrag($event, file.id)" @dragend="endDrag" @dragover.prevent="dragTarget = file.id" @dragleave="dragTarget = null" @drop.prevent="dropFile(file.id)">
+                <span class="drag-handle"><PdfIcon name="grip" /></span><span class="file-order">{{ index + 1 }}</span><span class="file-icon"><PdfIcon name="document" /></span>
+                <div class="file-copy"><strong :title="file.name">{{ file.name }}</strong><small :title="file.directory">{{ file.directory }}</small><span class="mobile-meta">{{ file.pages }} 页 · {{ formatSize(file.size) }}</span></div>
+                <span class="file-meta">{{ file.pages }} 页<span>{{ formatSize(file.size) }}</span></span>
+                <div class="row-actions"><QIconButton label="上移" :disabled="disabled || index === 0" @click="move(file.id, -1)"><PdfIcon name="up" /></QIconButton><QIconButton label="下移" :disabled="disabled || index === state.mergeFiles.length - 1" @click="move(file.id, 1)"><PdfIcon name="down" /></QIconButton><QIconButton label="移除文件" :disabled="disabled" @click="call('removeMergeFile', { id: file.id })"><QIcon name="close" /></QIconButton></div>
+              </article>
+            </TransitionGroup>
+            <button v-else class="file-drop-zone" :disabled="disabled" @click="chooseMergeFiles"><span class="drop-mark"><PdfIcon name="add" /></span><strong>添加 PDF</strong><span>拖入文件，或点击选择</span></button>
+            <footer class="tool-footer"><span class="subtle">{{ state.mergeFiles.length ? '拖动文件调整拼接顺序' : '至少添加两个 PDF' }}</span><QButton variant="primary" :disabled="disabled || state.mergeFiles.length < 2" :loading="pendingOperation === '正在拼接'" @click="runMerge"><PdfIcon name="merge" />{{ pendingOperation === '正在拼接' ? '正在拼接' : '开始拼接' }}</QButton></footer>
+          </template>
+          <template v-else>
+            <div class="tool-heading"><h2>{{ tab === 'split' ? '均分 PDF' : tab === 'extract' ? '提取页面' : '旋转 PDF' }}</h2><QButton :disabled="disabled" :loading="dialogBusy" @click="chooseSource"><QIcon name="folder" />{{ state.source ? '更换 PDF' : '选择 PDF' }}</QButton></div>
+            <div v-if="state.source" class="source-card"><span class="file-icon"><PdfIcon name="document" /></span><div class="file-copy"><strong :title="state.source.name">{{ state.source.name }}</strong><small :title="state.source.directory">{{ state.source.directory }}</small></div><span class="file-meta">{{ state.source.pages }} 页<span>{{ formatSize(state.source.size) }}</span></span></div>
+            <button v-else class="source-empty" :disabled="disabled" @click="chooseSource"><PdfIcon name="document" /><span>拖入或选择一个 PDF</span></button>
+            <div class="operation-body">
+              <template v-if="tab === 'split'">
+                <label class="field split-field"><span>均分份数</span><div class="split-input"><input v-model.number="parts" type="number" min="2" :max="state.source?.pages || 2" :disabled="!sourceReady || disabled" /><span>份</span></div></label>
+                <div class="distribution"><span class="field-label">页面分配</span><div v-if="ranges.length" class="range-list"><span v-for="(range, index) in ranges" :key="index" class="range-chip"><b>{{ index + 1 }}</b>{{ range }} 页</span><span v-if="parts > ranges.length" class="subtle">另 {{ parts - ranges.length }} 份</span></div><span v-else class="subtle">{{ sourceReady ? '份数需为 2 至总页数之间的整数' : '选择文件后显示' }}</span></div>
+              </template>
+              <label v-else-if="tab === 'extract'" class="field"><span>页码范围</span><input v-model="extractPages" type="text" placeholder="例如：1-3, 5, 8-10" :disabled="!sourceReady || disabled" /><small>用逗号分隔，按输入顺序提取。</small></label>
+              <template v-else>
+                <div class="field"><span>顺时针旋转</span><div class="angle-options" role="group" aria-label="旋转角度"><button v-for="angle in [90, 180, 270]" :key="angle" :aria-pressed="degrees === angle" :class="{ selected: degrees === angle }" :disabled="!sourceReady || disabled" @click="degrees = angle"><PdfIcon name="rotate" />{{ angle }}°</button></div></div>
+                <label class="field"><span>页码范围</span><input v-model="rotatePages" type="text" placeholder="留空表示全部页面" :disabled="!sourceReady || disabled" /></label>
+              </template>
+            </div>
+            <footer class="tool-footer"><span class="subtle">{{ sourceReady ? `${state.source?.pages} 页` : '尚未选择源文件' }}</span><QButton v-if="tab === 'split'" variant="primary" :disabled="disabled || !sourceReady || !splitValid" :loading="pendingOperation === '正在均分'" @click="runSplit"><PdfIcon name="split" />生成分份文件</QButton><QButton v-else-if="tab === 'extract'" variant="primary" :disabled="disabled || !sourceReady || !extractPages.trim()" :loading="pendingOperation === '正在提取'" @click="runExtract"><PdfIcon name="extract" />提取页面</QButton><QButton v-else variant="primary" :disabled="disabled || !sourceReady" :loading="pendingOperation === '正在旋转'" @click="runRotate"><PdfIcon name="rotate" />旋转 PDF</QButton></footer>
+          </template>
+        </section>
+      </Transition>
 
-      <section v-else class="tool-card">
-        <div class="source-card" :class="{ empty: !state.source }">
-          <template v-if="state.source"><span class="pdf-large">PDF</span><span class="file-copy"><small>源 PDF</small><strong>{{ state.source.name }}</strong><span>{{ state.source.directory }}</span></span><span class="meta">{{ state.source.pages }} 页 · {{ formatSize(state.source.size) }}</span></template>
-          <template v-else><span class="source-empty-copy"><strong>选择一个 PDF 后即可开始</strong><small>页面范围会在本机校验。</small></span></template>
-          <QButton :disabled="disabled" @click="chooseSource">{{ state.source ? '更换 PDF' : '选择 PDF' }}</QButton>
-        </div>
-
-        <div v-if="tab === 'split'" class="operation-body"><div class="field-row"><label><span>均分份数</span><input v-model.number="parts" type="number" min="2" :max="state.source?.pages || 2" :disabled="!sourceReady || disabled" /></label></div><div class="distribution"><span>页面分配</span><div><b v-for="(range, index) in splitRanges" :key="range">{{ index + 1 }}<small>{{ range }}</small></b></div></div><QButton variant="primary" class="operation-button" :disabled="disabled || !sourceReady || parts < 2 || parts > (state.source?.pages || 0)" @click="runSplit">生成分份文件</QButton></div>
-        <div v-else-if="tab === 'extract'" class="operation-body"><label class="field"><span>页码范围</span><input v-model="extractPages" type="text" placeholder="例如：1-3,5,8-10" :disabled="!sourceReady || disabled" /><small>支持逗号分隔的连续页码范围。</small></label><QButton variant="primary" class="operation-button" :disabled="disabled || !sourceReady || !extractPages.trim()" @click="runExtract">提取页面</QButton></div>
-        <div v-else class="operation-body"><label class="field"><span>旋转角度</span><select v-model.number="degrees" :disabled="!sourceReady || disabled"><option :value="90">90°</option><option :value="180">180°</option><option :value="270">270°</option></select></label><label class="field"><span>页码范围（可选）</span><input v-model="rotatePages" type="text" placeholder="留空表示全部页面" :disabled="!sourceReady || disabled" /></label><QButton variant="primary" class="operation-button" :disabled="disabled || !sourceReady" @click="runRotate">旋转 PDF</QButton></div>
-      </section>
-
-      <aside v-if="state.busy" class="job-card"><span class="spinner" /><span><strong>正在处理 PDF…</strong><small>{{ state.activeOperation }}</small></span><QButton @click="call('cancel')">取消</QButton></aside>
-      <aside v-else-if="state.result" class="result-card"><span class="result-check">✓</span><span><strong>处理结果已生成</strong><small>{{ state.result.files.join(' · ') }}</small></span><QButton @click="call('openResult', { resultId: state.result?.id })">查看输出</QButton><QButton variant="ghost" @click="call('clearResult')">关闭</QButton></aside>
-      <aside v-else-if="state.message === 'canceled'" class="alert">操作已取消。</aside>
-
-      <footer class="privacy"><span>● 所有处理均在本机完成</span><p>页面内容会被保留；复杂目录、表单或数字签名请在处理后再次检查。</p></footer>
+      <Transition name="notice"><aside v-if="working" class="job-card" role="status"><span class="job-spinner" /><strong>{{ pendingOperation || '正在处理 PDF' }}…</strong></aside><aside v-else-if="state.result" class="result-card" role="status"><span class="result-mark"><QIcon name="statusSuccess" /></span><div class="result-copy"><strong>处理完成</strong><span :title="state.result.files.join('\n')">{{ state.result.files.length }} 个文件 · {{ state.result.outputDirectory }}</span></div><QButton :disabled="disabled" @click="call('openResult', { resultId: state.result.id })"><QIcon name="folder" />查看输出</QButton><QIconButton label="关闭结果" :disabled="disabled" @click="call('clearResult')"><QIcon name="close" /></QIconButton></aside></Transition>
     </section>
+    <Transition name="notice"><div v-if="externalDrag" class="external-drop" aria-live="polite"><span><PdfIcon name="document" /><strong>{{ tab === 'merge' ? '松开以添加 PDF' : '松开以选择 PDF' }}</strong></span></div></Transition>
   </main>
 </template>

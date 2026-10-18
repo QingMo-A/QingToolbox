@@ -4,6 +4,8 @@ export type ModuleContext = {
   version: string
   iconDataUrl: string | null
   protocolVersion: number
+  appearancePreset?: string
+  theme?: 'system' | 'light' | 'dark'
   operations: string[]
 }
 

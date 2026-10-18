@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
-import { compareVersions, validateUpdate, validateCatalog } from './module-catalog.mjs'
+import { compareVersions, validateUpdate, validateCatalog, validateHostCapabilities } from './module-catalog.mjs'
 
 const release = () => ({
   version: '0.3.0', channel: 'preview', moduleProfile: 'tauri-process-v1', apiVersion: 1,
@@ -24,6 +24,12 @@ test('semantic comparison handles numeric versions, previews and build metadata'
 test('unpublished native modules and verified release records are valid', () => {
   assert.equal(validateUpdate(manifest(release()), 'qing.launcher').releases.length, 1)
   assert.equal(validateUpdate({ ...manifest(release()), releases: [] }, 'qing.launcher').releases.length, 0)
+})
+test('source modules declare only explicit unique host services', () => {
+  for (const manifest of [{}, { hostCapabilities: [] }, { hostCapabilities: ['fileDialog.openFiles'] }, { hostCapabilities: ['notification.show', 'dialog.show'] }]) validateHostCapabilities(manifest)
+  for (const hostCapabilities of [null, 'fileDialog.openFiles', [1], ['fileDialog.openFiles', 'fileDialog.openFiles'], ['filesystem.readAll']]) {
+    assert.throws(() => validateHostCapabilities({ hostCapabilities }))
+  }
 })
 test('old WPF profiles, malformed API versions and wrong module identities are rejected', () => {
   for (const mutation of [r => { r.moduleProfile = 'experimental-0.1' }, r => { r.apiVersion = '1' }, r => { r.apiVersion = 0 }]) {

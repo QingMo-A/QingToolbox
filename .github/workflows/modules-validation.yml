@@ -43,3 +43,7 @@ jobs:
         shell: pwsh
         working-directory: toolbox-host
         run: node --test scripts/test-module-sources.mjs scripts/test-tauri-build-cache.mjs
+      - name: Smoke test native Live Activity lifecycle and window
+        shell: pwsh
+        working-directory: toolbox-host
+        run: ./scripts/smoke-tauri-liveactivity.ps1 -ExecutablePath ./QingToolbox.Tauri/src-tauri/resources/modules/qing.liveactivity/bin/qing-liveactivity-module.exe

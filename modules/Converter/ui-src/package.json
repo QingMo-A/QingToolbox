@@ -1,0 +1,13 @@
+{
+  "name": "qing-convert-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ../../../scripts/build-module-ui.mjs",
+    "typecheck": "node ../../../scripts/build-module-ui.mjs --typecheck",
+    "test": "node --test src/presentation.test.mjs"
+  },
+  "dependencies": { "@tauri-apps/api": "2.11.1", "vue": "3.5.42" },
+  "devDependencies": { "@vitejs/plugin-vue": "6.0.1", "typescript": "5.9.3", "vite": "7.1.10", "vue-tsc": "3.3.11" }
+}

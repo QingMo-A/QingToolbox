@@ -9,6 +9,7 @@ modules/
   index.json                 官方模块目录和更新信息路径
   Launcher/                  启动台
   QingPdf/                   PDF 工具
+  Converter/                 格式转换（初版开发中，未发布）
   PowerGuard/                断电保护
   ScreenPin/                 截图贴图
   TextTools/                 文本工具

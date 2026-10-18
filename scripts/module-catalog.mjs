@@ -5,6 +5,13 @@ import { createHash } from 'node:crypto'
 
 export const officialSource = 'https://raw.githubusercontent.com/QingMo-A/QingToolbox/modules/modules/'
 export const profile = 'tauri-process-v1'
+export function validateHostCapabilities(manifest) {
+  if (!Object.hasOwn(manifest, 'hostCapabilities')) return
+  const values = manifest.hostCapabilities
+  const known = ['fileDialog.openFiles', 'fileDialog.openDirectory', 'fileDialog.saveFile', 'notification.show', 'dialog.show']
+  if (!Array.isArray(values) || values.length > 32 || new Set(values).size !== values.length || values.some(value => !known.includes(value)))
+    throw new Error('Invalid or unsupported host capability declaration.')
+}
 const fail = message => { throw new Error(message) }
 const object = value => value && typeof value === 'object' && !Array.isArray(value)
 const text = (value, max = 320) => typeof value === 'string' && value.trim().length > 0 && value.length <= max && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value)
@@ -110,6 +117,7 @@ export function validateCatalog(root) {
     paths.add(directory)
     controlledFile(root, item.icon)
     const manifest = readJson(controlledFile(root, item.moduleManifest))
+    validateHostCapabilities(manifest)
     if (manifest.id !== id || manifest.runtimeType !== 'Process' || manifest.runtimeIsolation !== 'OutOfProcess' || manifest.apiVersion !== 1 || !/^bin\/[A-Za-z0-9-]+\.exe$/.test(manifest.entry)) fail('Source module identity/API/runtime is invalid.')
     semver(manifest.version)
     const cargo = readFileSync(controlledFile(root, `${directory}/Cargo.toml`), 'utf8')

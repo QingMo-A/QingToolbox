@@ -2,7 +2,7 @@
   "id": "qing.pdf",
   "name": "Qing PDF",
   "description": "Merge, split, extract, and rotate PDF files locally.",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "apiVersion": 1,
   "author": "QingMo-A",
   "minimumHostVersion": "0.3.0-alpha",
@@ -18,6 +18,7 @@
     "ProcessStart",
     "WindowControl"
   ],
+  "hostCapabilities": ["fileDialog.openFiles", "fileDialog.openDirectory", "fileDialog.saveFile"],
   "operations": [
     "getState",
     "addMergeFiles",

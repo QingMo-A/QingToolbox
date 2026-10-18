@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('canary','launcher','pdf','texttools','windowtopmost','powerguard','screenpin','liveactivity','passwordnotes')]
+    [ValidateSet('canary','launcher','pdf','convert','texttools','windowtopmost','powerguard','screenpin','liveactivity','passwordnotes')]
     [string]$Module,
     [string]$QingToolboxHostRoot = $env:QINGTOOLBOX_HOST_ROOT
 )
