@@ -157,6 +157,8 @@ const hotkeyInput = ref<HTMLInputElement | null>(null)
 let everythingDebounceTimer: number | undefined
 let runtimeStatusTimer: number | undefined
 let runtimeStatusPending = false
+let startupTimer: number | undefined
+let startupRevision = -1
 let everythingRequestSerial = 0
 let unlistenStateChanged: UnlistenFn | undefined
 
@@ -812,6 +814,21 @@ async function reloadStateAfterHostEvent(): Promise<void> {
   }
 }
 
+async function refreshStartupState(): Promise<void> {
+  if (disposed) return
+  if (startupTimer !== undefined) { window.clearTimeout(startupTimer); startupTimer = undefined }
+  try {
+    const startup = await invokeModule<{ desktopRefreshing: boolean; revision: number }>('getStartupStatus')
+    if (disposed) return
+    if (startup.revision !== startupRevision && !loading.value && !busy.value && !draggedId.value && !everythingActive.value) {
+      startupRevision = startup.revision
+      await reloadStateAfterHostEvent()
+    }
+    // Do not replace a drag's DOM underneath the pointer; apply once it ends.
+    if (startup.desktopRefreshing || startup.revision !== startupRevision) startupTimer = window.setTimeout(() => { void refreshStartupState() }, 300)
+  } catch { /* Old hosts/preview fixtures may not expose the additive operation. */ }
+}
+
 async function refresh(): Promise<void> {
   if (busy.value) return
   busy.value = true
@@ -819,10 +836,12 @@ async function refresh(): Promise<void> {
   try {
     state.value = await invokeModule<LauncherState>('refreshDesktop')
     resetIconCache(state.value.cacheEnabled ?? true)
+    startupRevision = -1
   } catch (reason) {
     error.value = messageOf(reason)
   } finally {
     busy.value = false
+    void refreshStartupState()
   }
 }
 
@@ -985,6 +1004,7 @@ onMounted(() => {
     // Fallback when the cold-window shown event preceded bridge registration.
     if (!firstRevealHandled && document.hasFocus()) reveal()
     void refreshEverythingRuntimeStatus()
+    void refreshStartupState()
   })
   void listen<{ reason?: string }>('qmod:module-state-changed', async ({ payload }) => {
     if (payload.reason === 'externalDrop') {
@@ -1010,6 +1030,7 @@ onBeforeUnmount(() => {
   stopHotkeyRecording()
   if (everythingDebounceTimer !== undefined) window.clearTimeout(everythingDebounceTimer)
   if (runtimeStatusTimer !== undefined) window.clearTimeout(runtimeStatusTimer)
+  if (startupTimer !== undefined) window.clearTimeout(startupTimer)
   unlistenStateChanged?.()
   unlistenStateChanged = undefined
   window.removeEventListener('keydown', onWindowKeydown)
@@ -1095,7 +1116,7 @@ onBeforeUnmount(() => {
           <label class="batch-loading-field"><input v-model="cacheEnabledDraft" type="checkbox" :disabled="hotkeySaving || cacheClearing" /><span>开启缓存</span></label>
           <QButton :disabled="hotkeySaving || cacheClearing" @click="clearLauncherCache">{{ cacheClearing ? '清理中…' : '清理缓存' }}</QButton>
         </div>
-        <p class="cache-hint">缓存 Everything 搜索结果和高清图标，加快重复访问。搜索缓存 1 分钟、图标缓存 10 分钟；关闭后不再读写缓存。</p>
+        <p class="cache-hint">加载模块时后台预读缓存。搜索结果缓存 1 分钟；未变化的图标可跨重启保留 30 天，源文件变化会失效。启用后后台初始化 Everything 索引；关闭缓存后不再复用或写入缓存。</p>
         <p v-if="cacheMessage" class="cache-message" role="status">{{ cacheMessage }}</p>
       </div>
       <template #actions>

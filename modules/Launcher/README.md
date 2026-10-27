@@ -96,3 +96,20 @@ The bounded integration smoke uses `-Everything` with a temporary indexed
 folder. On a machine where the dedicated service has already been authorized,
 `-EverythingService` exercises the production service connection against a
 fixed-volume runtime file without changing the user's Everything settings.
+
+Launcher 0.3.7 fixes cold-load work ordering. Loading a module starts bounded
+background disk-cache warming and a one-shot Desktop refresh; the first state
+uses persisted apps/desktop entries without scanning or canonicalizing each
+saved target (disconnected providers must not hold up hello). The real private
+Everything database is initialized in its own worker after enable, not on first
+window creation. Fresh query pages still expire after 60 seconds to avoid hiding
+new files; stable, versioned Shell icon assets now survive 30 days across reboots
+and remain invalidated by target size/mtime. This is not a cached readiness badge.
+
+Shell extraction (two workers), Desktop scanning and Everything run separately.
+Slow requests return opaque bounded task receipts; UI polling yields to input
+and releases the host runtime lock. Navigation/state reads never wait for index
+creation, Shell providers or icon PNG encoding. A completed Desktop snapshot is
+applied without replacing an active drag. Clear Cache invalidates in-flight
+writes so old jobs cannot recreate cleared assets. Module stderr includes
+`[startup]` cache counts, Desktop scan times and real Everything status timings.

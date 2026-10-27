@@ -12,6 +12,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod background;
 mod cache;
 mod desktop;
 mod everything;
@@ -140,7 +141,7 @@ struct StoreDocument {
     cache_enabled: Option<bool>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct LauncherStore {
     path: PathBuf,
     sort_mode: String,
@@ -796,9 +797,17 @@ fn main() {
         .map(PathBuf::from)
         .or_else(|| env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
-    let mut everything = EverythingRuntime::new(module_directory, data_directory.clone());
+    let mut everything = EverythingRuntime::new(module_directory.clone(), data_directory.clone());
     everything.set_cache_enabled(store.cache_enabled);
-    let mut desktop_loaded = false;
+    let mut background = background::Background::new(
+        &store,
+        module_directory,
+        data_directory,
+        everything.shared_cache(),
+    );
+    // Cached desktop entries are immediately usable. Fresh scanning is owned
+    // by Background and is never implicitly performed by a state/navigation call.
+    let mut desktop_loaded = true;
     let mut lifecycle_active = false;
     let stdin = io::stdin();
     let mut stdout = BufWriter::new(io::stdout());
@@ -822,9 +831,7 @@ fn main() {
                 let Some(active) = envelope.payload.get("active").and_then(Value::as_bool) else {
                     break;
                 };
-                if !active {
-                    everything.shutdown();
-                }
+                background.activate(active);
                 lifecycle_active = active;
                 let response = serde_json::json!({
                     "protocolVersion": 1, "messageType": "module.lifecycle.response",
@@ -897,13 +904,33 @@ fn main() {
                     continue;
                 }
                 let payload = object.get("payload").cloned().unwrap_or(Value::Null);
-                match handle_method(
-                    method,
-                    payload,
-                    &mut store,
-                    &mut desktop_loaded,
-                    &mut everything,
-                ) {
+                background.drain(&mut store);
+                let result = match method {
+                    "pollBackgroundTask" => background.poll(&payload),
+                    "getStartupStatus" => Ok(background.startup()),
+                    "getItemIcon" => background.icon(&payload, &store),
+                    "getEverythingStatus" => Ok(background.status()),
+                    "searchEverything"
+                    | "loadMoreEverything"
+                    | "openEverythingResult"
+                    | "openEverythingResultFolder"
+                    | "copyEverythingResultPath" => background.everything(method, payload),
+                    "getState" => Ok(json!(store.state())),
+                    "refreshDesktop" => {
+                        background.refresh_desktop();
+                        Ok(json!(store.state()))
+                    }
+                    "clearCache" => background.clear_cache(),
+                    _ => handle_method(
+                        method,
+                        payload,
+                        &mut store,
+                        &mut desktop_loaded,
+                        &mut everything,
+                    ),
+                };
+                background.sync_settings(&store);
+                match result {
                     Ok(value) => write_response(
                         &mut stdout,
                         Response {
@@ -924,6 +951,7 @@ fn main() {
                 }
             }
             "module.event" if handshaken => {
+                background.drain(&mut store);
                 let Some(object) = envelope.payload.as_object() else {
                     eprintln!("Qing Launcher ignored an event with a non-object payload");
                     continue;
@@ -957,6 +985,7 @@ fn main() {
                 }
             }
             "module.shutdown.request" if handshaken => {
+                background.shutdown();
                 write_response(
                     &mut stdout,
                     Response {
@@ -978,6 +1007,7 @@ fn main() {
             ),
         }
     }
+    background.shutdown();
     everything.shutdown();
 }
 
@@ -1540,14 +1570,16 @@ fn normalize_items(items: Vec<LauncherItem>, source: &str) -> Vec<LauncherItem> 
             } else {
                 item.name.trim().chars().take(256).collect()
             };
-            item.target = normalize_path(Path::new(&item.target));
+            // Persisted paths were normalized when added/scanned. Canonicalizing
+            // every target here can block hello on disconnected disks/providers.
+            item.target = Path::new(&item.target).to_string_lossy().into_owned();
             item.working_directory = if item.working_directory.trim().is_empty() {
                 Path::new(&item.target)
                     .parent()
-                    .map(normalize_path)
+                    .map(|path| path.to_string_lossy().into_owned())
                     .unwrap_or_default()
             } else {
-                normalize_path(Path::new(&item.working_directory))
+                item.working_directory.clone()
             };
             item.source = source.to_string();
             item.icon_data_url = None;

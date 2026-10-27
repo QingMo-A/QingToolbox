@@ -291,6 +291,14 @@ impl EverythingRuntime {
         self.cache_enabled = enabled;
     }
 
+    pub fn shared_cache(&self) -> super::cache::DiskCache {
+        self.cache.clone()
+    }
+
+    pub fn use_shared_cache(&mut self, cache: super::cache::DiskCache) {
+        self.cache = cache;
+    }
+
     pub fn clear_cache(&mut self) -> io::Result<()> {
         // Existing result IDs/cursors remain usable; cached pages never contain IDs.
         self.cache.clear()
@@ -359,6 +367,7 @@ impl EverythingRuntime {
         settings: SearchSettings,
         offset: usize,
     ) -> Result<EverythingSearchResponse, EverythingError> {
+        let cache_generation = self.cache.generation();
         let cache_key =
             serde_json::to_string(&(mode.as_wire(), &query, settings.result_limit, offset))
                 .unwrap();
@@ -415,7 +424,8 @@ impl EverythingRuntime {
             ));
         }
         if self.cache_enabled && !paths.is_empty() {
-            self.cache.put(&cache_key, &paths);
+            self.cache
+                .put_if_generation(&cache_key, &paths, cache_generation);
         }
         Ok(self.project_page(paths, mode, query, request_id, settings, offset))
     }

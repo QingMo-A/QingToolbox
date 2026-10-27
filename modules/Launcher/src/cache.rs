@@ -2,17 +2,28 @@
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashMap,
     fs, io,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DiskCache {
     directory: PathBuf,
     ttl: u64,
     budget: u64,
     entries: usize,
+    memory: Arc<Mutex<Memory>>,
+    io: Arc<Mutex<()>>,
+}
+
+#[derive(Debug, Default)]
+struct Memory {
+    generation: u64,
+    bytes: usize,
+    values: HashMap<PathBuf, Arc<Vec<u8>>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -46,13 +57,22 @@ impl DiskCache {
         assert!(matches!(kind, "icons" | "everything"));
         Self {
             directory: data.join("launcher-cache-v1").join(kind),
-            ttl: if kind == "icons" { 600 } else { 60 },
+            // A reboot must not throw away unchanged Shell icons. Their keys
+            // already include source size/mtime and the extraction version.
+            // Query pages retain the short freshness window (not the index DB).
+            ttl: if kind == "icons" {
+                30 * 24 * 60 * 60
+            } else {
+                60
+            },
             budget: if kind == "icons" {
                 64 * 1024 * 1024
             } else {
                 16 * 1024 * 1024
             },
             entries: if kind == "icons" { 512 } else { 64 },
+            memory: Arc::default(),
+            io: Arc::default(),
         }
     }
 
@@ -66,10 +86,27 @@ impl DiskCache {
     }
 
     pub fn get<T: DeserializeOwned>(&self, key: &str) -> Option<T> {
+        let path = self.path(key);
+        let bytes = self
+            .memory
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values
+            .get(&path)
+            .cloned();
+        if let Some(bytes) = bytes {
+            if let Some(value) = self.decode(&bytes) {
+                return Some(value);
+            }
+            let mut memory = self.memory.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(old) = memory.values.remove(&path) {
+                memory.bytes = memory.bytes.saturating_sub(old.len());
+            }
+        }
+        let _io = self.io.lock().unwrap_or_else(|e| e.into_inner());
         if !self.safe() {
             return None;
         }
-        let path = self.path(key);
         let metadata = fs::symlink_metadata(&path).ok()?;
         if !metadata.is_file()
             || metadata.file_type().is_symlink()
@@ -77,14 +114,87 @@ impl DiskCache {
         {
             return None;
         }
-        let entry: Entry<T> = serde_json::from_slice(&fs::read(&path).ok()?).ok()?;
+        let bytes = fs::read(&path).ok()?;
+        let value = self.decode(&bytes)?;
+        self.remember(path, bytes);
+        Some(value)
+    }
+
+    fn decode<T: DeserializeOwned>(&self, bytes: &[u8]) -> Option<T> {
+        let entry: Entry<T> = serde_json::from_slice(bytes).ok()?;
         if entry.created > now() || now().saturating_sub(entry.created) >= self.ttl {
             return None;
         }
         Some(entry.value)
     }
 
+    fn remember(&self, path: PathBuf, bytes: Vec<u8>) {
+        let mut memory = self.memory.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(old) = memory.values.remove(&path) {
+            memory.bytes = memory.bytes.saturating_sub(old.len());
+        }
+        // Memory is a disposable acceleration layer, bounded independently of disk.
+        while !memory.values.is_empty()
+            && (memory.values.len() >= self.entries
+                || memory.bytes + bytes.len() > self.budget as usize)
+        {
+            let oldest = memory.values.keys().next().cloned().unwrap();
+            if let Some(old) = memory.values.remove(&oldest) {
+                memory.bytes = memory.bytes.saturating_sub(old.len());
+            }
+        }
+        memory.bytes += bytes.len();
+        memory.values.insert(path, Arc::new(bytes));
+    }
+
+    /// Called only on background workers, before a WebView requests any icons.
+    pub fn warm(&self) -> usize {
+        let _io = self.io.lock().unwrap_or_else(|e| e.into_inner());
+        let mut files = self.files().unwrap_or_default();
+        files.sort_by_key(|(_, m)| std::cmp::Reverse(m.modified().ok()));
+        let mut count = 0;
+        let mut total = 0;
+        for (path, metadata) in files {
+            if count >= self.entries
+                || total + metadata.len() > self.budget
+                || metadata.len() > 2 * 1024 * 1024
+            {
+                continue;
+            }
+            if let Ok(bytes) = fs::read(&path) {
+                if self.decode::<serde_json::Value>(&bytes).is_some() {
+                    total += metadata.len();
+                    self.remember(path, bytes);
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.memory
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .generation
+    }
+
+    pub fn invalidate_memory(&self) {
+        let mut memory = self.memory.lock().unwrap_or_else(|e| e.into_inner());
+        memory.generation += 1;
+        memory.bytes = 0;
+        memory.values.clear();
+    }
+
     pub fn put<T: Serialize>(&self, key: &str, value: &T) {
+        self.put_if_generation(key, value, self.generation());
+    }
+
+    pub fn put_if_generation<T: Serialize>(&self, key: &str, value: &T, generation: u64) {
+        let _io = self.io.lock().unwrap_or_else(|e| e.into_inner());
+        if self.generation() != generation {
+            return;
+        }
         // Cache failures must not prevent searching, opening apps or reading icons.
         if let Err(error) = self.write(key, value) {
             eprintln!("Launcher cache write skipped: {error}");
@@ -124,6 +234,7 @@ impl DiskCache {
         file.write_all(&bytes)?;
         drop(file);
         fs::rename(&temporary, &path)?;
+        self.remember(path, bytes);
         let mut entries = self.files()?;
         entries.sort_by_key(|(_, m)| m.modified().ok());
         let mut total: u64 = entries.iter().map(|(_, m)| m.len()).sum();
@@ -166,6 +277,13 @@ impl DiskCache {
     }
 
     pub fn clear(&self) -> io::Result<()> {
+        let _io = self.io.lock().unwrap_or_else(|e| e.into_inner());
+        {
+            let mut memory = self.memory.lock().unwrap_or_else(|e| e.into_inner());
+            memory.generation += 1;
+            memory.bytes = 0;
+            memory.values.clear();
+        }
         for (path, _) in self.files()? {
             fs::remove_file(path)?;
         }
@@ -200,6 +318,9 @@ mod tests {
         assert_eq!(reopened.get::<Vec<String>>("query").unwrap(), ["synthetic"]);
         cache.ttl = 0;
         assert!(cache.get::<Vec<String>>("query").is_none());
+        // Corruption is observed on the next disk read, not through an already
+        // warmed immutable in-memory copy.
+        reopened.memory.lock().unwrap().values.clear();
         fs::write(reopened.path("query"), b"broken").unwrap();
         assert!(reopened.get::<Vec<String>>("query").is_none());
         fs::write(dir.join("launcher.json"), "keep").unwrap();
@@ -226,5 +347,27 @@ mod tests {
         fs::write(&icon, "longer").unwrap();
         assert_ne!(before, icon_key(&icon).unwrap());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn warm_survives_reboot_age_and_clear_rejects_inflight_repopulation() {
+        let dir = std::env::temp_dir().join(super::super::unique_id("launcher-cache-test"));
+        let cache = DiskCache::new(&dir, "icons");
+        cache.put("icon", &"data:image/png;base64,fixture");
+        let bytes = serde_json::to_vec(&Entry {
+            created: now() - 24 * 3600,
+            value: "data:image/png;base64,fixture",
+        })
+        .unwrap();
+        fs::write(cache.path("icon"), bytes).unwrap();
+        let reopened = DiskCache::new(&dir, "icons");
+        assert_eq!(reopened.warm(), 1);
+        assert_eq!(reopened.memory.lock().unwrap().values.len(), 1);
+        let epoch = reopened.generation();
+        reopened.clear().unwrap();
+        reopened.put_if_generation("icon", &"obsolete", epoch);
+        assert!(reopened.get::<String>("icon").is_none());
+        assert!(reopened.memory.lock().unwrap().values.is_empty());
+        fs::remove_dir_all(dir).unwrap();
     }
 }

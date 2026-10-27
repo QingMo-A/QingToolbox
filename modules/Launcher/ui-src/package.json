@@ -1,7 +1,7 @@
 {
   "name": "qing-launcher-tauri-ui",
   "private": true,
-  "version": "0.3.6",
+  "version": "0.3.7",
   "type": "module",
   "scripts": {
     "typecheck": "node ../../../scripts/build-module-ui.mjs --typecheck",

@@ -86,8 +86,19 @@ export function getContext() {
   return tauriInvoke<ModuleContext>('get_module_window_context')
 }
 
-export function invokeModule<T>(method: string, payload: Record<string, unknown> = {}) {
-  return tauriInvoke<T>('invoke_module_window', { method, payload })
+export async function invokeModule<T>(method: string, payload: Record<string, unknown> = {}): Promise<T> {
+  let value = await tauriInvoke<unknown>('invoke_module_window', { method, payload })
+  const deadline = Date.now() + 100_000
+  let delay = 12
+  // Only a backend-issued bounded token can be polled; this is not a raw
+  // command gateway. Waiting yields to rendering/input, and releases host IPC.
+  while (value && typeof value === 'object' && 'launcherTask' in value && typeof value.launcherTask === 'string') {
+    if (Date.now() >= deadline) throw new Error('后台任务超时，请重试。')
+    await new Promise(resolve => setTimeout(resolve, delay))
+    delay = Math.min(150, delay * 2)
+    value = await tauriInvoke<unknown>('invoke_module_window', { method: 'pollBackgroundTask', payload: { taskId: value.launcherTask } })
+  }
+  return value as T
 }
 
 export function hideModuleWindow() {

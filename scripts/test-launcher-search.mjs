@@ -30,7 +30,16 @@ const request = (messageType, payload, timeout = 60000) => new Promise((resolve,
   pending.set(requestId, frame => { clearTimeout(timer); pending.delete(requestId); resolve(frame) })
   child.stdin.write(JSON.stringify({ protocolVersion: 1, messageType, requestId, payload }) + '\n')
 })
-const invoke = (method, payload = {}) => request('module.invoke.request', { method, payload })
+const invoke = async (method, payload = {}) => {
+  let frame = await request('module.invoke.request', { method, payload })
+  const deadline = Date.now() + 90000
+  while (frame.payload?.launcherTask) {
+    assert(Date.now() < deadline, 'background task deadline')
+    await new Promise(resolve => setTimeout(resolve, 25))
+    frame = await request('module.invoke.request', { method: 'pollBackgroundTask', payload: { taskId: frame.payload.launcherTask } })
+  }
+  return frame
+}
 const search = () => invoke('searchEverything', { mode: 'everything-file', query: 'item-*.txt', requestId: `search-${sequence}` })
 try {
   assert.equal((await request('module.hello.request', { moduleId: 'qing.launcher', nonce: 'search-test' })).error, undefined)
