@@ -4,6 +4,27 @@
   "publisher": "QingMo-A",
   "releases": [
     {
+      "version": "0.3.7",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.0-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-10-27T04:48:09Z",
+      "package": {
+        "fileName": "qing.launcher-0.3.7-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/d7c4a401ee62b20103c37f5fd6137c5dfa345645/modules/Launcher/packages/qing.launcher-0.3.7-tauri.qmod",
+        "size": 1509255,
+        "sha256": "07c7d33f0a212c0592169fc3c5a9ec311b3601b62019e1ea695e0e42710144bb"
+      },
+      "releaseNotes": {
+        "zh-CN": "修复重启后的首次加载：模块加载时后台预读缓存；未变化图标可跨重启保留30天，并按源文件大小、修改时间和提取版本失效。首次界面先使用持久化快照，后台刷新桌面；避免初始化时逐个解析断开磁盘上的保存路径。Everything在启用后后台初始化，图标提取、桌面扫描、索引及搜索相互隔离，慢任务通过短请求异步轮询，避免占用宿主串行IPC。搜索结果仍保持1分钟有效期，索引状态仍实时验证。新增启动计时日志和跨进程缓存回归测试。",
+        "en-US": "Warm disk caches when loading; retain unchanged, source-versioned icons for 30 days across reboots. Render persisted state immediately, refresh Desktop off-thread, and avoid canonicalizing saved paths during hello. Initialize Everything after activation in a separate worker; isolate Shell icon and Desktop work with bounded asynchronous task receipts so slow startup cannot monopolize host IPC. Query pages retain their 60-second freshness window and readiness remains live. Adds startup timing diagnostics and restart/latency regression coverage."
+      }
+    },
+    {
       "version": "0.3.6",
       "channel": "preview",
       "moduleProfile": "tauri-process-v1",
