@@ -65,7 +65,7 @@
       "icon": "ScreenBoard/icon.svg",
       "moduleManifest": "ScreenBoard/module.json",
       "updateManifest": "ScreenBoard/update.json",
-      "visibility": "development"
+      "visibility": "public"
     },
     "qing.screenpin": {
       "name": { "zh-CN": "截图贴图", "en-US": "Screen Pin" },
