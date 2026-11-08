@@ -1,0 +1,21 @@
+{
+  "id": "qing.windowstools",
+  "name": "Windows 设置助手",
+  "description": "查看、关闭和恢复 Windows 自动更新策略及防火墙配置，支持检查并修复防火墙服务。\n默认应用表格可增删自定义后缀、批量选择程序、启动检查关联变化并准备恢复；最后由 Windows 确认默认应用，不静默抢占关联。\n修改系统配置时单独请求管理员权限，不停止核心服务或重置防火墙规则。",
+  "version": "0.1.1",
+  "apiVersion": 1,
+  "author": "QingMo-A",
+  "minimumHostVersion": "0.3.4-alpha",
+  "entry": "bin/qing-windowstools-module.exe",
+  "runtimeType": "Process",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
+  "loadMode": "Manual",
+  "permissions": ["FileRead", "FileWrite", "ProcessStart"],
+  "hostCapabilities": ["fileDialog.openFiles"],
+  "icon": "icon.svg",
+  "defaultLanguage": "zh-CN",
+  "localization": { "basePath": "i18n", "resources": { "zh-CN": "i18n/zh-CN.json", "en-US": "i18n/en-US.json" } },
+  "operations": ["getState", "beginAction", "getOperation", "getAssociation", "registerAssociation", "openSettings", "getAssociationTable", "addAssociationRows", "addCommonAssociations", "removeAssociationRows", "setAssociationTarget", "setAssociationPreferences", "checkAssociations", "registerAssociationBatch"]
+}

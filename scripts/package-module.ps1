@@ -10,6 +10,11 @@ $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $oldHost = $env:QINGTOOLBOX_HOST_ROOT
 $oldModules = $env:QINGTOOLBOX_MODULES_ROOT
+$oldReadDefaults = $PSDefaultParameterValues
+# Module metadata is UTF-8. Windows PowerShell 5 otherwise reads a BOM-less
+# Chinese manifest using the system ANSI code page and may corrupt its JSON.
+$PSDefaultParameterValues = @{} + $PSDefaultParameterValues
+$PSDefaultParameterValues['Get-Content:Encoding'] = 'UTF8'
 try {
     if (-not [string]::IsNullOrWhiteSpace($QingToolboxHostRoot)) { $env:QINGTOOLBOX_HOST_ROOT = [IO.Path]::GetFullPath($QingToolboxHostRoot) }
     $hostRoot = & node (Join-Path $PSScriptRoot 'host-ui.mjs')
@@ -17,6 +22,11 @@ try {
     $env:QINGTOOLBOX_HOST_ROOT = $hostRoot
     $env:QINGTOOLBOX_MODULES_ROOT = $root
     $parameters = @{ ModuleId = $ModuleId }
+    if ($ModuleId -eq 'qing.windowstools' -and -not $SkipBuild) {
+        & (Join-Path $root 'modules/WindowsTools/build.ps1') -QingToolboxHostRoot $hostRoot
+        if ($LASTEXITCODE -ne 0) { throw 'Windows Tools build failed.' }
+        $parameters.SkipBuild = $true
+    }
     if ($OutputDirectory) { $parameters.OutputDirectory = $OutputDirectory }
     if ($SkipBuild) { $parameters.SkipBuild = $true }
     if ($Smoke) { $parameters.Smoke = $true }
@@ -25,4 +35,5 @@ try {
 } finally {
     $env:QINGTOOLBOX_HOST_ROOT = $oldHost
     $env:QINGTOOLBOX_MODULES_ROOT = $oldModules
+    $PSDefaultParameterValues = $oldReadDefaults
 }

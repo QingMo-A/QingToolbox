@@ -1,0 +1,1 @@
+{ "module.name": "Windows 设置助手", "module.description": "管理 Windows 自动更新、防火墙与服务修复。默认应用表格支持常用/自定义后缀、多选批量设置及启动检查；恢复默认需 Windows 确认。系统修改单独请求管理员授权。" }

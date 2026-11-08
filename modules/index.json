@@ -75,6 +75,14 @@
       "updateManifest": "TextTools/update.json",
       "visibility": "public"
     },
+    "qing.windowstools": {
+      "name": { "zh-CN": "Windows 设置助手", "en-US": "Windows Settings Assistant" },
+      "description": { "zh-CN": "可恢复的自动更新、防火墙配置与服务修复；默认应用表格支持自定义后缀、批量设置与启动检查。", "en-US": "Reversible update/firewall settings and service repair; manage a custom association table with batch candidates and startup checks." },
+      "icon": "WindowsTools/icon.svg",
+      "moduleManifest": "WindowsTools/module.json",
+      "updateManifest": "WindowsTools/update.json",
+      "visibility": "development"
+    },
     "qing.windowtopmost": {
       "name": { "zh-CN": "窗口置顶", "en-US": "Window Topmost" },
       "description": { "zh-CN": "选择或拾取窗口，切换窗口置顶状态。", "en-US": "Select or pick windows and change their always-on-top state." },

@@ -1,0 +1,1 @@
+{ "module.name": "Windows Settings Assistant", "module.description": "Manage Windows update policies, firewall profiles and service recovery. A persistent association table supports custom formats, batch candidates and startup checks. Windows confirmation is required to change defaults; system changes request elevation separately." }
