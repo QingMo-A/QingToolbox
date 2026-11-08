@@ -2,5 +2,27 @@
   "schemaVersion": 2,
   "moduleId": "qing.windowstools",
   "publisher": "QingMo-A",
-  "releases": []
+  "releases": [
+    {
+      "version": "0.1.1",
+      "channel": "preview",
+      "moduleProfile": "tauri-process-v1",
+      "apiVersion": 1,
+      "platform": "windows",
+      "architecture": "x64",
+      "minimumHostVersion": "0.3.4-alpha",
+      "maximumHostVersionExclusive": null,
+      "publishedAt": "2026-11-08T13:29:48Z",
+      "package": {
+        "fileName": "qing.windowstools-0.1.1-tauri.qmod",
+        "url": "https://raw.githubusercontent.com/QingMo-A/QingToolbox/8978571258ac907dbdd93a7bca5e3f55c38d3f8f/modules/WindowsTools/packages/qing.windowstools-0.1.1-tauri.qmod",
+        "size": 363850,
+        "sha256": "c3fb0a5ee04c8869e75cc4aedc07d4749519f8e0c501576def7ff9f416b1b2ee"
+      },
+      "releaseNotes": {
+        "zh-CN": "Windows 设置助手首次发布到模块分支，包含自动更新策略控制与原配置恢复、三种网络的防火墙配置，以及 BFE/MpsSvc 服务检查和经确认授权后的修复。默认应用使用可增删、搜索和多选的管理表，预置 22 种常用格式；可保存逐项目标程序、批量注册候选，并在模块启动后检查变化、按选项自动准备恢复。实际改变默认应用仍需在 Windows 设置中确认，不改写 UserChoice，也未实现打开方式代理。界面跟随宿主主题与字体，系统修改单独请求管理员授权，包含备份、冲突检查及操作日志。",
+        "en-US": "First branch publication of Windows Settings Assistant. Manage and restore Windows update policies and per-network firewall settings; inspect BFE/MpsSvc and attempt service repair only after explicit confirmation and elevation. A persistent, searchable association table includes 22 common formats, custom rows, multi-selection, per-format executable targets, batch candidate registration and optional startup drift checks/preparation. Windows confirmation is still required to change defaults; UserChoice is never rewritten and no file-opening proxy is included. Follows host appearance and fonts, with separate elevation, configuration backups, conflict checks and operation logs."
+      }
+    }
+  ]
 }
