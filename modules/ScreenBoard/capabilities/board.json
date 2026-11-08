@@ -1,0 +1,6 @@
+{
+  "identifier": "board-local-events",
+  "description": "Only the module-owned local drawing surfaces may subscribe to board events.",
+  "windows": ["canvas", "tools"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

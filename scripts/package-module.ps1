@@ -22,9 +22,10 @@ try {
     $env:QINGTOOLBOX_HOST_ROOT = $hostRoot
     $env:QINGTOOLBOX_MODULES_ROOT = $root
     $parameters = @{ ModuleId = $ModuleId }
-    if ($ModuleId -eq 'qing.windowstools' -and -not $SkipBuild) {
-        & (Join-Path $root 'modules/WindowsTools/build.ps1') -QingToolboxHostRoot $hostRoot
-        if ($LASTEXITCODE -ne 0) { throw 'Windows Tools build failed.' }
+    if ($ModuleId -in @('qing.windowstools','qing.screenboard') -and -not $SkipBuild) {
+        $directory = @{ 'qing.windowstools' = 'WindowsTools'; 'qing.screenboard' = 'ScreenBoard' }[$ModuleId]
+        & (Join-Path $root "modules/$directory/build.ps1") -QingToolboxHostRoot $hostRoot
+        if ($LASTEXITCODE -ne 0) { throw "Module build failed: $ModuleId" }
         $parameters.SkipBuild = $true
     }
     if ($OutputDirectory) { $parameters.OutputDirectory = $OutputDirectory }

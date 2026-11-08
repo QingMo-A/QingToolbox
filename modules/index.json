@@ -59,6 +59,14 @@
       "updateManifest": "PowerGuard/update.json",
       "visibility": "public"
     },
+    "qing.screenboard": {
+      "name": { "zh-CN": "屏幕画板", "en-US": "Screen Board" },
+      "description": { "zh-CN": "桌面绘画、文字与数学函数图像，支持 RGB、Alt 取色和 Ctrl 几何约束。", "en-US": "Draw over your desktop with text, function plots, RGB colors, Alt eyedropper and Ctrl constraints." },
+      "icon": "ScreenBoard/icon.svg",
+      "moduleManifest": "ScreenBoard/module.json",
+      "updateManifest": "ScreenBoard/update.json",
+      "visibility": "development"
+    },
     "qing.screenpin": {
       "name": { "zh-CN": "截图贴图", "en-US": "Screen Pin" },
       "description": { "zh-CN": "截图并将图片固定在桌面上。", "en-US": "Capture screen regions and pin images to the desktop." },

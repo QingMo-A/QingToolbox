@@ -1,0 +1,20 @@
+{
+  "id": "qing.screenboard",
+  "name": "屏幕画板",
+  "description": "直接在桌面和其他应用上绘画，支持文字、直线、平滑曲线、矩形、圆形与数学函数图像。\n预设色、RGB 调色、Alt 屏幕取色；Ctrl 规整笔迹、约束正圆/正方形，支持撤销、重做和对象移动缩放。\n独立悬浮工具条，Ctrl+Shift+D 切换绘画/鼠标穿透；Esc 收起画板。初版画面保留在内存中，卸载模块后清空。",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "author": "QingMo-A",
+  "minimumHostVersion": "0.3.4-alpha",
+  "entry": "bin/qing-screenboard-module.exe",
+  "runtimeType": "Process",
+  "runtimeIsolation": "OutOfProcess",
+  "uiKind": "Web",
+  "webEntry": "ui/index.html",
+  "loadMode": "Manual",
+  "permissions": ["WindowControl"],
+  "icon": "icon.svg",
+  "defaultLanguage": "zh-CN",
+  "localization": { "basePath": "i18n", "resources": { "zh-CN": "i18n/zh-CN.json", "en-US": "i18n/en-US.json" } },
+  "operations": ["getState", "setSettings", "showBoard", "hideBoard", "togglePassthrough"]
+}
